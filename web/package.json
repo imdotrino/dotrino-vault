@@ -1,0 +1,22 @@
+{
+  "name": "dotrino-vault-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Página de vault.dotrino.com: qué es Dotrino Vault, para qué sirve y descarga del binario.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dotrino/install": "0.2.3",
+    "@dotrino/support": "0.6.0",
+    "vue": "3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.1",
+    "vite": "5.4.10",
+    "vite-plugin-pwa": "0.20.5"
+  }
+}

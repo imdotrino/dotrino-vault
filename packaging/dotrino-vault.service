@@ -1,0 +1,37 @@
+[Unit]
+# dotrino-vault — certificador personal de Dotrino (daemon headless).
+# Unidad de usuario (systemd --user): corre sin sudo, bajo tu propia cuenta.
+# El daemon CONECTA HACIA AFUERA al proxy (wss://proxy.dotrino.com); no abre puertos.
+Description=Dotrino Vault (certificador personal)
+Documentation=https://dotrino.com
+# Espera a tener red antes de arrancar (best-effort en sesión de usuario).
+After=network-online.target
+Wants=network-online.target
+# Anti-bucle: no más de 10 reinicios en 60 s (va en [Unit]).
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# %h = home del usuario. El binario autosuficiente lleva Node embebido dentro.
+ExecStart=%h/.local/bin/dotrino-vaultd
+# Datos en el dir XDG del ecosistema (override con DOTRINO_VAULT_DIR si hace falta).
+Environment=DOTRINO_VAULT_DIR=%h/.local/share/dotrino/vault
+# Reinicio resiliente: un certificador debe estar siempre disponible.
+Restart=always
+RestartSec=5
+# Apagado limpio (el daemon atiende SIGINT/SIGTERM y cierra el transporte).
+KillSignal=SIGTERM
+TimeoutStopSec=15
+# Endurecimiento básico (no rompe el outbound al proxy).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Permite escribir SOLO en su dir de datos.
+ReadWritePaths=%h/.local/share/dotrino
+PrivateTmp=true
+# Log identificable en el journal.
+SyslogIdentifier=dotrino-vault
+
+[Install]
+WantedBy=default.target

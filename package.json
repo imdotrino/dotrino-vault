@@ -1,0 +1,22 @@
+{
+  "name": "dotrino-vault",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Certificador personal de Dotrino: daemon headless que custodia la clave maestra y delega capacidades a tus dispositivos por el proxy. Tu CA propia.",
+  "bin": {
+    "dotrino-vaultd": "bin/dotrino-vaultd.js"
+  },
+  "scripts": {
+    "start": "node bin/dotrino-vaultd.js",
+    "pair": "node bin/dotrino-vaultd.js --pair"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@dotrino/identity": "file:../dotrino-identity",
+    "@dotrino/proxy-client": "0.6.3",
+    "ws": "^8.18.0"
+  }
+}
