@@ -28,6 +28,7 @@ mkdir -p "$WORK" "$DIST"
 echo "  → bundling con esbuild…"
 npx --yes esbuild "$ROOT/bin/sea-entry.js" \
   --bundle --platform=node --format=cjs --target=node20 \
+  --define:__VAULT_VERSION__="\"$VER\"" \
   --outfile="$WORK/bundle.cjs" \
   --banner:js="globalThis.__DOTRINO_SEA__=true;"
 

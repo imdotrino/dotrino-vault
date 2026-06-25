@@ -29,6 +29,9 @@ const pendingFile = path.join(dir, 'pending-enroll.json')
 const devFile = path.join(dir, 'devices.json')
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
+// La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
+const VERSION = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
+const PROFILE_URL = 'https://profile.dotrino.com/#vault='
 
 function readState () {
   const s = readJson(stateFile, null)
@@ -55,6 +58,7 @@ function cmdStatus () {
   const s = readState()
   const up = alive(s.pid)
   console.log('dotrino-vault · %s', up ? 'corriendo' : 'DETENIDO (state.json viejo)')
+  console.log('  versión     : %s', VERSION)
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')
@@ -81,13 +85,15 @@ async function cmdPair () {
   if (!pair) { console.error('No se recibió respuesta del daemon para el emparejamiento.'); process.exit(1) }
 
   const payload = JSON.stringify(pair.qr)
+  const b64 = Buffer.from(payload, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const url = PROFILE_URL + b64
   const mins = Math.round((pair.expiresAt - Date.now()) / 60000)
-  console.log('\nEscaneá este código con el dispositivo que querés conectar (válido %d min):\n', mins)
-  console.log(qrToString(payload))
+  console.log('\nEscaneá este QR con el dispositivo que querés conectar (válido %d min):\n', mins)
+  console.log(qrToString(url)) // el QR abre profile.dotrino.com/#vault=… y empareja solo
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escaneálo en TU dispositivo.${Z}`)
-  console.log('\n(si no podés escanear, pegá este objeto en el dispositivo — y NO se lo des a nadie):')
-  console.log('  ' + payload)
+  console.log('\nO abrí esta dirección en el dispositivo:\n  ' + url)
+  console.log('\nO pegá este código en profile.dotrino.com/#vault :\n  ' + payload)
 
   // Esperar a que el dispositivo se conecte y mostrar su código para comparar.
   console.log('\nEsperando a que el dispositivo se conecte…  (Ctrl+C para salir)')
@@ -169,6 +175,7 @@ function help () {
   devices             lista dispositivos enrolados / revocados
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
   logs                últimos logs del servicio
+  version             muestra la versión instalada
 
 El servicio se gestiona con systemd --user:
   systemctl --user {start,stop,restart} dotrino-vault · journalctl --user -u dotrino-vault -f`)
@@ -185,6 +192,9 @@ export async function runCtl (argv) {
     case 'devices': return cmdDevices()
     case 'revoke': return cmdRevoke(rest[0])
     case 'logs': return cmdLogs()
+    case 'version':
+    case '--version':
+    case '-v': console.log('dotrino-vault ' + VERSION); return
     case undefined:
     case 'help':
     case '--help':
