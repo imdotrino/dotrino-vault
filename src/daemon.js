@@ -47,7 +47,7 @@ export async function runDaemon () {
     try {
       rm(pendingEnrollFile)
       // Pairing manual por CLI = gesto explícito del dueño → cert de identidad completo.
-      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read'], label: 'cli' })
+      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'cli' })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs })
       console.log('[vault] emparejamiento iniciado (válido %d min)', expiresInMs / 60000)
     } catch (e) {

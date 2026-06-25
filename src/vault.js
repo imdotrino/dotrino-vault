@@ -14,6 +14,7 @@ import { Identity } from '@dotrino/identity/node'
 import { verifyChain, verifyDeviceSig, deriveSAS, pubkeyId } from '@dotrino/identity/capabilities'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
+import { openThreadStore, STORE_READ_METHODS } from './threadStore.js'
 import { dataDir, ensureDir } from './paths.js'
 import { MSG, SCOPE } from './protocol.js'
 
@@ -36,6 +37,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   if (!identity.me?.publickey) await identity.setMyNickname('')
 
   const store = openStore(dir)
+  const threads = openThreadStore(dir)
   const master = await masterPubkeyOf(identity)
   const fp = (await pubkeyId(master)).slice(0, 16)
 
@@ -111,12 +113,45 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.DATA, id, node: store.getNode(id) })
   }
 
+  // Store de hilos+aperturas (Fase 3): escrituras requieren vault:store; lecturas
+  // aceptan vault:store o vault:read. Cada op va firmada por D + cert (cadena D←maestra).
+  async function handleStore (from, p) {
+    const d = p.data
+    if (!d || typeof d.method !== 'string' || !threads.methods[d.method]) {
+      return reply(from, { type: MSG.ERROR, error: 'store: método inválido' })
+    }
+    const revoked = await revocationSet()
+    let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
+    if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
+      chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
+    }
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    try {
+      const result = await threads.methods[d.method](d.args || {})
+      reply(from, { type: MSG.STORE_RESULT, method: d.method, result })
+    } catch (e) { reply(from, { type: MSG.ERROR, error: e.message }) }
+  }
+
+  // Lista (solo lectura) de dispositivos enrolados, para un panel en el navegador.
+  // Cualquier cert válido tuyo puede verla; REVOCAR sigue siendo solo desde el PC.
+  async function handleDevices (from, p) {
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    const { issued, revoked } = await identity.listDelegations()
+    const devices = await Promise.all(issued.map(async (x) => ({
+      deviceId: x.sub ? await deviceIdOf(x.sub) : null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
+    })))
+    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked })
+  }
+
   client.on('message', async (from, payload) => {
     if (!payload || typeof payload !== 'object') return
     try {
       if (payload.type === MSG.ENROLL) return await handleEnroll(from, payload)
       if (payload.type === MSG.SIGN) return await handleSign(from, payload)
       if (payload.type === MSG.GET) return await handleGet(from, payload)
+      if (payload.type === MSG.STORE) return await handleStore(from, payload)
+      if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -190,7 +225,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   return {
-    identity, client, store, master, fingerprint: fp,
+    identity, client, store, threads, master, fingerprint: fp,
     startPairing, stopPairing, listPending,
     approveDevice, rejectDevice,
     listDevices: () => identity.listDelegations(),

@@ -25,11 +25,16 @@ export const MSG = Object.freeze({
   SIGNED: 'vault.signed',                     // vault → dispositivo: { signature, publickey, device }
   GET: 'vault.get',                           // dispositivo → vault: { data, signature, cert }
   DATA: 'vault.data',                         // vault → dispositivo: { id, node }
+  STORE: 'vault.store',                       // dispositivo → vault: { data:{method,args,publickey,ts}, signature, cert }
+  STORE_RESULT: 'vault.store.result',         // vault → dispositivo: { method, result }
+  DEVICES: 'vault.devices',                   // dispositivo → vault: { data:{publickey,ts}, signature, cert }
+  DEVICES_RESULT: 'vault.devices.result',     // vault → dispositivo: { devices, revoked }
   ERROR: 'vault.error'                        // vault → dispositivo: { error }
 })
 
 /** Capacidades que puede llevar un `cert` (scope). Mínimo por defecto. */
 export const SCOPE = Object.freeze({
-  SIGN: 'vault:sign',  // pedir a la maestra que firme datos (identidad)
-  READ: 'vault:read'   // leer nodos del árbol de contenidos
+  SIGN: 'vault:sign',   // pedir a la maestra que firme datos (identidad)
+  READ: 'vault:read',   // leer nodos del árbol de contenidos
+  STORE: 'vault:store'  // leer/escribir el store de hilos + aperturas del usuario
 })

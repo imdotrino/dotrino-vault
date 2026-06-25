@@ -128,4 +128,18 @@ export async function requestGet ({ masterPubkey, proxyUrl, device, cert, id = '
   } finally { client.close() }
 }
 
+/** Llama un método del store de hilos/aperturas del vault (scope vault:store). */
+export async function requestStore ({ masterPubkey, proxyUrl, device, cert, method, args, dir } = {}) {
+  const client = await freshClient({ proxyUrl, dir })
+  try {
+    const data = { op: 'store', method, args: args || {}, publickey: device.publickey, ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+    const pending = waitFor(client, (p) => p.type === MSG.STORE_RESULT || p.type === MSG.ERROR)
+    client.sendByPubkey(masterPubkey, { type: MSG.STORE, data, signature, cert })
+    const res = await pending
+    if (res.type === MSG.ERROR) throw new Error(res.error)
+    return res.result
+  } finally { client.close() }
+}
+
 export { identifyAsDevice }
