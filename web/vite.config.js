@@ -19,9 +19,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'og.jpg', 'robots.txt', 'sitemap.xml'],
       manifest: {
-        name: 'Dotrino Vault — tu certificador personal',
+        name: 'Dotrino Vault — toda tu información en un solo lugar',
         short_name: 'Dotrino Vault',
-        description: 'Sé tu propia autoridad: custodia tu llave maestra y certifica tus dispositivos sin una autoridad central. Self-hosted, sin rastreo.',
+        description: 'Guarda toda tu información en una bóveda dentro de tu propia computadora, no en la nube de una empresa. Privada, segura y tuya.',
         lang: 'es',
         start_url: '/',
         scope: '/',
