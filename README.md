@@ -30,12 +30,12 @@ es `@dotrino/proxy-client`. Este repo solo **orquesta**.
 
 ## Instalación (Linux)
 
-**Ubuntu / Debian — `.deb`** (lo más simple): descarga `dotrino-vault-amd64.deb`
-desde [Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y haz
-doble clic, o en la terminal:
+**Ubuntu / Debian — `.deb`** (lo más simple): descarga el `.deb` (versionado) desde
+[Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y haz doble
+clic, o en la terminal:
 
 ```sh
-sudo apt install ./dotrino-vault-amd64.deb
+sudo apt install ./dotrino-vault_*.deb
 ```
 
 **Otro Linux — tarball:** descarga el binario autosuficiente y ejecuta el instalador:

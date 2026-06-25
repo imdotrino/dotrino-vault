@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
-const DEB = RELEASES + '/download/dotrino-vault-amd64.deb'
 const DISCORD = 'https://discord.gg/D648uq7cth'
 
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
@@ -37,7 +36,7 @@ const I18N = {
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
     dl_deb_t: 'Ubuntu o Debian',
     dl_deb_btn: 'Descargar el instalador (.deb)',
-    dl_deb_note: 'Haz doble clic en el archivo descargado y se instala solo (o en la terminal: sudo apt install ./dotrino-vault-amd64.deb). Queda funcionando al instante.',
+    dl_deb_note: 'Descarga el archivo .deb, haz doble clic y se instala solo (o en la terminal: sudo apt install ./dotrino-vault_*.deb). Queda funcionando al instante.',
     dl_tar_t: 'Otro Linux',
     dl_tar_btn: 'Descargar (.tar.gz)',
     dl_install_t: 'Instalar',
@@ -76,7 +75,7 @@ const I18N = {
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
     dl_deb_t: 'Ubuntu or Debian',
     dl_deb_btn: 'Download the installer (.deb)',
-    dl_deb_note: 'Double-click the downloaded file and it installs on its own (or in a terminal: sudo apt install ./dotrino-vault-amd64.deb). Up and running instantly.',
+    dl_deb_note: 'Download the .deb file, double-click and it installs on its own (or in a terminal: sudo apt install ./dotrino-vault_*.deb). Up and running instantly.',
     dl_tar_t: 'Other Linux',
     dl_tar_btn: 'Download (.tar.gz)',
     dl_install_t: 'Install',
@@ -168,7 +167,7 @@ onMounted(() => { document.documentElement.lang = lang.value })
 
         <div class="dl-card">
           <h3>{{ t.dl_deb_t }}</h3>
-          <a class="btn btn-primary btn-lg" :href="DEB" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
+          <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
           <p class="dl-note">{{ t.dl_deb_note }}</p>
         </div>
 
