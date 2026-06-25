@@ -74,7 +74,7 @@ function showChallenge (pe) {
   console.log('  Si no:        dotrino-vault reject %s\n', pe.deviceId)
 }
 
-async function cmdPair () {
+async function cmdPair (args = []) {
   const s = requireDaemon()
   try { fs.rmSync(pairFile, { force: true }) } catch (_) {}
   try { fs.rmSync(pendingFile, { force: true }) } catch (_) {}
@@ -94,6 +94,15 @@ async function cmdPair () {
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escaneálo en TU dispositivo.${Z}`)
   console.log('\nO abrí esta dirección en el dispositivo:\n  ' + url)
   console.log('\nO pegá este código en profile.dotrino.com/#vault :\n  ' + payload)
+
+  // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.
+  const saveIdx = args.indexOf('--save')
+  if (saveIdx >= 0) {
+    const next = args[saveIdx + 1]
+    const file = (next && !next.startsWith('-')) ? next : 'dotrino-invite.dpair'
+    try { fs.writeFileSync(file, url + '\n', { mode: 0o600 }); console.log('\nInvitación guardada en: %s\n  (ábrila en profile.dotrino.com/#vault → «Abrir imagen/archivo». Es efímera y de un solo uso; no la compartas.)', file) }
+    catch (e) { console.error('No se pudo guardar la invitación:', e.message) }
+  }
 
   // Esperar a que el dispositivo se conecte y mostrar su código para comparar.
   console.log('\nEsperando a que el dispositivo se conecte…  (Ctrl+C para salir)')
@@ -168,7 +177,7 @@ function help () {
   console.log(`dotrino-vault — control del certificador personal
 
   status              estado del servicio + fingerprint
-  pair                inicia un emparejamiento (muestra el código y espera al dispositivo)
+  pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <deviceId>  aprueba un dispositivo (tras comparar el código en ambas pantallas)
   reject <deviceId>   rechaza un dispositivo pendiente
@@ -185,7 +194,7 @@ export async function runCtl (argv) {
   const [cmd, ...rest] = argv
   switch (cmd) {
     case 'status': return cmdStatus()
-    case 'pair': return cmdPair()
+    case 'pair': return cmdPair(rest)
     case 'pending': return cmdPending()
     case 'approve': return cmdApprove(rest[0])
     case 'reject': return cmdReject(rest[0])
