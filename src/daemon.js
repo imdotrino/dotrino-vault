@@ -26,8 +26,8 @@ export async function runDaemon () {
   const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId+SAS para que el
   // dueño lo compare con el del dispositivo y apruebe.
-  const onEnrollChallenge = ({ deviceId, sas, scope }) => {
-    writeJson(pendingEnrollFile, { v: 1, at: Date.now(), deviceId, sas, scope })
+  const onEnrollChallenge = ({ deviceId, scope }) => {
+    writeJson(pendingEnrollFile, { v: 1, at: Date.now(), deviceId, scope })
   }
 
   const vault = await startVault({ dir, proxyUrl, onEnrollChallenge })
@@ -63,8 +63,8 @@ export async function runDaemon () {
   process.on('SIGUSR2', async () => {
     try {
       const appr = readJsonSafe(approveReqFile)
-      if (appr?.deviceId) {
-        try { await vault.approveDevice(appr.deviceId); rm(pendingEnrollFile); console.log('[vault] aprobado %s', appr.deviceId) }
+      if (appr?.code) {
+        try { const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); console.log('[vault] aprobado %s', r.deviceId) }
         catch (e) { console.error('[vault] aprobación falló:', e.message) }
         rm(approveReqFile)
       }

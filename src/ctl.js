@@ -69,9 +69,9 @@ function cmdStatus () {
 function showChallenge (pe) {
   console.log('\n%sUn dispositivo quiere conectarse a tu bóveda:%s', B, Z)
   console.log('  dispositivo : %s%s%s', B, pe.deviceId, Z)
-  console.log('  código      : %s%s%s   ← debe COINCIDIR con el que muestra el dispositivo', B, pe.sas, Z)
-  console.log('\n  Si coincide:  dotrino-vault approve %s', pe.deviceId)
-  console.log('  Si no:        dotrino-vault reject %s\n', pe.deviceId)
+  console.log('\n  Ingresá el código que MUESTRA el dispositivo (el vault no lo conoce):')
+  console.log('    %sdotrino-vault approve <código>%s', B, Z)
+  console.log('  Si no reconocés este dispositivo:  dotrino-vault reject %s\n', pe.deviceId)
 }
 
 async function cmdPair (args = []) {
@@ -121,12 +121,12 @@ function cmdPending () {
   showChallenge(pe)
 }
 
-function cmdApprove (deviceId) {
-  if (!deviceId) { console.error('uso: dotrino-vault approve <deviceId>'); process.exit(2) }
+function cmdApprove (code) {
+  if (!code) { console.error('uso: dotrino-vault approve <código>   (los dígitos que muestra el dispositivo)'); process.exit(2) }
   const s = requireDaemon()
-  fs.writeFileSync(path.join(dir, 'approve-request.json'), JSON.stringify({ deviceId, at: Date.now() }), { mode: 0o600 })
+  fs.writeFileSync(path.join(dir, 'approve-request.json'), JSON.stringify({ code: String(code), at: Date.now() }), { mode: 0o600 })
   process.kill(s.pid, 'SIGUSR2')
-  console.log('Aprobando %s… verificá con: dotrino-vault devices', deviceId)
+  console.log('Aprobando con el código %s… verificá con: dotrino-vault devices', code)
 }
 
 function cmdReject (deviceId) {
@@ -179,7 +179,7 @@ function help () {
   status              estado del servicio + fingerprint
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pending             muestra el dispositivo pendiente + su código a comparar
-  approve <deviceId>  aprueba un dispositivo (tras comparar el código en ambas pantallas)
+  approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
   devices             lista dispositivos enrolados / revocados
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)

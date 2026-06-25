@@ -11,7 +11,7 @@
  * Toda la cripto es de `@dotrino/identity`. Este módulo solo orquesta.
  */
 import { Identity } from '@dotrino/identity/node'
-import { verifyChain, verifyDeviceSig, deriveSAS, pubkeyId } from '@dotrino/identity/capabilities'
+import { verifyChain, verifyDeviceSig, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS } from './threadStore.js'
@@ -59,7 +59,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // --- ENROLL: el dispositivo prueba posesión de D; NO se firma cert todavía ---
   async function handleEnroll (from, p) {
     const d = p?.data
-    if (!d || typeof d.dpub !== 'string' || typeof p.signature !== 'string') {
+    if (!d || typeof d.dpub !== 'string' || typeof p.signature !== 'string' || typeof d.commit !== 'string') {
       return reply(from, { type: MSG.ERROR, error: 'enroll inválido' })
     }
     const pend = pending.get(d.token)
@@ -72,22 +72,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!ok) return reply(from, { type: MSG.ERROR, error: 'firma de dispositivo inválida' })
 
     const deviceId = await deviceIdOf(d.dpub)
-    const sas = await deriveSAS(master, d.dpub, pend.sn)
     pend.state = 'PENDING_CONFIRM'
     pend.dpub = d.dpub
     pend.deviceId = deviceId
-    pend.sas = sas
+    pend.commit = d.commit  // el vault NO conoce el código; solo su compromiso (lo aprende al tipearlo)
     pend.from = from
     if (d.label) pend.label = String(d.label).slice(0, 60)
 
-    // El dispositivo recibe el reto (mostrará deviceId + SAS en su pantalla).
-    reply(from, { type: MSG.ENROLL_CHALLENGE, deviceId, sas })
-    // El dueño ve el mismo deviceId + SAS en el PC y decide aprobar.
+    // El dispositivo MUESTRA el código; el dueño lo TIPEA en el PC. El vault no lo sabe.
+    reply(from, { type: MSG.ENROLL_CHALLENGE, deviceId })
     log(`\n[vault] Un dispositivo quiere conectarse:`)
-    log(`        deviceId: ${deviceId}   ·   código (SAS): ${sas}`)
-    log(`        Verificá que coincida con el del dispositivo y aprobá:`)
-    log(`          dotrino-vault approve ${deviceId}    (o rechazá: dotrino-vault reject ${deviceId})\n`)
-    try { onEnrollChallenge?.({ deviceId, sas, scope: pend.scope }) } catch (_) {}
+    log(`        deviceId: ${deviceId}`)
+    log(`        Ingresá el código que MUESTRA el dispositivo:`)
+    log(`          dotrino-vault approve <código>    (o rechazá: dotrino-vault reject ${deviceId})\n`)
+    try { onEnrollChallenge?.({ deviceId, scope: pend.scope }) } catch (_) {}
   }
 
   // --- handleSign / handleGet: idénticos (verifyChain de la cadena D←maestra) ---
@@ -180,20 +178,31 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   function listPending () {
     return [...pending.values()]
       .filter((p) => p.state === 'PENDING_CONFIRM')
-      .map((p) => ({ deviceId: p.deviceId, sas: p.sas, scope: p.scope }))
+      .map((p) => ({ deviceId: p.deviceId, scope: p.scope }))
   }
 
-  /** El dueño aprueba un enroll pendiente: SOLO ahora la maestra firma el cert. */
-  async function approveDevice (deviceId) {
-    const found = findPending(deviceId)
-    if (!found) throw new Error('no hay un emparejamiento pendiente con ese deviceId')
-    const { token, pend } = found
+  /**
+   * El dueño aprueba TIPEANDO el código que muestra el dispositivo. El vault NO conocía el
+   * código: recompone el compromiso `H(code‖dpub‖sn)` y busca el enrol pendiente que matchea.
+   * Solo si matchea (= tenés el dispositivo, de ahí leíste el código) firma el cert.
+   */
+  async function approveDevice (code) {
+    code = String(code || '').trim()
+    if (!/^\d{4,8}$/.test(code)) throw new Error('código inválido (son los dígitos que muestra el dispositivo)')
+    let match = null
+    for (const [token, pend] of pending) {
+      if (pend.state !== 'PENDING_CONFIRM' || !pend.commit) continue
+      const c = await commitCode({ code, dpub: pend.dpub, sn: pend.sn })
+      if (c === pend.commit) { match = { token, pend }; break }
+    }
+    if (!match) throw new Error('código incorrecto: ningún dispositivo pendiente tiene ese código')
+    const { token, pend } = match
     const { cert } = await identity.signDelegation(pend.dpub, pend.scope, { ttlMs: pend.ttlMs, label: pend.label })
     pend.used = true
     pending.delete(token)
-    reply(pend.from, { type: MSG.ENROLLED, cert, iss: master, sas: pend.sas })
-    log(`[vault] dispositivo aprobado: ${deviceId} · scope ${JSON.stringify(pend.scope)}`)
-    return { ok: true, deviceId, nonce: cert.nonce }
+    reply(pend.from, { type: MSG.ENROLLED, cert, iss: master })
+    log(`[vault] dispositivo aprobado: ${pend.deviceId} · scope ${JSON.stringify(pend.scope)}`)
+    return { ok: true, deviceId: pend.deviceId, nonce: cert.nonce }
   }
 
   /** El dueño rechaza un enroll pendiente. */
