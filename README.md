@@ -62,12 +62,22 @@ contraseña, sin abrir puertos** (el vault marca hacia afuera).
 ### CLI de control
 
 ```sh
-dotrino-vault status            # estado del servicio + fingerprint
-dotrino-vault pair              # muestra un QR para enrolar un dispositivo
-dotrino-vault devices           # lista dispositivos enrolados / revocados
-dotrino-vault revoke <nonce>    # revoca un dispositivo
-dotrino-vault logs              # últimos logs del servicio
+dotrino-vault status               # estado del servicio + fingerprint
+dotrino-vault pair                 # inicia un emparejamiento (muestra el código y espera al dispositivo)
+dotrino-vault pending              # muestra el dispositivo pendiente + su código a comparar
+dotrino-vault approve <deviceId>   # aprueba un dispositivo (tras comparar el código en ambas pantallas)
+dotrino-vault reject  <deviceId>   # rechaza un dispositivo pendiente
+dotrino-vault devices              # lista dispositivos enrolados / revocados
+dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
+dotrino-vault logs                 # últimos logs del servicio
 ```
+
+**Emparejamiento endurecido** (ver [`docs/pairing-protocol.md`](./docs/pairing-protocol.md)):
+el dispositivo prueba posesión de su llave firmando el enrolamiento, y la maestra
+solo firma el certificado **después** de que compares un código de 6 dígitos (SAS)
+entre las dos pantallas y corras `approve`. Un código robado ya no alcanza para
+entrar; la revocación de un dispositivo le ordena **autoborrarse** (con firma de la
+maestra, no por un mensaje cualquiera).
 
 El servicio se gestiona con systemd `--user`
 (`systemctl --user {start,stop,restart} dotrino-vault`). Tus datos —clave maestra

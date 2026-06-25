@@ -1,17 +1,15 @@
 /**
- * daemon.js — modo SERVICIO del vault. Arranca el núcleo (`startVault`) y añade
- * lo que un servicio headless necesita:
+ * daemon.js — modo SERVICIO del vault. Arranca `startVault` y expone control
+ * LOCAL por archivos + señales (sin socket/puerto: nada escucha en red).
  *
- *   1. escribe `state.json` (fingerprint + iss + proxy) en el dir de datos en
- *      cada arranque → el CLI de control y el instalador lo leen sin tocar la
- *      identidad ni abrir puertos/sockets (privacidad: nada escucha).
- *   2. atiende SIGUSR1 → mina un token de emparejamiento y escribe `pair.json`
- *      (0600, efímero) para que `dotrino-vault pair` lo lea y dibuje el QR. Así
- *      el secreto de emparejamiento vive en memoria del daemon y solo se vuelca
- *      a un archivo 0600 a pedido explícito del dueño.
- *   3. apagado limpio con SIGTERM/SIGINT (systemd manda SIGTERM).
+ *   state.json          fingerprint + iss + proxy (lo lee el CLI/instalador)
+ *   SIGUSR1 → pair.json  inicia un emparejamiento y vuelca el QR
+ *   pending-enroll.json  cuando un dispositivo pide enrolarse: { deviceId, sas } a
+ *                        comparar/aprobar (emparejamiento ENDURECIDO, ver docs/)
+ *   SIGUSR2 → consume approve-request / reject-request / revoke-request y vuelca
+ *             devices.json
  *
- * NO abre sockets de control: el único transporte es el proxy del ecosistema.
+ * La maestra solo firma el cert de un dispositivo DESPUÉS de `dotrino-vault approve`.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -19,64 +17,79 @@ import { startVault } from './vault.js'
 import { dataDir, writeJson, readJson } from './paths.js'
 
 const readJsonSafe = (f) => readJson(f, null)
+const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
 
 export async function runDaemon () {
   const dir = dataDir()
   const proxyUrl = process.env.PROXY_URL || 'wss://proxy.dotrino.com'
 
-  const vault = await startVault({ dir, proxyUrl })
+  const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
+  // Cuando un dispositivo pide enrolarse, exponemos su deviceId+SAS para que el
+  // dueño lo compare con el del dispositivo y apruebe.
+  const onEnrollChallenge = ({ deviceId, sas, scope }) => {
+    writeJson(pendingEnrollFile, { v: 1, at: Date.now(), deviceId, sas, scope })
+  }
 
-  // --- 1. state.json: lo lee el CLI/instalador (legible solo por el dueño) ---
+  const vault = await startVault({ dir, proxyUrl, onEnrollChallenge })
+
+  // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
   writeJson(stateFile, {
-    v: 1,
-    fingerprint: vault.fingerprint,
-    iss: vault.master,
-    proxy: vault.client.url,
-    pid: process.pid,
-    startedAt: new Date().toISOString()
+    v: 1, fingerprint: vault.fingerprint, iss: vault.master,
+    proxy: vault.client.url, pid: process.pid, startedAt: new Date().toISOString()
   })
   console.log(`dotrino-vault · datos en ${dir} · proxy ${proxyUrl}`)
   console.log(`identidad (fingerprint): ${vault.fingerprint} · pid ${process.pid}`)
 
-  // --- 2. emparejamiento a pedido vía SIGUSR1 -------------------------------
+  // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
   process.on('SIGUSR1', () => {
     try {
-      const { qr, expiresInMs } = vault.startPairing({ label: 'cli' })
-      writeJson(pairFile, { v: 1, qr, expiresAt: Date.now() + expiresInMs })
-      console.log('[vault] token de emparejamiento generado (válido %d min)', expiresInMs / 60000)
+      rm(pendingEnrollFile)
+      // Pairing manual por CLI = gesto explícito del dueño → cert de identidad completo.
+      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read'], label: 'cli' })
+      writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs })
+      console.log('[vault] emparejamiento iniciado (válido %d min)', expiresInMs / 60000)
     } catch (e) {
-      console.error('[vault] no se pudo generar emparejamiento:', e.message)
+      console.error('[vault] no se pudo iniciar emparejamiento:', e.message)
     }
   })
 
-  // --- 2b. snapshot de dispositivos a pedido vía SIGUSR2 --------------------
-  // El daemon es el ÚNICO proceso que abre la identidad; el CLI no la toca. Para
-  // que `dotrino-vault devices` no necesite un socket de control, el daemon
-  // vuelca el listado a `devices.json` (0600) cuando recibe SIGUSR2.
+  // --- SIGUSR2: approve / reject / revoke + volcado de dispositivos ---
   const devFile = path.join(dir, 'devices.json')
+  const approveReqFile = path.join(dir, 'approve-request.json')
+  const rejectReqFile = path.join(dir, 'reject-request.json')
   const revokeReqFile = path.join(dir, 'revoke-request.json')
   process.on('SIGUSR2', async () => {
     try {
-      // Si hay una orden de revocación pendiente del CLI, ejecutarla primero.
+      const appr = readJsonSafe(approveReqFile)
+      if (appr?.deviceId) {
+        try { await vault.approveDevice(appr.deviceId); rm(pendingEnrollFile); console.log('[vault] aprobado %s', appr.deviceId) }
+        catch (e) { console.error('[vault] aprobación falló:', e.message) }
+        rm(approveReqFile)
+      }
+      const rej = readJsonSafe(rejectReqFile)
+      if (rej?.deviceId) {
+        try { vault.rejectDevice(rej.deviceId); rm(pendingEnrollFile) } catch (_) {}
+        rm(rejectReqFile)
+      }
       const req = readJsonSafe(revokeReqFile)
       if (req?.nonce) {
         try { await vault.revokeDevice(req.nonce); console.log('[vault] revocado nonce=%s', req.nonce) }
         catch (e) { console.error('[vault] revocación falló:', e.message) }
-        try { fs.rmSync(revokeReqFile, { force: true }) } catch (_) {}
+        rm(revokeReqFile)
       }
       const list = await vault.listDevices()
       writeJson(devFile, { v: 1, at: Date.now(), ...list })
     } catch (e) {
-      console.error('[vault] no se pudo volcar dispositivos:', e.message)
+      console.error('[vault] error en señal de control:', e.message)
     }
   })
 
-  // --- 3. apagado limpio -----------------------------------------------------
+  // --- apagado limpio ---
   const shutdown = (sig) => {
     console.log(`\n[vault] ${sig} → deteniendo…`)
-    try { fs.rmSync(pairFile, { force: true }) } catch (_) {}
+    rm(pairFile); rm(pendingEnrollFile)
     try { vault.close() } catch (_) {}
     process.exit(0)
   }
