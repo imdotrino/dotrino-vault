@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
+const DEB = RELEASES + '/download/dotrino-vault-amd64.deb'
 const DISCORD = 'https://discord.gg/D648uq7cth'
 
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
@@ -33,8 +34,12 @@ const I18N = {
       ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.'],
     ],
     dl_title: 'Descarga',
-    dl_lead: 'Un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
-    dl_btn: 'Descargar gratis para Linux',
+    dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
+    dl_deb_t: 'Ubuntu o Debian',
+    dl_deb_btn: 'Descargar el instalador (.deb)',
+    dl_deb_note: 'Haz doble clic en el archivo descargado y se instala solo (o en la terminal: sudo apt install ./dotrino-vault-amd64.deb). Queda funcionando al instante.',
+    dl_tar_t: 'Otro Linux',
+    dl_tar_btn: 'Descargar (.tar.gz)',
     dl_install_t: 'Instalar',
     dl_pair_t: 'Conectar un dispositivo',
     dl_warn: 'Como es un programa gratuito y de código abierto (no le pagamos a nadie por "firmarlo"), tu sistema puede mostrarte un aviso al instalarlo. Es normal y seguro.',
@@ -68,8 +73,12 @@ const I18N = {
       ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.'],
     ],
     dl_title: 'Download',
-    dl_lead: 'A single file with everything inside. Download it, install it and your vault runs on its own.',
-    dl_btn: 'Download free for Linux',
+    dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
+    dl_deb_t: 'Ubuntu or Debian',
+    dl_deb_btn: 'Download the installer (.deb)',
+    dl_deb_note: 'Double-click the downloaded file and it installs on its own (or in a terminal: sudo apt install ./dotrino-vault-amd64.deb). Up and running instantly.',
+    dl_tar_t: 'Other Linux',
+    dl_tar_btn: 'Download (.tar.gz)',
     dl_install_t: 'Install',
     dl_pair_t: 'Connect a device',
     dl_warn: 'Since it’s a free, open-source program (we don’t pay anyone to "sign" it), your system may show a warning when installing. That’s normal and safe.',
@@ -119,7 +128,7 @@ onMounted(() => { document.documentElement.lang = lang.value })
         <h1>{{ t.hero_title }}</h1>
         <p class="lead">{{ t.hero_sub }}</p>
         <div class="cta">
-          <a class="btn btn-primary" :href="RELEASES" data-testid="hero-download">↓ {{ t.hero_download }}</a>
+          <a class="btn btn-primary" href="#download" data-testid="hero-download">↓ {{ t.hero_download }}</a>
           <a class="btn btn-ghost" :href="GITHUB">{{ t.hero_source }}</a>
         </div>
         <p class="note">{{ t.hero_note }}</p>
@@ -156,14 +165,24 @@ onMounted(() => { document.documentElement.lang = lang.value })
       <section id="download" class="download">
         <h2>{{ t.dl_title }}</h2>
         <p class="lead">{{ t.dl_lead }}</p>
-        <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download">↓ {{ t.dl_btn }}</a>
 
-        <div class="codeblock">
-          <div class="code-head"><span>{{ t.dl_install_t }}</span>
-            <button class="copy" @click="copy(installCmd, 'install')">{{ copied === 'install' ? '✓' : '⧉' }}</button>
-          </div>
-          <pre><code>{{ installCmd }}</code></pre>
+        <div class="dl-card">
+          <h3>{{ t.dl_deb_t }}</h3>
+          <a class="btn btn-primary btn-lg" :href="DEB" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
+          <p class="dl-note">{{ t.dl_deb_note }}</p>
         </div>
+
+        <div class="dl-card">
+          <h3>{{ t.dl_tar_t }}</h3>
+          <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ t.dl_install_t }}</span>
+              <button class="copy" @click="copy(installCmd, 'install')">{{ copied === 'install' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ installCmd }}</code></pre>
+          </div>
+        </div>
+
         <div class="codeblock">
           <div class="code-head"><span>{{ t.dl_pair_t }}</span>
             <button class="copy" @click="copy(pairCmd, 'pair')">{{ copied === 'pair' ? '✓' : '⧉' }}</button>

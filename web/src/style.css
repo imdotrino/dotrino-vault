@@ -99,7 +99,10 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 /* download */
 .download { max-width: 760px; }
 .download .lead { color: #c4d0de; font-size: 1.08rem; margin: 0 0 22px; }
-.download .btn-lg { margin-bottom: 26px; }
+.download .btn-lg { margin-bottom: 14px; }
+.dl-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; margin-bottom: 16px; }
+.dl-card h3 { margin: 0 0 14px; font-size: 1.08rem; color: var(--accent); }
+.dl-note { color: var(--muted); font-size: .95rem; margin: 12px 0 0; }
 .codeblock { background: #0a1322; border: 1px solid var(--line); border-radius: 12px; margin: 0 0 14px; overflow: hidden; }
 .code-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
 .copy { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 1rem; }

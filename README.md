@@ -30,15 +30,25 @@ es `@dotrino/proxy-client`. Este repo solo **orquesta**.
 
 ## Instalación (Linux)
 
-Descarga el binario autosuficiente desde
-[Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y ejecuta el
-instalador:
+**Ubuntu / Debian — `.deb`** (lo más simple): descarga `dotrino-vault-amd64.deb`
+desde [Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y haz
+doble clic, o en la terminal:
+
+```sh
+sudo apt install ./dotrino-vault-amd64.deb
+```
+
+**Otro Linux — tarball:** descarga el binario autosuficiente y ejecuta el instalador:
 
 ```sh
 tar xzf dotrino-vault-*-linux-x64.tar.gz
 cd dotrino-vault-*-linux-x64
 sh install.sh
 ```
+
+El `.deb` deja los binarios en `/usr/bin`, instala la unidad `systemd --user` y la
+habilita; el tarball hace lo equivalente en tu `$HOME`. Ambos: nada de Node ni
+dependencias, y el servicio arranca solo.
 
 El binario **trae Node embebido**: no necesitas instalar nada más. El instalador lo
 deja como **servicio systemd `--user`** que arranca solo (también en el boot, vía
