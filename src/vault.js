@@ -145,6 +145,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.DEVICES_RESULT, devices, revoked })
   }
 
+  // RENOVACIÓN automática: un dispositivo con cert VIGENTE y no revocado pide un
+  // cert fresco (misma sub-clave y scope) sin QR ni aprobación — sigue siendo el
+  // mismo dispositivo enrolado, solo extiende la ventana. Un cert vencido o
+  // revocado NO puede renovarse (ahí sí toca re-emparejar con aprobación).
+  const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000
+  async function handleRenew (from, p) {
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    // Reusar el label del cert original (si sigue registrado en delegations).
+    const { issued } = await identity.listDelegations()
+    const prev = (issued || []).find((x) => x.nonce === p.cert.nonce)
+    const { cert } = await identity.signDelegation(p.cert.sub, p.cert.scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
+    log(`[vault] cert renovado para ${await deviceIdOf(p.cert.sub)} (30 días)`)
+    reply(from, { type: MSG.RENEWED, cert })
+  }
+
   client.on('message', async (from, payload) => {
     if (!payload || typeof payload !== 'object') return
     try {
@@ -153,6 +169,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.GET) return await handleGet(from, payload)
       if (payload.type === MSG.STORE) return await handleStore(from, payload)
       if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
+      if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }

@@ -29,6 +29,8 @@ export const MSG = Object.freeze({
   STORE_RESULT: 'vault.store.result',         // vault → dispositivo: { method, result }
   DEVICES: 'vault.devices',                   // dispositivo → vault: { data:{publickey,ts}, signature, cert }
   DEVICES_RESULT: 'vault.devices.result',     // vault → dispositivo: { devices, revoked }
+  RENEW: 'vault.renew',                       // dispositivo → vault: { data:{op,publickey,ts}, signature, cert }
+  RENEWED: 'vault.renewed',                   // vault → dispositivo: { cert }  (cert fresco, misma sub-clave/scope)
   ERROR: 'vault.error'                        // vault → dispositivo: { error }
 })
 
