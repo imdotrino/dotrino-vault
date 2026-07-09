@@ -47,7 +47,12 @@ export async function runDaemon () {
     try {
       rm(pendingEnrollFile)
       // Pairing manual por CLI = gesto explícito del dueño → cert de identidad completo.
-      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'cli' })
+      // ttlMs: 30 días (MAX_DELEGATION_MS). Sin esto caía al default de 24 h, pensado
+      // para delegaciones efímeras: los dispositivos emparejados morían al día
+      // siguiente en silencio ("no autorizado" en todas las apps). Renovación
+      // automática: pendiente (por ahora, re-emparejar al mes).
+      const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'cli', ttlMs: DEVICE_TTL_MS })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs })
       console.log('[vault] emparejamiento iniciado (válido %d min)', expiresInMs / 60000)
     } catch (e) {
