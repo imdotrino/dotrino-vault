@@ -86,8 +86,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.ENROLL_CHALLENGE, deviceId })
     log(`\n[vault] Un dispositivo quiere conectarse:`)
     log(`        deviceId: ${deviceId}`)
-    log(`        Ingresá el código que MUESTRA el dispositivo:`)
-    log(`          dotrino-vault approve <código>    (o rechazá: dotrino-vault reject ${deviceId})\n`)
+    log(`        Ingresa el código que MUESTRA el dispositivo:`)
+    log(`          dotrino-vault approve <código>    (o rechaza: dotrino-vault reject ${deviceId})\n`)
     try { onEnrollChallenge?.({ deviceId, scope: pend.scope }) } catch (_) {}
   }
 
@@ -139,8 +139,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
     if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
     const { issued, revoked } = await identity.listDelegations()
+    // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
+    // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
+    // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
     const devices = await Promise.all(issued.map(async (x) => ({
-      deviceId: x.sub ? await deviceIdOf(x.sub) : null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
+      deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
     reply(from, { type: MSG.DEVICES_RESULT, devices, revoked })
   }

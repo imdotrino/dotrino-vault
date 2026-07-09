@@ -69,7 +69,7 @@ function cmdStatus () {
 function showChallenge (pe) {
   console.log('\n%sUn dispositivo quiere conectarse a tu bóveda:%s', B, Z)
   console.log('  dispositivo : %s%s%s', B, pe.deviceId, Z)
-  console.log('\n  Ingresá el código que MUESTRA el dispositivo (el vault no lo conoce):')
+  console.log('\n  Ingresa el código que MUESTRA el dispositivo (el vault no lo conoce):')
   console.log('    %sdotrino-vault approve <código>%s', B, Z)
   console.log('  Si no reconocés este dispositivo:  dotrino-vault reject %s\n', pe.deviceId)
 }
@@ -126,7 +126,7 @@ function cmdApprove (code) {
   const s = requireDaemon()
   fs.writeFileSync(path.join(dir, 'approve-request.json'), JSON.stringify({ code: String(code), at: Date.now() }), { mode: 0o600 })
   process.kill(s.pid, 'SIGUSR2')
-  console.log('Aprobando con el código %s… verificá con: dotrino-vault devices', code)
+  console.log('Aprobando con el código %s… verifica con: dotrino-vault devices', code)
 }
 
 function cmdReject (deviceId) {
@@ -165,12 +165,12 @@ function cmdRevoke (nonce) {
   const s = requireDaemon()
   fs.writeFileSync(path.join(dir, 'revoke-request.json'), JSON.stringify({ nonce, at: Date.now() }), { mode: 0o600 })
   process.kill(s.pid, 'SIGUSR2')
-  console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verificá: dotrino-vault devices', nonce)
+  console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', nonce)
 }
 
 function cmdLogs () {
   try { process.stdout.write(execFileSync('journalctl', ['--user', '-u', 'dotrino-vault', '-n', '40', '--no-pager'], { encoding: 'utf8' })) }
-  catch { console.error('No se pudieron leer los logs. Probá:  journalctl --user -u dotrino-vault -f') }
+  catch { console.error('No se pudieron leer los logs. Prueba:  journalctl --user -u dotrino-vault -f') }
 }
 
 function help () {
