@@ -59,6 +59,12 @@ function cmdStatus () {
   const up = alive(s.pid)
   console.log('dotrino-vault · %s', up ? 'corriendo' : 'DETENIDO (state.json viejo)')
   console.log('  versión     : %s', VERSION)
+  // El .deb instala el binario pero NO reinicia el servicio: si el daemon
+  // corriendo es más viejo que el CLI, avisar (nos mordió 3 veces).
+  if (s.version && s.version !== VERSION) {
+    console.log('  ⚠ el servicio corre la versión %s (binario instalado: %s).', s.version, VERSION)
+    console.log('    Reinicia para actualizarlo:  systemctl --user restart dotrino-vault')
+  }
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')

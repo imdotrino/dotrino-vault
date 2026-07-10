@@ -34,8 +34,9 @@ export async function runDaemon () {
 
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
+  const daemonVersion = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
   writeJson(stateFile, {
-    v: 1, fingerprint: vault.fingerprint, iss: vault.master,
+    v: 1, version: daemonVersion, fingerprint: vault.fingerprint, iss: vault.master,
     proxy: vault.client.url, pid: process.pid, startedAt: new Date().toISOString()
   })
   console.log(`dotrino-vault · datos en ${dir} · proxy ${proxyUrl}`)

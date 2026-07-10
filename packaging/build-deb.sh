@@ -93,6 +93,8 @@ cat <<'MSG'
 Dotrino Vault instalado.
   - Se inicia solo en tu proximo inicio de sesion.
   - Para iniciarlo ahora:     systemctl --user start dotrino-vault
+  - Si estas ACTUALIZANDO, el servicio viejo sigue corriendo: reinicialo con
+      systemctl --user restart dotrino-vault
   - Ver estado:               dotrino-vault status
   - Conectar un dispositivo:  dotrino-vault pair
 Tus datos viven en ~/.local/share/dotrino/vault (solo tu los lees).
