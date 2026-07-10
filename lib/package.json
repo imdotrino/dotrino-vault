@@ -1,0 +1,35 @@
+{
+  "name": "@dotrino/vault",
+  "version": "0.1.0",
+  "description": "Usa ESTE dispositivo (navegador) como bóveda/CA del ecosistema Dotrino: atiende enrolamientos por el proxy y firma certificados de delegación a tus máquinas. Contraparte browser del daemon dotrino-vault, reutilizable por cualquier app.",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dotrino",
+    "vault",
+    "identity",
+    "delegation",
+    "pairing"
+  ],
+  "peerDependencies": {
+    "@dotrino/identity": ">=0.17.0",
+    "@dotrino/proxy-client": ">=0.6.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imdotrino/dotrino-vault.git",
+    "directory": "lib"
+  }
+}
