@@ -78,6 +78,17 @@ export function openThreadStore (dir) {
       }
       save(); return { mode, count: Object.keys(data.threads).length }
     },
+    // ----- PERFIL del usuario (me): el vault es la copia AUTORITATIVA -----
+    // Cada dispositivo emparejado lo empuja al editarlo y lo jala al arrancar →
+    // el mismo perfil (apodo/avatar/datos) en todos los dispositivos.
+    profileSet ({ me }) {
+      if (!me || typeof me !== 'object') throw new Error('me required')
+      // nunca guardar llaves de dispositivo (son por-dispositivo)
+      const { publickey, encryptionPubkey, ...content } = me
+      data.profile = { ...content, updatedAt: content.updatedAt || Date.now() }
+      save(); return { ok: true, updatedAt: data.profile.updatedAt }
+    },
+    profileGet () { return { me: data.profile || null } },
     getStats () {
       const threads = {}
       for (const [k, arr] of Object.entries(data.threads)) threads[k] = { count: arr.length }
@@ -89,5 +100,5 @@ export function openThreadStore (dir) {
 
 /** Métodos del store que son de SOLO LECTURA (para decidir el scope necesario). */
 export const STORE_READ_METHODS = new Set([
-  'listThread', 'listThreadKeys', 'getThreadSummaries', 'getOpens', 'exportThreads', 'getStats'
+  'listThread', 'listThreadKeys', 'getThreadSummaries', 'getOpens', 'exportThreads', 'getStats', 'profileGet'
 ])
