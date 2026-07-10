@@ -10,6 +10,8 @@
  *
  * Toda la cripto es de `@dotrino/identity`. Este módulo solo orquesta.
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain, verifyDeviceSig, pubkeyId } from '@dotrino/identity/capabilities'
 import { createTransport, masterPubkeyOf } from './transport.js'
@@ -56,6 +58,30 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     try { client.send(to, obj) } catch (e) { log('[vault] no se pudo responder:', e.message) }
   }
 
+  // FRESCURA anti-replay: toda petición firmada debe traer `data.ts` dentro de una
+  // ventana de ±5 min (mismo criterio que el identify del proxy). Sin esto, un
+  // relay malicioso podía REPRODUCIR mensajes firmados viejos (re-pedir firmas,
+  // abrir renovaciones…) durante toda la vida del cert.
+  // AUDITORÍA: bitácora de actividad de seguridad (activity.log, JSONL) — qué
+  // dispositivo firmó/renovó/enroló y qué se rechazó. `dotrino-vault activity`
+  // la muestra. Sin contenido de payloads (privacidad): solo op, dispositivo, hora.
+  const activityFile = path.join(dir, 'activity.log')
+  const audit = (op, info = {}) => {
+    try {
+      fs.appendFileSync(activityFile, JSON.stringify({ ts: Date.now(), op, ...info }) + '\n')
+      // rotación simple: si pasa de ~1 MB, conservar la última mitad
+      const st = fs.statSync(activityFile)
+      if (st.size > 1024 * 1024) {
+        const lines = fs.readFileSync(activityFile, 'utf8').split('\n')
+        fs.writeFileSync(activityFile, lines.slice(Math.floor(lines.length / 2)).join('\n'))
+      }
+    } catch (_) {}
+  }
+
+  const FRESH_WINDOW_MS = 5 * 60 * 1000
+  const isFresh = (d) => typeof d?.ts === 'number' && Math.abs(Date.now() - d.ts) <= FRESH_WINDOW_MS
+  const staleReply = (from) => reply(from, { type: MSG.ERROR, error: 'petición vencida: ts fuera de la ventana ±5 min (posible replay, o el reloj del dispositivo está desfasado)' })
+
   // --- ENROLL: el dispositivo prueba posesión de D; NO se firma cert todavía ---
   async function handleEnroll (from, p) {
     const d = p?.data
@@ -67,6 +93,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'token de emparejamiento inválido o expirado' })
     }
     if (d.sn !== pend.sn) return reply(from, { type: MSG.ERROR, error: 'sesión inválida' })
+    if (!isFresh(d)) return staleReply(from)
     // PRUEBA DE POSESIÓN: la firma de `data` debe verificar contra `dpub`.
     const ok = await verifyDeviceSig({ publickey: d.dpub, data: d, signature: p.signature })
     if (!ok) return reply(from, { type: MSG.ERROR, error: 'firma de dispositivo inválida' })
@@ -93,18 +120,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   // --- handleSign / handleGet: idénticos (verifyChain de la cadena D←maestra) ---
   async function handleSign (from, p) {
+    if (!isFresh(p.data)) { audit('rejected', { what: 'sign', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    if (!chk.ok) { audit('rejected', { what: 'sign', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
     const toSign = p.data?.payload
     if (toSign == null) return reply(from, { type: MSG.ERROR, error: 'data.payload requerido' })
     const { signature, publickey } = await identity.signData(toSign)
+    audit('sign', { device: await deviceIdOf(chk.device) })
     reply(from, { type: MSG.SIGNED, signature, publickey, device: chk.device })
   }
 
   async function handleGet (from, p) {
+    if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
@@ -121,6 +151,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!d || typeof d.method !== 'string' || !threads.methods[d.method]) {
       return reply(from, { type: MSG.ERROR, error: 'store: método inválido' })
     }
+    if (!isFresh(d)) return staleReply(from)
     const revoked = await revocationSet()
     let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
@@ -136,6 +167,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // Lista (solo lectura) de dispositivos enrolados, para un panel en el navegador.
   // Cualquier cert válido tuyo puede verla; REVOCAR sigue siendo solo desde el PC.
   async function handleDevices (from, p) {
+    if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
     if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
     const { issued, revoked } = await identity.listDelegations()
@@ -154,12 +186,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // revocado NO puede renovarse (ahí sí toca re-emparejar con aprobación).
   const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000
   async function handleRenew (from, p) {
+    if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    if (!chk.ok) { audit('rejected', { what: 'renew', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
     const prev = (issued || []).find((x) => x.nonce === p.cert.nonce)
     const { cert } = await identity.signDelegation(p.cert.sub, p.cert.scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
+    audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '' })
     log(`[vault] cert renovado para ${await deviceIdOf(p.cert.sub)} (30 días)`)
     reply(from, { type: MSG.RENEWED, cert })
   }
@@ -220,6 +254,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const { cert } = await identity.signDelegation(pend.dpub, pend.scope, { ttlMs: pend.ttlMs, label: pend.label })
     // Echamos el código tipeado + el cert. El vault NO valida el código: el DISPOSITIVO acepta
     // solo si coincide con el que generó → un vault falso (que no conoce el código) no puede.
+    audit('enroll', { device: pend.deviceId, label: pend.label || '', scope: pend.scope })
     reply(pend.from, { type: MSG.ENROLLED, code, cert, iss: master })
     log(`[vault] código enviado al dispositivo ${pend.deviceId} (acepta si coincide con el suyo)`)
     return { ok: true, deviceId: pend.deviceId }
@@ -246,6 +281,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     try { client.sendByPubkey(dpub, { type: MSG.REVOKED, body, signature }) } catch (e) { log('[vault] no se pudo emitir revoke:', e.message) }
   }
   async function revokeDevice (nonce) {
+    audit('revoke', { nonce })
     const { issued } = await identity.listDelegations()
     const dele = issued.find((d) => d.nonce === nonce)
     const res = await identity.revokeDelegation(nonce)

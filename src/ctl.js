@@ -168,6 +168,25 @@ function cmdRevoke (nonce) {
   console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', nonce)
 }
 
+// Bitácora de actividad de seguridad (quién firmó/renovó/enroló y qué se rechazó).
+function cmdActivity (n = 30) {
+  const f = path.join(dir, 'activity.log')
+  let lines = []
+  try { lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean) } catch {
+    console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
+  }
+  const ICON = { sign: '🖊 firma', renew: '♻ renovación', enroll: '➕ enrolado', revoke: '⛔ revocado', rejected: '🚫 RECHAZADO' }
+  for (const line of lines.slice(-n)) {
+    try {
+      const e = JSON.parse(line)
+      const when = new Date(e.ts).toLocaleString()
+      const what = ICON[e.op] || e.op
+      const extra = [e.device, e.label, e.what, e.reason, e.nonce].filter(Boolean).join(' · ')
+      console.log(`${when}  ${what}${extra ? '  ' + extra : ''}`)
+    } catch {}
+  }
+}
+
 function cmdLogs () {
   try { process.stdout.write(execFileSync('journalctl', ['--user', '-u', 'dotrino-vault', '-n', '40', '--no-pager'], { encoding: 'utf8' })) }
   catch { console.error('No se pudieron leer los logs. Prueba:  journalctl --user -u dotrino-vault -f') }
@@ -183,6 +202,7 @@ function help () {
   reject <deviceId>   rechaza un dispositivo pendiente
   devices             lista dispositivos enrolados / revocados
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
+  activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio
   version             muestra la versión instalada
 
@@ -200,6 +220,7 @@ export async function runCtl (argv) {
     case 'reject': return cmdReject(rest[0])
     case 'devices': return cmdDevices()
     case 'revoke': return cmdRevoke(rest[0])
+    case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':
     case '--version':
