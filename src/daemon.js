@@ -55,6 +55,13 @@ export async function runDaemon () {
       const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000
       const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'cli', ttlMs: DEVICE_TTL_MS })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs })
+      // El token es un secreto efímero: no debe quedar en disco más allá de su
+      // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
+      const tok = qr.token
+      setTimeout(() => {
+        const cur = readJsonSafe(pairFile)
+        if (cur?.qr?.token === tok) rm(pairFile)
+      }, expiresInMs + 1000).unref?.()
       console.log('[vault] emparejamiento iniciado (válido %d min)', expiresInMs / 60000)
     } catch (e) {
       console.error('[vault] no se pudo iniciar emparejamiento:', e.message)
@@ -70,7 +77,7 @@ export async function runDaemon () {
     try {
       const appr = readJsonSafe(approveReqFile)
       if (appr?.code) {
-        try { const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); console.log('[vault] aprobado %s', r.deviceId) }
+        try { const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile); console.log('[vault] aprobado %s', r.deviceId) }
         catch (e) { console.error('[vault] aprobación falló:', e.message) }
         rm(approveReqFile)
       }
