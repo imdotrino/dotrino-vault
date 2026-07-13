@@ -12,3 +12,4 @@ dist/
 # OS / editores / agente
 .DS_Store
 .claude/
+usage-stats.json

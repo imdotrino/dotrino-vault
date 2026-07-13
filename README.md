@@ -69,6 +69,10 @@ dotrino-vault approve <deviceId>   # aprueba un dispositivo (tras comparar el c�
 dotrino-vault reject  <deviceId>   # rechaza un dispositivo pendiente
 dotrino-vault devices              # lista dispositivos enrolados / revocados
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
+dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
+dotrino-vault secret set <ns> <CLAVE> <valor>   # guarda un secreto para ese servicio
+dotrino-vault secret rm  <ns> <CLAVE>           # borra un secreto
+dotrino-vault secret list                       # nombres de secretos (nunca valores)
 dotrino-vault logs                 # últimos logs del servicio
 ```
 
@@ -106,6 +110,33 @@ const { signature } = await requestSign({
   payload: { hola: 'mundo' }
 })
 ```
+
+### Secretos de servicios (los servicios del ecosistema son clientes identificados)
+
+Los servicios (proxy, geo, bots…) **no llevan secretos de terceros en su `.env`**:
+se enrolan al vault como un dispositivo más, con un cert limitado al scope
+`vault:secrets:<ns>` (`pair --service <ns>`), y al arrancar piden su bundle con
+`@dotrino/vault/service`:
+
+```js
+import { enrollService, waitForSecrets } from '@dotrino/vault/service'
+
+// una vez (con el payload del QR de `pair --service proxy`):
+await enrollService({ qr, ns: 'proxy', dir: './vault-service' })
+
+// en cada arranque: espera al vault PARA SIEMPRE (sin vault, la feature no opera)
+const secrets = await waitForSecrets({ dir: './vault-service' })
+// → { TURN_KEY_ID: '…', TURN_KEY_API_TOKEN: '…' }
+```
+
+Garantías: la petición va firmada por la llave del servicio + cert (scope solo
+su `ns`); la respuesta viaja **sellada** a una llave efímera por petición (el
+proxy que la transporta no puede leerla, y un replay no se puede descifrar) y
+**firmada por la maestra** (verificada contra la `iss` pineada del enrolamiento).
+Revocar el cert (`revoke`) corta el acceso de inmediato; `activity` audita cada
+lectura. Los servicios críticos sin secretos en su core (el propio proxy) arrancan
+sin vault; solo la feature que los necesita (TURN) espera. Primer consumidor:
+`dotrino-proxy` (TURN de Cloudflare, ver su README).
 
 ## Alcance
 

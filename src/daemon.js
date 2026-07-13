@@ -44,6 +44,7 @@ export async function runDaemon () {
 
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
+  const pairReqFile = path.join(dir, 'pair-request.json')
   process.on('SIGUSR1', () => {
     try {
       rm(pendingEnrollFile)
@@ -53,7 +54,14 @@ export async function runDaemon () {
       // siguiente en silencio ("no autorizado" en todas las apps). Renovación
       // automática: pendiente (por ahora, re-emparejar al mes).
       const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000
-      const { qr, expiresInMs } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'cli', ttlMs: DEVICE_TTL_MS })
+      // `pair --service <ns>` (vía pair-request.json): cert SOLO con
+      // vault:secrets:<ns> — para enrolar un SERVICIO (proxy, geo…) que lee sus
+      // secretos, sin poder firmar como el usuario ni leer sus datos.
+      const pairReq = readJsonSafe(pairReqFile); rm(pairReqFile)
+      const isService = typeof pairReq?.service === 'string' && pairReq.service
+      const scope = isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
+      const label = pairReq?.label || (isService ? 'servicio:' + pairReq.service : 'cli')
+      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
@@ -73,6 +81,8 @@ export async function runDaemon () {
   const approveReqFile = path.join(dir, 'approve-request.json')
   const rejectReqFile = path.join(dir, 'reject-request.json')
   const revokeReqFile = path.join(dir, 'revoke-request.json')
+  const secretReqFile = path.join(dir, 'secret-request.json')
+  const secretsListFile = path.join(dir, 'secrets-list.json')
   process.on('SIGUSR2', async () => {
     try {
       const appr = readJsonSafe(approveReqFile)
@@ -92,6 +102,18 @@ export async function runDaemon () {
         catch (e) { console.error('[vault] revocación falló:', e.message) }
         rm(revokeReqFile)
       }
+      // Secretos de servicios: `secret set/rm` del CLI. El archivo con el valor
+      // vive un instante en el mismo dir 0700 del vault y se borra al consumir.
+      const sec = readJsonSafe(secretReqFile)
+      if (sec?.op) {
+        try {
+          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value); console.log('[vault] secreto guardado: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secreto borrado: %s/%s', sec.ns, sec.key) }
+        } catch (e) { console.error('[vault] secreto falló:', e.message) }
+        rm(secretReqFile)
+      }
+      // Volcado de nombres (nunca valores) para `secret list`.
+      writeJson(secretsListFile, { v: 1, at: Date.now(), ns: vault.listSecrets() })
       const list = await vault.listDevices()
       writeJson(devFile, { v: 1, at: Date.now(), ...list })
     } catch (e) {

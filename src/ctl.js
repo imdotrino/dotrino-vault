@@ -84,6 +84,16 @@ async function cmdPair (args = []) {
   const s = requireDaemon()
   try { fs.rmSync(pairFile, { force: true }) } catch (_) {}
   try { fs.rmSync(pendingFile, { force: true }) } catch (_) {}
+  // --service <ns>: emparejar un SERVICIO (proxy, geo…) con cert limitado a
+  // vault:secrets:<ns> (no puede firmar como vos ni leer tus datos).
+  const svcIdx = args.indexOf('--service')
+  if (svcIdx >= 0) {
+    const ns = args[svcIdx + 1]
+    if (!ns || ns.startsWith('-') || !/^[a-z0-9-]{1,32}$/.test(ns)) {
+      console.error('uso: dotrino-vault pair --service <ns>   (ns en minúsculas, p.ej. proxy)'); process.exit(2)
+    }
+    fs.writeFileSync(path.join(dir, 'pair-request.json'), JSON.stringify({ service: ns, at: Date.now() }), { mode: 0o600 })
+  }
   process.kill(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -181,16 +191,55 @@ function cmdActivity (n = 30) {
   try { lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean) } catch {
     console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
   }
-  const ICON = { sign: '🖊 firma', renew: '♻ renovación', enroll: '➕ enrolado', revoke: '⛔ revocado', rejected: '🚫 RECHAZADO' }
+  const ICON = { sign: '🖊 firma', renew: '♻ renovación', enroll: '➕ enrolado', revoke: '⛔ revocado', rejected: '🚫 RECHAZADO', secrets: '🔑 secretos leídos', 'secret.set': '🔑 secreto guardado', 'secret.rm': '🔑 secreto borrado' }
   for (const line of lines.slice(-n)) {
     try {
       const e = JSON.parse(line)
       const when = new Date(e.ts).toLocaleString()
       const what = ICON[e.op] || e.op
-      const extra = [e.device, e.label, e.what, e.reason, e.nonce].filter(Boolean).join(' · ')
+      const extra = [e.device, e.label, e.what, e.ns, e.key, e.reason, e.nonce].filter(Boolean).join(' · ')
       console.log(`${when}  ${what}${extra ? '  ' + extra : ''}`)
     } catch {}
   }
+}
+
+// Secretos de servicios: se cargan aquí (el dueño, en el PC del vault) y los
+// leen los SERVICIOS enrolados con `pair --service <ns>`. Nunca se listan valores.
+async function cmdSecret (rest) {
+  const [sub, ns, key, ...valueParts] = rest
+  const s = requireDaemon()
+  const secretsListFile = path.join(dir, 'secrets-list.json')
+  const signalAndWaitList = async () => {
+    try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
+    process.kill(s.pid, 'SIGUSR2')
+    for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
+    console.error('El daemon no respondió.'); process.exit(1)
+  }
+  if (sub === 'list') {
+    const d = await signalAndWaitList()
+    const names = d.ns || {}
+    const nss = Object.keys(names)
+    if (!nss.length) { console.log('No hay secretos guardados. Agrega uno:  dotrino-vault secret set <ns> <CLAVE> <valor>'); return }
+    for (const n of nss) {
+      console.log('%s%s%s  (scope vault:secrets:%s)', B, n, Z, n)
+      for (const k of names[n]) console.log('  · %s', k)
+    }
+    return
+  }
+  if (sub === 'set' || sub === 'rm') {
+    const value = valueParts.join(' ')
+    if (!ns || !key || (sub === 'set' && !value)) {
+      console.error('uso: dotrino-vault secret set <ns> <CLAVE> <valor>\n     dotrino-vault secret rm <ns> <CLAVE>'); process.exit(2)
+    }
+    const req = sub === 'set' ? { op: 'set', ns, key, value, at: Date.now() } : { op: 'rm', ns, key, at: Date.now() }
+    fs.writeFileSync(path.join(dir, 'secret-request.json'), JSON.stringify(req), { mode: 0o600 })
+    const d = await signalAndWaitList()
+    const ok = sub === 'set' ? (d.ns?.[ns] || []).includes(key) : !(d.ns?.[ns] || []).includes(key)
+    if (ok) console.log(sub === 'set' ? 'Secreto guardado: %s/%s' : 'Secreto borrado: %s/%s', ns, key)
+    else { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    return
+  }
+  console.error('uso: dotrino-vault secret {set|rm|list}'); process.exit(2)
 }
 
 function cmdLogs () {
@@ -203,6 +252,10 @@ function help () {
 
   status              estado del servicio + fingerprint
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
+  pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
+  secret set <ns> <CLAVE> <valor>   guarda un secreto para el servicio <ns>
+  secret rm <ns> <CLAVE>            borra un secreto
+  secret list                       lista nombres de secretos (nunca valores)
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
@@ -226,6 +279,7 @@ export async function runCtl (argv) {
     case 'reject': return cmdReject(rest[0])
     case 'devices': return cmdDevices()
     case 'revoke': return cmdRevoke(rest[0])
+    case 'secret': return cmdSecret(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':

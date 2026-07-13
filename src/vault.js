@@ -17,8 +17,10 @@ import { verifyChain, verifyDeviceSig, pubkeyId } from '@dotrino/identity/capabi
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS } from './threadStore.js'
+import { openSecretsStore } from './secretsStore.js'
+import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
-import { MSG, SCOPE } from './protocol.js'
+import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 const PAIRING_TTL_MS = 5 * 60 * 1000 // un token de emparejamiento vale 5 min
 
@@ -40,6 +42,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const store = openStore(dir)
   const threads = openThreadStore(dir)
+  const secrets = openSecretsStore(dir)
   const master = await masterPubkeyOf(identity)
   const fp = (await pubkeyId(master)).slice(0, 16)
 
@@ -198,6 +201,35 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.RENEWED, cert })
   }
 
+  // SECRETOS de servicios: un servicio enrolado (cert `vault:secrets:<ns>`)
+  // pide el bundle de su namespace. La respuesta va SELLADA a la llave ECDH
+  // efímera `ek` que vino en el sobre firmado (el proxy transporta pero no
+  // puede leer los valores) y el cuerpo va FIRMADO por la maestra (el
+  // servicio verifica contra su iss pineada — un relay no puede inyectar
+  // secretos falsos). Replay inerte: cada petición usa una ek nueva.
+  //   data: { op:'secrets', ns, ek, publickey, ts }
+  async function handleSecrets (from, p) {
+    if (!isFresh(p.data)) { audit('rejected', { what: 'secrets', reason: 'stale' }); return staleReply(from) }
+    const ns = p.data?.ns
+    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: namespace inválido' })
+    if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: falta ek (llave efímera del solicitante)' })
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+    })
+    if (!chk.ok) { audit('rejected', { what: 'secrets', ns, reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
+    let enc
+    try {
+      enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns) } })
+    } catch (e) {
+      return reply(from, { type: MSG.ERROR, error: 'secrets: ek inválida' })
+    }
+    const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
+    const { signature } = await identity.signData(body)
+    audit('secrets', { device: await deviceIdOf(chk.device), ns })
+    reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+  }
+
   client.on('message', async (from, payload) => {
     if (!payload || typeof payload !== 'object') return
     try {
@@ -207,6 +239,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.STORE) return await handleStore(from, payload)
       if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
       if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
+      if (payload.type === MSG.SECRETS) return await handleSecrets(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -289,10 +322,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return res
   }
 
+  // API local de secretos (solo CLI/UI del dueño; audita cada cambio).
+  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }) }
+  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) audit('secret.rm', { ns, key }); return ok }
+  function listSecrets () { return secrets.list() }
+
   return {
-    identity, client, store, threads, master, fingerprint: fp,
+    identity, client, store, threads, secrets, master, fingerprint: fp,
     startPairing, stopPairing, listPending,
     approveDevice, rejectDevice,
+    setSecret, deleteSecret, listSecrets,
     listDevices: () => identity.listDelegations(),
     revokeDevice,
     close () { try { client.close() } catch (_) {} identity.destroy() }

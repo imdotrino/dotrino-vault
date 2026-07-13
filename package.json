@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node bin/dotrino-vaultd.js",
-    "pair": "node bin/dotrino-vaultd.js --pair"
+    "pair": "node bin/dotrino-vaultd.js --pair",
+    "test": "node --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=20"
