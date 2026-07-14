@@ -115,19 +115,66 @@ const { signature } = await requestSign({
 
 Los servicios (proxy, geo, bots…) **no llevan secretos de terceros en su `.env`**:
 se enrolan al vault como un dispositivo más, con un cert limitado al scope
-`vault:secrets:<ns>` (`pair --service <ns>`), y al arrancar piden su bundle con
-`@dotrino/vault/service`:
+`vault:secrets:<ns>` (`pair --service <ns>`), y al arrancar piden su bundle.
+
+Son **dos momentos distintos, a propósito**: el **enrolamiento** (registro de la
+máquina) es un **comando previo** que corre un humano **una sola vez**; el
+**arranque** de la app solo lee la identidad ya guardada y no interactúa con nadie.
+
+#### 1) Enrolamiento — comando previo, una vez por máquina
+
+```bash
+# en el VAULT (tu PC)
+dotrino-vault pair --service proxy                 # invitación con scope SOLO vault:secrets:proxy
+dotrino-vault secret set proxy TURN_KEY_ID  …
+
+# en la MÁQUINA del servicio (pega la invitación; te MUESTRA un código)
+npx dotrino-env enroll --ns proxy
+
+# de vuelta en el VAULT: tipeas el código LEYÉNDOLO de la pantalla del servicio
+dotrino-vault approve 7K3F-92Q1
+```
+
+Deja `~/.dotrino/service/<ns>/service-identity.json` (0600) con la llave del
+dispositivo (generada ahí, nunca sale) + el cert. **No hay ningún secreto en disco.**
+
+**Por qué NO se enrola en el primer arranque de la app:** el enrolamiento exige un
+humano que **lea el código en la pantalla del servicio** — es lo único que impide que
+un vault falso (que nunca vio el código) enrole la máquina, o que alguien apruebe a
+ciegas. Un servicio arranca bajo systemd/PM2, sin TTY y sin nadie mirando: el código
+acabaría en un log (y quien lea el log ya podría aprobar). Además el arranque quedaría
+bloqueado esperando una aprobación que quizá nadie da, y un reinicio automático de
+madrugada intentaría re-enrolar. Separados, el arranque es determinista e idempotente:
+solo **lee**; el enrolamiento **escribe** y consume una invitación de un solo uso.
+
+Va donde va el `npm ci` al aprovisionar el VPS. (Para máquinas efímeras —Docker,
+autoescalado— haría falta una invitación pre-provisionada de un solo uso con TTL corto
+y auto-aprobación; **aún no está decidido ni implementado**.)
+
+#### 2) Arranque — sin interacción, en cada reinicio
 
 ```js
-import { enrollService, waitForSecrets } from '@dotrino/vault/service'
-
-// una vez (con el payload del QR de `pair --service proxy`):
-await enrollService({ qr, ns: 'proxy', dir: './vault-service' })
-
-// en cada arranque: espera al vault PARA SIEMPRE (sin vault, la feature no opera)
-const secrets = await waitForSecrets({ dir: './vault-service' })
-// → { TURN_KEY_ID: '…', TURN_KEY_API_TOKEN: '…' }
+import '@dotrino/vault/config'     // como `dotenv/config`, pero contra el vault (ns = DOTRINO_NS)
+console.log(process.env.TURN_KEY_ID)
 ```
+
+o explícito, con `@dotrino/vault/env` / `@dotrino/vault/service`:
+
+```js
+import { loadEnv } from '@dotrino/vault/env'
+const { secrets } = await loadEnv({ ns: 'proxy', required: ['TURN_KEY_ID'] })
+```
+
+**Modos de fallo (importante):**
+
+- **Vault caído / proxy caído** → **espera** (reintento con backoff, para siempre). Sin
+  vault el servicio no opera: no arranca con secretos viejos ni vacíos.
+- **Sin enrolar, cert revocado o vencido, scope equivocado** → **aborta en el acto**.
+  Son errores que no se arreglan reintentando: hay que (re)enrolar.
+
+CLI de apoyo: `dotrino-env status` (qué hay enrolado aquí), `dotrino-env check` (lista
+los **nombres** de los secretos, nunca los valores), `dotrino-env run -- <cmd>` (inyecta
+los secretos en el entorno de un proceso que no es Node).
 
 Garantías: la petición va firmada por la llave del servicio + cert (scope solo
 su `ns`); la respuesta viaja **sellada** a una llave efímera por petición (el

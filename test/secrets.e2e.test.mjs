@@ -60,6 +60,30 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   assert.deepEqual(secrets, { TURN_KEY_ID: 'k-123', TURN_KEY_API_TOKEN: 't-456' })
 })
 
+test('loadEnv() inyecta los secretos en process.env (el "dotenv contra el vault")', async () => {
+  delete process.env.TURN_KEY_ID
+  process.env.TURN_KEY_API_TOKEN = 'ya-estaba'   // lo presente en el entorno manda (sin override)
+
+  const { loadEnv } = await import('../lib/src/env.js')
+  const { ns, injected, skipped } = await loadEnv({ ns: 'proxy', dir: svcDir, wait: false })
+
+  assert.equal(ns, 'proxy')
+  assert.equal(process.env.TURN_KEY_ID, 'k-123')
+  assert.deepEqual(injected, ['TURN_KEY_ID'])
+  assert.deepEqual(skipped, ['TURN_KEY_API_TOKEN'])
+  assert.equal(process.env.TURN_KEY_API_TOKEN, 'ya-estaba')
+
+  // override: pisa lo que ya estaba
+  await loadEnv({ ns: 'proxy', dir: svcDir, wait: false, override: true })
+  assert.equal(process.env.TURN_KEY_API_TOKEN, 't-456')
+
+  // required: si falta una clave, no arranca
+  await assert.rejects(
+    loadEnv({ ns: 'proxy', dir: svcDir, wait: false, required: ['NO_EXISTE'] }),
+    /faltan secretos/
+  )
+})
+
 test('el scope corta el acceso a otro namespace', async () => {
   vault.setSecret('geo', 'DB_PASSWORD', 'nope')
   await assert.rejects(
