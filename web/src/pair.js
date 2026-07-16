@@ -3,7 +3,8 @@
  *
  * Emparejador SELF independiente del ecosistema: este navegador actúa como vault
  * (levanta el daemon con startDeviceVault) y enlaza dispositivos/agentes (genera el
- * código de emparejamiento, aprueba con SAS, lista los enlazados).
+ * código de emparejamiento, aprueba con SAS, lista los enlazados con su estado
+ * online vía ping/pong).
  *
  * Las apps llegan con ?back=<url>; tras enlazar, un botón vuelve a esa URL.
  * Centraliza lo que antes duplicaban selfTerminalScreen / selfIaScreen.
@@ -27,6 +28,7 @@ const I18N = {
     pending: (d) => `La máquina ${d} pide acceso. Tipea el código que muestra:`,
     code_ph: 'código', approve: 'Aprobar', reject: 'Rechazar',
     machines_title: 'Máquinas enlazadas', machines_none: 'Aún no hay máquinas enlazadas.',
+    checking: 'comprobando…', online: 'en línea', offline: 'desconectado',
     back_app: (h) => `Volver a ${h}`,
     need_identity: 'Necesitas una identidad primero. Créala en',
     proxy_err: 'No se pudo conectar al proxy para actuar como vault.',
@@ -44,6 +46,7 @@ const I18N = {
     pending: (d) => `Machine ${d} requests access. Type the code it shows:`,
     code_ph: 'code', approve: 'Approve', reject: 'Reject',
     machines_title: 'Linked machines', machines_none: 'No machines linked yet.',
+    checking: 'checking…', online: 'online', offline: 'offline',
     back_app: (h) => `Back to ${h}`,
     need_identity: 'You need an identity first. Create one at',
     proxy_err: 'Could not connect to the proxy to act as vault.',
@@ -57,11 +60,38 @@ const t = (k, ...a) => String(typeof I18N[lang][k] === 'function' ? I18N[lang][k
 const el = (h) => { const tp = document.createElement('template'); tp.innerHTML = h.trim(); return tp.content.firstElementChild }
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 // base64url del JSON: para el CÓDIGO COPIABLE (oculta iss/token/sn en texto plano).
-// El QR usa el JSON crudo (más corto → QR más chico y fácil de escanear); el texto
-// visible va en base64url. El agente (parseQr) acepta ambos formatos.
+// El QR usa el JSON crudo (más corto → QR más chico); el texto visible va en base64url.
 function b64urlEncode (str) {
   const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(str)))
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+let _presenceTimer = null
+
+// Sonda de presencia: ping/pong por el proxy. Mandamos AMBOS tipos (ra.ping para
+// agentes basados en @dotrino/remote-agent —ia—; terminal.ping para agentes de
+// terminal pre-migración) y consideramos online si responde cualquiera.
+function probeOnline (client, pubkeys, { timeoutMs = 4000 } = {}) {
+  return new Promise((resolve) => {
+    const online = new Set()
+    if (!client?.sendByPubkey || !pubkeys.length) return resolve(online)
+    let rest = pubkeys.length
+    const byNonce = new Map()
+    const off = client.on('message', (_f, p) => {
+      if (!p || typeof p !== 'object') return
+      if (p.type === 'ra.pong' || p.type === 'terminal.pong') {
+        const pk = byNonce.get(p.n)
+        if (pk) { online.add(pk); byNonce.delete(p.n); settle() }
+      }
+    })
+    function settle () { if (--rest <= 0) { off(); resolve(online) } }
+    for (const pk of pubkeys) {
+      const n = pk.slice(0, 6) + Math.random().toString(36).slice(2, 8)
+      byNonce.set(n, pk)
+      try { client.sendByPubkey(pk, { type: 'ra.ping', n }); client.sendByPubkey(pk, { type: 'terminal.ping', n }) } catch {}
+      setTimeout(settle, timeoutMs) // si no respondió → cuenta como offline
+    }
+  })
 }
 
 // ?back= URL de la app que nos llamó (solo http/https, para evitar open-redirect).
@@ -88,6 +118,7 @@ async function wireTopbar () {
 }
 
 async function render () {
+  if (_presenceTimer) { clearInterval(_presenceTimer); _presenceTimer = null }
   const bh = backHost()
   const backBtn = bh ? `<button class="back-app" id="backApp" data-testid="pair-back">${t('back_app', esc(bh))}</button>` : ''
   app.replaceChildren(el(`<section class="card"><span class="status">${t('proxy_err')}</span></section>`))
@@ -183,7 +214,17 @@ async function render () {
   sm.onPendingChange(() => renderPending(sm.listPending()))
   renderPairIdle()
 
-  // --- Lista de máquinas enlazadas ---
+  // --- Lista de máquinas enlazadas + presencia (ping/pong) ---
+  async function updatePresence (subs) {
+    if (!subs.length) return
+    const online = await probeOnline(sm.client, subs)
+    for (const row of machinesBox.querySelectorAll('.machine-row')) {
+      const dot = row.querySelector('.mdot'); if (!dot) continue
+      const on = online.has(row.dataset.sub)
+      dot.className = 'mdot ' + (on ? 'on' : 'off')
+      dot.title = on ? t('online') : t('offline')
+    }
+  }
   async function refreshMachines () {
     try {
       const list = await sm.listMachines()
@@ -197,11 +238,19 @@ async function render () {
       const holder = machinesBox.querySelector('.machine-list')
       for (const d of list) {
         const name = d.label ? `${d.label} · ${d.deviceId}` : d.deviceId
-        holder.appendChild(el(`<div class="machine-row" data-sub="${esc(d.sub)}"><span class="machine-name">🖥 ${esc(name)}</span></div>`))
+        holder.appendChild(el(`<div class="machine-row" data-sub="${esc(d.sub)}">
+          <span class="machine-name"><span class="mdot" title="${esc(t('checking'))}"></span>🖥 ${esc(name)}</span>
+        </div>`))
       }
+      updatePresence(list.map((d) => d.sub))
     } catch { machinesBox.innerHTML = `<span class="status">${t('machines_none')}</span>` }
   }
   refreshMachines()
+  // Re-sondeo periódico: cubre "el agente se cerró/abrió con la página abierta".
+  _presenceTimer = setInterval(() => {
+    const subs = [...machinesBox.querySelectorAll('.machine-row')].map((r) => r.dataset.sub)
+    if (subs.length) updatePresence(subs)
+  }, 30000)
   const _origApprove = sm.approve.bind(sm)
   sm.approve = async (...a) => { const r = await _origApprove(...a); refreshMachines(); return r }
 }
