@@ -13,7 +13,12 @@
  *   reject <id>       rechaza un dispositivo pendiente
  *   devices           lista dispositivos enrolados / revocados
  *   revoke <nonce>    revoca un dispositivo (y le ordena autoborrarse)
+ *   profile …         perfiles (varias identidades en el mismo PC) y su contraseña
+ *   unlock / lock     candado del perfil (la contraseña solo hace falta para EDITAR)
  *   logs              últimos logs del servicio
+ *
+ * MULTI-PERFIL: todos los comandos aceptan `--profile <id|nombre>`; sin él van al
+ * perfil ACTIVO (`profile use`).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -27,6 +32,22 @@ const stateFile = path.join(dir, 'state.json')
 const pairFile = path.join(dir, 'pair.json')
 const pendingFile = path.join(dir, 'pending-enroll.json')
 const devFile = path.join(dir, 'devices.json')
+const profilesFile = path.join(dir, 'profiles-list.json')
+
+// `--profile <id|nombre>`: a qué perfil apunta el comando (sin él, el activo).
+// Se extrae de los argumentos antes de interpretarlos, así vale para todos.
+let PROFILE = null
+function takeProfileFlag (args) {
+  const i = args.findIndex((a) => a === '--profile' || a === '-p')
+  if (i < 0) return args
+  const val = args[i + 1]
+  if (!val || val.startsWith('-')) { console.error('uso: --profile <id|nombre>'); process.exit(2) }
+  PROFILE = val
+  return [...args.slice(0, i), ...args.slice(i + 2)]
+}
+/** Campo `profile` de las peticiones al daemon (omitido = perfil activo). */
+const withProfile = (obj) => (PROFILE ? { ...obj, profile: PROFILE } : obj)
+const writeReq = (name, obj) => fs.writeFileSync(path.join(dir, name), JSON.stringify(withProfile({ ...obj, at: Date.now() })), { mode: 0o600 })
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
@@ -69,7 +90,19 @@ function cmdStatus () {
   console.log('  proxy       : %s', s.proxy)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')
   console.log('  datos       : %s', dir)
+  const profiles = s.profiles || []
+  if (profiles.length) {
+    console.log('  perfiles    : %d', profiles.length)
+    for (const p of profiles) console.log('    %s %s', p.current ? '*' : ' ', describeProfile(p))
+    if (profiles.length > 1) console.log('    (el * es el perfil activo; los demás siguen atendiendo a sus dispositivos)')
+  }
   if (!up) process.exitCode = 1
+}
+
+/** Una línea por perfil: nombre, id, huella y estado del candado. */
+function describeProfile (p) {
+  const lock = !p.protected ? 'sin contraseña' : (p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado')
+  return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}`
 }
 
 function showChallenge (pe) {
@@ -87,13 +120,16 @@ async function cmdPair (args = []) {
   // --service <ns>: emparejar un SERVICIO (proxy, geo…) con cert limitado a
   // vault:secrets:<ns> (no puede firmar como vos ni leer tus datos).
   const svcIdx = args.indexOf('--service')
+  let service = null
   if (svcIdx >= 0) {
-    const ns = args[svcIdx + 1]
-    if (!ns || ns.startsWith('-') || !/^[a-z0-9-]{1,32}$/.test(ns)) {
+    service = args[svcIdx + 1]
+    if (!service || service.startsWith('-') || !/^[a-z0-9-]{1,32}$/.test(service)) {
       console.error('uso: dotrino-vault pair --service <ns>   (ns en minúsculas, p.ej. proxy)'); process.exit(2)
     }
-    fs.writeFileSync(path.join(dir, 'pair-request.json'), JSON.stringify({ service: ns, at: Date.now() }), { mode: 0o600 })
   }
+  // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
+  // se empareja el dispositivo.
+  writeReq('pair-request.json', service ? { service } : {})
   process.kill(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -140,7 +176,7 @@ function cmdPending () {
 function cmdApprove (code) {
   if (!code) { console.error('uso: dotrino-vault approve <código>   (los dígitos que muestra el dispositivo)'); process.exit(2) }
   const s = requireDaemon()
-  fs.writeFileSync(path.join(dir, 'approve-request.json'), JSON.stringify({ code: String(code), at: Date.now() }), { mode: 0o600 })
+  writeReq('approve-request.json', { code: String(code) })
   process.kill(s.pid, 'SIGUSR2')
   console.log('Aprobando con el código %s… verifica con: dotrino-vault devices', code)
 }
@@ -148,7 +184,7 @@ function cmdApprove (code) {
 function cmdReject (deviceId) {
   if (!deviceId) { console.error('uso: dotrino-vault reject <deviceId>'); process.exit(2) }
   const s = requireDaemon()
-  fs.writeFileSync(path.join(dir, 'reject-request.json'), JSON.stringify({ deviceId, at: Date.now() }), { mode: 0o600 })
+  writeReq('reject-request.json', { deviceId })
   process.kill(s.pid, 'SIGUSR2')
   console.log('Rechazado %s.', deviceId)
 }
@@ -156,6 +192,7 @@ function cmdReject (deviceId) {
 async function cmdDevices () {
   const s = requireDaemon()
   try { fs.rmSync(devFile, { force: true }) } catch (_) {}
+  writeReq('dump-request.json', {}) // de qué perfil queremos los dispositivos
   process.kill(s.pid, 'SIGUSR2')
   let snap = null
   for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
@@ -179,14 +216,30 @@ async function cmdDevices () {
 function cmdRevoke (nonce) {
   if (!nonce) { console.error('uso: dotrino-vault revoke <nonce>'); process.exit(2) }
   const s = requireDaemon()
-  fs.writeFileSync(path.join(dir, 'revoke-request.json'), JSON.stringify({ nonce, at: Date.now() }), { mode: 0o600 })
+  writeReq('revoke-request.json', { nonce })
   process.kill(s.pid, 'SIGUSR2')
   console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', nonce)
 }
 
+/**
+ * Dir de datos de un perfil (o del activo). Cada perfil tiene el suyo, así que su
+ * bitácora también es propia. Cae al dir raíz si el daemon aún es mono-perfil.
+ */
+function profileDir () {
+  const s = readState()
+  const list = s.profiles || []
+  if (!list.length) return dir // vault anterior al multi-perfil
+  const ref = PROFILE ? String(PROFILE).toLowerCase() : null
+  const p = ref
+    ? list.find((x) => x.id === PROFILE || (x.name || '').toLowerCase() === ref)
+    : (list.find((x) => x.current) || list[0])
+  if (!p) { console.error('el perfil no existe: %s', PROFILE); process.exit(1) }
+  return path.join(dir, 'p', p.id)
+}
+
 // Bitácora de actividad de seguridad (quién firmó/renovó/enroló y qué se rechazó).
 function cmdActivity (n = 30) {
-  const f = path.join(dir, 'activity.log')
+  const f = path.join(profileDir(), 'activity.log')
   let lines = []
   try { lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean) } catch {
     console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
@@ -211,6 +264,7 @@ async function cmdSecret (rest) {
   const secretsListFile = path.join(dir, 'secrets-list.json')
   const signalAndWaitList = async () => {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
+    writeReq('dump-request.json', {}) // de qué perfil son los secretos
     process.kill(s.pid, 'SIGUSR2')
     for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
     console.error('El daemon no respondió.'); process.exit(1)
@@ -231,8 +285,7 @@ async function cmdSecret (rest) {
     if (!ns || !key || (sub === 'set' && !value)) {
       console.error('uso: dotrino-vault secret set <ns> <CLAVE> <valor>\n     dotrino-vault secret rm <ns> <CLAVE>'); process.exit(2)
     }
-    const req = sub === 'set' ? { op: 'set', ns, key, value, at: Date.now() } : { op: 'rm', ns, key, at: Date.now() }
-    fs.writeFileSync(path.join(dir, 'secret-request.json'), JSON.stringify(req), { mode: 0o600 })
+    writeReq('secret-request.json', sub === 'set' ? { op: 'set', ns, key, value } : { op: 'rm', ns, key })
     const d = await signalAndWaitList()
     const ok = sub === 'set' ? (d.ns?.[ns] || []).includes(key) : !(d.ns?.[ns] || []).includes(key)
     if (ok) console.log(sub === 'set' ? 'Secreto guardado: %s/%s' : 'Secreto borrado: %s/%s', ns, key)
@@ -240,6 +293,136 @@ async function cmdSecret (rest) {
     return
   }
   console.error('uso: dotrino-vault secret {set|rm|list}'); process.exit(2)
+}
+
+/**
+ * Lee una contraseña del terminal SIN eco. Nunca se pasa como argumento: quedaría
+ * en `ps` y en el historial de la shell.
+ */
+function askPassword (prompt) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin
+    if (!stdin.isTTY) return reject(new Error('hace falta un terminal para escribir la contraseña'))
+    process.stdout.write(prompt)
+    stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8')
+    let buf = ''
+    const done = (err, val) => {
+      stdin.setRawMode(false); stdin.pause(); stdin.removeListener('data', onData)
+      process.stdout.write('\n')
+      err ? reject(err) : resolve(val)
+    }
+    const onData = (ch) => {
+      for (const c of ch) {
+        if (c === '\n' || c === '\r' || c === '\u0004') return done(null, buf) // Enter / Ctrl-D
+        if (c === '\u0003') return done(new Error('cancelado')) // Ctrl-C
+        if (c === '\u007f' || c === '\b') { buf = buf.slice(0, -1); continue } // borrar
+        buf += c
+      }
+    }
+    stdin.on('data', onData)
+  })
+}
+
+/**
+ * Manda una orden de perfil/candado al daemon y espera su volcado. La contraseña
+ * (si la hay) viaja por un archivo 0600 dentro del dir 0700 del vault, que el
+ * daemon borra al leerlo — mismo camino que ya usan los secretos.
+ */
+async function profileRequest (op, extra = {}) {
+  const s = requireDaemon()
+  try { fs.rmSync(profilesFile, { force: true }) } catch (_) {}
+  writeReq('profile-request.json', { op, ...extra })
+  process.kill(s.pid, 'SIGUSR2')
+  for (let i = 0; i < 100; i++) {
+    await sleep(100)
+    const d = readJson(profilesFile, null)
+    if (d?.at) return d
+  }
+  console.error('El daemon no respondió.'); process.exit(1)
+}
+
+function reportProfiles (d) {
+  if (d.error) { console.error('%s', d.error); process.exit(1) }
+  if (d.done) console.log('%s', d.done)
+  return d
+}
+
+async function cmdProfile (rest) {
+  const [sub, ...args] = rest
+  const name = args.join(' ').trim()
+  switch (sub || 'ls') {
+    case 'ls': {
+      const d = await profileRequest('list')
+      console.log('Perfiles del vault: %d', d.profiles.length)
+      for (const p of d.profiles) console.log('  %s %s', p.current ? '*' : ' ', describeProfile(p))
+      console.log('\nEl * es el perfil activo (el destino por defecto). Todos atienden a sus dispositivos a la vez.')
+      console.log('Apunta un comando a otro:  dotrino-vault <comando> --profile <id|nombre>')
+      return
+    }
+    case 'add': {
+      if (!name) { console.error('uso: dotrino-vault profile add <nombre>'); process.exit(2) }
+      reportProfiles(await profileRequest('add', { name }))
+      console.log('Conecta un dispositivo a este perfil:  dotrino-vault pair --profile "%s"', name)
+      return
+    }
+    case 'rename': {
+      if (!name) { console.error('uso: dotrino-vault profile rename <nombre nuevo>   (usa --profile para elegir cuál)'); process.exit(2) }
+      reportProfiles(await profileRequest('rename', { name }))
+      return
+    }
+    case 'use': {
+      const ref = name || PROFILE
+      if (!ref) { console.error('uso: dotrino-vault profile use <id|nombre>'); process.exit(2) }
+      reportProfiles(await profileRequest('use', { profile: ref }))
+      return
+    }
+    case 'rm': {
+      const ref = name || PROFILE
+      if (!ref) { console.error('uso: dotrino-vault profile rm <id|nombre>'); process.exit(2) }
+      const d = await profileRequest('list')
+      const p = d.profiles.find((x) => x.id === ref || (x.name || '').toLowerCase() === ref.toLowerCase())
+      if (!p) { console.error('el perfil no existe: %s', ref); process.exit(1) }
+      console.log('\n%s%sEsto BORRA la identidad del perfil "%s" y todos sus datos.%s', R, B, p.name || p.id, Z)
+      console.log('%s  Es irreversible: se pierde su clave, y sus dispositivos dejan de funcionar.%s', R, Z)
+      const typed = await askText(`\nEscribe el nombre del perfil para confirmar (${p.name || p.id}): `)
+      if (typed.trim() !== (p.name || p.id)) { console.log('Cancelado (no coincide).'); return }
+      reportProfiles(await profileRequest('rm', { profile: p.id }))
+      return
+    }
+    case 'password': {
+      const action = args[0]
+      if (action === 'rm') { reportProfiles(await profileRequest('password-rm')); return }
+      if (action && action !== 'set') { console.error('uso: dotrino-vault profile password [set|rm]'); process.exit(2) }
+      console.log('La contraseña solo se pide para EDITAR el perfil. Tus dispositivos siguen')
+      console.log('funcionando (firmando y leyendo) aunque el perfil esté bloqueado.')
+      const pwd = await askPassword('\nContraseña nueva (mínimo 4): ')
+      const again = await askPassword('Repítela: ')
+      if (pwd !== again) { console.error('Las contraseñas no coinciden.'); process.exit(1) }
+      reportProfiles(await profileRequest('password-set', { password: pwd }))
+      return
+    }
+    default:
+      console.error('uso: dotrino-vault profile {ls|add|rename|use|rm|password}'); process.exit(2)
+  }
+}
+
+/** Lee una línea del terminal (con eco): confirmaciones. */
+function askText (prompt) {
+  return new Promise((resolve) => {
+    process.stdout.write(prompt)
+    process.stdin.resume(); process.stdin.setEncoding('utf8')
+    process.stdin.once('data', (d) => { process.stdin.pause(); resolve(String(d).replace(/\n$/, '')) })
+  })
+}
+
+async function cmdUnlock () {
+  const pwd = await askPassword('Contraseña del perfil: ')
+  reportProfiles(await profileRequest('unlock', { password: pwd }))
+  console.log('Ya puedes editar el perfil. Se vuelve a bloquear al reiniciar el servicio (o con: dotrino-vault lock).')
+}
+
+async function cmdLock () {
+  reportProfiles(await profileRequest('lock'))
 }
 
 function cmdLogs () {
@@ -265,13 +448,32 @@ function help () {
   logs                últimos logs del servicio
   version             muestra la versión instalada
 
+Perfiles (varias identidades tuyas en el mismo PC; todas atienden a la vez):
+  profile ls                        lista los perfiles (* = el activo, el destino por defecto)
+  profile add <nombre>              crea un perfil (identidad nueva, vacía)
+  profile use <id|nombre>           elige el perfil activo
+  profile rename <nombre>           renombra un perfil
+  profile rm <id|nombre>            BORRA un perfil y su identidad (irreversible)
+  --profile <id|nombre>             apunta CUALQUIER comando a otro perfil
+                                    (p.ej. dotrino-vault pair --profile trabajo)
+
+Contraseña del perfil (opcional; solo se pide para EDITAR el perfil — tus
+dispositivos siguen firmando y leyendo aunque esté bloqueado):
+  profile password [set]            pone o cambia la contraseña
+  profile password rm               la quita
+  unlock                            desbloquea para poder editar
+  lock                              vuelve a bloquear (también al reiniciar el servicio)
+
 El servicio se gestiona con systemd --user:
   systemctl --user {start,stop,restart} dotrino-vault · journalctl --user -u dotrino-vault -f`)
 }
 
 export async function runCtl (argv) {
-  const [cmd, ...rest] = argv
+  const [cmd, ...rest] = takeProfileFlag(argv)
   switch (cmd) {
+    case 'profile': return cmdProfile(rest)
+    case 'unlock': return cmdUnlock()
+    case 'lock': return cmdLock()
     case 'status': return cmdStatus()
     case 'pair': return cmdPair(rest)
     case 'pending': return cmdPending()

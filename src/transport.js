@@ -29,12 +29,17 @@ export async function masterPubkeyOf (identity) {
 export async function createTransport ({ identity, dir, url = DEFAULT_PROXY }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
-  const { getWebSocketProxyClient } = await import('@dotrino/proxy-client')
+  // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
+  // ese es un SINGLETON de proceso, y con multi-perfil el vault necesita una
+  // conexión POR PERFIL (cada maestra se identifica con su propia pubkey ante el
+  // proxy). Con el singleton, el segundo perfil reusaba el cliente del primero y
+  // su `identify` pisaba al anterior. Sigue siendo el cliente oficial del paquete.
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
 
   // WebRTC off: el vault usa el proxy como transporte (RTCPeerConnection no existe
   // en Node). Reconexión prácticamente ilimitada: un daemon de larga duración no
   // debe rendirse tras unos intentos.
-  const client = getWebSocketProxyClient({
+  const client = new WebSocketProxyClient({
     url, enableWebRTC: false, autoReconnect: true,
     maxReconnectAttempts: 100000, reconnectDelay: 4000
   })

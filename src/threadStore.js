@@ -102,3 +102,10 @@ export function openThreadStore (dir) {
 export const STORE_READ_METHODS = new Set([
   'listThread', 'listThreadKeys', 'getThreadSummaries', 'getOpens', 'exportThreads', 'getStats', 'profileGet'
 ])
+
+/**
+ * Métodos que EDITAN el perfil del usuario (quién es: apodo, avatar, campos).
+ * Son los únicos que el candado por contraseña bloquea (`vault.js`): el resto del
+ * store —contenido de las apps— sigue disponible con el perfil bloqueado.
+ */
+export const PROFILE_EDIT_METHODS = new Set(['profileSet'])

@@ -76,6 +76,49 @@ dotrino-vault secret list                       # nombres de secretos (nunca val
 dotrino-vault logs                 # últimos logs del servicio
 ```
 
+### Varios perfiles en el mismo PC
+
+Puedes tener varias identidades tuyas en la misma máquina (p. ej. personal y
+trabajo). Cada perfil es **una identidad distinta**: su propia clave, sus propios
+dispositivos, sus propios datos y secretos — nada se cruza entre ellos. **Todos
+atienden a la vez**: el perfil «activo» solo decide a cuál va un comando cuando no
+lo dices con `--profile`, no apaga a los demás.
+
+```sh
+dotrino-vault profile ls                  # lista los perfiles (* = el activo)
+dotrino-vault profile add Trabajo         # crea un perfil (identidad nueva, vacía)
+dotrino-vault profile use Trabajo         # elige el activo
+dotrino-vault profile rename <nombre>     # renombra
+dotrino-vault profile rm Trabajo          # BORRA el perfil y su identidad (irreversible)
+
+dotrino-vault pair --profile Trabajo      # cualquier comando acepta --profile
+dotrino-vault devices --profile personal
+```
+
+Si ya usabas el vault antes de esto, tu identidad de siempre se convierte sola en
+el primer perfil («Perfil 1»): la misma clave, los mismos dispositivos, nada que
+volver a emparejar.
+
+### Contraseña del perfil (opcional)
+
+Cada perfil puede llevar contraseña. **Solo se pide para EDITAR el perfil** (cambiar
+tu nombre, avatar o datos): tus dispositivos siguen firmando, leyendo y guardando
+aunque el perfil esté bloqueado — así un reinicio del PC nunca deja tus apps
+muertas esperando a que alguien teclee algo.
+
+```sh
+dotrino-vault profile password     # pone o cambia la contraseña (te la pregunta)
+dotrino-vault profile password rm  # la quita
+dotrino-vault unlock               # desbloquea para poder editar
+dotrino-vault lock                 # vuelve a bloquear
+```
+
+El perfil se vuelve a bloquear al reiniciar el servicio. La contraseña **no se
+guarda**: solo un verificador con sal (PBKDF2), igual que el candado del navegador.
+Para que quede claro qué protege y qué no: evita que otro que se siente en tu
+máquina —o un dispositivo tuyo comprometido— te reescriba el perfil; **no** cifra la
+clave en el disco (eso es el cifrado en reposo, ver *Alcance*).
+
 **Emparejamiento endurecido** (ver [`docs/pairing-protocol.md`](./docs/pairing-protocol.md)):
 el dispositivo prueba posesión de su llave firmando el enrolamiento, y la maestra
 solo firma el certificado **después** de que compares un código de 6 dígitos (SAS)
@@ -85,7 +128,8 @@ maestra, no por un mensaje cualquiera).
 
 El servicio se gestiona con systemd `--user`
 (`systemctl --user {start,stop,restart} dotrino-vault`). Tus datos —clave maestra
-incluida— viven en `~/.local/share/dotrino/vault` (permisos `0600`/`0700`).
+incluida— viven en `~/.local/share/dotrino/vault` (permisos `0600`/`0700`), con un
+subdirectorio `p/<id>/` por perfil.
 
 ## Desarrollo
 
@@ -187,17 +231,21 @@ sin vault; solo la feature que los necesita (TURN) espera. Primer consumidor:
 
 ## Alcance
 
-- **v1 (este):** servicio headless en Node (Linux), **sin contraseña maestra**,
-  **clave privada en claro** (en `~/.local/share/dotrino/vault`, permisos `0600`).
-  Enrolamiento de dispositivos, firma delegada y lectura del árbol de contenidos por
-  el proxy. Distribución como binario único (Node SEA) + servicio systemd.
-- **v2:** contraseña maestra opcional → cifrado en reposo (keychain del SO o archivo,
-  a elección); UI de escritorio (Tauri) como cliente del daemon; firma de documentos
-  con sellado de tiempo (`dotrino-signer`); macOS y Windows.
+- **v1 (este):** servicio headless en Node (Linux), **multi-perfil**, con
+  **contraseña opcional por perfil para editarlo** (verificador PBKDF2) pero la
+  **clave privada en claro** en el disco (en `~/.local/share/dotrino/vault`, permisos
+  `0600`). Enrolamiento de dispositivos, firma delegada y lectura del árbol de
+  contenidos por el proxy. Distribución como binario único (Node SEA) + servicio systemd.
+- **v2:** **cifrado en reposo** con la contraseña (keychain del SO o archivo, a
+  elección) — hoy la contraseña es un candado de edición, no cifra la clave; UI de
+  escritorio (Tauri) como cliente del daemon; firma de documentos con sellado de
+  tiempo (`dotrino-signer`); macOS y Windows.
 
 ## Estructura
 
-- `src/vault.js` — núcleo (Identity + transporte + router de pedidos: enrolar/firmar/leer).
+- `src/vault.js` — núcleo de UN perfil (Identity + transporte + router: enrolar/firmar/leer).
+- `src/profiles.js` — registro multi-perfil (`profiles.json`, `p/<id>/`) + candado por contraseña.
+- `src/manager.js` — corre todos los perfiles a la vez (uno por maestra/conexión).
 - `src/daemon.js` — modo servicio: `state.json`, emparejamiento por señal, apagado limpio.
 - `src/ctl.js` — CLI de control (habla con el daemon por archivos + señales, sin socket).
 - `src/transport.js` — conexión headless al proxy + `identify` firmado.

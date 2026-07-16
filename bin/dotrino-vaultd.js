@@ -15,11 +15,12 @@
 import { runDaemon } from '../src/daemon.js'
 import { qrToString } from '../src/qr.js'
 
-const vault = await runDaemon()
+const mgr = await runDaemon()
 
 // Atajo de dev: --pair imprime el QR directo en stdout (en producción se usa el CLI).
+// Empareja contra el perfil ACTIVO.
 if (process.argv.includes('--pair')) {
-  const { qr, expiresInMs } = vault.startPairing({ label: 'cli' })
+  const { qr, expiresInMs } = mgr.current().startPairing({ label: 'cli' })
   console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
   console.log(qrToString(JSON.stringify(qr)))
   console.log(JSON.stringify(qr))

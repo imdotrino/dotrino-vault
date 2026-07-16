@@ -16,7 +16,7 @@ import { Identity } from '@dotrino/identity/node'
 import { verifyChain, verifyDeviceSig, pubkeyId } from '@dotrino/identity/capabilities'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
-import { openThreadStore, STORE_READ_METHODS } from './threadStore.js'
+import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore } from './secretsStore.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
@@ -35,7 +35,17 @@ async function deviceIdOf (dpub) {
   return id.slice(0, 4) + '-' + id.slice(4, 8)
 }
 
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge } = {}) {
+/**
+ * Abre UN perfil del vault (una maestra, un dir, una conexión al proxy). El
+ * daemon multi-perfil (`manager.js`) levanta uno de estos por perfil.
+ *
+ * @param {Object} [opts]
+ * @param {string} [opts.dir]        Dir de datos de ESTE perfil.
+ * @param {() => boolean} [opts.isLocked]  Candado del perfil (contraseña opcional).
+ *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
+ *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
+ */
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false } = {}) {
   ensureDir(dir)
   const identity = await Identity.connect({ dir })
   if (!identity.me?.publickey) await identity.setMyNickname('')
@@ -155,6 +165,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'store: método inválido' })
     }
     if (!isFresh(d)) return staleReply(from)
+    // CANDADO del perfil (contraseña opcional): solo frena EDITAR el perfil. Un
+    // dispositivo enrolado puede seguir firmando, leyendo y guardando contenido;
+    // lo que no puede es reescribir quién sos mientras el perfil está bloqueado.
+    if (PROFILE_EDIT_METHODS.has(d.method) && isLocked()) {
+      audit('rejected', { what: 'store', method: d.method, reason: 'locked' })
+      return reply(from, { type: MSG.ERROR, error: 'perfil bloqueado: desbloquéalo en el PC del vault (dotrino-vault unlock) para editarlo' })
+    }
     const revoked = await revocationSet()
     let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
