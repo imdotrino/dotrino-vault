@@ -12,6 +12,10 @@ const commitMeta = {
 
 export default defineConfig({
   base: '/',
+  build: {
+    // Multi-page: /pair (emparejador self) como página independiente, sin router.
+    rollupOptions: { input: { index: 'index.html', pair: 'pair.html' } },
+  },
   plugins: [
     vue(),
     commitMeta,

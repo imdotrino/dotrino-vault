@@ -10,8 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dotrino/identity": "0.17.0",
     "@dotrino/install": "0.2.3",
     "@dotrino/support": "0.6.0",
+    "@dotrino/topbar": "0.2.3",
+    "@dotrino/vault": "0.1.2",
+    "qrcode-generator": "1.4.4",
     "vue": "3.5.13"
   },
   "devDependencies": {
