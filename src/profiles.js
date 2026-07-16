@@ -115,7 +115,9 @@ export function openProfiles (root = dataDir()) {
           if (/^peers\..+\.json$/.test(f)) { try { fs.renameSync(path.join(root, f), path.join(dir, f)) } catch (_) {} }
         }
       }
-      data.profiles.push({ id, name: legacy ? 'Perfil 1' : '', createdAt: Date.now() })
+      // «Perfil 1» tanto al migrar como en una instalación nueva: es un nombre que
+      // el dueño puede cambiar, y evita que la CLI salude con «(sin nombre)».
+      data.profiles.push({ id, name: 'Perfil 1', createdAt: Date.now() })
       data.current = id
       save()
       return { id, migrated: legacy }
