@@ -56,6 +56,13 @@ let lang = document.documentElement.lang === 'en' ? 'en' : 'es'
 const t = (k, ...a) => String(typeof I18N[lang][k] === 'function' ? I18N[lang][k](...a) : (I18N[lang][k] ?? k))
 const el = (h) => { const tp = document.createElement('template'); tp.innerHTML = h.trim(); return tp.content.firstElementChild }
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+// base64url del JSON: para el CÓDIGO COPIABLE (oculta iss/token/sn en texto plano).
+// El QR usa el JSON crudo (más corto → QR más chico y fácil de escanear); el texto
+// visible va en base64url. El agente (parseQr) acepta ambos formatos.
+function b64urlEncode (str) {
+  const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(str)))
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
 
 // ?back= URL de la app que nos llamó (solo http/https, para evitar open-redirect).
 function backUrl () {
@@ -126,11 +133,12 @@ async function render () {
   }
   function startPairing () {
     const { qr } = sm.startPairing()
-    const payload = JSON.stringify(qr)
+    const json = JSON.stringify(qr)        // QR → JSON crudo (más corto)
+    const code = b64urlEncode(json)        // texto copiable → base64url (no expone el contenido)
     pairBox.innerHTML = `<div class="setup">
       <p class="status">${t('pair_step1')}</p>
-      <div class="qr-wrap" title="QR">${qrSvg(payload)}</div>
-      <div class="qr-code"><pre><code>${esc(payload)}</code></pre></div>
+      <div class="qr-wrap" title="QR">${qrSvg(json)}</div>
+      <div class="qr-code"><pre><code>${esc(code)}</code></pre></div>
       <button id="copyQr" class="link">${t('copy')}</button>
       <span class="status" id="copyMsg"></span>
       <p class="status">${t('pair_step2')}</p>
@@ -138,7 +146,7 @@ async function render () {
       <button id="cancelPair" class="link">${t('cancel')}</button>
     </div>`
     document.getElementById('copyQr').addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(payload); document.getElementById('copyMsg').textContent = t('copied') } catch {}
+      try { await navigator.clipboard.writeText(code); document.getElementById('copyMsg').textContent = t('copied') } catch {}
     })
     document.getElementById('cancelPair').addEventListener('click', renderPairIdle)
   }
