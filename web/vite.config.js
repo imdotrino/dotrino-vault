@@ -12,15 +12,12 @@ const commitMeta = {
 
 export default defineConfig({
   base: '/',
-  build: {
-    // Multi-page: /pair (emparejador self) como página independiente, sin router.
-    rollupOptions: { input: { index: 'index.html', pair: 'pair.html' } },
-  },
   plugins: [
     vue(),
     commitMeta,
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: false,
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'og.jpg', 'robots.txt', 'sitemap.xml'],
       manifest: {
         name: 'Dotrino Vault — toda tu información en un solo lugar',
