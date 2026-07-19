@@ -76,6 +76,34 @@ dotrino-vault secret list                       # nombres de secretos (nunca val
 dotrino-vault logs                 # últimos logs del servicio
 ```
 
+### Interfaz de terminal (TUI)
+
+Todo lo anterior (bóvedas, dispositivos y secretos) también se maneja desde una
+**interfaz de terminal a pantalla completa**, sin memorizar subcomandos:
+
+```sh
+dotrino-vaultd --tui          # binario instalado
+node bin/dotrino-vault-tui.js # en desarrollo  (o:  npm run tui)
+```
+
+Como la CLI, la TUI **no abre la identidad ni la red**: le habla al daemon por el
+mismo canal de archivos + señales. El daemon debe estar corriendo; si no, la TUI
+ofrece arrancarlo. No agrega dependencias (se dibuja con ANSI y lee el teclado en
+raw mode). Desde ella puedes:
+
+- **Bóvedas (perfiles):** crear una nueva, cambiar la activa, renombrar, borrar y
+  poner/quitar/usar la contraseña (candado).
+- **Dispositivos (pares):** verlos, **emparejar** uno nuevo (muestra el QR y la URL,
+  y espera a que se conecte), **aprobar** con el código que muestra el dispositivo,
+  **rechazar** y **revocar**.
+- **Scopes y variables (secretos):** ver los scopes y sus variables (nunca los
+  valores), **agregar** una variable (con su scope) y **quitar** una variable o un
+  scope entero.
+
+Navegación: `↑↓` mover · `Enter` abrir/usar · las teclas de cada acción se listan
+en la barra inferior · `Esc` volver · `q` salir. Todo actúa sobre la **bóveda
+activa**; para operar otra, cámbiala en la pantalla de bóvedas.
+
 ### Varios perfiles en el mismo PC
 
 Puedes tener varias identidades tuyas en la misma máquina (p. ej. personal y
@@ -248,12 +276,15 @@ sin vault; solo la feature que los necesita (TURN) espera. Primer consumidor:
 - `src/manager.js` — corre todos los perfiles a la vez (uno por maestra/conexión).
 - `src/daemon.js` — modo servicio: `state.json`, emparejamiento por señal, apagado limpio.
 - `src/ctl.js` — CLI de control (habla con el daemon por archivos + señales, sin socket).
+- `src/vaultControl.js` — API de control programática (misma vía que la CLI); la usa la TUI.
+- `src/tui/` — interfaz de terminal a pantalla completa, sin dependencias (`term.js` primitivas ANSI/raw-mode; `app.js` pantallas).
 - `src/transport.js` — conexión headless al proxy + `identify` firmado.
 - `src/store.js` — árbol de contenidos (`vault.json`, versionado).
 - `src/client.js` — helper de **dispositivo** (enrolar / pedir firma / leer).
 - `src/protocol.js` — tipos de mensaje y scopes. · `src/qr.js` — QR ASCII. · `src/paths.js` — dirs.
-- `bin/sea-entry.js` — entrypoint del binario único (multicall daemon / `--ctl`).
+- `bin/sea-entry.js` — entrypoint del binario único (multicall daemon / `--ctl` / `--tui`).
 - `bin/dotrino-vaultd.js` — entrypoint de desarrollo (node directo).
+- `bin/dotrino-vault-tui.js` — entrypoint de desarrollo de la TUI.
 - `packaging/` — `build.sh` (binario), `install.sh`/`uninstall.sh`, unit systemd.
 - `web/` — la página `vault.dotrino.com` (Vite + Vue).
 
