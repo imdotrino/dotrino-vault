@@ -430,9 +430,17 @@ function cmdLogs () {
   catch { console.error('No se pudieron leer los logs. Prueba:  journalctl --user -u dotrino-vault -f') }
 }
 
+// Import dinámico: así `dotrino-vault status` (el caso común) no carga la TUI.
+async function cmdTui () {
+  if (!process.stdout.isTTY) { console.error('la TUI necesita un terminal interactivo (TTY).'); process.exit(2) }
+  const { runTui } = await import('./tui/app.js')
+  await runTui()
+}
+
 function help () {
   console.log(`dotrino-vault — control del certificador personal
 
+  tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
   status              estado del servicio + fingerprint
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
@@ -471,6 +479,7 @@ El servicio se gestiona con systemd --user:
 export async function runCtl (argv) {
   const [cmd, ...rest] = takeProfileFlag(argv)
   switch (cmd) {
+    case 'tui': return cmdTui()
     case 'profile': return cmdProfile(rest)
     case 'unlock': return cmdUnlock()
     case 'lock': return cmdLock()

@@ -62,6 +62,7 @@ contraseña, sin abrir puertos** (el vault marca hacia afuera).
 ### CLI de control
 
 ```sh
+dotrino-vault tui                  # interfaz de terminal a pantalla completa (ver abajo)
 dotrino-vault status               # estado del servicio + fingerprint
 dotrino-vault pair                 # inicia un emparejamiento (muestra el código y espera al dispositivo)
 dotrino-vault pending              # muestra el dispositivo pendiente + su código a comparar
@@ -82,7 +83,7 @@ Todo lo anterior (bóvedas, dispositivos y secretos) también se maneja desde un
 **interfaz de terminal a pantalla completa**, sin memorizar subcomandos:
 
 ```sh
-dotrino-vaultd --tui          # binario instalado
+dotrino-vault tui             # binario instalado
 node bin/dotrino-vault-tui.js # en desarrollo  (o:  npm run tui)
 ```
 
