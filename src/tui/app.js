@@ -93,19 +93,6 @@ function renderList (rows, selIdx, height, cols, t, scrollRef) {
 
 // --------------------------------- pantallas -------------------------------
 
-function menuRows (st, t) {
-  const dev = st.devices ? (st.devices.issued.length + '') : '…'
-  const sec = st.secrets ? (Object.keys(st.secrets).length + '') : '…'
-  const prof = st.profiles ? (st.profiles.profiles.length + '') : '…'
-  return [
-    { text: '  Bóvedas (perfiles)      ' + t.muted(`${prof} · crear · cambiar · renombrar · borrar`), sel: true, meta: 'profiles' },
-    { text: '  Dispositivos (pares)    ' + t.muted(`${dev} enrolados · emparejar · revocar`), sel: true, meta: 'devices' },
-    { text: '  Scopes y variables      ' + t.muted(`${sec} scopes · agregar · quitar`), sel: true, meta: 'secrets' },
-    { text: '', sel: false },
-    { text: '  Salir', sel: true, meta: 'quit' }
-  ]
-}
-
 function profileRows (st, t) {
   const list = st.profiles?.profiles || []
   return list.map((p) => {
@@ -218,21 +205,6 @@ async function ensureUnlocked (term, st, p, thenFn) {
 
 // --------------------------------- teclas ----------------------------------
 
-async function onKeyMenu (term, st, key) {
-  const rows = menuRows(st, term.t)
-  const sels = rows.filter((r) => r.sel)
-  if (key.name === 'up') st.sel.menu = Math.max(0, st.sel.menu - 1)
-  else if (key.name === 'down') st.sel.menu = Math.min(sels.length - 1, st.sel.menu + 1)
-  else if (key.name === 'enter') {
-    const target = sels[st.sel.menu]?.meta
-    if (target === 'quit') return false
-    if (target === 'profiles') { st.screen = 'profiles'; await refreshProfiles(term, st) }
-    else if (target === 'devices') { st.screen = 'devices'; await refreshDevices(term, st) }
-    else if (target === 'secrets') { st.screen = 'secrets'; await refreshSecrets(term, st) }
-  }
-  return true
-}
-
 function moveSel (st, key, screen, count) {
   if (count <= 0) { st.sel[screen] = 0; return }
   // Clampa el índice guardado ANTES de aplicar el delta: si la lista encogió, la
@@ -253,9 +225,17 @@ async function onKeyProfiles (term, st, key) {
   const cur = sels[Math.min(st.sel.profiles, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
-  if (key.name === 'enter' && cur && !cur.current) {
-    const r = await guard(term, st, 'Cambiando de bóveda…', () => vc.useProfile(cur.id))
-    if (r.ok) { flash(st, `Bóveda activa: ${cur.name || cur.id}`); await refreshAll(term, st) }
+  if (key.name === 'enter' && cur) {
+    // Entrar a la bóveda: la activa (si no lo estaba ya) y pasa a sus pestañas
+    // (Dispositivos/Scopes) — así siempre es explícito de qué bóveda son los ítems.
+    if (!cur.current) {
+      const r = await guard(term, st, 'Cambiando de bóveda…', () => vc.useProfile(cur.id))
+      if (!r.ok) return true
+      flash(st, `Bóveda activa: ${cur.name || cur.id}`)
+      await refreshAll(term, st)
+    }
+    st.screen = 'devices'
+    await refreshDevices(term, st)
   } else if (ch === 'n') {
     setInput(st, {
       label: 'Nombre de la nueva bóveda',
@@ -501,19 +481,28 @@ async function onConfirmKey (st, key) {
 
 // --------------------------------- render ----------------------------------
 
+// Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
+// bóvedas (profiles) es el nivel de arriba (se entra con Enter, no es una pestaña).
+const INNER_TABS = ['devices', 'secrets']
+const TAB_LABEL = { devices: 'Dispositivos', secrets: 'Scopes y variables' }
+
 const HELP = {
-  menu: '↑↓ mover · Enter abrir · q salir',
-  profiles: '↑↓ · Enter usar · n nueva · r renombrar · d borrar · k clave · x quitar-clave · u desbloq · l bloq · Esc atrás',
-  devices: '↑↓ · e emparejar · a aprobar · x rechazar · v revocar · r refrescar · Esc atrás',
-  secrets: '↑↓ · n nueva variable · x quitar (variable/scope) · r refrescar · Esc atrás',
+  profiles: '↑↓ · Enter entrar · n nueva · r renombrar · d borrar · k clave · x quitar-clave · u desbloq · l bloq · q salir',
+  devices: '←→ pestaña · ↑↓ · e emparejar · a aprobar · x rechazar · v revocar · r refrescar · Esc bóvedas · q salir',
+  secrets: '←→ pestaña · ↑↓ · n nueva variable · x quitar (variable/scope) · r refrescar · Esc bóvedas · q salir',
   pairing: 'a aprobar · x rechazar · e reiniciar · Esc atrás'
 }
 const TITLE = {
-  menu: 'Menú principal',
-  profiles: 'Bóvedas (perfiles)',
-  devices: 'Dispositivos (pares)',
-  secrets: 'Scopes y variables',
+  profiles: 'Bóvedas',
   pairing: 'Emparejar un dispositivo'
+}
+
+/** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
+function renderTabs (st, t) {
+  return INNER_TABS.map((k) => {
+    const active = st.screen === k
+    return active ? t.bold(t.accent('▐ ' + TAB_LABEL[k] + ' ▌')) : t.muted('  ' + TAB_LABEL[k] + '  ')
+  }).join('   ') + t.muted('   (←→ cambiar)')
 }
 
 function pairingBody (st, t, cols, height) {
@@ -565,7 +554,9 @@ function render (term, st) {
   const apTxt = ap ? `${t.accent('●')} ${t.bold(ap.name || '(sin nombre)')} ${lockGlyph(ap)} ${t.muted('· ' + (ap.fingerprint || '—'))}` : t.muted('—')
   lines[1] = ' Bóveda activa: ' + apTxt
   lines[2] = ''
-  lines[3] = ' ' + t.title('» ' + (TITLE[st.screen] || ''))
+  // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
+  // el resto muestra su título simple.
+  lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + (TITLE[st.screen] || ''))
   lines[4] = ''
 
   const top = 5
@@ -574,8 +565,7 @@ function render (term, st) {
   const scrollRef = st.scroll[st.screen] || (st.scroll[st.screen] = { value: 0 })
 
   let body = []
-  if (st.screen === 'menu') body = renderList(menuRows(st, t), st.sel.menu, contentH, cols, t, scrollRef)
-  else if (st.screen === 'profiles') body = renderList(profileRows(st, t), st.sel.profiles, contentH, cols, t, scrollRef)
+  if (st.screen === 'profiles') body = renderList(profileRows(st, t), st.sel.profiles, contentH, cols, t, scrollRef)
   else if (st.screen === 'devices') body = renderList(deviceRows(st, t), st.sel.devices, contentH, cols, t, scrollRef)
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
@@ -658,8 +648,8 @@ async function daemonDownScreen (term, st) {
 export async function runTui () {
   const term = createTerm()
   const st = {
-    screen: 'menu',
-    sel: { menu: 0, profiles: 0, devices: 0, secrets: 0 },
+    screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
+    sel: { profiles: 0, devices: 0, secrets: 0 },
     scroll: {},
     profiles: null,
     devices: null,
@@ -704,14 +694,21 @@ export async function runTui () {
       if (key.name === 'ctrl-c') { running = false; continue }
 
       const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-      // 'q' global sale; Esc/'b' vuelve al menú (salvo en menú, donde no hace nada).
+      // 'q' global sale.
       if (ch === 'q') { running = false; continue }
-      if ((key.name === 'escape' || ch === 'b') && st.screen !== 'menu' && st.screen !== 'pairing') {
-        st.screen = 'menu'; continue
+      // ←→ cambia entre las pestañas de la bóveda entrada (Dispositivos/Scopes).
+      if ((key.name === 'left' || key.name === 'right') && INNER_TABS.includes(st.screen)) {
+        const i = INNER_TABS.indexOf(st.screen)
+        st.screen = INNER_TABS[(i + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length]
+        continue
+      }
+      // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
+      // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
+      if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
+        st.screen = 'profiles'; continue
       }
 
-      if (st.screen === 'menu') running = await onKeyMenu(term, st, key)
-      else if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
+      if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
       else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
@@ -722,4 +719,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, menuRows, profileRows, deviceRows, secretRows, pairingBody }
+export const __test = { render, profileRows, deviceRows, secretRows, pairingBody }

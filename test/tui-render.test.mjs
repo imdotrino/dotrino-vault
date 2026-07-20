@@ -22,8 +22,8 @@ function fakeTerm (cols = 80, rows = 24) {
 
 function baseState (over = {}) {
   return {
-    screen: 'menu',
-    sel: { menu: 0, profiles: 0, devices: 0, secrets: 0 },
+    screen: 'profiles',
+    sel: { profiles: 0, devices: 0, secrets: 0 },
     scroll: {},
     profiles: { current: 'p1', profiles: [{ id: 'p1', name: 'Perfil 1', protected: false, locked: false, current: true, fingerprint: 'fp1' }] },
     devices: { issued: [], revoked: [] },
@@ -51,7 +51,7 @@ function assertClean (term, cols, rows) {
 
 test('render de todas las pantallas no lanza y respeta el tamaño', () => {
   for (const [cols, rows] of [[80, 24], [40, 12], [120, 40], [30, 10]]) {
-    for (const screen of ['menu', 'profiles', 'devices', 'secrets', 'pairing']) {
+    for (const screen of ['profiles', 'devices', 'secrets', 'pairing']) {
       const term = fakeTerm(cols, rows)
       const st = baseState({ screen })
       if (screen === 'pairing') st.pairing = { url: 'https://profile.dotrino.com/#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000 }
@@ -86,8 +86,8 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
     { screen: 'secrets', ...rich },
     { screen: 'secrets', ...rich, input: { label: 'Valor', value: 'topsecret', mask: true, hint: 'no se muestra' } },
     { screen: 'devices', ...rich, confirm: { text: '¿Revocar AB12-CD34?' } },
-    { screen: 'menu', ...rich, flash: { text: 'Guardado', kind: 'ok', at: Date.now() } },
-    { screen: 'menu', ...rich, flash: { text: 'Error grave', kind: 'danger', at: Date.now() } },
+    { screen: 'profiles', ...rich, flash: { text: 'Guardado', kind: 'ok', at: Date.now() } },
+    { screen: 'secrets', ...rich, flash: { text: 'Error grave', kind: 'danger', at: Date.now() } },
     { screen: 'profiles', ...rich, busy: 'Cargando…' }
   ]
   for (const over of modes) {
@@ -109,9 +109,26 @@ test('terminal muy pequeño: no lanza y no desborda', () => {
 test('render sin datos cargados todavía (todo null)', () => {
   const term = fakeTerm(80, 24)
   const st = baseState({ profiles: null, devices: null, secrets: null })
-  for (const screen of ['menu', 'profiles', 'devices', 'secrets']) {
+  for (const screen of ['profiles', 'devices', 'secrets']) {
     st.screen = screen
     V.render(term, st)
     assertClean(term, 80, 24)
   }
+})
+
+test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => {
+  const term = fakeTerm(80, 24)
+  V.render(term, baseState({ screen: 'devices' }))
+  const devicesLine3 = term.last[3]
+  assert.match(devicesLine3, /Dispositivos/)
+  assert.match(devicesLine3, /Scopes y variables/)
+  assert.match(devicesLine3, /cambiar/)
+
+  V.render(term, baseState({ screen: 'secrets' }))
+  assert.match(term.last[3], /Dispositivos/)
+  assert.match(term.last[3], /Scopes y variables/)
+
+  V.render(term, baseState({ screen: 'profiles' }))
+  assert.match(term.last[3], /Bóvedas/)
+  assert.doesNotMatch(term.last[3], /cambiar/)
 })

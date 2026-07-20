@@ -90,20 +90,25 @@ node bin/dotrino-vault-tui.js # en desarrollo  (o:  npm run tui)
 Como la CLI, la TUI **no abre la identidad ni la red**: le habla al daemon por el
 mismo canal de archivos + señales. El daemon debe estar corriendo; si no, la TUI
 ofrece arrancarlo. No agrega dependencias (se dibuja con ANSI y lee el teclado en
-raw mode). Desde ella puedes:
+raw mode).
 
-- **Bóvedas (perfiles):** crear una nueva, cambiar la activa, renombrar, borrar y
-  poner/quitar/usar la contraseña (candado).
-- **Dispositivos (pares):** verlos, **emparejar** uno nuevo (muestra el QR y la URL,
-  y espera a que se conecte), **aprobar** con el código que muestra el dispositivo,
-  **rechazar** y **revocar**.
-- **Scopes y variables (secretos):** ver los scopes y sus variables (nunca los
-  valores), **agregar** una variable (con su scope) y **quitar** una variable o un
-  scope entero.
+**Navegación en dos niveles**, para que siempre sea explícito de qué bóveda son
+los dispositivos/variables que estás viendo:
 
-Navegación: `↑↓` mover · `Enter` abrir/usar · las teclas de cada acción se listan
-en la barra inferior · `Esc` volver · `q` salir. Todo actúa sobre la **bóveda
-activa**; para operar otra, cámbiala en la pantalla de bóvedas.
+1. **Bóvedas** es la pantalla de entrada: lista tus perfiles (`↑↓` mover, `Enter`
+   **entrar** a uno — lo activa si no lo estaba). Ahí también creas una bóveda
+   nueva, renombras, borras y pones/quitas/usas la contraseña (candado).
+2. Al entrar caes en sus **pestañas horizontales**, que cambias con `←→`:
+   - **Dispositivos (pares):** verlos, **emparejar** uno nuevo (muestra el QR y la
+     URL, y espera a que se conecte), **aprobar** con el código que muestra el
+     dispositivo, **rechazar** y **revocar**.
+   - **Scopes y variables (secretos):** ver los scopes y sus variables (nunca los
+     valores), **agregar** una variable (con su scope) y **quitar** una variable o
+     un scope entero.
+
+`Esc` desde las pestañas vuelve a la lista de bóvedas (para entrar a otra); `q`
+sale desde cualquier pantalla. Las teclas de cada acción se listan en la barra
+inferior.
 
 ### Varios perfiles en el mismo PC
 
