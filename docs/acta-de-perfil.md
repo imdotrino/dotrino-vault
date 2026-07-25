@@ -1,6 +1,7 @@
 # Acta de perfil — plan de implementación
 
-> Estado: **F0–F4 implementadas y publicadas; F5 pendiente**. Fecha: 2026-07-25.
+> Estado: **F0–F5 implementadas y publicadas** (con dos pendientes acotados, ver §4.0).
+> Fecha: 2026-07-25.
 > Estado detallado por fase en [§4.0](#40-estado). El plan se mantiene como fuente de la
 > verdad del diseño: si el código y esto no coinciden, se corrige el que esté mal.
 > Reemplaza el modelo mental de «una clave maestra con dispositivos delegados» por
@@ -312,19 +313,30 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 | **F1** acta + consola | ✅ hecha y desplegada | `@dotrino/identity/acta`, handlers del acta, consola en `vault.dotrino.com/dispositivos` |
 | **F2** traspaso y firma | ✅ hecha y publicada | aprobar admite en el acta, el acta viaja con el cert y con `vault.devices`, `signData` re-enrutado, `joinProfile` |
 | **F3** unir identidades | ✅ hecha y publicada | certificado de continuidad, verificado en el ENROLL y guardado con el miembro |
-| **F4** contenido | ⚠️ **primitivas hechas**, falta el store | `@dotrino/identity/content` + llavero en el acta + rotación. **Falta**: que `@dotrino/store` cifre con la CEK |
-| **F5** consumidores y endurecimiento | ❌ pendiente | ver §4.5 |
+| **F4** contenido | ✅ hecha y publicada | `@dotrino/identity/content` + llavero en el acta + rotación al expulsar + **store cifrado de punta a punta** |
+| **F5** consumidores y endurecimiento | ✅ hecha (salvo messenger) | proxy bindea el `profileId` del acta; reputación por persona; **cifrado en reposo ligado a la máquina** |
 | **Smoke E2E** | ✅ hecho | `dotrino-test/smoke/` — 6 escenarios verdes con proxy y bóveda reales en local |
 
-**Pendientes concretos que quedaron dentro de fases marcadas como hechas:**
+**Lo que queda pendiente, en concreto:**
 
-- **CLI/TUI del daemon**: faltan `dotrino-vault members` y `caps` (la consola web sí los tiene).
-- **Ventana de retención de actas** (§1.3): el master todavía no conserva las últimas 50.
-- **Prevención del master obsoleto** (§2.4.1 punto 4): falta que el master pregunte el acta
-  vigente al arrancar antes de sellar. La regla de desempate sí está implementada y probada.
+- **Messenger — cifrar a TODOS los dispositivos de un contacto.** Está bloqueado por algo
+  que no existe todavía: **los pares no intercambian sus actas**. Hoy solo conoces el acta
+  de tu propio perfil (llega con el cert y con `vault.devices`); para cifrarle a la persona
+  y no al aparato hace falta un mecanismo de descubrimiento del acta ajena. Es diseño nuevo,
+  no cableado: no se hizo a medias a propósito.
+- **Prevención del master obsoleto** (§2.4.1 punto 4): que el master pregunte el acta
+  vigente al arrancar antes de sellar. Requiere que los miembros SIRVAN su acta (hoy solo la
+  bóveda sirve), así que depende del mismo mecanismo que el punto anterior. La regla de
+  desempate sí está implementada y probada, que es lo que resuelve el conflicto cuando pasa.
+- **Reinicio del proxy en el VPS**: el código nuevo ya está en la máquina (`git pull` hecho),
+  pero el reinicio del proceso quedó bloqueado por el permisos del entorno. Corre en un
+  `screen`, no en systemd. **Hasta que se reinicie, el proxy en vivo no bindea el `profileId`.**
 - **Topbar estándar** en `vault.dotrino.com` (§5 de CONVENCIONES): la consola usa el header
   propio de la landing, no `<dotrino-topbar>`.
-- **Escenario de navegador con Playwright** en el smoke.
+- **Escenario de navegador con Playwright** en el smoke (el resto del protocolo ya está
+  cubierto por los 9 escenarios headless).
+- **TPM 2.0** para el cifrado en reposo: el ligado a máquina actual sube el listón (copiar
+  el archivo a otro equipo no sirve) pero no protege contra quien ya tiene esa máquina.
 
 
 ### F0 — Deuda que habilita todo lo demás
