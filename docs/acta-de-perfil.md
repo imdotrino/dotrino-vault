@@ -64,8 +64,9 @@ exactamente un miembro.
 ```jsonc
 {
   "v": 1,
-  "profileId": "<pubkeyId de la génesis>",   // nombre estable, nunca cambia
-  "sealer": "<JWK string del master vigente>",
+  "profileId": "<pubkey de la génesis>",      // nombre estable, nunca cambia
+  "sealer": "<pubkey del master DE AQUÍ EN ADELANTE>",
+  "sealedBy": "<pubkey que FIRMÓ esta acta>", // ver 1.2.2
   "seq": 42,                                  // monotónico; nunca retrocede
   "prev": "<sha-256 hex del acta seq-1>",
   "members": [
@@ -84,6 +85,19 @@ exactamente un miembro.
   "sig": "<firma del sealer>"
 }
 ```
+
+#### 1.2.2 `sealer` ≠ `sealedBy` (y por qué el traspaso se verifica solo)
+
+`sealedBy` es la llave que **firmó** esta acta; `sealer` es quien queda como **master de aquí
+en adelante**. Normalmente coinciden. En un **traspaso no**: el acta que nombra al master
+nuevo la firma el **saliente**, así que `sealedBy` = saliente y `sealer` = entrante.
+
+Esa distinción es la que hace el traspaso auto-verificable —la firma del saliente es la
+prueba de su propia degradación— y la que da la regla de empate de §2.4.1 en una línea:
+**a igual `seq` gana el acta con `sealer !== sealedBy`** (la que traspasa).
+
+Al adoptar se exige además `candidate.sealedBy === current.sealer`: solo el master que yo
+conocía puede haber producido la siguiente.
 
 #### 1.2.1 Tiempos
 
