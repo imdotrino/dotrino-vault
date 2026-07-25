@@ -54,7 +54,7 @@ test('render de todas las pantallas no lanza y respeta el tamaño', () => {
     for (const screen of ['profiles', 'devices', 'secrets', 'pairing']) {
       const term = fakeTerm(cols, rows)
       const st = baseState({ screen })
-      if (screen === 'pairing') st.pairing = { url: 'https://profile.dotrino.com/#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000 }
+      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000 }
       V.render(term, st)
       assertClean(term, cols, rows)
     }

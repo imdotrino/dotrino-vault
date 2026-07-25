@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import Consola from './Console.vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
@@ -8,7 +9,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_home: 'Inicio',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
     hero_sub: 'Tus archivos, tus contactos, tus contraseñas y lo que guardan tus apps, todo junto en una bóveda que vive en tu propia computadora. No en la nube de una empresa: en tu máquina, bajo tu control. Sin anuncios, sin rastreo, sin que nadie venda tus datos.',
@@ -47,7 +48,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download',
+    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_home: 'Home',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
     hero_sub: 'Your files, your contacts, your passwords and whatever your apps save, all together in a vault that lives on your own computer. Not on a company’s cloud: on your machine, under your control. No ads, no tracking, nobody selling your data.',
@@ -99,6 +100,22 @@ function copy (text, key) {
   navigator.clipboard?.writeText(text).then(() => { copied.value = key; setTimeout(() => (copied.value = ''), 1400) })
 }
 
+/* Ruta: la landing en `/` y la consola de dispositivos en `/dispositivos`. El QR de
+   `dotrino-vault pair` abre `/dispositivos#vault=<código>` — el código viaja en el
+   #fragment, que nunca llega al servidor. */
+const view = ref('home')
+function routeNow () {
+  const p = location.pathname.replace(/\/+$/, '')
+  view.value = (/\/dispositivos$/.test(p) || location.hash.includes('#vault=')) ? 'console' : 'home'
+}
+routeNow()
+function go (v, ev) {
+  ev?.preventDefault()
+  history.pushState(null, '', v === 'console' ? '/dispositivos' : '/')
+  routeNow()
+}
+window.addEventListener('popstate', routeNow)
+
 onMounted(() => { document.documentElement.lang = lang.value })
 </script>
 
@@ -107,8 +124,10 @@ onMounted(() => { document.documentElement.lang = lang.value })
     <header class="topbar">
       <a class="brand" href="/"><img src="/icon.svg" alt="" width="30" height="30" /><span>Dotrino&nbsp;Vault</span></a>
       <nav class="navlinks">
-        <a href="#how">{{ t.nav_how }}</a>
-        <a href="#download">{{ t.nav_download }}</a>
+        <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
+        <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
+        <a href="/dispositivos" data-testid="nav-devices" @click="go('console', $event)">{{ t.nav_devices }}</a>
+        <a v-if="view !== 'home'" href="/" @click="go('home', $event)">{{ t.nav_home }}</a>
       </nav>
       <div class="actions">
         <div class="lang-selector" role="group" aria-label="es / en">
@@ -121,6 +140,8 @@ onMounted(() => { document.documentElement.lang = lang.value })
     </header>
 
     <main>
+      <Consola v-if="view === 'console'" :lang="lang" />
+      <template v-else>
       <!-- HERO -->
       <section class="hero">
         <p class="kicker">{{ t.hero_kicker }}</p>
@@ -192,6 +213,7 @@ onMounted(() => { document.documentElement.lang = lang.value })
         <p class="warn">{{ t.dl_warn }}</p>
         <p class="other">{{ t.dl_other }}</p>
       </section>
+      </template>
     </main>
 
     <footer class="foot">

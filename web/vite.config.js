@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'node:child_process'
+import { copyFileSync } from 'node:fs'
 
 let commit = 'dev'
 try { commit = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* sin git */ }
@@ -10,11 +11,19 @@ const commitMeta = {
   transformIndexHtml (html) { return html.replace('</head>', `  <meta name="commit" content="${commit}" />\n  </head>`) },
 }
 
+// GitHub Pages no sabe de rutas de una SPA: una visita directa a /dispositivos daría 404.
+// Sirviendo el mismo HTML como 404.html, Pages lo devuelve y la app enruta en el cliente.
+const spaFallback = {
+  name: 'spa-404',
+  closeBundle () { try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {} },
+}
+
 export default defineConfig({
   base: '/',
   plugins: [
     vue(),
     commitMeta,
+    spaFallback,
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,
@@ -36,7 +45,7 @@ export default defineConfig({
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'], navigateFallback: null, cleanupOutdatedCaches: true, skipWaiting: true, clientsClaim: true },
+      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'], navigateFallback: '/index.html', cleanupOutdatedCaches: true, skipWaiting: true, clientsClaim: true },
     }),
   ],
 })

@@ -196,7 +196,7 @@ test('secretos: set / list / delete variable / delete scope', async () => {
 
 test('dispositivos: pair / pending / approve / revoke', async () => {
   const pair = await vc.startPairing({ profile: 'p1' })
-  assert.match(pair.url, /profile\.dotrino\.com\/#vault=/)
+  assert.match(pair.url, /vault\.dotrino\.com\/dispositivos#vault=/)
   assert.ok(pair.payload.includes('tok'))
   assert.ok(pair.expiresAt > Date.now())
 

@@ -52,7 +52,7 @@ const writeReq = (name, obj) => fs.writeFileSync(path.join(dir, name), JSON.stri
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
 const VERSION = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
-const PROFILE_URL = 'https://profile.dotrino.com/#vault='
+const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
 function readState () {
   const s = readJson(stateFile, null)
@@ -141,18 +141,18 @@ async function cmdPair (args = []) {
   const url = PROFILE_URL + b64
   const mins = Math.round((pair.expiresAt - Date.now()) / 60000)
   console.log('\nEscaneá este QR con el dispositivo que querés conectar (válido %d min):\n', mins)
-  console.log(qrToString(url)) // el QR abre profile.dotrino.com/#vault=… y empareja solo
+  console.log(qrToString(url)) // el QR abre vault.dotrino.com/dispositivos y empareja solo
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escaneálo en TU dispositivo.${Z}`)
   console.log('\nO abrí esta dirección en el dispositivo:\n  ' + url)
-  console.log('\nO pegá este código en profile.dotrino.com/#vault :\n  ' + payload)
+  console.log('\nO pega este código en vault.dotrino.com/dispositivos :\n  ' + payload)
 
   // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.
   const saveIdx = args.indexOf('--save')
   if (saveIdx >= 0) {
     const next = args[saveIdx + 1]
     const file = (next && !next.startsWith('-')) ? next : 'dotrino-invite.dpair'
-    try { fs.writeFileSync(file, url + '\n', { mode: 0o600 }); console.log('\nInvitación guardada en: %s\n  (ábrila en profile.dotrino.com/#vault → «Abrir imagen/archivo». Es efímera y de un solo uso; no la compartas.)', file) }
+    try { fs.writeFileSync(file, url + '\n', { mode: 0o600 }); console.log('\nInvitación guardada en: %s\n  (ábrela en vault.dotrino.com/dispositivos → «Abrir imagen o archivo». Es efímera y de un solo uso; no la compartas.)', file) }
     catch (e) { console.error('No se pudo guardar la invitación:', e.message) }
   }
 

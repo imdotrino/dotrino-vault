@@ -237,9 +237,9 @@ export async function deleteScope (ns, profile) {
 // Emparejamiento de dispositivos (pares)
 // ---------------------------------------------------------------------------
 
-const PROFILE_URL = 'https://profile.dotrino.com/#vault='
+const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
-/** Codifica el QR crudo como URL de profile.dotrino.com (base64url del payload). */
+/** Codifica el QR crudo como URL de la consola de vault.dotrino.com (base64url del payload). */
 export function pairUrl (qr) {
   const payload = JSON.stringify(qr)
   const b64 = Buffer.from(payload, 'utf8').toString('base64')
