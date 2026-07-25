@@ -1,6 +1,8 @@
 # Acta de perfil — plan de implementación
 
-> Estado: **plan aprobado, sin implementar**. Fecha: 2026-07-25.
+> Estado: **F0–F4 implementadas y publicadas; F5 pendiente**. Fecha: 2026-07-25.
+> Estado detallado por fase en [§4.0](#40-estado). El plan se mantiene como fuente de la
+> verdad del diseño: si el código y esto no coinciden, se corrige el que esté mal.
 > Reemplaza el modelo mental de «una clave maestra con dispositivos delegados» por
 > **«un perfil es un conjunto de llaves ligadas por certificados, con un acta firmada
 > por UN solo sellador que dice quién puede hacer qué»**.
@@ -302,6 +304,29 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 
 ## 4. Fases
 
+### 4.0 Estado
+
+| Fase | Estado | Dónde quedó |
+|---|---|---|
+| **F0** deuda | ✅ hecha y desplegada | núcleo de enrolamiento compartido, el código se comprueba antes de firmar, autoborrado solo con firma, registros podados |
+| **F1** acta + consola | ✅ hecha y desplegada | `@dotrino/identity/acta`, handlers del acta, consola en `vault.dotrino.com/dispositivos` |
+| **F2** traspaso y firma | ✅ hecha y publicada | aprobar admite en el acta, el acta viaja con el cert y con `vault.devices`, `signData` re-enrutado, `joinProfile` |
+| **F3** unir identidades | ✅ hecha y publicada | certificado de continuidad, verificado en el ENROLL y guardado con el miembro |
+| **F4** contenido | ⚠️ **primitivas hechas**, falta el store | `@dotrino/identity/content` + llavero en el acta + rotación. **Falta**: que `@dotrino/store` cifre con la CEK |
+| **F5** consumidores y endurecimiento | ❌ pendiente | ver §4.5 |
+| **Smoke E2E** | ✅ hecho | `dotrino-test/smoke/` — 6 escenarios verdes con proxy y bóveda reales en local |
+
+**Pendientes concretos que quedaron dentro de fases marcadas como hechas:**
+
+- **CLI/TUI del daemon**: faltan `dotrino-vault members` y `caps` (la consola web sí los tiene).
+- **Ventana de retención de actas** (§1.3): el master todavía no conserva las últimas 50.
+- **Prevención del master obsoleto** (§2.4.1 punto 4): falta que el master pregunte el acta
+  vigente al arrancar antes de sellar. La regla de desempate sí está implementada y probada.
+- **Topbar estándar** en `vault.dotrino.com` (§5 de CONVENCIONES): la consola usa el header
+  propio de la landing, no `<dotrino-topbar>`.
+- **Escenario de navegador con Playwright** en el smoke.
+
+
 ### F0 — Deuda que habilita todo lo demás
 
 No depende de ninguna decisión pendiente. **Se puede empezar ya.**
@@ -438,7 +463,13 @@ le corta el acceso al contenido futuro.
 
 ---
 
-### F5 — Consumidores y endurecimiento del vault
+### 4.5 · F5 — Consumidores y endurecimiento del vault (PENDIENTE)
+
+> No se empezó a propósito: cada punto toca datos o servicios vivos y conviene hacerlo con
+> alguien mirando. El smoke E2E ya permite probarlos contra un proxy local antes de tocar
+> producción.
+
+**F5 — Consumidores y endurecimiento del vault**
 
 - [ ] `dotrino-proxy/server.js`: `verifyDeviceCert` (`:281`) contra el `sealer` vigente.
 - [ ] `@dotrino/reputation`: sujeto = `profileId` (compatible: hoy ya **es** la pubkey).
