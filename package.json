@@ -18,7 +18,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@dotrino/identity": "0.28.0",
+    "@dotrino/identity": "0.29.0",
     "@dotrino/proxy-client": "0.6.3",
     "ws": "^8.18.0"
   }

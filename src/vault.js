@@ -187,13 +187,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
     const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    // Si el dispositivo estuvo apagado y viene con un `seq` viejo, se le manda la CADENA
+    // que falta (ventana de retención, §1.3) para que compruebe el encadenamiento en vez
+    // de tragarse un salto a ciegas. Si se salió de la ventana, llega vacía y toca
+    // re-emparejar — que es justo lo que debe pasar.
+    const chain = typeof p.data?.sinceSeq === 'number'
+      ? (await identity.actaHistory({ sinceSeq: p.data.sinceSeq }).catch(() => null))?.chain || null
+      : null
     // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
     // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
     // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
-    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta })
+    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta, chain })
   }
 
   // RENOVACIÓN automática: un dispositivo con cert VIGENTE y no revocado pide un
