@@ -440,7 +440,44 @@ le corta el acceso al contenido futuro.
 
 ---
 
-## 5. Residuales aceptados (documentar, no prometer que se resuelven)
+## 5. Pruebas (pedido del dueño, 2026-07-25)
+
+Tres niveles, y el tercero es el que falta:
+
+1. **Unitario por repo** (`node --test`, ya existe). Aquí vive lo que se puede probar sin
+   red: el mostrador de enrolamiento (`dotrino-vault/test/enroll.test.mjs`), el acta, las
+   reglas de sellado y de fork. **Toda regla de §2 debe tener su test.**
+2. **Integración por repo**, con el daemon real en un directorio temporal (ya existe:
+   `multiprofile.e2e.test.mjs`, `secrets.e2e.test.mjs`).
+3. **Smoke E2E del ecosistema — en `dotrino-test`.** Hoy `dotrino-test` es el sandbox web
+   (`test.dotrino.com`); gana una carpeta **`smoke/`** con scripts Node que levantan el
+   escenario completo y lo verifican de punta a punta.
+
+**Qué tiene que simular el smoke** (todos a la vez, hablando entre ellos):
+
+- un **proxy local** (`dotrino-proxy` en un puerto propio, `PROXY_URL` apuntando ahí) —
+  las pruebas **no** deben depender del proxy de producción;
+- un **vault** (daemon en un dir temporal, con su perfil recién creado);
+- un **dispositivo navegador**, con **Playwright** contra `vault.dotrino.com` (o su build
+  local) y el iframe de identidad — es el único que necesita navegador;
+- **`dotrino-terminal`** (su agente headless), **`dotrino-ia`** y **`dotrino-bot`**, que se
+  enrolan con el mismo protocolo desde Node.
+
+**Escenarios mínimos, por fase:**
+
+- [ ] F0 · emparejar cada cliente, aprobar con el código correcto, **rechazo con el código
+      equivocado sin emitir cert**, revocar y comprobar el autoborrado firmado.
+- [ ] F1 · el acta se genera sola, la consola lista miembros y capacidades.
+- [ ] F2 · traspaso del master al vault; el dispositivo renuncia a `sign` y sigue
+      funcionando a través de la bóveda; con la bóveda apagada, error claro.
+- [ ] F2 · **master obsoleto**: restaurar un respaldo del vault y comprobar que su rama
+      pierde (§2.4.1).
+- [ ] F3–F5 · unión de identidades, contenido compartido, y los consumidores.
+
+Regla práctica: el smoke corre en CI y **debe poder correr sin credenciales de producción**.
+Si un escenario necesita el proxy real, va aparte y marcado como manual.
+
+## 6. Residuales aceptados (documentar, no prometer que se resuelven)
 
 - **R1 — Ventana de rollback.** Quien nunca vio el acta nueva puede aceptar una vieja.
   Acotado por el pin de `maxSeq` y el tope de 30 días de los certs.
@@ -458,7 +495,7 @@ le corta el acceso al contenido futuro.
 - **R6 — Dependencia del vault online** cuando es el único con `sign`. Salida futura si
   molesta: tickets de firma de corta vida pre-emitidos. No entra en la primera versión.
 
-## 6. Siguiente pasada de diseño (después de este plan)
+## 7. Siguiente pasada de diseño (después de este plan)
 
 **Cómo se mergea el contenido entre pares** (pedido del dueño, 2026-07-25). Este plan
 define **quién** puede leer y escribir (el acta, las capacidades, la CEK de F4), pero **no**
@@ -469,7 +506,7 @@ criterio que aquí: reglas deterministas, nada de «gana el más nuevo por fecha
 Precedentes a mirar antes de inventar: el merge por `id+ts` de `@dotrino/store` y el
 `recordOpen` con valor absoluto de `dotrino-vault/docs/store-identity-architecture.md §3`.
 
-## 7. Fuera de alcance
+## 8. Fuera de alcance
 
 Rotación de identidad (cambiar el `profileId`), federación del registro de revocación, y
 tickets de firma offline. Ninguno bloquea las fases de arriba.

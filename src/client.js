@@ -4,12 +4,14 @@
  * `@dotrino/identity/capabilities` + `@dotrino/proxy-client`.
  *
  * Emparejamiento ENDURECIDO (docs/pairing-protocol.md): el dispositivo genera su
- * sub-clave `D`, FIRMA el ENROLL con ella (prueba de posesión), recibe un reto con
- * el SAS (que el usuario compara entre pantallas y aprueba en el PC), y al recibir
- * el cert lo VALIDA estrictamente (firmado por la maestra que vio en el QR, y para
- * SU dispositivo) antes de guardarlo. La maestra nunca sale del vault.
+ * sub-clave `D`, FIRMA el ENROLL con ella (prueba de posesión) y adjunta el COMPROMISO
+ * de un código de 6 dígitos que MUESTRA en pantalla (el código nunca viaja). El dueño lo
+ * tipea en la bóveda, que recompone el compromiso y solo entonces firma el cert; al
+ * recibirlo, el dispositivo comprueba que le ECHAN su código y VALIDA el cert
+ * estrictamente (firmado por la maestra que vio en el QR, y para SU clave) antes de
+ * guardarlo. La maestra nunca sale del vault.
  */
-import { makeDeviceKey, signWithDevice, verifyDelegation, verifyDeviceSig, deriveSAS, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
 import { installNodeGlobals } from './node-globals.js'
 import { MSG } from './protocol.js'
 
@@ -44,7 +46,7 @@ function waitFor (client, predicate, timeoutMs = 30000) {
  * @param {Object} opts
  * @param {{v:number, iss:string, proxy:string, token:string, sn:string}} opts.qr  QR v2 del vault.
  * @param {string} [opts.label]
- * @param {(c:{deviceId:string,sas:string})=>void} [opts.onChallenge]  Para MOSTRAR el SAS y que el usuario lo compare.
+ * @param {(c:{deviceId:string,code:string})=>void} [opts.onChallenge]  Para MOSTRAR el código que el usuario tipea en la bóveda.
  * @param {number} [opts.approveTimeoutMs]  Cuánto esperar la aprobación humana (def 3 min).
  * @returns {Promise<{ device, cert, iss:string }>}  GUARDAR `device` (incluye la privada) + `cert`. `iss` = qr.iss verificado.
  */
@@ -53,21 +55,23 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
   const client = await freshClient({ proxyUrl: qr.proxy, dir })
   try {
     const device = await makeDeviceKey({ label })
-    // El dispositivo computa SU PROPIO SAS y deviceId (NO los que mande la red): el
-    // usuario compara ESTE SAS con el que muestra el PC → si un MITM tocó iss/dpub/sn,
-    // no coinciden. Esa comparación es el control anti-phishing.
     const myDeviceId = (await pubkeyId(device.publickey)).slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2')
-    const mySas = await deriveSAS(qr.iss, device.publickey, qr.sn)
+    // ESTE dispositivo genera el código y lo MUESTRA; solo viaja su COMPROMISO. El vault
+    // lo aprende cuando un humano lo tipea, y solo firma el cert si el compromiso coincide.
+    const code = makePairingCode()
+    const commit = await commitCode({ code, dpub: device.publickey, sn: qr.sn })
     // ENROLL firmado con D = prueba de posesión (un token robado ya no basta).
-    const data = { op: 'enroll', dpub: device.publickey, token: qr.token, sn: qr.sn, label, ts: Date.now() }
+    const data = { op: 'enroll', dpub: device.publickey, token: qr.token, sn: qr.sn, commit, label, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
 
     const enrolled = new Promise((resolve, reject) => {
       const off = client.on('message', (_from, p) => {
         if (!p || typeof p !== 'object') return
         if (p.type === MSG.ENROLL_CHALLENGE) {
-          onChallenge?.({ deviceId: myDeviceId, sas: mySas }) // SAS computado por el dispositivo, no el de la red
+          onChallenge?.({ deviceId: myDeviceId, code }) // el código lo genera y muestra ESTE dispositivo
         } else if (p.type === MSG.ENROLLED) {
+          // Aceptamos solo si la bóveda ECHA nuestro código: una que no lo conoce no nos enrola.
+          if (String(p.code || '').trim() !== code) return
           cleanup(); resolve(p)
         } else if (p.type === MSG.ERROR) {
           cleanup(); reject(new Error(p.error))
