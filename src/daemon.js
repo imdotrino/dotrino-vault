@@ -151,6 +151,15 @@ export async function runDaemon () {
         try { targetOf(rej)?.rejectDevice(rej.deviceId); rm(pendingEnrollFile) } catch (_) {}
         rm(rejectReqFile)
       }
+      // Cambio de permisos de un miembro del acta (`dotrino-vault caps`).
+      const capsReq = readJsonSafe(path.join(dir, 'caps-request.json'))
+      if (capsReq?.pub && Array.isArray(capsReq.caps)) {
+        rm(path.join(dir, 'caps-request.json'))
+        try {
+          await targetOf(capsReq)?.setCaps(capsReq.pub, capsReq.caps)
+          console.log('[vault] permisos actualizados: %s', capsReq.caps.join(', ') || '(ninguno)')
+        } catch (e) { console.error('[vault] no se pudieron cambiar los permisos:', e.message) }
+      }
       const req = readJsonSafe(revokeReqFile)
       if (req?.nonce) {
         try { await targetOf(req)?.revokeDevice(req.nonce); console.log('[vault] revocado nonce=%s', req.nonce) }
@@ -186,6 +195,8 @@ export async function runDaemon () {
       // Nombres de secretos, nunca valores.
       writeJson(secretsListFile, { v: 1, at: Date.now(), profile: t.id, ns: t.vault.listSecrets() })
       writeJson(devFile, { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.listDevices()) })
+      // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
+      try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
     } catch (e) {
       console.error('[vault] error en señal de control:', e.message)
     }

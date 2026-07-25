@@ -189,6 +189,62 @@ function cmdReject (deviceId) {
   console.log('Rechazado %s.', deviceId)
 }
 
+/**
+ * `dotrino-vault members` — el ACTA del perfil: qué llaves son tuyas y qué puede hacer cada
+ * una. Es la misma información que muestra la consola de vault.dotrino.com.
+ */
+async function cmdMembers () {
+  const s = requireDaemon()
+  const actaFile = path.join(dataDir(), 'acta.json')
+  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
+  writeReq('dump-request.json', {})
+  process.kill(s.pid, 'SIGUSR2')
+  let acta = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
+  if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
+  if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
+
+  const CAP = { sign: 'firma', store: 'guarda', read: 'lee' }
+  console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, (acta.profileId || '').slice(0, 24) + '…', acta.seq)
+  for (const m of acta.members) {
+    const quien = m.label || m.id
+    const marcas = [m.isMaster ? `${B}manda${Z}` : null, m.isMe ? 'este dispositivo' : null].filter(Boolean)
+    const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
+    console.log('  %s  %s%s\n      %s', m.id, quien, marcas.length ? '  [' + marcas.join(' · ') + ']' : '', caps)
+  }
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee\n')
+}
+
+/** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
+async function cmdCaps (args = []) {
+  const [id, ...cambios] = args
+  if (!id || !cambios.length) {
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee')
+    process.exit(2)
+  }
+  const NOMBRE = { firma: 'sign', guarda: 'store', lee: 'read', sign: 'sign', store: 'store', read: 'read' }
+  const s = requireDaemon()
+  const actaFile = path.join(dataDir(), 'acta.json')
+  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
+  writeReq('dump-request.json', {})
+  process.kill(s.pid, 'SIGUSR2')
+  let acta = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
+  const m = acta?.members?.find((x) => x.id === id.toUpperCase())
+  if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
+
+  const caps = new Set(m.caps)
+  for (const c of cambios) {
+    const signo = c[0]
+    const cap = NOMBRE[c.slice(1).toLowerCase()]
+    if (!cap || (signo !== '+' && signo !== '-')) { console.error('permiso no reconocido: %s', c); process.exit(2) }
+    if (signo === '+') caps.add(cap); else caps.delete(cap)
+  }
+  writeReq('caps-request.json', { pub: m.pub, caps: [...caps] })
+  process.kill(s.pid, 'SIGUSR2')
+  console.log('Listo. Compruébalo con: dotrino-vault members')
+}
+
 async function cmdDevices () {
   const s = requireDaemon()
   try { fs.rmSync(devFile, { force: true }) } catch (_) {}
@@ -451,6 +507,8 @@ function help () {
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
   devices             lista dispositivos enrolados / revocados
+  members             el acta del perfil: quién es tuyo y qué puede hacer
+  caps <ID> ±permiso  cambia permisos (+firma -guarda …)
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio
@@ -489,6 +547,8 @@ export async function runCtl (argv) {
     case 'approve': return cmdApprove(rest[0])
     case 'reject': return cmdReject(rest[0])
     case 'devices': return cmdDevices()
+    case 'members': return cmdMembers()
+    case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
