@@ -244,6 +244,23 @@ monotonía por `profileId`) y el ataque no hace daño.
 pregunta antes de sellar); un tercero comprueba frescura sin contactarte; R1 y R5 quedan
 acotados a «el proxy no responde».
 
+### 2.4.3 Un dispositivo pertenece a UN solo perfil
+
+> Regla del dueño (2026-07-25).
+
+- **Un dispositivo que ya tiene master no puede vincularse a otro master.** Para entrar a
+  otro perfil primero tiene que salir del suyo (renuncia total o expulsión), y eso es un
+  gesto explícito y advertido, nunca un efecto colateral de escanear un QR.
+- **Si los dos lados tienen master, el emparejamiento es una NEGOCIACIÓN: cuál de los dos
+  queda como master.** Ése es exactamente el caso dispositivo ↔ vault: el dispositivo nació
+  siendo su propia génesis y el vault también, así que emparejarlos **no** es «enrolar», es
+  **unir dos perfiles eligiendo quién manda**. El que cede queda como miembro del otro, con
+  su cert y su cert de continuidad (F3).
+- **Cierra un agujero de hoy:** `vaultPair` sobrescribe el cert sin comprobar si el
+  dispositivo ya pertenece a un perfil (`dotrino-identity/vault/core.js:846`) — o sea que
+  hoy se puede re-emparejar en silencio a otra bóveda (el ataque A12 de
+  `pairing-protocol.md`). Con esta regla el re-emparejamiento silencioso deja de existir.
+
 ### 2.5 Punto de confianza inicial
 
 Al admitir un dispositivo nuevo no hay negociación: recibe el acta del master y la **pinea**
@@ -441,7 +458,18 @@ le corta el acceso al contenido futuro.
 - **R6 — Dependencia del vault online** cuando es el único con `sign`. Salida futura si
   molesta: tickets de firma de corta vida pre-emitidos. No entra en la primera versión.
 
-## 6. Fuera de alcance
+## 6. Siguiente pasada de diseño (después de este plan)
+
+**Cómo se mergea el contenido entre pares** (pedido del dueño, 2026-07-25). Este plan
+define **quién** puede leer y escribir (el acta, las capacidades, la CEK de F4), pero **no**
+qué pasa cuando dos miembros editaron lo mismo por separado. Hace falta una pasada propia:
+qué es una unidad de contenido, qué gana ante conflicto (por tipo de dato, no una regla
+única), qué es idempotente, y cómo se reconcilia sin depender del reloj — con el mismo
+criterio que aquí: reglas deterministas, nada de «gana el más nuevo por fecha».
+Precedentes a mirar antes de inventar: el merge por `id+ts` de `@dotrino/store` y el
+`recordOpen` con valor absoluto de `dotrino-vault/docs/store-identity-architecture.md §3`.
+
+## 7. Fuera de alcance
 
 Rotación de identidad (cambiar el `profileId`), federación del registro de revocación, y
 tickets de firma offline. Ninguno bloquea las fases de arriba.
