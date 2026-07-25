@@ -183,6 +183,45 @@ irrefutable de su propia degradación.
 5. **Avisar lo descartado:** si A alcanzó a sellar cambios en su rama muerta (admitió un
    dispositivo, cambió capacidades), se pierden. La consola lo dice explícitamente.
 
+### 2.4.2 Oráculo de frescura (opcional): la CABECERA del acta en el proxy
+
+El proxy del ecosistema puede guardar, por perfil, **sólo la cabecera** del acta:
+
+```json
+{ "profileId": "…", "seq": 42, "hash": "<sha-256 del acta>", "sealer": "<pub>", "sig": "…" }
+```
+
+~250 bytes. **No** la lista de miembros, **no** las etiquetas, **no** las capacidades: el acta
+completa es un mapa de cuántos dispositivos tienes, cómo se llaman y cuándo los cambias — dato
+del usuario, no va al servidor (`CLAUDE.md`, §SEO/privacidad). El acta completa se sigue
+obteniendo del miembro con el que hablas; **la baliza sólo dice si la que te dieron está vieja**.
+
+**Regla 1 — el oráculo sólo puede adelantarte, nunca atrasarte.** Una cabecera puede hacerte
+buscar un acta más nueva; jamás aceptar una vieja. Un proxy hostil sólo puede **callarse**
+(congelarte, DoS visible): no puede falsificar (la cabecera va firmada por el sellador) ni
+hacerte retroceder.
+
+**Regla 2 — una cabecera sin acta verificable es un rumor, no un veredicto.** El servidor no
+puede validar un cambio de sellador (no tiene el acta); si aceptara cualquier cabecera con
+`seq` mayor, cualquiera que conozca tu `profileId` publicaría una `seq 999` firmada con su
+propia llave y te congelaría. Por eso **una cabecera sólo cuenta cuando conseguiste y
+verificaste el acta correspondiente**. Así el servidor puede ser tonto (guardar, devolver,
+monotonía por `profileId`) y el ataque no hace daño.
+
+**Restricciones de diseño:**
+
+- **Opcional siempre.** Todo funciona sin oráculo, con los residuales ya aceptados. Si se
+  vuelve requisito, el perfil deja de ser del usuario y pasa a depender de un servidor.
+- **Espejable por cualquiera.** La cabecera va firmada: sirve venga de donde venga. Quien se
+  autohospeda usa su proxy. Sin esto sería un punto de centralización.
+- **Los canales del proxy NO sirven** para esto (son presencia en memoria con expiración,
+  `dotrino-proxy/server.js:21`, no un almacén). Va como tabla nueva en el SQLite que ya
+  persiste datos por pubkey (`dotrino-proxy/persistence.js`).
+
+**Qué gana:** la prevención de §2.4.1 pasa de «si hay alguien en línea» a fiable (el master
+pregunta antes de sellar); un tercero comprueba frescura sin contactarte; R1 y R5 quedan
+acotados a «el proxy no responde».
+
 ### 2.5 Punto de confianza inicial
 
 Al admitir un dispositivo nuevo no hay negociación: recibe el acta del master y la **pinea**
@@ -304,6 +343,17 @@ se genera sola y todavía no la consume nadie para decidir).
 - [ ] Ventana de retención de actas (§1.3) + re-admisión del que quedó fuera de ventana.
 - [ ] Copy en lenguaje llano (§9.1): «Tu bóveda firmará por ti. Si la apagas, este dispositivo
       no podrá firmar hasta que vuelva.»
+
+**Oráculo de frescura (§2.4.2) — opcional, se puede diferir sin bloquear F2:**
+
+- [ ] `dotrino-proxy`: tabla `acta_heads` en `persistence.js` + ops `acta.head.put` /
+      `acta.head.get`. El servidor es **tonto**: guarda, devuelve y exige monotonía por
+      `profileId`. **No** guarda el acta, sólo la cabecera (~250 B).
+- [ ] Cliente: publicar la cabecera al sellar; consultarla al arrancar el master (antes de
+      sellar) y al verificar una firma ajena.
+- [ ] Regla 1 (sólo adelanta, nunca atrasa) y regla 2 (cabecera sin acta verificada = rumor),
+      con test de cada una — incluido el intento de congelar con una `seq` alta ajena.
+- [ ] Que funcione con el oráculo apagado, byte-idéntico a no tenerlo.
 
 **Hecho cuando:** el dispositivo le cede el master al vault, le quita `sign` a sí mismo, sigue
 funcionando firmando a través del vault, y con el vault apagado da un error claro en vez de
