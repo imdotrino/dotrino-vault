@@ -161,13 +161,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
     if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
     const { issued, revoked } = await identity.listDelegations()
+    // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
+    // política (quién manda, quién puede qué) sin un canal aparte.
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
     // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
     // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
     // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
-    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked })
+    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta })
   }
 
   // RENOVACIÓN automática: un dispositivo con cert VIGENTE y no revocado pide un
