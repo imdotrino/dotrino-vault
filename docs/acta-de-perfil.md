@@ -2,10 +2,10 @@
 
 > Estado: **plan aprobado, sin implementar**. Fecha: 2026-07-25.
 > Reemplaza el modelo mental de «una clave maestra con dispositivos delegados» por
-> **«un perfil es un conjunto de llaves ligadas por certificados, con una política
-> firmada que dice quién puede hacer qué»**.
-> Complementa a [`pairing-protocol.md`](./pairing-protocol.md) (que sigue vigente:
-> el emparejamiento endurecido es el gesto con el que se admite un miembro).
+> **«un perfil es un conjunto de llaves ligadas por certificados, con un acta firmada
+> por UN solo sellador que dice quién puede hacer qué»**.
+> Complementa a [`pairing-protocol.md`](./pairing-protocol.md), que sigue vigente: el
+> emparejamiento endurecido es el gesto con el que el master admite un miembro.
 
 ---
 
@@ -21,65 +21,67 @@ cuál firma, cuál guarda el contenido— sin que ninguna llave privada viaje nu
 | # | Decisión |
 |---|---|
 | D1 | **Las llaves privadas son intransferibles.** No se copian, no se mueven, no se exportan. Nacen y mueren en su dispositivo. |
-| D2 | **El perfil es un acta**, no una llave: un conjunto de llaves miembro + una política de capacidades, todo firmado y auto-verificable. |
-| D3 | **`profileId` = pubkey de la llave génesis.** Como toda identidad actual nació en un dispositivo, el `profileId` de cada usuario existente **es su pubkey de siempre** → cero migración de reputación, contactos ni contenido firmado. |
-| D4 | **Renunciar es unilateral; ampliar requiere `policy`.** Un miembro puede bajarse a sí mismo cualquier capacidad, solo. Otorgar (a sí mismo o a otro) exige la firma de quien tenga `policy`. |
-| D5 | **Capacidad efectiva = `cert ∩ acta`.** El cert es la credencial (lo que ya verifican el proxy y `verifyChain`); el acta es la política encima. Permite migración gradual. |
-| D6 | **El acta es un snapshot firmado con `seq` monotónico + hash del anterior**, no un log que se reproduce. Tamaño O(miembros), constante en el tiempo. |
-| D7 | **`policy` la tienen la génesis y el miembro de papel**, nadie más por defecto. |
-| D8 | **Miembro de papel**: llave generada offline, guardada como QR impreso, con `admit` + `policy` y **sin** `sign` ni `read`. Es la red de recuperación del modelo (sin llaves móviles, perder todos los miembros = perder el perfil). |
-| D9 | **Reconciliación determinista, sin votación**: gana el `seq` mayor verificable; ante fork, unión restrictiva. Ver §2.4. |
+| D2 | **El perfil es un acta**: un conjunto de llaves miembro + una política de capacidades, firmada y auto-verificable. |
+| D3 | **`profileId` = pubkey de la llave génesis**, y es el nombre **estable** del perfil para siempre. Como toda identidad actual nació en un dispositivo, el `profileId` de cada usuario existente **es su pubkey de siempre** → cero migración de reputación, contactos ni contenido firmado. |
+| D4 | **UN SOLO SELLADOR (el «master»).** El acta la sella un único dispositivo. Nunca dos. Por eso **no existen las bifurcaciones**: no se resuelven, son imposibles (ver §2.4). |
+| D5 | **La intención es que el master sea el vault.** Un dispositivo nace master (es su propia génesis) y **le cede el master al vault**; de ahí en adelante sólo el vault sella. |
+| D6 | **Si se pierde el master, se pierde la cuenta.** Decidido explícitamente por el dueño (2026-07-25), y **no hay mecanismo de recuperación**: sin relevo, sin sucesión, sin miembro de papel. Es una consecuencia asumida de D1, no una carencia a tapar. |
+| D7 | **Capacidades: `sign` · `store` · `read`.** Nada más. `admit` y `policy` no existen como capacidades porque **son el master** (cambiar el acta y admitir miembros es sellar). Se mapean 1:1 a los scopes que ya existen (`vault:sign`, `vault:read`, `vault:store`). |
+| D8 | **Capacidad efectiva = `cert ∩ acta`.** El cert es la credencial (lo que ya verifican el proxy y `verifyChain`); el acta es la política encima. Permite migración gradual. |
+| D9 | **Cadenas de un solo nivel.** Sólo el master emite certs, así que `verifyChain` sirve tal cual. Al ceder el master, el nuevo **re-emite** los certs de todos los miembros (ya se re-emiten cada 30 días por la renovación). |
+| D10 | **Renunciar a una capacidad propia es un registro suelto, unilateral y offline** — no toca el acta, y por eso no contradice D4 (§2.2). Sólo puede quitar, nunca otorgar. |
+| D11 | **El acta es un snapshot firmado con `seq` monotónico + hash del anterior**, no un log que se reproduce. Tamaño O(miembros), constante en el tiempo. |
 
 ### 0.3 Descartado explícitamente (no reintroducir)
 
-- **Copiar / transferir la llave principal.** Era el plan del 2026-07-25 por la mañana;
-  el dueño cambió de criterio: las llaves deben ser intransferibles. Con el acta, «el
-  dispositivo entrega la firma al vault» se hace **renunciando a la capacidad**, no
-  borrando la llave — y es reversible y verificable por terceros, cosa que borrar no es.
+- **Copiar / transferir la llave principal.** Era el plan del 2026-07-25 por la mañana; el
+  dueño cambió de criterio: las llaves son intransferibles. Con el acta, «el dispositivo
+  entrega la firma al vault» se hace **renunciando a la capacidad**, no borrando la llave
+  — y es reversible y verificable por terceros, cosa que borrar no es.
 - **Llaves extractables opt-in / semilla de recuperación cifrada.** Contradicen D1.
-  La recuperación es el **miembro de papel** (D8), que no es copia de ninguna llave viva.
-- **Votación / quórum M-de-N para cambiar el acta.** D4 lo hace innecesario para el caso
-  real (renunciar) y D9 resuelve los conflictos sin coordinación.
+- **Relevo con fecha, sucesión y miembro de papel.** Se propusieron como red para el punto
+  único de fallo del sellador; el dueño los descartó junto con D6.
+- **Votación / quórum para cambiar el acta.** Innecesario con un solo sellador.
+- **`verifyPath` con atenuación / admisión encadenada.** Innecesario con D9.
 
 ---
 
 ## 1. Modelo de datos
 
-### 1.1 Capacidades (lista cerrada — no crecer sin muy buena razón)
+### 1.1 Capacidades (lista cerrada)
 
-| Capacidad | Qué habilita |
-|---|---|
-| `sign` | firmar como la identidad ante terceros (reputación, publicaciones, retos) |
-| `store` | leer y escribir el contenido del perfil |
-| `read` | sólo leer el contenido |
-| `admit` | admitir miembros nuevos (emitir certs de membresía) |
-| `policy` | cambiar el acta: otorgar capacidades, expulsar miembros |
+| Capacidad | Scope existente | Qué habilita |
+|---|---|---|
+| `sign` | `vault:sign` | firmar como la identidad ante terceros (reputación, publicaciones) |
+| `store` | `vault:store` | leer y escribir el contenido del perfil |
+| `read` | `vault:read` | sólo leer el contenido |
 
-Las capacidades existentes `vault:sign` / `vault:read` / `vault:store`
-(`dotrino-vault/lib/src/protocol.js`) se mapean 1:1 a las tres primeras; `admit` y
-`policy` son nuevas.
+Sellar el acta y admitir miembros **no son capacidades**: son el rol de master, y lo tiene
+exactamente un miembro.
 
 ### 1.2 El acta
 
 ```jsonc
 {
   "v": 1,
-  "profileId": "<pubkeyId de la génesis>",
-  "seq": 42,                       // monotónico; nunca retrocede
+  "profileId": "<pubkeyId de la génesis>",   // nombre estable, nunca cambia
+  "sealer": "<JWK string del master vigente>",
+  "seq": 42,                                  // monotónico; nunca retrocede
   "prev": "<sha-256 hex del acta seq-1>",
   "members": [
     {
       "pub": "<JWK string>",       // llave de FIRMA del miembro
       "encPub": "<JWK string>",    // llave ECDH del miembro (para envolverle la CEK)
       "label": "Celular de Santiago",
-      "caps": ["store", "read"],   // la política; ver D5
+      "caps": ["store", "read"],
       "addedAt": 1690000000000,
-      "cert": { /* cert de membresía, encadenable */ }
+      "cert": { /* cert emitido por el sealer vigente; depth 1 */ }
     }
   ],
   "revoked": [ { "nonce": "…", "until": 1690000000000 } ],  // se poda al vencer
+  "renounced": [ { "member": "<pub>", "caps": ["sign"], "ts": 0, "sig": "…" } ],
   "updatedAt": 1690000000000,
-  "sig": "<firma del miembro con `policy` que emitió esta versión>"
+  "sig": "<firma del sealer>"
 }
 ```
 
@@ -90,79 +92,83 @@ pubkey JWK **158 B** · cert **601 B** · miembro completo **~1 KB** ·
 ### 1.3 Retención del historial
 
 - **Un tercero no necesita historial**: recibe el snapshot actual y verifica firma + `seq`.
-- **Entre miembros del mismo perfil sí hace falta una ventana** para poder comprobar el
-  encadenamiento al reconciliar (si estoy en `seq 5` y me llega la 9, necesito 6-7-8).
-  **Ventana normada: las últimas 50 actas o 12 meses, lo que sea mayor.**
-- Un miembro apagado más tiempo que la ventana **no valida el salto y debe re-admitirse**
-  (pasa otra vez por el emparejamiento con aprobación humana — deseable, no un defecto).
-- El historial de auditoría legible por el dueño va en el `activity.log` que ya existe
-  y ya rota a 1 MB (`dotrino-vault/src/vault.js:82-92`).
+- **Un miembro que vuelve necesita una ventana** para comprobar el encadenamiento (si está
+  en `seq 5` y le llega la 9, necesita 6-7-8). **Ventana normada: las últimas 50 actas o
+  12 meses, lo que sea mayor.** El master es quien las conserva.
+- Un miembro apagado más tiempo que la ventana **debe re-admitirse** (pasa otra vez por el
+  emparejamiento con aprobación humana — deseable, no un defecto).
+- El historial de auditoría legible por el dueño va en el `activity.log` que ya existe y
+  ya rota a 1 MB (`dotrino-vault/src/vault.js:82-92`).
 
 ---
 
 ## 2. Reglas normativas (lo que el código debe hacer cumplir)
 
-### 2.1 Cambio de política
+### 2.1 Sellado
 
-1. Un miembro puede **quitarse a sí mismo** capacidades sin firma de nadie más (D4).
-2. **Otorgar** cualquier capacidad, a quien sea, exige firma de un miembro con `policy`.
-3. **Prohibido** aplicar un cambio que deje el perfil **sin ningún miembro vivo con `sign`**
-   o **sin ningún miembro con `policy`**. El código rechaza la operación y explica por qué.
-4. Todo cambio incrementa `seq` en 1 y fija `prev` = hash del acta anterior.
+1. **Sólo el `sealer` del acta vigente puede sellar la siguiente.** Cualquier acta firmada
+   por otra llave se descarta sin más.
+2. Todo cambio incrementa `seq` en 1 y fija `prev` = hash del acta anterior.
+3. **Traspaso de master**: lo sella el master actual, nombrando al nuevo en `sealer`. Es la
+   última cosa que sella. El nuevo master re-emite los certs de todos los miembros (D9).
+4. **Prohibido** sellar un acta que deje el perfil sin ningún miembro con `sign`.
+   El código rechaza la operación y explica por qué.
 
-### 2.2 Verificación de una acción firmada
+### 2.2 Renuncia (el único cambio que no pasa por el master)
+
+Un miembro puede emitir `{ op:'renounce', member, caps:[…], ts, sig }` firmado por sí mismo.
+Como **sólo puede quitar**, cualquier verificador la honra por su cuenta sin riesgo, y no
+toca el `seq`. El master la absorbe en `renounced` al sellar la siguiente acta.
+
+Caso que cubre: te roban el dispositivo y querés que deje de firmar **ya**, con el vault
+apagado.
+
+### 2.3 Verificación de una acción firmada
 
 ```
-capacidad_efectiva = cert.scope ∩ acta.members[k].caps
+cert válido           ⟺  cert.iss === acta_vigente.sealer   (depth 1, verifyChain)
+capacidad_efectiva     =  cert.scope ∩ acta.members[k].caps  −  renuncias del miembro
 ```
 Se rechaza si el acta que presenta el firmante tiene `seq` **menor** al máximo que el
-verificador ya vio para ese `profileId` (anti-rollback, ver 2.3).
-
-### 2.3 Anti-rollback
+verificador ya vio para ese `profileId`.
 
 - Cada verificador guarda `maxSeq` por `profileId` conocido (un número por contacto).
-- **Nunca se acepta un `seq` menor al ya visto.**
 - Refuerzo temporal: el tope duro de 30 días de los certs (`MAX_DELEGATION_MS`,
   `dotrino-identity/vault/capabilities.js:29`) hace que una política vieja caduque sola.
-- **Residual aceptado:** un verificador que nunca vio el acta nueva puede aceptar una
-  vieja. Es el mismo residual que ya tiene la revocación; no se inventa uno nuevo.
 
-### 2.4 Reconciliación entre miembros
+### 2.4 Por qué no hay bifurcaciones
 
-Al conectarse, cada uno anuncia `{ profileId, seq, hash }`. El que está atrás pide la
-más nueva y **la adopta sólo si**: (a) la firma es de un miembro que tenía `policy` en
-el acta que él ya tenía, (b) el `prev` encadena, (c) el `seq` es mayor. Si algo falla,
-**no adopta y conserva la suya**.
+Con **un solo sellador** (D4) y **llaves intransferibles** (D1), el sellador no se puede
+clonar: dos actas legítimas con el mismo `seq` son **criptográficamente imposibles**, no
+un conflicto a resolver. **No hay merge, ni precedencia, ni votación.**
 
-**Fork** (dos actas con el mismo `seq` y distinto hash), en este orden:
-
-1. Si **ambos cambios sólo QUITAN** capacidades → **se fusionan** aplicando los dos
-   (intersección). Determinista y nunca otorga nada que ninguno otorgaba.
-2. Si alguno **OTORGA** → no se fusiona: gana el firmado por el `policy` de mayor
-   precedencia (génesis > resto); el otro se descarta y **se avisa al usuario qué se perdió**.
-3. **Nunca «gana el más nuevo por fecha»**: los relojes son manipulables desde el dispositivo.
+Lo único que queda es que el sellador **se contradiga a sí mismo**: se restaura un respaldo
+del PC y vuelve a sellar `seq 5` con otro contenido. Contra eso está el pin de `maxSeq`
+(§2.3): los miembros que vieron la 6 rechazan la 5, y el master debe emitir un `seq` mayor
+para re-sincronizar.
 
 ### 2.5 Punto de confianza inicial
 
-Al admitir un dispositivo nuevo no hay negociación: recibe el acta del que lo admite y
-la **pinea** junto al `profileId`, igual que hoy pinea `qr.iss`
-(`dotrino-identity/vault/remote.js:69`). De ahí en adelante sólo acepta actas que encadenen.
+Al admitir un dispositivo nuevo no hay negociación: recibe el acta del master y la **pinea**
+junto al `profileId`, igual que hoy pinea `qr.iss` (`dotrino-identity/vault/remote.js:69`).
+De ahí en adelante sólo acepta actas selladas por el `sealer` que diga el acta que ya tiene.
 
 ---
 
 ## 3. Arquitectura — dónde vive cada cosa
 
-Regla dura, para no duplicar (hoy el «lado bóveda» está escrito **tres veces**: daemon,
-lib y el vendor del iframe):
-
 | Capa | Dueño | Contenido |
 |---|---|---|
-| Cripto | `@dotrino/identity/capabilities` | `verifyPath`, acta, `wrap/unwrapContentKey`. **Toda la cripto acá y sólo acá.** |
+| Cripto | `@dotrino/identity/capabilities` | acta (build/verify/hash/apply), `wrap/unwrapContentKey`. **Toda la cripto acá y sólo acá.** |
 | Protocolo | `@dotrino/vault/protocol` (`lib/src/protocol.js`) | `MSG` / `SCOPE` — fuente única, ya re-exportada por el daemon |
-| Lado bóveda | `@dotrino/vault` `lib/src/` | núcleo puro `{ identity, send, audit }` que consumen daemon, `startDeviceVault` y el vendor |
+| Lado bóveda | `@dotrino/vault` `lib/src/` | núcleo puro `{ identity, send, audit }` que consumen daemon, `startDeviceVault` y el vendor del iframe |
 | Lado dispositivo | `@dotrino/identity` `vault/core.js` | handlers del acta, expuestos por RPC del iframe |
 | **UI** | **`vault.dotrino.com`, y sólo ahí** | consola «dónde vive tu perfil». **Cero cripto en la app** |
 | Consumidores | proxy · reputation · store · messenger | resolver `pubkey → profileId` |
+
+Nota: el daemon y el paquete npm **sí comparten** el núcleo (ESM puro sin dependencias en
+`lib/src/`): el binario lo embebe al compilar con SEA y el iframe lo vendoriza como ya hace.
+Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 
 ---
 
@@ -172,143 +178,133 @@ lib y el vendor del iframe):
 
 No depende de ninguna decisión pendiente. **Se puede empezar ya.**
 
-> **Sobre «el daemon y `@dotrino/vault` no comparten código» (2026-07-10):** era una
-> observación de que uno se empaqueta como binario y el otro es una librería web, no una
-> regla. **Sí comparten** a partir de acá: el núcleo se escribe como ESM puro sin
-> dependencias en `lib/src/`, el binario lo embebe al compilar (Node SEA) y el iframe lo
-> vendoriza como ya hace hoy. Con el acta ese lado deja de ser sólo el enroll —suma
-> política, reconciliación y forks—, así que tenerlo escrito tres veces es la vía más
-> rápida a que diverjan en silencio.
-
-- [ ] Extraer el núcleo del lado-bóveda a `dotrino-vault/lib/src/enroll.js` (puro,
-      recibe `{ identity, send, audit }`): `handleEnroll`, `approve`, `reject`, `emitRevoke`.
+- [ ] Extraer el núcleo del lado-bóveda a `dotrino-vault/lib/src/enroll.js` (puro, recibe
+      `{ identity, send, audit }`): `handleEnroll`, `approve`, `reject`, `emitRevoke`.
 - [ ] `dotrino-vault/src/vault.js` pasa a consumirlo (hoy duplica ~120 líneas).
 - [ ] `dotrino-vault/lib/src/index.js` (`startDeviceVault`) pasa a consumirlo.
-- [ ] Re-vendorizar `dotrino-identity/vault/vendor/vault/index.js` + actualizar su `VERSION.txt`.
-- [ ] **Cerrar `commitCode`**: el dispositivo manda el compromiso `SHA-256(code‖dpub‖sn)`
-      en el ENROLL (`dotrino-identity/vault/remote.js:48`) y el vault **valida el código
-      tipeado antes de firmar** (`dotrino-vault/src/vault.js:297-311`).
-      Hoy firma el cert sin comprobarlo: la defensa vive sólo en el cliente honesto.
-- [ ] **Receptor de `vault.revoked` firmado** en `dotrino-identity/vault/core.js`:
-      verificar contra la maestra pineada (`verifyRevoke`, `dotrino-vault/src/client.js:97`)
-      antes de cualquier borrado.
+- [ ] Re-vendorizar `dotrino-identity/vault/vendor/vault/index.js` + actualizar `VERSION.txt`.
+- [ ] **Cerrar `commitCode`**: el dispositivo manda el compromiso `SHA-256(code‖dpub‖sn)` en
+      el ENROLL (`dotrino-identity/vault/remote.js:48`) y el vault **valida el código tipeado
+      antes de firmar** (`dotrino-vault/src/vault.js:297-311`). Hoy firma el cert sin
+      comprobarlo: la defensa vive sólo en el cliente honesto.
+- [ ] **Receptor de `vault.revoked` firmado** en `dotrino-identity/vault/core.js`: verificar
+      contra la maestra pineada (`verifyRevoke`, `dotrino-vault/src/client.js:97`) antes de
+      cualquier borrado.
 - [ ] **Quitar el borrado por texto de error**: `handleVaultError` borra cert+device local
       cuando el mensaje contiene «revoked» (`core.js:264-270`), justo lo que
       `pairing-protocol.md §2.3` prohíbe. Sustituirlo por el receptor firmado.
 - [ ] Podar `DELEGATIONS_STORAGE` y `REVOCATIONS_STORAGE`: hoy crecen para siempre
       (renovación mensual = 12 entradas por dispositivo por año, `core.js:756-759`;
-      revocaciones nunca podadas, `core.js:254`). Renovar **reemplaza** la entrada;
-      un revocado se cae al vencer su cert.
-- [ ] Tests: `node --test` en identity y vault siguen verdes; test nuevo del `commitCode`
-      (aprobar con código equivocado **no** debe emitir cert).
+      revocaciones nunca podadas, `core.js:254`). Renovar **reemplaza** la entrada; un
+      revocado se cae al vencer su cert.
+- [ ] Tests: `node --test` verde en identity y vault; test nuevo del `commitCode` (aprobar
+      con código equivocado **no** debe emitir cert).
 - [ ] Publicar `@dotrino/identity` y `@dotrino/vault` (commit → tag → `npm publish`).
 
-**Hecho cuando:** aprobar con un código incorrecto no emite cert; un `MSG.ERROR` de texto
-no borra nada; un `vault.revoked` firmado sí; el flujo de emparejamiento vive en un solo
-módulo; los registros dejan de crecer sin límite.
+**Hecho cuando:** aprobar con un código incorrecto no emite cert; un `MSG.ERROR` de texto no
+borra nada; un `vault.revoked` firmado sí; el emparejamiento vive en un solo módulo; los
+registros dejan de crecer sin límite.
 
 ---
 
-### F1 — El acta v1 (membresía + capacidades) y la consola
+### F1 — El acta v1 y la consola
 
-- [ ] `@dotrino/identity/capabilities`: `SCOPE.ADMIT = 'profile:admit'`,
-      `SCOPE.POLICY = 'profile:policy'`.
-- [ ] `verifyPath({ chain, leaf, profileId, expectedCap, revoked, now })`: cadena de N
-      certs con **atenuación** (`scope ⊆` del padre, `exp ≤` del padre, `iss(n) = sub(n-1)`),
-      raíz = `profileId`. `verifyChain` actual queda como el caso N=1 (no se rompe).
-- [ ] `buildActa` / `verifyActa` / `actaHash` / `applyChange` (módulo puro, sin kv ni red).
-- [ ] `dotrino-identity/vault/core.js`: persistencia del acta + handlers
-      `profileActa()`, `profileMembers()`, `admitMember()`, `setCaps()`, `removeMember()`,
-      `myMembership()`.
-- [ ] Reglas §2.1 aplicadas en `applyChange` (incluido «no dejar el perfil sin `sign`
-      ni sin `policy`»), con tests de cada rechazo.
-- [ ] Migración: al arrancar sin acta, **generar la v1 automáticamente** con un solo
-      miembro (la llave actual) y todas las capacidades. Invisible para el usuario.
+- [ ] `buildActa` / `verifyActa` / `actaHash` / `applyChange` en
+      `@dotrino/identity/capabilities` (módulo puro: sin kv, sin red).
+      **No hacen falta scopes nuevos** (D7) ni `verifyPath` (D9).
+- [ ] `dotrino-identity/vault/core.js`: persistencia del acta + handlers `profileActa()`,
+      `profileMembers()`, `admitMember()`, `setCaps()`, `removeMember()`, `myMembership()`,
+      `isMaster()`.
+- [ ] Reglas §2.1 en `applyChange` (sólo sella el `sealer`; `seq`+`prev`; no dejar el perfil
+      sin `sign`), con test de cada rechazo.
+- [ ] Pin de `maxSeq` por `profileId` en el verificador (§2.3).
+- [ ] Migración: al arrancar sin acta, **generar la v1 automáticamente** — un miembro (la
+      llave actual), `sealer` = esa misma llave, todas las capacidades. Invisible.
 - [ ] `dotrino-identity/src/index.js` + `index.d.ts` + `src/node.js`: wrappers.
-- [ ] **Miembro de papel**: generar llave offline → acta con `admit` + `policy` →
-      render QR imprimible (reusar `dotrino-vault/src/qr.js` / el generador del cliente).
-      Nunca se persiste su privada en ningún dispositivo.
-- [ ] **Consola en `vault.dotrino.com`**: la landing actual (`web/src/App.vue`) se queda
-      como home y se agrega `/dispositivos` con: quién es quién, **qué puede hacer cada
-      uno**, admitir, expulsar, y el aviso «tienes un solo miembro» mientras aplique.
+- [ ] **Consola en `vault.dotrino.com`**: la landing actual (`web/src/App.vue`) queda como
+      home y se agrega `/dispositivos` con: quién es quién, **qué puede hacer cada uno**,
+      **quién sella**, admitir y expulsar.
+- [ ] Aviso permanente y en lenguaje llano de la consecuencia de D6: «si pierdes este
+      dispositivo, pierdes el perfil». Sin prometer una recuperación que no existe.
 - [ ] Normalizar esa app: `<dotrino-topbar>` con `profile` (§5/§6.1 de CONVENCIONES),
-      `@dotrino/support@0.8` (hoy tiene 0.6.0), bilingüe es/en.
-- [ ] Migrar desde `dotrino_profile/src/main.js` las vistas `/vault` (`:336`) y
-      `/myvault` (`:653`) — ~500 de sus 893 líneas — y dejar redirect en las rutas viejas.
+      `@dotrino/support@0.8` (hoy 0.6.0), bilingüe es/en.
+- [ ] Migrar desde `dotrino_profile/src/main.js` las vistas `/vault` (`:336`) y `/myvault`
+      (`:653`) — ~500 de sus 893 líneas — y dejar redirect en las rutas viejas.
 - [ ] `dotrino-vault/src/ctl.js`: apuntar el QR a `vault.dotrino.com` (hoy `PROFILE_URL`, `:140`).
 - [ ] CLI/TUI espejo: `dotrino-vault members`, `caps <deviceId> <±cap>`.
 
-**Hecho cuando:** el usuario ve en `vault.dotrino.com` sus dispositivos y qué puede hacer
-cada uno; puede admitir y expulsar; existe el miembro de papel; nada del comportamiento
-actual cambió (el acta se genera sola y todavía no la consume nadie para decidir).
+**Hecho cuando:** el usuario ve en `vault.dotrino.com` sus dispositivos, qué puede hacer cada
+uno y quién sella; puede admitir y expulsar; y nada del comportamiento actual cambió (el acta
+se genera sola y todavía no la consume nadie para decidir).
 
 ---
 
-### F2 — Renuncia y re-enrutamiento de la firma  ← **acá el modelo ya funciona**
+### F2 — Traspaso del master al vault, renuncia y re-enrutamiento de la firma
 
-- [ ] Botón **«Este dispositivo ya no firma por mí»** en la consola: quita `sign` de sus
-      propias `caps` (unilateral, D4) y publica `seq+1`.
+**Es el corazón del modelo: al terminar F2, funciona lo que el dueño pidió.**
+
+- [ ] **Traspaso**: el dispositivo génesis sella un acta nombrando al vault como `sealer`
+      (§2.1.3). Flujo en la consola, con la consecuencia dicha en claro.
+- [ ] El vault, al recibir el master, **re-emite los certs de todos los miembros** (D9).
+- [ ] **Renuncia** (§2.2): botón «Este dispositivo ya no firma por mí» → registro suelto
+      firmado, honrado de inmediato aunque el vault esté apagado; el master lo absorbe después.
 - [ ] `signData` bifurcado en `dotrino-identity/vault/core.js:738`:
-      - con `sign` en el acta → firma local (idéntico a hoy),
-      - sin `sign` → re-enruta a `vaultSign` (`core.js:869`, ya implementado de punta a
-        punta contra `handleSign`, `dotrino-vault/src/vault.js:135`) y devuelve la
-        pubkey del firmante del perfil, **estable**,
-      - `op:'identify'` **siempre** firma local (el transporte lo necesita, y el proxy ya
-        lo acepta: `dotrino-proxy/server.js:1626-1630`),
-      - sin miembro con `sign` alcanzable → error explícito `perfil-sin-firmante`,
-        nunca colgarse.
-- [ ] Reconciliación §2.4 entre miembros (anuncio `{seq,hash}` + adopción + fork).
+      - con `sign` efectivo → firma local (idéntico a hoy),
+      - sin `sign` → re-enruta a `vaultSign` (`core.js:869`, ya implementado de punta a punta
+        contra `handleSign`, `dotrino-vault/src/vault.js:135`) y devuelve la pubkey del
+        firmante del perfil, **estable**,
+      - `op:'identify'` **siempre** firma local (el transporte lo necesita y el proxy ya lo
+        acepta: `dotrino-proxy/server.js:1626-1630`),
+      - sin miembro con `sign` alcanzable → error explícito `perfil-sin-firmante`, nunca colgarse.
+- [ ] Distribución del acta: `vault.devices` (`dotrino-vault/src/vault.js:189`) pasa a servir
+      también el acta vigente; los miembros la adoptan si el `sealer` y el `seq` verifican (§2.5).
 - [ ] Ventana de retención de actas (§1.3) + re-admisión del que quedó fuera de ventana.
-- [ ] `vault.devices` (`dotrino-vault/src/vault.js:189`) pasa a servir también el acta actual.
-- [ ] Copy en lenguaje llano (§9.1): «Tu bóveda firmará por ti. Si la apagas, este
-      dispositivo no podrá firmar hasta que vuelva.»
+- [ ] Copy en lenguaje llano (§9.1): «Tu bóveda firmará por ti. Si la apagas, este dispositivo
+      no podrá firmar hasta que vuelva.»
 
-**Hecho cuando:** quitas `sign` al celular, el celular sigue funcionando firmando a través
-del vault, y con el vault apagado da un error claro en vez de firmar por su cuenta.
+**Hecho cuando:** el dispositivo le cede el master al vault, le quita `sign` a sí mismo, sigue
+funcionando firmando a través del vault, y con el vault apagado da un error claro en vez de
+firmar por su cuenta.
 
 ---
 
-### F3 — Admisión encadenada y unión de identidades existentes
+### F3 — Unir identidades que ya existen
 
-- [ ] Un miembro con `admit` puede admitir a otro (hoy sólo la raíz emite: `iss` forzado
-      a la propia en `core.js:756`). Cadenas de 2+ eslabones validadas con `verifyPath`.
-- [ ] **Cert de continuidad**: al unir dos identidades que ya existían, la absorbida firma
-      «esta pubkey es ahora miembro de `<profileId>`»; queda en el acta como puente para
-      que su reputación previa siga contando.
+- [ ] **Cert de continuidad**: al unir dos identidades preexistentes, la absorbida firma
+      «esta pubkey es ahora miembro de `<profileId>`»; el master lo sella en el acta y queda
+      como puente para que su reputación previa siga contando.
 - [ ] UX de unión en la consola, con las dos consecuencias dichas en claro.
 
-**Hecho cuando:** un celular admitido por el vault puede admitir la laptop sin que el
-génesis intervenga; dos identidades viejas se unen sin perder reputación.
+**Hecho cuando:** dos identidades viejas quedan en un solo perfil sin perder reputación.
 
 ---
 
 ### F4 — Contenido unificado
 
-- [ ] Clave de contenido del perfil (CEK) **envuelta a la `encPub` de cada miembro**
-      (reusar el ECDH+AES-GCM de `core.js:936-955`; **no reimplementar**).
+- [ ] Clave de contenido del perfil (CEK) **envuelta a la `encPub` de cada miembro** (reusar
+      el ECDH+AES-GCM de `core.js:936-955`; **no reimplementar**).
 - [ ] Admitir miembro → re-envolver. Expulsar → rotar CEK y re-envolver al resto.
 - [ ] Llavero de CEK antiguas para leer contenido viejo (32 B c/u) + re-cifrado perezoso.
 - [ ] `@dotrino/store` lee/escribe por perfil, no por dispositivo.
 
-**Hecho cuando:** admitir un dispositivo le da acceso al contenido ya existente, y
-expulsarlo le corta el acceso al contenido futuro.
+**Hecho cuando:** admitir un dispositivo le da acceso al contenido ya existente, y expulsarlo
+le corta el acceso al contenido futuro.
 
 ---
 
 ### F5 — Consumidores y endurecimiento del vault
 
-- [ ] `dotrino-proxy/server.js`: `verifyDeviceCert` (`:281`) generalizado a cadena.
+- [ ] `dotrino-proxy/server.js`: `verifyDeviceCert` (`:281`) contra el `sealer` vigente.
 - [ ] `@dotrino/reputation`: sujeto = `profileId` (compatible: hoy ya **es** la pubkey).
-- [ ] `@dotrino/messenger` y contactos: un peer = un perfil con N llaves; cifrar a todos
-      los miembros (encaja con `recipients[]` que ya existe).
-- [ ] Vault: cifrado en reposo **ligado a la máquina** (`machine-id` + serial de disco +
-      salt local 0600, más la contraseña del perfil si está puesta). Copiar
-      `identity.json` a otra máquina deja de servir. **No** protege contra root local:
-      decirlo así en la copy, sin prometer de más.
+- [ ] `@dotrino/messenger` y contactos: un peer = un perfil con N llaves; cifrar a todos los
+      miembros (encaja con `recipients[]` que ya existe).
+- [ ] Vault: cifrado en reposo **ligado a la máquina** (`machine-id` + serial de disco + salt
+      local 0600, más la contraseña del perfil si está puesta). Copiar `identity.json` a otra
+      máquina deja de servir. **No** protege contra root local: decirlo así en la copy.
 - [ ] TPM 2.0 opt-in (avanzado; rompe la portabilidad del binario único).
-- [ ] **Requisito bloqueante del punto anterior**: no permitir activar el ligado a
-      hardware si el perfil no tiene otro miembro con `admit` — un cambio de disco o
-      placa deja ese miembro inutilizable para siempre.
+
+> ⚠️ Con D6 (perder el master = perder la cuenta), el ligado a hardware **sube la apuesta**:
+> un cambio de disco o de placa mata el perfil. Va opt-in, con la advertencia explícita.
 
 ---
 
@@ -316,16 +312,16 @@ expulsarlo le corta el acceso al contenido futuro.
 
 - **R1 — Ventana de rollback.** Quien nunca vio el acta nueva puede aceptar una vieja.
   Acotado por el pin de `maxSeq` y el tope de 30 días de los certs.
-- **R2 — La política la hacen cumplir los verificadores, no el dispositivo.** Un miembro
-  al que le quitaste `sign` sigue teniendo su llave y físicamente puede firmar; lo que
-  ocurre es que **los demás dejan de aceptarle esa firma**.
-- **R3 — Sin llaves móviles no hay respaldo.** Perder todos los miembros = perder el
-  perfil, sin excepción. Por eso el miembro de papel es parte de F1, no un extra.
+- **R2 — La política la hacen cumplir los verificadores, no el dispositivo.** Un miembro al
+  que le quitaste `sign` sigue teniendo su llave y físicamente puede firmar; lo que ocurre es
+  que **los demás dejan de aceptarle esa firma**.
+- **R3 — No hay recuperación (por diseño, D6).** Perder el master es perder el perfil. No es
+  un pendiente: es la decisión del dueño, y la UI la dice en voz alta en vez de esconderla.
 - **R4 — Expulsar no recupera lo ya leído.** Rotar la CEK protege el contenido futuro.
 - **R5 — Dependencia del vault online** cuando es el único con `sign`. Salida futura si
   molesta: tickets de firma de corta vida pre-emitidos. No entra en la primera versión.
 
 ## 6. Fuera de alcance
 
-Rotación de identidad (cambiar el `profileId`), federación del registro de revocación,
-y tickets de firma offline. Ninguno bloquea las fases de arriba.
+Rotación de identidad (cambiar el `profileId`), federación del registro de revocación, y
+tickets de firma offline. Ninguno bloquea las fases de arriba.
