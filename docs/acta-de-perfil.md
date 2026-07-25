@@ -183,7 +183,15 @@ irrefutable de su propia degradación.
 5. **Avisar lo descartado:** si A alcanzó a sellar cambios en su rama muerta (admitió un
    dispositivo, cambió capacidades), se pierden. La consola lo dice explícitamente.
 
-### 2.4.2 Oráculo de frescura (opcional): la CABECERA del acta en el proxy
+### 2.4.2 Oráculo de frescura (OPCIONAL y DIFERIDO): la CABECERA del acta en el proxy
+
+> **Postura del dueño (2026-07-25): opcional y diferido.** El conflicto que resuelve exige
+> restaurar un respaldo viejo del vault, cosa poco frecuente. **No se construye todavía y
+> nada depende de él.** Cuando se retome, el motivo principal no serán los conflictos sino
+> **cerrar la ventana de rollback (R1)**: un dispositivo robado presentando el acta vieja en
+> la que aún tenía `sign`, ante alguien que no vio la nueva. Sin oráculo eso queda acotado
+> por el tope de 30 días de los certs.
+
 
 El proxy del ecosistema puede guardar, por perfil, **sólo la cabecera** del acta:
 
