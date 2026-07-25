@@ -172,14 +172,13 @@ lib y el vendor del iframe):
 
 No depende de ninguna decisión pendiente. **Se puede empezar ya.**
 
-> ⚠️ **Punto abierto (decisión del dueño, pendiente).** El 2026-07-10 el dueño decidió
-> explícitamente que **el daemon y el paquete npm `@dotrino/vault` conviven SIN compartir
-> código** («no es necesario que compartan código»). Las tres primeras casillas de abajo
-> van en contra de esa decisión. Con el acta, el lado-bóveda deja de ser sólo el enroll y
-> pasa a incluir política, reconciliación y forks — mantener eso escrito tres veces
-> (daemon, lib, vendor) es donde veo el mayor riesgo de que diverjan en silencio.
-> **Si el dueño ratifica la decisión de 2026-07-10, se saltan esas tres casillas** y cada
-> lado implementa lo suyo; el resto de F0 no cambia.
+> **Sobre «el daemon y `@dotrino/vault` no comparten código» (2026-07-10):** era una
+> observación de que uno se empaqueta como binario y el otro es una librería web, no una
+> regla. **Sí comparten** a partir de acá: el núcleo se escribe como ESM puro sin
+> dependencias en `lib/src/`, el binario lo embebe al compilar (Node SEA) y el iframe lo
+> vendoriza como ya hace hoy. Con el acta ese lado deja de ser sólo el enroll —suma
+> política, reconciliación y forks—, así que tenerlo escrito tres veces es la vía más
+> rápida a que diverjan en silencio.
 
 - [ ] Extraer el núcleo del lado-bóveda a `dotrino-vault/lib/src/enroll.js` (puro,
       recibe `{ identity, send, audit }`): `handleEnroll`, `approve`, `reject`, `emitRevoke`.
