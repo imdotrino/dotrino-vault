@@ -111,6 +111,16 @@ pubkey JWK **158 B** · cert **601 B** · miembro completo **~1 KB** ·
 2. Todo cambio incrementa `seq` en 1 y fija `prev` = hash del acta anterior.
 3. **Traspaso de master**: lo sella el master actual, nombrando al nuevo en `sealer`. Es la
    última cosa que sella. El nuevo master re-emite los certs de todos los miembros (D9).
+   Cubre los dos casos con el **mismo** mecanismo, sin caso especial: dispositivo → vault
+   (D5) y **vault → vault** (mudarse de PC). Ninguna llave se mueve, tampoco al traspasar.
+   - **Admitir y traspasar van en el MISMO `seq`**: el nuevo sellador debe ser miembro (con
+     su cert) antes de sellar, así que el acta del traspaso agrega el miembro *y* cambia el
+     `sealer` de una sola vez. Sin ventana intermedia.
+   - **El contenido va aparte** y es la parte lenta: el nuevo master lo jala con su capacidad
+     `store` (F4), como copia reanudable. El acta se traspasa al instante.
+   - **Regla operativa para el usuario: sella el traspaso ANTES de apagar el vault viejo.**
+     Con el sello hecho, el master nuevo ya está vivo y perder el viejo no cuesta nada; si el
+     viejo muere antes de sellar, aplica D6. Mitiga el punto único de fallo sin contradecirlo.
 4. **Prohibido** sellar un acta que deje el perfil sin ningún miembro con `sign`.
    El código rechaza la operación y explica por qué.
 
@@ -243,9 +253,12 @@ se genera sola y todavía no la consume nadie para decidir).
 
 **Es el corazón del modelo: al terminar F2, funciona lo que el dueño pidió.**
 
-- [ ] **Traspaso**: el dispositivo génesis sella un acta nombrando al vault como `sealer`
-      (§2.1.3). Flujo en la consola, con la consecuencia dicha en claro.
-- [ ] El vault, al recibir el master, **re-emite los certs de todos los miembros** (D9).
+- [ ] **Traspaso**: el master actual sella un acta que, en el **mismo `seq`**, admite al
+      nuevo sellador como miembro y lo nombra en `sealer` (§2.1.3). Un solo flujo cubre
+      dispositivo → vault y **vault → vault** (mudarse de PC).
+- [ ] El nuevo master, al recibirlo, **re-emite los certs de todos los miembros** (D9).
+- [ ] Consola: el traspaso avisa **«sella antes de apagar el vault viejo»** y sólo después
+      ofrece migrar el contenido (que es reanudable y no crítico).
 - [ ] **Renuncia** (§2.2): botón «Este dispositivo ya no firma por mí» → registro suelto
       firmado, honrado de inmediato aunque el vault esté apagado; el master lo absorbe después.
 - [ ] `signData` bifurcado en `dotrino-identity/vault/core.js:738`:
