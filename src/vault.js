@@ -21,6 +21,7 @@ import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './thr
 import { openSecretsStore } from './secretsStore.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
+import { atRestFor, machineKey, migrateFile } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 /**
@@ -35,7 +36,15 @@ import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
  */
 export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false } = {}) {
   ensureDir(dir)
-  const identity = await Identity.connect({ dir })
+  // CIFRADO EN REPOSO ligado a esta máquina: `identity.json` deja de estar en claro, así
+  // que copiarlo a otro equipo no sirve de nada. No protege contra quien ya tiene ESTA
+  // máquina (puede leer el mismo material); es subir el listón, no una imposibilidad.
+  // La migración verifica antes de reemplazar: si algo falla, el original queda intacto.
+  try {
+    const r = migrateFile(path.join(dir, 'identity.json'), machineKey(dir))
+    if (r === 'migrado') log('[vault] identidad cifrada en reposo (ligada a esta máquina)')
+  } catch (e) { log('[vault] no se pudo cifrar la identidad en reposo:', e.message) }
+  const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
   if (!identity.me?.publickey) await identity.setMyNickname('')
 
   const store = openStore(dir)
