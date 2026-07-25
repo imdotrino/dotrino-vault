@@ -149,7 +149,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
     try {
-      const result = await threads.methods[d.method](d.args || {})
+      // CIFRADO de punta a punta con la clave de contenido del perfil: el proxy transporta
+      // pero no ve nada de lo que el usuario guarda. Si el dispositivo mandó `enc`, se abre
+      // aquí con la clave de la bóveda (que también es miembro) y la respuesta vuelve igual.
+      let args = d.args || {}
+      let cek = null
+      if (d.enc) {
+        cek = await identity.contentKey?.().catch(() => null)
+        if (!cek) return reply(from, { type: MSG.ERROR, error: 'store: esta bóveda no tiene la clave de contenido del perfil' })
+        args = JSON.parse(await identity.openContent(d.enc))
+      }
+      const result = await threads.methods[d.method](args)
+      if (cek) {
+        const enc = await identity.sealContent(JSON.stringify(result ?? null))
+        return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: { __enc: enc } })
+      }
       reply(from, { type: MSG.STORE_RESULT, method: d.method, result })
     } catch (e) { reply(from, { type: MSG.ERROR, error: e.message }) }
   }
