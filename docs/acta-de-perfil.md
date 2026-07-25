@@ -80,10 +80,24 @@ exactamente un miembro.
   ],
   "revoked": [ { "nonce": "…", "until": 1690000000000 } ],  // se poda al vencer
   "renounced": [ { "member": "<pub>", "caps": ["sign"], "ts": 0, "sig": "…" } ],
-  "updatedAt": 1690000000000,
+  "updatedAt": 1690000000000,   // epoch ms = UTC; ver §1.2.1
   "sig": "<firma del sealer>"
 }
 ```
+
+#### 1.2.1 Tiempos
+
+- **Todos los tiempos son epoch en milisegundos**, que **es UTC por definición**: sin zona
+  horaria, sin ambigüedad, sin horario de verano. Aplica a `updatedAt` (acta),
+  `addedAt` (miembro), `ts` (renuncia), `until` (revocación) y a `iat`/`exp` de los certs.
+- Van **dentro del cuerpo firmado**: no se pueden alterar sin romper el sello.
+- **El tiempo es informativo y NUNCA decide.** Toda la precedencia va por `seq` y por la
+  regla de traspaso (§2.4.1), a propósito «sin relojes»: si alguna regla dependiera de la
+  hora, un master mintiendo reescribiría el orden con sólo cambiar el reloj de su PC.
+  Sirve para la consola («cambiado el 12 de julio a las 14:30») y para auditar.
+- Un `updatedAt` absurdo (muy en el futuro) se puede **señalar** como sospechoso, pero
+  **nunca** rechaza un acta por sí solo — el reloj de un dispositivo puede estar mal.
+- La UI muestra en **hora local**; el dato guardado y firmado siempre es UTC.
 
 Tamaños medidos con los certs reales del ecosistema (2026-07-25):
 pubkey JWK **158 B** · cert **601 B** · miembro completo **~1 KB** ·
