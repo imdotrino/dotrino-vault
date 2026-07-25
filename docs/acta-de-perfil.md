@@ -157,6 +157,32 @@ del PC y vuelve a sellar `seq 5` con otro contenido. Contra eso está el pin de 
 (§2.3): los miembros que vieron la 6 rechazan la 5, y el master debe emitir un `seq` mayor
 para re-sincronizar.
 
+### 2.4.1 Master obsoleto (se restaura un respaldo anterior al traspaso)
+
+Caso: A era master, traspasó a B en `seq 10`, y después A se restaura de un respaldo de
+`seq 9` — no sabe que dejó de serlo y sella su propio `seq 10` nombrándose a sí mismo.
+Es la única forma en que aparecen dos actas del mismo `seq` firmadas por quien era sellador.
+
+Se resuelve porque **el acta del traspaso la firmó el propio A**: su firma es la prueba
+irrefutable de su propia degradación.
+
+1. **Empate a igual `seq`: gana el acta que cambia el `sealer`.** Determinista, sin relojes,
+   y en la misma dirección que ya es segura: entre dos versiones firmadas por la misma llave,
+   vale la que **le quita** poder al firmante.
+   (Si ambas cambian el `sealer` a destinos distintos, el master está mintiendo activamente:
+   desempate por hash menor, pero nada salva de un master hostil — puede expulsar a todos.)
+2. **Después del traspaso, A no puede nada más.** Sus actas `seq 11`, `12`… van firmadas por
+   quien ya no es el `sealer` y se rechazan de plano. **El daño se acota a un solo `seq`.**
+3. **Matiz al pin de `maxSeq`:** debe permitir **reemplazo a igual `seq`** cuando la regla 1
+   lo dicta (guardando el hash ganador). Sigue prohibido bajar de `seq`. Sin esto, un miembro
+   que ya adoptó la rama de A queda atrapado en ella.
+4. **Prevención:** al sellar el traspaso, el master viejo **persiste que dejó de serlo y se
+   niega a sellar**. Y **todo master, al arrancar, pide el acta vigente antes de sellar**
+   (a los miembros y al otro vault por el proxy); si ya no es el `sealer`, se calla. Cubre el
+   caso de restauración siempre que haya alguien más en línea.
+5. **Avisar lo descartado:** si A alcanzó a sellar cambios en su rama muerta (admitió un
+   dispositivo, cambió capacidades), se pierden. La consola lo dice explícitamente.
+
 ### 2.5 Punto de confianza inicial
 
 Al admitir un dispositivo nuevo no hay negociación: recibe el acta del master y la **pinea**
@@ -259,6 +285,10 @@ se genera sola y todavía no la consume nadie para decidir).
 - [ ] El nuevo master, al recibirlo, **re-emite los certs de todos los miembros** (D9).
 - [ ] Consola: el traspaso avisa **«sella antes de apagar el vault viejo»** y sólo después
       ofrece migrar el contenido (que es reanudable y no crítico).
+- [ ] **Master obsoleto** (§2.4.1): al traspasar, el master viejo persiste que dejó de serlo
+      y se niega a sellar; todo master pide el acta vigente al arrancar antes de sellar;
+      empate a igual `seq` lo gana el acta que cambia el `sealer`; el pin admite reemplazo a
+      igual `seq`; la consola avisa qué cambios se descartaron. Con test de cada regla.
 - [ ] **Renuncia** (§2.2): botón «Este dispositivo ya no firma por mí» → registro suelto
       firmado, honrado de inmediato aunque el vault esté apagado; el master lo absorbe después.
 - [ ] `signData` bifurcado en `dotrino-identity/vault/core.js:738`:
@@ -331,7 +361,12 @@ le corta el acceso al contenido futuro.
 - **R3 — No hay recuperación (por diseño, D6).** Perder el master es perder el perfil. No es
   un pendiente: es la decisión del dueño, y la UI la dice en voz alta en vez de esconderla.
 - **R4 — Expulsar no recupera lo ya leído.** Rotar la CEK protege el contenido futuro.
-- **R5 — Dependencia del vault online** cuando es el único con `sign`. Salida futura si
+- **R5 — Miembro aislado de la rama buena.** Un miembro que nunca se cruza con la rama del
+  master nuevo sigue creyendo que el viejo manda, y éste puede renovarle certs en su rama
+  muerta. Inevitable en cualquier sistema que funcione offline: nadie se entera de lo que
+  nunca le llegó. Colapsa a la rama buena en cuanto cualquiera de los dos toca la red donde
+  está el master vigente.
+- **R6 — Dependencia del vault online** cuando es el único con `sign`. Salida futura si
   molesta: tickets de firma de corta vida pre-emitidos. No entra en la primera versión.
 
 ## 6. Fuera de alcance
