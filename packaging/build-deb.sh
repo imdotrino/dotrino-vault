@@ -70,7 +70,7 @@ Architecture: amd64
 Maintainer: Dotrino <hola@dotrino.com>
 Section: utils
 Priority: optional
-Depends: systemd
+Depends: systemd, libatomic1
 Homepage: https://vault.dotrino.com
 Installed-Size: $INSTALLED_KB
 Description: Tu bóveda personal: toda tu información en un solo lugar seguro

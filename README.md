@@ -50,7 +50,11 @@ El `.deb` deja los binarios en `/usr/bin`, instala la unidad `systemd --user` y 
 habilita; el tarball hace lo equivalente en tu `$HOME`. Ambos: nada de Node ni
 dependencias, y el servicio arranca solo.
 
-El binario **trae Node embebido**: no necesitas instalar nada más. El instalador lo
+El binario **trae Node embebido**: no necesitas instalar Node ni dependencias de npm. Lo
+único que espera del sistema es la biblioteca `libatomic1`, que casi todas las distribuciones
+traen puesta; el `.deb` la declara y la instala sola si falta. Con el tarball, en un sistema
+muy pelado (un contenedor mínimo, por ejemplo), instálala tú:
+`sudo apt install libatomic1`. El instalador lo
 deja como **servicio systemd `--user`** que arranca solo (también en el boot, vía
 `linger`). En el primer arranque genera tu identidad y se conecta al proxy. **Sin
 contraseña, sin abrir puertos** (el vault marca hacia afuera).
