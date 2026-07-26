@@ -51,16 +51,40 @@ cuál firma, cuál guarda el contenido— sin que ninguna llave privada viaje nu
 
 ## 1. Modelo de datos
 
-### 1.1 Capacidades (lista cerrada)
+### 1.1 Capacidades (lista cerrada) y el CN
 
-| Capacidad | Scope existente | Qué habilita |
-|---|---|---|
-| `sign` | `vault:sign` | firmar como la identidad ante terceros (reputación, publicaciones) |
-| `store` | `vault:store` | leer y escribir el contenido del perfil |
-| `read` | `vault:read` | sólo leer el contenido |
+| Capacidad | Scope del cert | Qué habilita | Quién |
+|---|---|---|---|
+| `sign` | `vault:sign` | firmar como la identidad ante terceros | dispositivo |
+| `store` | `vault:store` | leer y escribir el contenido del perfil | dispositivo |
+| `read` | `vault:read` | sólo leer el contenido | dispositivo |
+| `secrets` | `vault:secrets:<cn>` | abrir **su propio** cajón de claves | servicio |
 
 Sellar el acta y admitir miembros **no son capacidades**: son el rol de master, y lo tiene
 exactamente un miembro.
+
+#### El CN: la frontera de lo que cada llave puede ver
+
+Cada miembro lleva un **`cn`** (nombre común, como en un certificado de toda la vida):
+
+- **`cn: null` → es un DISPOSITIVO tuyo.** Puede tener `sign`/`store`/`read`, o sea acceso
+  a lo que es tuyo. No tiene cajón de claves que abrir.
+- **`cn: 'proxy'` → es un SERVICIO.** Su única capacidad posible es `secrets`, y lo que abre
+  es **exactamente** el cajón `proxy`. No ve el cajón de `geo`, no firma por ti, no lee tu
+  contenido. La llave del proxy no puede acceder a nada que no sea del proxy.
+
+Esto **no es una costumbre, es una regla de forma del acta**: un acta donde un miembro con
+`cn` tenga capacidades de dispositivo —o uno sin `cn` tenga `secrets`— **no valida**
+(`servicio-con-capacidades-de-dispositivo` / `secretos-sin-cn`). Y no se puede ascender un
+servicio cambiándole los permisos: para eso hay que sacarlo y volver a admitirlo, que es un
+gesto visible en el acta.
+
+**Dos cierres independientes**, y ahí está el valor de tenerlo en el acta: el cert acota
+(scope `vault:secrets:proxy`) **y** el acta acota (el `cn` de ese miembro). La bóveda
+comprueba las dos cosas antes de entregar un secreto, así que el límite no depende de qué
+cert se emitió un día: está escrito donde cualquiera puede verificarlo.
+
+El `cn` sale del scope al emparejar: `dotrino-vault pair --service proxy` ⇒ CN `proxy`.
 
 ### 1.2 El acta
 
@@ -77,6 +101,7 @@ exactamente un miembro.
       "pub": "<JWK string>",       // llave de FIRMA del miembro
       "encPub": "<JWK string>",    // llave ECDH del miembro (para envolverle la CEK)
       "label": "Celular de Santiago",
+      "cn": null,                  // null = dispositivo tuyo · 'proxy' = servicio (§1.1)
       "caps": ["store", "read"],
       "addedAt": 1690000000000,
       "cert": { /* cert emitido por el sealer vigente; depth 1 */ }

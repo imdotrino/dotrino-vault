@@ -204,15 +204,20 @@ async function cmdMembers () {
   if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
   if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
-  const CAP = { sign: 'firma', store: 'guarda', read: 'lee' }
+  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves' }
   console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, (acta.profileId || '').slice(0, 24) + '…', acta.seq)
   for (const m of acta.members) {
     const quien = m.label || m.id
-    const marcas = [m.isMaster ? `${B}manda${Z}` : null, m.isMe ? 'este dispositivo' : null].filter(Boolean)
+    const marcas = [
+      m.isMaster ? `${B}manda${Z}` : null,
+      m.isMe ? 'este dispositivo' : null,
+      m.cn ? `servicio «${m.cn}»` : null
+    ].filter(Boolean)
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
     console.log('  %s  %s%s\n      %s', m.id, quien, marcas.length ? '  [' + marcas.join(' · ') + ']' : '', caps)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee\n')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee')
+  console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
 }
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */

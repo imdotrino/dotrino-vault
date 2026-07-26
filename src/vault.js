@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
+import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf } from '../lib/src/enroll.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
@@ -238,6 +239,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
     })
     if (!chk.ok) { audit('rejected', { what: 'secrets', ns, reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
+    // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
+    // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
+    // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta
+    if (acta && !Acta.memberCanReadSecrets(acta, chk.device, ns)) {
+      audit('rejected', { what: 'secrets', ns, reason: 'cn' })
+      return reply(from, { type: MSG.ERROR, error: `no autorizado: cn — el acta no reconoce a este miembro como el servicio «${ns}»` })
+    }
     let enc
     try {
       enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns) } })

@@ -23,7 +23,9 @@ const T = {
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Manda',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'manda',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves' },
+    service: 'servicio',
+    service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     caps_none: 'sin permisos',
     solo_warn_t: 'Solo tienes este dispositivo',
     solo_warn_b: 'Si lo pierdes, pierdes el perfil: no hay forma de recuperarlo. Conecta al menos otro dispositivo o tu bóveda.',
@@ -64,7 +66,9 @@ const T = {
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'In charge',
     members: 'Devices', me: 'this device', is_master: 'in charge',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys' },
+    service: 'service',
+    service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     caps_none: 'no permissions',
     solo_warn_t: 'You only have this device',
     solo_warn_b: 'If you lose it, you lose the profile: there is no way to recover it. Connect at least one more device or your vault.',
@@ -324,16 +328,18 @@ onBeforeUnmount(() => clearInterval(selfTimer))
             <strong>{{ m.label || m.id }}</strong>
             <span class="tag" v-if="m.isMe">{{ t.me }}</span>
             <span class="tag master" v-if="m.isMaster">{{ t.is_master }}</span>
+            <span class="tag svc" v-if="m.cn">{{ t.service }} «{{ m.cn }}»</span>
             <code class="mid">{{ m.id }}</code>
           </div>
           <div class="caps">
-            <button v-for="c in ['sign','store','read']" :key="c"
+            <button v-for="c in (m.cn ? ['secrets'] : ['sign','store','read'])" :key="c"
                     class="cap" :class="{ on: m.caps.includes(c) }"
                     :disabled="!isMaster || busy === 'caps-' + m.pub"
                     :data-testid="'cap-' + c + '-' + m.id"
                     @click="toggleCap(m, c)">{{ t.caps[c] }}</button>
             <span v-if="!m.caps.length" class="muted">{{ t.caps_none }}</span>
           </div>
+          <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
                     data-testid="renounce" @click="confirming = { kind: 'renounce', pub: m.pub }">{{ t.act_renounce }}</button>
@@ -415,6 +421,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tag { font-size: 11px; background: #1b2536; color: #9fb0c9; border-radius: 999px; padding: 2px 8px; }
 .tag.master { background: #1d3350; color: #9cc4ff; }
+.tag.svc { background: #2a2310; color: #ffd98a; }
+.svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }
 .cap.on { background: #14304a; color: #bfe0ff; border-color: #2f5f8f; }
