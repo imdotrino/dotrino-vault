@@ -105,6 +105,20 @@ const T = {
 }
 const t = computed(() => T[props.lang] || T.es)
 
+/**
+ * En desarrollo se puede apuntar la identidad a un iframe LOCAL con `?vault=<url>`, para
+ * poder probar la consola entera sin salir de la máquina.
+ *
+ * Solo se acepta si esta página se está sirviendo desde localhost. Es importante: sin ese
+ * cerrojo, un enlace del tipo `vault.dotrino.com/dispositivos?vault=…` podría apuntar tu
+ * identidad a un iframe ajeno, que es exactamente el ataque que este proyecto evita.
+ */
+function opcionesIdentidad () {
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
+  const url = local ? new URLSearchParams(location.search).get('vault') : null
+  return url ? { vaultUrl: url } : {}
+}
+
 const id = ref(null)
 const loading = ref(true)
 const fatal = ref('')
@@ -130,7 +144,7 @@ async function refresh () {
 }
 
 onMounted(async () => {
-  try { id.value = await Identity.connect() } catch { fatal.value = t.value.err_connect; loading.value = false; return }
+  try { id.value = await Identity.connect(opcionesIdentidad()) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
   await refresh()
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
