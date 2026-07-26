@@ -145,6 +145,37 @@ Tamaños medidos con los certs reales del ecosistema (2026-07-25):
 pubkey JWK **158 B** · cert **601 B** · miembro completo **~1 KB** ·
 **acta de 5 miembros: 5,7 KB** · acta de 20 miembros: ~23 KB.
 
+### 1.2.3 La TARJETA de perfil (lo que se comparte con otra persona)
+
+Para escribirle a alguien cifrado hay que conocer las **llaves de cifrado de todos sus
+dispositivos**; si no, el mensaje solo lo abre el aparato desde el que te escribió. Pero
+pasarle el ACTA a un contacto le contaría de más: cuántos dispositivos tienes, cómo se
+llaman y qué puede cada uno. Nada de eso es asunto suyo.
+
+Así que lo que viaja entre personas es una **tarjeta**: el mínimo imprescindible, firmado.
+
+```jsonc
+{ "v": 1, "profileId": "…", "seq": 42, "sealedBy": "…",
+  "keys": [ { "pub": "…", "encPub": "…" } ],   // solo llaves; los servicios (CN) NO salen
+  "iat": 1690000000000, "sig": "…" }
+```
+
+- **La firma el master al sellar** y viaja **con** el acta (fuera del cuerpo firmado, con
+  firma propia), así que cualquier miembro puede entregarla sin ser él quien manda.
+- **Al adoptarla**: la primera vez se acepta —es el mismo criterio con el que agregaste el
+  contacto—; después solo si el `seq` no retrocede y la firmó el mismo master. Si el master
+  cambió (traspaso), se avisa (`master-cambiado`) en vez de aceptarlo en silencio.
+- **Los servicios no aparecen**: un `cn` no es la persona y no tiene por qué recibir los
+  mensajes de nadie.
+
+**Y el sobre deja de estar atado a la conexión.** Las envolturas se indexaban por el token
+del proxy, así que un dispositivo que no estaba conectado no tenía entrada y no podía abrir
+nada. Ahora se indexan por un id derivado de la llave de cifrado (sobre `v2`): cualquier
+dispositivo de esa persona lo abre, hubiera estado en línea o no.
+
+> ⚠️ El cuerpo firmado del acta excluye `sig` **y** `card`. Quien verifique un acta por su
+> cuenta (lo hace el proxy) tiene que excluir las dos, o la firma no cuadra.
+
 ### 1.3 Retención del historial
 
 - **Un tercero no necesita historial**: recibe el snapshot actual y verifica firma + `seq`.
@@ -339,23 +370,16 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 | **F2** traspaso y firma | ✅ hecha y publicada | aprobar admite en el acta, el acta viaja con el cert y con `vault.devices`, `signData` re-enrutado, `joinProfile` |
 | **F3** unir identidades | ✅ hecha y publicada | certificado de continuidad, verificado en el ENROLL y guardado con el miembro |
 | **F4** contenido | ✅ hecha y publicada | `@dotrino/identity/content` + llavero en el acta + rotación al expulsar + **store cifrado de punta a punta** |
-| **F5** consumidores y endurecimiento | ✅ hecha (salvo messenger) | proxy bindea el `profileId` del acta; reputación por persona; **cifrado en reposo ligado a la máquina** |
+| **F5** consumidores y endurecimiento | ✅ hecha | proxy bindea el `profileId`; reputación por persona; **messenger cifra a todos los dispositivos** (tarjeta de perfil, §1.2.3); **cifrado en reposo ligado a la máquina** |
 | **Smoke E2E** | ✅ hecho | `dotrino-test/smoke/` — 6 escenarios verdes con proxy y bóveda reales en local |
 
 **Lo que queda pendiente, en concreto:**
 
-- **Messenger — cifrar a TODOS los dispositivos de un contacto.** Está bloqueado por algo
-  que no existe todavía: **los pares no intercambian sus actas**. Hoy solo conoces el acta
-  de tu propio perfil (llega con el cert y con `vault.devices`); para cifrarle a la persona
-  y no al aparato hace falta un mecanismo de descubrimiento del acta ajena. Es diseño nuevo,
-  no cableado: no se hizo a medias a propósito.
 - **Prevención del master obsoleto** (§2.4.1 punto 4): que el master pregunte el acta
-  vigente al arrancar antes de sellar. Requiere que los miembros SIRVAN su acta (hoy solo la
-  bóveda sirve), así que depende del mismo mecanismo que el punto anterior. La regla de
-  desempate sí está implementada y probada, que es lo que resuelve el conflicto cuando pasa.
-- **Reinicio del proxy en el VPS**: el código nuevo ya está en la máquina (`git pull` hecho),
-  pero el reinicio del proceso quedó bloqueado por el permisos del entorno. Corre en un
-  `screen`, no en systemd. **Hasta que se reinicie, el proxy en vivo no bindea el `profileId`.**
+  vigente al arrancar antes de sellar. La **tarjeta** (§1.2.3) resuelve el descubrimiento
+  entre personas, pero para esto hace falta que un MIEMBRO sirva el acta completa a otro
+  miembro del mismo perfil, que es otra cosa. La regla de desempate sí está implementada y
+  probada, que es lo que resuelve el conflicto cuando ocurre.
 - **Topbar estándar** en `vault.dotrino.com` (§5 de CONVENCIONES): la consola usa el header
   propio de la landing, no `<dotrino-topbar>`.
 - **Escenario de navegador con Playwright** en el smoke (el resto del protocolo ya está
