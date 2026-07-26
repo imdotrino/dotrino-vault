@@ -225,7 +225,7 @@ Residuales que se aceptan y documentan:
 - `enroll`: firmar `data` con `D` y enviarla en el `ENROLL`; manejar `ENROLL_CHALLENGE` (mostrar SAS/deviceId); al recibir `ENROLLED`, **validar** con `verifyChain({ cert: res.cert, trustedIssuer: qr.iss, expectedSub: device.publickey, expectedScope })` y exigir `res.cert.iss === qr.iss` y `res.cert.sub === device.publickey` **antes** de retornar; **dejar de devolver `res.iss`** (devolver `qr.iss`).
 - Nuevo manejador `MSG.REVOKED`: verificar firma de la maestra pineada antes de cualquier acción (en Node solo loguea; en el navegador dispara el self-wipe — §5.4).
 
-### 5.3 `dotrino_profile` (UX de emparejar)
+### 5.3 `dotrino-profile-app` (UX de emparejar)
 
 - Pantalla en modo `self`: pegar/escanear el QR `v:2`; mostrar el **fingerprint del `iss`** y, tras enviar el ENROLL, mostrar el **SAS** que devuelve el vault para que el usuario lo **compare** con el del PC antes de aprobar.
 - Tres acciones separadas y claramente etiquetadas: **Conectar** (no borra), **Mover identidad a otra bóveda** (borra, con confirmación textual), **Desconectar**.
@@ -248,7 +248,7 @@ Archivos load-bearing a tocar (rutas absolutas):
 - `/mnt/sda1/Dotrino/dotrino-vault/src/protocol.js` → mover a `/mnt/sda1/Dotrino/dotrino-identity/vault/vault-protocol.js` (re-export)
 - `/mnt/sda1/Dotrino/dotrino-identity/vault/capabilities.js` (deriveSAS, DEFAULT_DELEGATION_MS más corto)
 - `/mnt/sda1/Dotrino/dotrino-identity/vault/core.js` (signData bifurcado, vaultPair/vaultUnpair, MSG.REVOKED self-wipe)
-- `/mnt/sda1/Dotrino/dotrino_profile/src/main.js` (UX tres acciones + SAS)
+- `/mnt/sda1/Dotrino/dotrino-profile-app/src/main.js` (UX tres acciones + SAS)
 - `/mnt/sda1/Dotrino/dotrino-store/store/` (`vault-backend.js`, `merge.js`, `D` no-extraíble, MSG.REVOKED)
 
 El cambio que cierra el agujero de raíz es la **confirmación humana del `deviceId`+SAS en la máquina de la maestra antes de `signDelegation`** (paso 6-7) combinada con la **validación estricta de la cadena en el dispositivo** (paso 8): el token deja de ser credencial suficiente y la maestra solo firma para el `D` que el usuario aprobó comparando códigos. Todo lo demás es defensa en profundidad.

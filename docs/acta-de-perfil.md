@@ -442,7 +442,7 @@ registros dejan de crecer sin límite.
       dispositivo, pierdes el perfil». Sin prometer una recuperación que no existe.
 - [ ] Normalizar esa app: `<dotrino-topbar>` con `profile` (§5/§6.1 de CONVENCIONES),
       `@dotrino/support@0.8` (hoy 0.6.0), bilingüe es/en.
-- [ ] Migrar desde `dotrino_profile/src/main.js` las vistas `/vault` (`:336`) y `/myvault`
+- [ ] Migrar desde `dotrino-profile-app/src/main.js` las vistas `/vault` (`:336`) y `/myvault`
       (`:653`) — ~500 de sus 893 líneas — y dejar redirect en las rutas viejas.
 - [ ] `dotrino-vault/src/ctl.js`: apuntar el QR a `vault.dotrino.com` (hoy `PROFILE_URL`, `:140`).
 - [ ] CLI/TUI espejo: `dotrino-vault members`, `caps <deviceId> <±cap>`.

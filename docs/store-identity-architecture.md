@@ -89,9 +89,9 @@ Cada handler de `store.js` se vuelve wrapper: si `isPaired()` y la op está enru
 
 ---
 
-## 4. UX de emparejar — en `dotrino_profile`
+## 4. UX de emparejar — en `dotrino-profile-app`
 
-Pantalla en el modo `self` (tu propio perfil), bloque "Tu bóveda · Dispositivos" debajo de `<dotrino-profile>` (`dotrino_profile/src/main.js`, render por `innerHTML` como el resto). Profile es **otro origin**: no custodia nada; orquesta el pairing como control remoto de los iframes compartidos. Profile ya embebe `Identity.connect()` (iframe `id.`); para el store debe además embeber `Store.connect()` (iframe `store.`) y llamar sus métodos `vault*`.
+Pantalla en el modo `self` (tu propio perfil), bloque "Tu bóveda · Dispositivos" debajo de `<dotrino-profile>` (`dotrino-profile-app/src/main.js`, render por `innerHTML` como el resto). Profile es **otro origin**: no custodia nada; orquesta el pairing como control remoto de los iframes compartidos. Profile ya embebe `Identity.connect()` (iframe `id.`); para el store debe además embeber `Store.connect()` (iframe `store.`) y llamar sus métodos `vault*`.
 
 **Estados:**
 - **(a) No vinculado:** tarjeta "Conecta este dispositivo a tu bóveda" con dos vías para ingresar el objeto `{v,iss,proxy,token}` que imprime `dotrino-vault pair`: **pegar el JSON** o **escanear el QR** con la cámara (reusar el decoder client-side de `qrreader`/`qrshare`, sin librería de terceros nueva). Antes de confirmar, mostrar el **fingerprint del `iss`** para verificación visual. Al confirmar:
@@ -111,7 +111,7 @@ Pantalla en el modo `self` (tu propio perfil), bloque "Tu bóveda · Dispositivo
 
 ### Fase 1 — Emparejamiento + cert en el iframe de identidad (bajo riesgo, entregable)
 **Objetivo:** poder enrolar un dispositivo desde profile y guardar el cert delegado en `id.dotrino.com`, sin cambiar todavía el comportamiento de `signData` (remote mode existe pero el default de firma NO cambia hasta fase 2).
-- Archivos: `dotrino-identity/vault/vault-protocol.js` (NUEVO, mueve `MSG`/`SCOPE`), `dotrino-vault/src/protocol.js` (re-export para compat), `dotrino-identity/vault/remote.js` (NUEVO, solo `enroll`), `dotrino-identity/vault/core.js` (`DEVICE_KEY_STORAGE`/`VAULT_CERT_STORAGE`, handlers `vaultPair`/`vaultUnpair`/`vaultStatus`), `dotrino-identity/src/index.js` (+`.d.ts`), `dotrino_profile/src/main.js` (pantalla pegar/escanear + fingerprint).
+- Archivos: `dotrino-identity/vault/vault-protocol.js` (NUEVO, mueve `MSG`/`SCOPE`), `dotrino-vault/src/protocol.js` (re-export para compat), `dotrino-identity/vault/remote.js` (NUEVO, solo `enroll`), `dotrino-identity/vault/core.js` (`DEVICE_KEY_STORAGE`/`VAULT_CERT_STORAGE`, handlers `vaultPair`/`vaultUnpair`/`vaultStatus`), `dotrino-identity/src/index.js` (+`.d.ts`), `dotrino-profile-app/src/main.js` (pantalla pegar/escanear + fingerprint).
 - **Hecho cuando:** desde profile se pega/escanea el QR de un daemon real, `vaultStatus()` devuelve `paired:true` con `deviceId` y `exp`, el daemon confirma el `deviceId`, y `vaultUnpair()` revierte. `signData` sin opts sigue firmando con la maestra local (sin regresión, verificado con messenger/reputation). Daemon desplegado sigue funcionando (compat del re-export probada).
 
 ### Fase 2 — Identidad delegada (re-enrutar `signData` a la maestra)
@@ -121,7 +121,7 @@ Pantalla en el modo `self` (tu propio perfil), bloque "Tu bóveda · Dispositivo
 
 ### Fase 3 — Routing del store a la bóveda (cifrado de cara al proxy)
 **Objetivo:** que el store lea/escriba en la bóveda, con IndexedDB como cache.
-- Archivos: `dotrino-vault/src/protocol.js` (`SCOPE.STORE`, `MSG.STORE_OP/STORE_RES`), `dotrino-vault/src/store.js` (SCHEMA 2, threads/opens, opens absoluto), `dotrino-vault/src/vault.js` (`handleStore` + `verifyChain` scope store + anti-replay), `dotrino-store/store/merge.js` (NUEVO, puro, `maxPerThread` por arg), `dotrino-store/store/vault-backend.js` (NUEVO, vendor proxy-client/capabilities, ops cifradas), `dotrino-store/store/store.js` (wrappers con fallback + cache), `dotrino-store/store/index.html` (`/vendor`), `dotrino-store/src/index.js` (`vaultEnroll`/`vaultUnlink`/`vaultStatus`/`onVault`), `dotrino_profile/src/main.js` (enrolar store + "subir mis datos" + Drive off).
+- Archivos: `dotrino-vault/src/protocol.js` (`SCOPE.STORE`, `MSG.STORE_OP/STORE_RES`), `dotrino-vault/src/store.js` (SCHEMA 2, threads/opens, opens absoluto), `dotrino-vault/src/vault.js` (`handleStore` + `verifyChain` scope store + anti-replay), `dotrino-store/store/merge.js` (NUEVO, puro, `maxPerThread` por arg), `dotrino-store/store/vault-backend.js` (NUEVO, vendor proxy-client/capabilities, ops cifradas), `dotrino-store/store/store.js` (wrappers con fallback + cache), `dotrino-store/store/index.html` (`/vendor`), `dotrino-store/src/index.js` (`vaultEnroll`/`vaultUnlink`/`vaultStatus`/`onVault`), `dotrino-profile-app/src/main.js` (enrolar store + "subir mis datos" + Drive off).
 - **Hecho cuando:** con store emparejado, `appendMessage`/`listThread`/`recordOpen` (valor absoluto) hacen round-trip cifrado a la bóveda y espejan en cache; con el daemon offline caen a IndexedDB y reconcilian al volver (merge idempotente por `id+ts`); todas las ops mutadoras enrutan (no quedan cache/vault inconsistentes); el proxy NO ve contenido de threads en claro. Sin pairing, byte-idéntico a hoy (verificado en messenger/home/chat).
 
 ### Fase 4 (posterior, fuera de alcance inmediato) — panel remoto de dispositivos
