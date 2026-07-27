@@ -198,8 +198,8 @@ const installCmd = 'tar xzf dotrino-vault-*-linux-x64.tar.gz\ncd dotrino-vault-*
 const pairCmd = 'dotrino-vault pair'
 // Instalador universal del ecosistema (dotrino-home/public/install.{ps1,sh}): asegura
 // Node 20+ —lo baja LOCAL, sin admin— y corre el paquete. Es la vía probada en Windows.
-const winPsCmd = '& ([scriptblock]::Create((irm https://dotrino.com/install.ps1))) @dotrino/vaultd'
-const winShCmd = 'curl -fsSL https://dotrino.com/install.sh | sh -s -- @dotrino/vaultd'
+const winPsCmd = '& ([scriptblock]::Create((irm https://install.dotrino.com/install.ps1))) @dotrino/vaultd'
+const winShCmd = 'curl -fsSL https://install.dotrino.com/install.sh | sh -s -- @dotrino/vaultd'
 const npxCmd = 'npx -y @dotrino/vaultd'
 
 /* Pestañas por sistema: las tres vías existen para los tres, así que mostrarlas todas
