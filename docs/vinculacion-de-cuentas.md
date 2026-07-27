@@ -193,21 +193,54 @@ completo sin ellos.
 
 ### 5.1 Bug a cerrar primero: el camino B hoy pisa la cuenta abierta
 
+**Esto es lo primero que se arregla, y se puede arreglar solo: no necesita el protocolo nuevo
+ni el resto de la fase 1.**
+
 `joinProfile` (`dotrino-identity/vault/core.js:451`) acepta cambiar de perfil siempre que este
-dispositivo sea **el único miembro** del suyo, y entonces hace `saveActa(candidate)`
-(`:461`) **encima** del acta que había. O sea: hoy, emparejar un teléfono que ya tenía su
-cuenta con una bóveda que tiene otra **reemplaza la cuenta del teléfono sin preguntar**.
+dispositivo sea **el único miembro** del suyo, y entonces hace `saveActa(candidate)` (`:461`)
+**encima** del acta que había. O sea: hoy, emparejar un teléfono que ya tenía su cuenta con
+una bóveda que tiene otra **reemplaza la cuenta del teléfono sin preguntar**.
 
-Y no es solo el nombre: el llavero (`keyring`) vive **dentro del acta**, y `myCek()`
-(`:416`) lo lee del acta vigente. Al sobrescribirla, las generaciones viejas se van con ella
-—`joinProfile` ni siquiera las manda al historial— así que **lo que esa cuenta hubiera
-guardado cifrado se queda sin llave**.
+Qué daño hace, medido y sin exagerar:
 
-- [ ] `joinProfile` solo procede sobre un perfil **recién nacido y vacío** (un miembro, sin
-      contenido, llavero sin usar). En cualquier otro caso devuelve el conflicto para que lo
-      resuelva la UI eligiendo camino. Nunca sobrescribe.
-- [ ] Test de regresión: teléfono con cuenta y contenido + bóveda con otra cuenta ⇒ la cuenta
-      del teléfono **sigue intacta** y aparece una segunda.
+- **Activo, hoy.** El contenido del store se namespacea por el **id local del perfil**
+  (`store/store.js`, `threads.<pid>.v1`), no por el `profileId` del acta. Así que el contenido
+  no se mueve: se queda donde estaba y **pasa a colgar de la cuenta nueva**. Es exactamente la
+  fusión de cuentas que §4 prohíbe, hecha en silencio y en una sola dirección.
+- **Latente.** El llavero (`keyring`) vive **dentro** del acta y `myCek()` (`:416`) lo lee de
+  la vigente. Al sobrescribirla las generaciones se van con ella —`joinProfile` ni siquiera
+  las manda al historial—, así que **lo que estuviera cifrado con esa clave quedaría sin
+  llave**. Todavía no muerde porque `sealContent`/`openContent` existen en identity y en el
+  vault pero **ningún cliente del store los usa aún**; muerde el día que se usen.
+
+**La corrección:**
+
+- [ ] **`joinProfile` nunca sobrescribe.** Solo procede sobre un perfil **apto para adoptar**;
+      en cualquier otro caso devuelve el conflicto (`perfil-con-datos`, con `profileId`, `seq`
+      y número de miembros) y **no escribe nada**.
+- [ ] **Apto = marcado a propósito, no adivinado.** `createProfile({ name, forVault: true })`
+      deja `pendingJoin: true` en el registro; `joinProfile` exige esa marca **o** un perfil
+      virgen comprobable desde identity: `seq === 1`, un solo miembro (yo), **sin peers**, sin
+      cert de bóveda. La marca se limpia al unirse. Nada de heurísticas sobre «parece vacío».
+- [ ] **El contenido del store no lo puede comprobar identity** (vive en otro origen): lo
+      comprueba **quien llama** (la consola) y, si hay algo, no ofrece el camino B sobre ese
+      perfil sino crear uno nuevo. Que identity no pueda verlo es la razón de la marca.
+- [ ] **`pushHistory(current)` antes de cualquier `saveActa` de adopción**, para que el
+      llavero anterior no se evapore ni siquiera en los casos raros.
+- [ ] `vaultPair` (`:1262`) deja de llamar a `joinProfile` a ciegas (`:1278`): si el perfil
+      abierto no es apto, **falla con un mensaje claro** en vez de tragarse la cuenta. Lo mismo
+      en el receptor de actas (`:1349`).
+- [ ] Copy del error, en llano: «Este aparato ya está usando una cuenta. Para usar también la
+      de tu computadora, crea una cuenta nueva aquí — la que tienes abierta no se toca.»
+
+**Pruebas (van antes que el arreglo, porque hoy fallan):**
+
+- [ ] Teléfono con cuenta y contenido + bóveda con otra cuenta ⇒ la cuenta del teléfono
+      **sigue intacta**, con su `profileId`, su acta y su contenido, y aparece una segunda.
+- [ ] Perfil creado con `forVault: true` ⇒ se une sin fricción y la marca queda limpia.
+- [ ] Perfil con peers ⇒ `perfil-con-datos` y **cero escrituras** (comprobar que el acta
+      guardada es byte-idéntica a la de antes).
+- [ ] Adoptar guarda la anterior en el historial (`actaHistory` la devuelve).
 
 ### 5.2 Protocolo: la intención viaja firmada (V7)
 

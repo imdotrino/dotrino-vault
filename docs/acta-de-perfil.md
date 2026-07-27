@@ -612,14 +612,14 @@ Si un escenario necesita el proxy real, va aparte y marcado como manual.
 > cuentas) y cómo se mueve contenido **entre cuentas distintas** (fase 2, local a cada lado).
 > Lo de aquí abajo es **dentro de UNA misma cuenta**: dos aparatos que editaron lo mismo.
 
-**Cómo se mergea el contenido entre pares** (pedido del dueño, 2026-07-25). Este plan
-define **quién** puede leer y escribir (el acta, las capacidades, la CEK de F4), pero **no**
-qué pasa cuando dos miembros editaron lo mismo por separado. Hace falta una pasada propia:
-qué es una unidad de contenido, qué gana ante conflicto (por tipo de dato, no una regla
-única), qué es idempotente, y cómo se reconcilia sin depender del reloj — con el mismo
-criterio que aquí: reglas deterministas, nada de «gana el más nuevo por fecha».
-Precedentes a mirar antes de inventar: el merge por `id+ts` de `@dotrino/store` y el
-`recordOpen` con valor absoluto de `dotrino-vault/docs/store-identity-architecture.md §3`.
+**Cómo se mergea el contenido entre pares** — ✅ **diseñado el 2026-07-27** en
+**[`dotrino-store/docs/politicas-de-datos.md`](../../dotrino-store/docs/politicas-de-datos.md)**
+(pendiente de implementar, fases B0–B6). Este plan define **quién** puede leer y escribir (el
+acta, las capacidades, la CEK de F4); aquello define **qué pasa cuando dos miembros editaron
+lo mismo por separado**: un sobre por ítem con reloj lógico por miembro (`wid`+`wseq`, el `ts`
+no decide nunca), un catálogo cerrado de cinco políticas por tipo de dato (`log`, `registro`,
+`contador`, `conjunto`, `archivo`), borrar como lápida —hoy lo borrado resucita en la
+siguiente mezcla— y la regla dura de que ninguna resolución descarta datos en silencio.
 
 ## 8. Fuera de alcance
 
