@@ -47,6 +47,7 @@ const T = {
     pair_code_t: 'Escribe este código en tu bóveda',
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
+    pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
     pair_fail: 'No se pudo conectar: ',
     cam_err: 'No se pudo abrir la cámara. Pega el código a mano.',
     no_qr: 'No se encontró ningún código en esa imagen.',
@@ -90,6 +91,7 @@ const T = {
     pair_code_t: 'Type this code in your vault',
     pair_code_b: 'Open it and type these six digits to approve the connection. Nobody else knows them.',
     pair_done: 'Done, this device is connected.',
+    pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
     pair_fail: 'Could not connect: ',
     cam_err: 'Could not open the camera. Paste the code by hand.',
     no_qr: 'No code found in that image.',
@@ -205,7 +207,10 @@ async function connect (qr) {
   pairing.value = true; pairCode.value = ''; msg.value = { kind: 'info', text: t.value.pair_wait }
   const off = id.value.onVault((e) => { if (e?.phase === 'challenge') { pairCode.value = e.code; msg.value = null } })
   try {
-    await id.value.enrollDevice(qr)
+    // Camino B (`vinculacion-de-cuentas.md` §3): la cuenta de la bóveda se materializa aquí
+    // como una cuenta MÁS, con llave nueva. La que estabas usando NO se toca — antes se
+    // sobrescribía sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
+    await id.value.enrollDevice(qr, { join: 'new' })
     msg.value = { kind: 'ok', text: t.value.pair_done }
     await refresh()
   } catch (e) {
@@ -381,6 +386,7 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         <p class="muted">{{ t.pair_code_b }}</p>
       </div>
       <template v-else>
+        <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
         <div class="row">
           <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
           <button class="btn ghost" :disabled="pairing" @click="fileInput.click()">{{ t.pair_file }}</button>

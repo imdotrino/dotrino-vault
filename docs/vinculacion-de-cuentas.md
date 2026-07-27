@@ -109,8 +109,13 @@ conmutador de perfiles muestra una entrada más.
 leerla ahí. Lo único que viaja es la CEK envuelta a la llave nueva.
 
 **Continuidad:** aquí **no hace falta** certificado de continuidad. La llave nació hace un
-segundo y no tiene pasado que salvar. (Hoy se manda igual siempre que el perfil tenga un solo
-miembro; hay que acotarlo — §5.)
+segundo y no tiene pasado que salvar; ya no se manda (0.34.0).
+
+> ⚠️ **Y con eso el certificado de continuidad se queda sin ningún caso de uso.** Existía para
+> «una identidad que ya existía se une a otro perfil», que es justo lo que el modelo de dos
+> caminos elimina: en A la identidad **es** la cuenta (no hay nada que puentear) y en B la
+> llave es nueva (no hay pasado). Queda el código en su sitio —es inofensivo y puede servir en
+> el protocolo del camino A—, pero **hoy no lo llama nadie**. Decidir si se borra.
 
 ---
 
@@ -191,17 +196,17 @@ completo sin ellos.
 
 ## 5. FASE 1 — qué hay que cambiar en el código (el emparejamiento)
 
-### 5.1 Bug a cerrar primero: el camino B hoy pisa la cuenta abierta
+### 5.1 ✅ HECHO (2026-07-27) — el camino B ya no pisa la cuenta abierta
 
-**Esto es lo primero que se arregla, y se puede arreglar solo: no necesita el protocolo nuevo
-ni el resto de la fase 1.**
+> Implementado en `@dotrino/identity@0.34.0`, con la consola y `profile.dotrino.com` al día.
+> Lo que sigue queda como registro de qué se arregló y por qué.
 
-`joinProfile` (`dotrino-identity/vault/core.js:451`) acepta cambiar de perfil siempre que este
-dispositivo sea **el único miembro** del suyo, y entonces hace `saveActa(candidate)` (`:461`)
-**encima** del acta que había. O sea: hoy, emparejar un teléfono que ya tenía su cuenta con
-una bóveda que tiene otra **reemplaza la cuenta del teléfono sin preguntar**.
+`joinProfile` aceptaba cambiar de perfil con que este dispositivo fuera **el único miembro**
+del suyo, y entonces hacía `saveActa(candidate)` **encima** del acta que había. O sea:
+emparejar un teléfono que ya tenía su cuenta con una bóveda que tiene otra **reemplazaba la
+cuenta del teléfono sin preguntar**.
 
-Qué daño hace, medido y sin exagerar:
+Qué daño hacía, medido y sin exagerar:
 
 - **Activo, hoy.** El contenido del store se namespacea por el **id local del perfil**
   (`store/store.js`, `threads.<pid>.v1`), no por el `profileId` del acta. Así que el contenido
@@ -215,33 +220,33 @@ Qué daño hace, medido y sin exagerar:
 
 **La corrección:**
 
-- [ ] **`joinProfile` nunca sobrescribe.** Solo procede sobre un perfil **apto para adoptar**;
+- [x] **`joinProfile` nunca sobrescribe.** Solo procede sobre un perfil **apto para adoptar**;
       en cualquier otro caso devuelve el conflicto (`perfil-con-datos`, con `profileId`, `seq`
       y número de miembros) y **no escribe nada**.
-- [ ] **Apto = marcado a propósito, y nada más.** `createProfile({ name, forVault: true })`
+- [x] **Apto = marcado a propósito, y nada más.** `createProfile({ name, forVault: true })`
       deja `pendingJoin: true` en el registro, y `joinProfile` **exige esa marca**, que se
       limpia al unirse. Sin heurísticas de «parece vacío» y sin camino alternativo: si un
       perfil no nació para adoptar, no adopta. (Dotrino está en pruebas: no hay perfiles
       previos que acomodar, así que la regla puede ser la estricta desde el primer día.)
-- [ ] **El contenido del store no lo puede comprobar identity** (vive en otro origen): lo
+- [x] **El contenido del store no lo puede comprobar identity** (vive en otro origen): lo
       comprueba **quien llama** (la consola) y, si hay algo, no ofrece el camino B sobre ese
       perfil sino crear uno nuevo. Que identity no pueda verlo es la razón de la marca.
-- [ ] **`pushHistory(current)` antes de cualquier `saveActa` de adopción**, para que el
+- [x] **`pushHistory(current)` antes de cualquier `saveActa` de adopción**, para que el
       llavero anterior no se evapore ni siquiera en los casos raros.
-- [ ] `vaultPair` (`:1262`) deja de llamar a `joinProfile` a ciegas (`:1278`): si el perfil
+- [x] `vaultPair` (`:1262`) deja de llamar a `joinProfile` a ciegas (`:1278`): si el perfil
       abierto no es apto, **falla con un mensaje claro** en vez de tragarse la cuenta. Lo mismo
       en el receptor de actas (`:1349`).
-- [ ] Copy del error, en llano: «Este aparato ya está usando una cuenta. Para usar también la
+- [x] Copy del error, en llano: «Este aparato ya está usando una cuenta. Para usar también la
       de tu computadora, crea una cuenta nueva aquí — la que tienes abierta no se toca.»
 
 **Pruebas (van antes que el arreglo, porque hoy fallan):**
 
-- [ ] Teléfono con cuenta y contenido + bóveda con otra cuenta ⇒ la cuenta del teléfono
+- [x] Teléfono con cuenta y contenido + bóveda con otra cuenta ⇒ la cuenta del teléfono
       **sigue intacta**, con su `profileId`, su acta y su contenido, y aparece una segunda.
-- [ ] Perfil creado con `forVault: true` ⇒ se une sin fricción y la marca queda limpia.
-- [ ] Perfil **sin la marca**, aunque parezca vacío ⇒ `perfil-con-datos` y **cero escrituras**
+- [x] Perfil creado con `forVault: true` ⇒ se une sin fricción y la marca queda limpia.
+- [x] Perfil **sin la marca**, aunque parezca vacío ⇒ `perfil-con-datos` y **cero escrituras**
       (comprobar que el acta guardada es byte-idéntica a la de antes).
-- [ ] Adoptar guarda la anterior en el historial (`actaHistory` la devuelve).
+- [x] Adoptar guarda la anterior en el historial (`actaHistory` la devuelve).
 
 ### 5.2 Protocolo: la intención viaja firmada (V7)
 
