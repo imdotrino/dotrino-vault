@@ -218,10 +218,11 @@ Qué daño hace, medido y sin exagerar:
 - [ ] **`joinProfile` nunca sobrescribe.** Solo procede sobre un perfil **apto para adoptar**;
       en cualquier otro caso devuelve el conflicto (`perfil-con-datos`, con `profileId`, `seq`
       y número de miembros) y **no escribe nada**.
-- [ ] **Apto = marcado a propósito, no adivinado.** `createProfile({ name, forVault: true })`
-      deja `pendingJoin: true` en el registro; `joinProfile` exige esa marca **o** un perfil
-      virgen comprobable desde identity: `seq === 1`, un solo miembro (yo), **sin peers**, sin
-      cert de bóveda. La marca se limpia al unirse. Nada de heurísticas sobre «parece vacío».
+- [ ] **Apto = marcado a propósito, y nada más.** `createProfile({ name, forVault: true })`
+      deja `pendingJoin: true` en el registro, y `joinProfile` **exige esa marca**, que se
+      limpia al unirse. Sin heurísticas de «parece vacío» y sin camino alternativo: si un
+      perfil no nació para adoptar, no adopta. (Dotrino está en pruebas: no hay perfiles
+      previos que acomodar, así que la regla puede ser la estricta desde el primer día.)
 - [ ] **El contenido del store no lo puede comprobar identity** (vive en otro origen): lo
       comprueba **quien llama** (la consola) y, si hay algo, no ofrece el camino B sobre ese
       perfil sino crear uno nuevo. Que identity no pueda verlo es la razón de la marca.
@@ -238,8 +239,8 @@ Qué daño hace, medido y sin exagerar:
 - [ ] Teléfono con cuenta y contenido + bóveda con otra cuenta ⇒ la cuenta del teléfono
       **sigue intacta**, con su `profileId`, su acta y su contenido, y aparece una segunda.
 - [ ] Perfil creado con `forVault: true` ⇒ se une sin fricción y la marca queda limpia.
-- [ ] Perfil con peers ⇒ `perfil-con-datos` y **cero escrituras** (comprobar que el acta
-      guardada es byte-idéntica a la de antes).
+- [ ] Perfil **sin la marca**, aunque parezca vacío ⇒ `perfil-con-datos` y **cero escrituras**
+      (comprobar que el acta guardada es byte-idéntica a la de antes).
 - [ ] Adoptar guarda la anterior en el historial (`actaHistory` la devuelve).
 
 ### 5.2 Protocolo: la intención viaja firmada (V7)
