@@ -43,15 +43,23 @@ const I18N = {
     dl_install_t: 'Instalar',
     dl_pair_t: 'Conectar un dispositivo',
     dl_warn: 'Como es un programa gratuito y de código abierto (no le pagamos a nadie por "firmarlo"), tu sistema puede mostrarte un aviso al instalarlo. Es normal y seguro.',
-    dl_win_t: 'Windows o macOS',
-    dl_win_lead: 'Aquí no hay instalador todavía, pero sí una forma de tenerlo funcionando en un minuto: un comando que se encarga de todo, incluido bajar lo que haga falta. No pide permisos de administrador.',
-    dl_win_ps: 'Windows (PowerShell)',
-    dl_win_sh: 'macOS o Linux (terminal)',
-    dl_win_note: 'Deja la ventana abierta: mientras esté abierta, tu bóveda está funcionando. Para conectar un aparato, abre otra ventana y pide el código.',
-    dl_docker_t: 'Docker',
-    dl_docker_lead: 'Si ya usas Docker, es la forma más limpia: se actualiza sola y no ensucia tu sistema. Funciona igual en Windows, macOS y Linux.',
+    os: { linux: 'Linux', windows: 'Windows', macos: 'macOS' },
+    dl_os_pick: 'Elige tu sistema',
+    dl_os_hint: 'Elegimos tu sistema por ti. Si no acertamos, cámbialo aquí.',
+    m1_t: '1 · Instalador',
+    m1_lead: 'La forma más cómoda: lo instalas y queda funcionando solo, también cuando enciendes la computadora.',
+    m1_soon: 'Para este sistema todavía no hay instalador de un clic: está en camino. Las dos formas de abajo ya funcionan y dejan tu bóveda igual de lista.',
+    m2_t: '2 · Un comando',
+    m2_lead: 'Un comando que se encarga de todo, incluido bajar lo que haga falta. No pide permisos de administrador ni instala nada en el sistema.',
+    m2_note: 'Deja la ventana abierta: mientras esté abierta, tu bóveda está funcionando. Para conectar un aparato, abre otra ventana y pide el código.',
+    m3_t: '3 · Docker',
+    dl_win_ps: 'PowerShell',
+    dl_win_sh: 'Terminal',
+    dl_docker_lead: 'Si ya usas Docker, es la forma más limpia: arranca sola con la máquina, se actualiza fácil y no ensucia tu sistema.',
     dl_docker_note: 'No hace falta abrir ningún puerto ni tocar tu router: la bóveda no escucha nada, se conecta ella hacia afuera. Y ojo con una cosa: el volumen ES tu cuenta. Si lo borras, se perdió.',
-    dl_other: 'El instalador de un clic para Windows y macOS está en camino. Mientras tanto, las dos formas de arriba funcionan igual de bien.',
+    m3_desktop: 'Necesitas Docker Desktop instalado. Y ojo con una cosa: el volumen ES tu cuenta. Si lo borras, se perdió. Tampoco hace falta abrir puertos: la bóveda no escucha nada.',
+    dl_pair_note: 'Según cómo la hayas instalado, el comando se escribe con un prefijo distinto. Está explicado abajo, en «Cómo se usa».',
+    dl_other: 'Las tres formas dejan la misma bóveda: elige la que te resulte más cómoda.',
     nav_use: 'Cómo se usa',
     use_title: 'Cómo se usa, una vez instalada',
     use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda trabaja de fondo. Con el instalador de Linux y con Docker arranca sola cada vez que enciendes la computadora; si la levantaste con el comando de Windows o macOS, funciona mientras dejes esa ventana abierta. Esto es lo poco que sí harás alguna vez.',
@@ -125,15 +133,23 @@ const I18N = {
     dl_install_t: 'Install',
     dl_pair_t: 'Connect a device',
     dl_warn: 'Since it’s a free, open-source program (we don’t pay anyone to "sign" it), your system may show a warning when installing. That’s normal and safe.',
-    dl_win_t: 'Windows or macOS',
-    dl_win_lead: 'No installer here yet, but there is a way to have it running in a minute: one command that takes care of everything, including downloading whatever is missing. It does not ask for admin rights.',
-    dl_win_ps: 'Windows (PowerShell)',
-    dl_win_sh: 'macOS or Linux (terminal)',
-    dl_win_note: 'Leave the window open: while it is open, your vault is running. To connect a device, open another window and ask for the code.',
-    dl_docker_t: 'Docker',
-    dl_docker_lead: 'If you already use Docker, it is the cleanest way: it updates on its own and does not touch your system. Works the same on Windows, macOS and Linux.',
+    os: { linux: 'Linux', windows: 'Windows', macos: 'macOS' },
+    dl_os_pick: 'Pick your system',
+    dl_os_hint: 'We picked your system for you. If we got it wrong, change it here.',
+    m1_t: '1 · Installer',
+    m1_lead: 'The most comfortable way: you install it and it keeps running on its own, including when you turn the computer on.',
+    m1_soon: 'There is no one-click installer for this system yet: it is on the way. The two ways below already work and leave your vault just as ready.',
+    m2_t: '2 · One command',
+    m2_lead: 'One command that takes care of everything, including downloading whatever is missing. It does not ask for admin rights and installs nothing system-wide.',
+    m2_note: 'Leave the window open: while it is open, your vault is running. To connect a device, open another window and ask for the code.',
+    m3_t: '3 · Docker',
+    dl_win_ps: 'PowerShell',
+    dl_win_sh: 'Terminal',
+    dl_docker_lead: 'If you already use Docker, it is the cleanest way: it starts with the machine, updates easily and does not touch your system.',
     dl_docker_note: 'No ports to open and nothing to touch on your router: the vault listens to nothing, it connects outward. And one thing to keep in mind: the volume IS your account. If you delete it, it is gone.',
-    dl_other: 'The one-click installer for Windows and macOS is on the way. In the meantime, the two ways above work just as well.',
+    m3_desktop: 'You need Docker Desktop installed. And one thing to keep in mind: the volume IS your account. If you delete it, it is gone. No ports to open either: the vault listens to nothing.',
+    dl_pair_note: 'Depending on how you installed it, the command takes a different prefix. It is explained below, under “How to use it”.',
+    dl_other: 'All three ways leave you the same vault: pick whichever suits you.',
     nav_use: 'How to use it',
     use_title: 'How to use it, once installed',
     use_lead: 'Most of the time you do nothing: the vault works in the background. With the Linux installer and with Docker it starts on its own every time you turn the computer on; if you launched it with the Windows or macOS command, it runs while you leave that window open. This is the little you will actually do.',
@@ -185,6 +201,17 @@ const pairCmd = 'dotrino-vault pair'
 const winPsCmd = '& ([scriptblock]::Create((irm https://dotrino.com/install.ps1))) @dotrino/vaultd'
 const winShCmd = 'curl -fsSL https://dotrino.com/install.sh | sh -s -- @dotrino/vaultd'
 const npxCmd = 'npx -y @dotrino/vaultd'
+
+/* Pestañas por sistema: las tres vías existen para los tres, así que mostrarlas todas
+   juntas era la misma página tres veces. Se adivina el sistema y se puede cambiar. */
+const OSES = ['linux', 'windows', 'macos']
+function guessOs () {
+  const ua = (navigator.userAgent || '') + ' ' + (navigator.platform || '')
+  if (/Win/i.test(ua)) return 'windows'
+  if (/Mac|iPhone|iPad/i.test(ua)) return 'macos'
+  return 'linux'
+}
+const os = ref(guessOs())
 const dockerCmd = [
   'docker volume create dotrino-vault',
   'docker run -d --name dotrino-vault --restart unless-stopped \\',
@@ -297,21 +324,62 @@ onMounted(() => { document.documentElement.lang = lang.value })
         <h2>{{ t.dl_title }}</h2>
         <p class="lead">{{ t.dl_lead }}</p>
 
-        <div class="dl-card">
-          <h3>{{ t.dl_deb_t }}</h3>
-          <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
-          <p class="dl-note">{{ t.dl_deb_note }}</p>
+        <div class="os-tabs" role="group" :aria-label="t.dl_os_pick">
+          <button v-for="o in OSES" :key="o" :class="{ on: os === o }"
+                  :data-testid="'os-' + o" @click="os = o">{{ t.os[o] }}</button>
+        </div>
+        <p class="os-hint">{{ t.dl_os_hint }}</p>
+
+        <!-- 1 · Instalador -->
+        <div class="dl-card" data-testid="m-installer">
+          <h3>{{ t.m1_t }}</h3>
+          <template v-if="os === 'linux'">
+            <p class="dl-note m1-lead">{{ t.m1_lead }}</p>
+            <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
+            <p class="dl-note">{{ t.dl_deb_note }}</p>
+            <h4 class="sub">{{ t.dl_tar_t }}</h4>
+            <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
+            <div class="codeblock">
+              <div class="code-head"><span>{{ t.dl_install_t }}</span>
+                <button class="copy" @click="copy(installCmd, 'install')">{{ copied === 'install' ? '✓' : '⧉' }}</button>
+              </div>
+              <pre><code>{{ installCmd }}</code></pre>
+            </div>
+            <p class="warn">{{ t.dl_warn }}</p>
+          </template>
+          <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>
         </div>
 
-        <div class="dl-card">
-          <h3>{{ t.dl_tar_t }}</h3>
-          <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
+        <!-- 2 · Un comando (mismo instalador universal del ecosistema en los tres) -->
+        <div class="dl-card" data-testid="m-command">
+          <h3>{{ t.m2_t }}</h3>
+          <p class="dl-note m1-lead">{{ t.m2_lead }}</p>
           <div class="codeblock">
-            <div class="code-head"><span>{{ t.dl_install_t }}</span>
-              <button class="copy" @click="copy(installCmd, 'install')">{{ copied === 'install' ? '✓' : '⧉' }}</button>
+            <div class="code-head"><span>{{ os === 'windows' ? t.dl_win_ps : t.dl_win_sh }}</span>
+              <button class="copy" @click="copy(os === 'windows' ? winPsCmd : winShCmd, 'cmd')">{{ copied === 'cmd' ? '✓' : '⧉' }}</button>
             </div>
-            <pre><code>{{ installCmd }}</code></pre>
+            <pre><code>{{ os === 'windows' ? winPsCmd : winShCmd }}</code></pre>
           </div>
+          <div class="codeblock">
+            <div class="code-head"><span>Node ≥ 20</span>
+              <button class="copy" @click="copy(npxCmd, 'npx')">{{ copied === 'npx' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ npxCmd }}</code></pre>
+          </div>
+          <p class="dl-note">{{ t.m2_note }}</p>
+        </div>
+
+        <!-- 3 · Docker (idéntico en los tres; solo cambia la nota) -->
+        <div class="dl-card" data-testid="m-docker">
+          <h3>{{ t.m3_t }}</h3>
+          <p class="dl-note m1-lead">{{ t.dl_docker_lead }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>Docker</span>
+              <button class="copy" @click="copy(dockerCmd, 'docker')">{{ copied === 'docker' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ dockerCmd }}</code></pre>
+          </div>
+          <p class="dl-note">{{ os === 'linux' ? t.dl_docker_note : t.m3_desktop }}</p>
         </div>
 
         <div class="codeblock">
@@ -320,44 +388,7 @@ onMounted(() => { document.documentElement.lang = lang.value })
           </div>
           <pre><code>{{ pairCmd }}</code></pre>
         </div>
-
-        <p class="warn">{{ t.dl_warn }}</p>
-
-        <div class="dl-card">
-          <h3>{{ t.dl_win_t }}</h3>
-          <p class="dl-note">{{ t.dl_win_lead }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ t.dl_win_ps }}</span>
-              <button class="copy" @click="copy(winPsCmd, 'winps')">{{ copied === 'winps' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ winPsCmd }}</code></pre>
-          </div>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ t.dl_win_sh }}</span>
-              <button class="copy" @click="copy(winShCmd, 'winsh')">{{ copied === 'winsh' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ winShCmd }}</code></pre>
-          </div>
-          <div class="codeblock">
-            <div class="code-head"><span>Node ≥ 20</span>
-              <button class="copy" @click="copy(npxCmd, 'npx')">{{ copied === 'npx' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ npxCmd }}</code></pre>
-          </div>
-          <p class="dl-note">{{ t.dl_win_note }}</p>
-        </div>
-
-        <div class="dl-card">
-          <h3>{{ t.dl_docker_t }}</h3>
-          <p class="dl-note">{{ t.dl_docker_lead }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>Docker</span>
-              <button class="copy" @click="copy(dockerCmd, 'docker')">{{ copied === 'docker' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ dockerCmd }}</code></pre>
-          </div>
-          <p class="dl-note">{{ t.dl_docker_note }}</p>
-        </div>
+        <p class="dl-note">{{ t.dl_pair_note }}</p>
 
         <p class="other">{{ t.dl_other }}</p>
       </section>
