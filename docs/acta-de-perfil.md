@@ -386,8 +386,9 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
   probada, que es lo que resuelve el conflicto cuando ocurre.
 - **Topbar estándar** en `vault.dotrino.com` (§5 de CONVENCIONES): la consola usa el header
   propio de la landing, no `<dotrino-topbar>`.
-- **Escenario de navegador con Playwright** en el smoke (el resto del protocolo ya está
-  cubierto por los 9 escenarios headless).
+- ~~Escenario de navegador con Playwright en el smoke~~ ✅ **hecho**: `dotrino-test/smoke/
+  navegador.mjs`, 4 escenarios (incluida la comprobación de que la llave del navegador **no
+  es extraíble**), más los 9 headless y los 11 del protocolo.
 - **TPM 2.0** para el cifrado en reposo: el ligado a máquina actual sube el listón (copiar
   el archivo a otro equipo no sirve) pero no protege contra quien ya tiene esa máquina.
 
