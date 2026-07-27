@@ -319,7 +319,11 @@ acotados a «el proxy no responde».
 
 ### 2.4.3 Un dispositivo pertenece a UN solo perfil
 
-> Regla del dueño (2026-07-25).
+> Regla del dueño (2026-07-25). **Precisada el 2026-07-27**: lo que pertenece a un perfil es
+> la **LLAVE**, no la máquina. Un aparato puede tener varias llaves —una por cuenta— y por eso
+> puede tener varias cuentas a la vez (multi-perfil). Cómo se resuelve el encuentro de dos
+> cuentas está en **[`vinculacion-de-cuentas.md`](./vinculacion-de-cuentas.md)**: dos caminos,
+> y **no existe fusionar cuentas**.
 
 - **Un dispositivo que ya tiene master no puede vincularse a otro master.** Para entrar a
   otro perfil primero tiene que salir del suyo (renuncia total o expulsión), y eso es un
@@ -602,6 +606,11 @@ Si un escenario necesita el proxy real, va aparte y marcado como manual.
   molesta: tickets de firma de corta vida pre-emitidos. No entra en la primera versión.
 
 ## 7. Siguiente pasada de diseño (después de este plan)
+
+> No confundir con **[`vinculacion-de-cuentas.md`](./vinculacion-de-cuentas.md)**, que es otra
+> cosa y ya está decidida: cómo se vincula una cuenta a una bóveda (dos caminos, sin fusión de
+> cuentas) y cómo se mueve contenido **entre cuentas distintas** (fase 2, local a cada lado).
+> Lo de aquí abajo es **dentro de UNA misma cuenta**: dos aparatos que editaron lo mismo.
 
 **Cómo se mergea el contenido entre pares** (pedido del dueño, 2026-07-25). Este plan
 define **quién** puede leer y escribir (el acta, las capacidades, la CEK de F4), pero **no**
