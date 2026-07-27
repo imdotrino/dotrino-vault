@@ -48,6 +48,13 @@ const T = {
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
+    two_title: 'Ahora tienes dos cuentas en este aparato',
+    two_body: 'La que ya usabas sigue intacta, y se agregó la de tu bóveda, que es la que estás usando ahora. Puedes cambiar entre ellas cuando quieras desde el botón de tu foto, arriba.',
+    two_del: 'Si no quieres conservar la anterior:',
+    two_del_1: 'Abre tu página de perfil.',
+    two_del_2: 'En «Tus perfiles», pulsa Borrar en la cuenta que no quieras.',
+    two_del_3: 'Confirma. Se va con todo lo suyo y no se puede deshacer.',
+    two_del_link: 'Abrir mi página de perfil',
     pair_fail: 'No se pudo conectar: ',
     cam_err: 'No se pudo abrir la cámara. Pega el código a mano.',
     no_qr: 'No se encontró ningún código en esa imagen.',
@@ -92,6 +99,13 @@ const T = {
     pair_code_b: 'Open it and type these six digits to approve the connection. Nobody else knows them.',
     pair_done: 'Done, this device is connected.',
     pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
+    two_title: 'You now have two accounts on this device',
+    two_body: 'The one you were using is untouched, and your vault\'s was added — that is the one you are using now. You can switch between them any time from your photo button, above.',
+    two_del: 'If you do not want to keep the previous one:',
+    two_del_1: 'Open your profile page.',
+    two_del_2: 'Under “Your profiles”, press Delete on the account you do not want.',
+    two_del_3: 'Confirm. It goes with everything in it and cannot be undone.',
+    two_del_link: 'Open my profile page',
     pair_fail: 'Could not connect: ',
     cam_err: 'Could not open the camera. Paste the code by hand.',
     no_qr: 'No code found in that image.',
@@ -184,6 +198,8 @@ const renounceSign = () => run('renounce', () => id.value.renounceCaps(['sign'])
 const pairing = ref(false)
 const pairCode = ref('')
 const pasted = ref('')
+// Recién emparejado: hay que explicar que el aparato quedó con DOS cuentas.
+const justPaired = ref(false)
 const scanHost = ref(null)
 const fileInput = ref(null)
 
@@ -212,6 +228,9 @@ async function connect (qr) {
     // sobrescribía sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
     await id.value.enrollDevice(qr, { join: 'new' })
     msg.value = { kind: 'ok', text: t.value.pair_done }
+    // Emparejar deja DOS cuentas en el aparato, y eso hay que decirlo: si no, el
+    // conmutador aparece con una entrada de más y nadie sabe de dónde salió.
+    justPaired.value = true
     await refresh()
   } catch (e) {
     msg.value = { kind: 'bad', text: t.value.pair_fail + (e?.message || e) }
@@ -385,7 +404,23 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         <div class="digits">{{ pairCode }}</div>
         <p class="muted">{{ t.pair_code_b }}</p>
       </div>
-      <template v-else>
+      <!-- Emparejar deja el aparato con DOS cuentas: se dice, y se dice cómo deshacerse
+           de la que no quieras. Lo contrario es que aparezca una entrada de más en el
+           conmutador y nadie sepa de dónde salió. -->
+      <div v-if="justPaired" class="banner two-accounts" data-testid="two-accounts">
+        <strong>{{ t.two_title }}</strong>
+        <p>{{ t.two_body }}</p>
+        <p class="muted">{{ t.two_del }}</p>
+        <ol class="muted">
+          <li>{{ t.two_del_1 }}</li>
+          <li>{{ t.two_del_2 }}</li>
+          <li>{{ t.two_del_3 }}</li>
+        </ol>
+        <a class="btn ghost sm" href="https://profile.dotrino.com/" target="_blank" rel="noopener"
+           data-testid="goto-profile">{{ t.two_del_link }}</a>
+      </div>
+
+      <template v-else-if="!pairCode">
         <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
         <div class="row">
           <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
@@ -434,6 +469,9 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .banner { border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 14px; }
 .banner.ok { background: #0f2a1c; color: #7fe0a8; }
 .banner.bad { background: #2a1113; color: #ff9aa2; }
+.two-accounts { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.two-accounts p, .two-accounts ol { margin: 0; }
+.two-accounts ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .banner.info { background: #10203a; color: #9cc4ff; }
 .banner.warn { background: #2a2310; color: #ffd98a; }
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
