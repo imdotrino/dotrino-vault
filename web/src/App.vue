@@ -44,6 +44,37 @@ const I18N = {
     dl_pair_t: 'Conectar un dispositivo',
     dl_warn: 'Como es un programa gratuito y de código abierto (no le pagamos a nadie por "firmarlo"), tu sistema puede mostrarte un aviso al instalarlo. Es normal y seguro.',
     dl_other: 'Las versiones para macOS y Windows están en camino. Por ahora, Linux.',
+    nav_use: 'Cómo se usa',
+    use_title: 'Cómo se usa, una vez instalada',
+    use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda arranca sola con la computadora y trabaja de fondo. Esto es lo poco que sí harás alguna vez.',
+    use_cards: [
+      ['Conectar un teléfono o una laptop',
+       'En tu computadora pides un código; en el aparato lo escaneas o lo pegas. El aparato te muestra seis dígitos y tú los escribes en la computadora. Ese ida y vuelta es lo que evita que alguien se cuele: aprobar exige tener el aparato en la mano.'],
+      ['Ver quién está conectado',
+       'Tu página de dispositivos lista cada aparato, qué puede hacer cada uno y cuál manda. Desde ahí quitas permisos o sacas a uno del todo.'],
+      ['Si pierdes un aparato',
+       'Lo desconectas y deja de servir: la bóveda no vuelve a firmar por él y, la próxima vez que se encienda, se borra lo que tenía de tu cuenta.'],
+      ['Tener varias cuentas',
+       'Puedes guardar más de una cuenta en la misma computadora (la personal y la del trabajo, por ejemplo). Funcionan a la vez y no se ven entre ellas.'],
+      ['Ponerle una contraseña',
+       'Opcional. Protege que otro que se siente en tu computadora te cambie la cuenta. No protege el disco, y tus aparatos siguen funcionando aunque esté puesta.'],
+    ],
+    use_warn_t: 'Lo más importante que tienes que saber',
+    use_warn_b: 'Tu cuenta vive en esta computadora y en ningún otro lado. No hay una copia nuestra ni una forma de recuperarla: si pierdes la máquina sin haber conectado otra bóveda antes, pierdes la cuenta. Es el precio de que sea tuya de verdad, y preferimos decírtelo antes que prometerte un rescate que no existe.',
+    use_cmds_t: 'Los comandos, si te manejas con la terminal',
+    use_cmds: [
+      ['dotrino-vault status', 'ver si está funcionando'],
+      ['dotrino-vault pair', 'conectar un aparato (muestra el código)'],
+      ['dotrino-vault approve <código>', 'aprobar el aparato con los dígitos que él muestra'],
+      ['dotrino-vault members', 'quién está en tu cuenta y qué puede hacer'],
+      ['dotrino-vault caps <ID> -firma', 'quitarle un permiso a un aparato'],
+      ['dotrino-vault revoke <nonce>', 'sacar un aparato del todo'],
+      ['dotrino-vault activity', 'bitácora: qué se firmó y quién entró'],
+      ['dotrino-vault profile ls', 'tus cuentas en esta computadora'],
+      ['dotrino-vault tui', 'todo lo anterior, en una pantalla'],
+    ],
+    use_service_t: 'Y el servicio, si algo se atasca',
+    use_more: 'Todo esto también está en tu página de dispositivos, sin terminal.',
     foot_tag: 'Tu información, en tu lugar, bajo tus reglas.',
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
@@ -83,6 +114,37 @@ const I18N = {
     dl_pair_t: 'Connect a device',
     dl_warn: 'Since it’s a free, open-source program (we don’t pay anyone to "sign" it), your system may show a warning when installing. That’s normal and safe.',
     dl_other: 'macOS and Windows versions are on the way. For now, Linux.',
+    nav_use: 'How to use it',
+    use_title: 'How to use it, once installed',
+    use_lead: 'Most of the time you do nothing: the vault starts with your computer and works in the background. This is the little you will actually do.',
+    use_cards: [
+      ['Connect a phone or a laptop',
+       'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.'],
+      ['See who is connected',
+       'Your devices page lists every device, what each one can do and which one is in charge. From there you take permissions away or remove one entirely.'],
+      ['If you lose a device',
+       'You disconnect it and it stops working: the vault will not sign for it again and, next time it turns on, it wipes what it had of your account.'],
+      ['Keep several accounts',
+       'You can keep more than one account on the same computer (personal and work, say). They run at the same time and cannot see each other.'],
+      ['Set a password',
+       'Optional. It stops someone sitting at your computer from changing your account. It does not protect the disk, and your devices keep working with it on.'],
+    ],
+    use_warn_t: 'The most important thing to know',
+    use_warn_b: 'Your account lives on this computer and nowhere else. There is no copy of ours and no way to recover it: if you lose the machine without having connected another vault first, you lose the account. That is the price of it being truly yours, and we would rather tell you than promise a rescue that does not exist.',
+    use_cmds_t: 'The commands, if you are at home in a terminal',
+    use_cmds: [
+      ['dotrino-vault status', 'see if it is running'],
+      ['dotrino-vault pair', 'connect a device (shows the code)'],
+      ['dotrino-vault approve <code>', 'approve the device with the digits it shows'],
+      ['dotrino-vault members', 'who is in your account and what they can do'],
+      ['dotrino-vault caps <ID> -firma', 'take a permission away from a device'],
+      ['dotrino-vault revoke <nonce>', 'remove a device entirely'],
+      ['dotrino-vault activity', 'log: what was signed and who joined'],
+      ['dotrino-vault profile ls', 'your accounts on this computer'],
+      ['dotrino-vault tui', 'all of the above, on one screen'],
+    ],
+    use_service_t: 'And the service, if something gets stuck',
+    use_more: 'All of this is also on your devices page, no terminal needed.',
     foot_tag: 'Your data, in your place, under your rules.',
     foot_eco: 'Part of the Dotrino ecosystem', foot_src: 'Source', foot_discord: 'Discord',
   },
@@ -94,6 +156,7 @@ const setLang = (l) => { lang.value = l; localStorage.setItem(LANG_KEY, l); docu
 
 const installCmd = 'tar xzf dotrino-vault-*-linux-x64.tar.gz\ncd dotrino-vault-*-linux-x64\nsh install.sh'
 const pairCmd = 'dotrino-vault pair'
+const serviceCmd = 'systemctl --user restart dotrino-vault\njournalctl --user -u dotrino-vault -f'
 
 const copied = ref('')
 function copy (text, key) {
@@ -126,6 +189,7 @@ onMounted(() => { document.documentElement.lang = lang.value })
       <nav class="navlinks">
         <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
         <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
+        <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
         <a href="/dispositivos" data-testid="nav-devices" @click="go('console', $event)">{{ t.nav_devices }}</a>
         <a v-if="view !== 'home'" href="/" @click="go('home', $event)">{{ t.nav_home }}</a>
       </nav>
@@ -212,6 +276,49 @@ onMounted(() => { document.documentElement.lang = lang.value })
 
         <p class="warn">{{ t.dl_warn }}</p>
         <p class="other">{{ t.dl_other }}</p>
+      </section>
+
+      <!-- CÓMO SE USA — la landing explicaba cómo descargarla y ahí se acababa. Lo que
+           falta después de instalar (conectar aparatos, quitar permisos, varias cuentas)
+           y, sobre todo, la consecuencia de perder la máquina, que hay que decir en voz
+           alta en vez de esconderla. -->
+      <section id="use" class="use" data-testid="use">
+        <h2>{{ t.use_title }}</h2>
+        <p class="lead">{{ t.use_lead }}</p>
+
+        <div class="use-grid">
+          <article v-for="(c, i) in t.use_cards" :key="i" class="use-card">
+            <h3>{{ c[0] }}</h3>
+            <p>{{ c[1] }}</p>
+          </article>
+        </div>
+
+        <div class="use-warn" data-testid="use-warn">
+          <h3>{{ t.use_warn_t }}</h3>
+          <p>{{ t.use_warn_b }}</p>
+        </div>
+
+        <p class="use-more">
+          <a href="/dispositivos" @click="go('console', $event)">{{ t.use_more }}</a>
+        </p>
+
+        <details class="use-cmds">
+          <summary>{{ t.use_cmds_t }}</summary>
+          <table>
+            <tbody>
+              <tr v-for="(c, i) in t.use_cmds" :key="i">
+                <td><code>{{ c[0] }}</code></td>
+                <td>{{ c[1] }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ t.use_service_t }}</span>
+              <button class="copy" @click="copy(serviceCmd, 'svc')">{{ copied === 'svc' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ serviceCmd }}</code></pre>
+          </div>
+        </details>
       </section>
       </template>
     </main>
