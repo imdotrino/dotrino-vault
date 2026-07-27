@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
 import { qrToString } from './qr.js'
+import { VERSION } from './version.js'
 
 const dir = dataDir()
 const stateFile = path.join(dir, 'state.json')
@@ -51,7 +52,7 @@ const writeReq = (name, obj) => fs.writeFileSync(path.join(dir, name), JSON.stri
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
-const VERSION = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
+
 const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
 /**

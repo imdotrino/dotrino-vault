@@ -18,6 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { startVaultManager } from './manager.js'
 import { dataDir, writeJson, readJson } from './paths.js'
+import { VERSION } from './version.js'
 
 const readJsonSafe = (f) => readJson(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
@@ -37,7 +38,7 @@ export async function runDaemon () {
 
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
-  const daemonVersion = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
+  const daemonVersion = VERSION
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
   // instalador y la web, que son anteriores al multi-perfil. La lista completa va
   // en `profiles`.
