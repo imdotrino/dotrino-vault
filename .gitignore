@@ -4,6 +4,7 @@ node_modules/
 # artefactos de build (binario SEA ~124MB, tarball, bundle CJS, build de la web)
 dist/
 .build/
+.build-win/
 
 # datos locales del vault — NUNCA commitear: contienen la llave maestra en claro
 .dotrino/

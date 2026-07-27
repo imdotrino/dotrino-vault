@@ -1,0 +1,45 @@
+# Publica la imagen del vault en GHCR para que instalarlo con Docker sea UN comando
+# (`docker run … ghcr.io/imdotrino/dotrino-vault`) en vez de clonar y construir.
+#
+# Se dispara al etiquetar una versión del daemon (`vaultd-v*`) y a mano.
+name: Publicar imagen Docker
+
+on:
+  push:
+    tags: ['vaultd-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión del paquete
+        id: v
+        run: echo "ver=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # amd64 y arm64: un vault en una Raspberry o en un mini-PC ARM es un caso
+      # normal, no exótico — es justo la máquina que alguien deja encendida en casa.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/imdotrino/dotrino-vault:${{ steps.v.outputs.ver }}
+            ghcr.io/imdotrino/dotrino-vault:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

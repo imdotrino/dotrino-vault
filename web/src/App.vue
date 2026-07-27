@@ -14,7 +14,7 @@ const I18N = {
     hero_title: 'Toda tu información, en un solo lugar seguro',
     hero_sub: 'Tus archivos, tus contactos, tus contraseñas y lo que guardan tus apps, todo junto en una bóveda que vive en tu propia computadora. No en la nube de una empresa: en tu máquina, bajo tu control. Sin anuncios, sin rastreo, sin que nadie venda tus datos.',
     hero_download: 'Descargar gratis', hero_source: 'Ver el código',
-    hero_note: 'Por ahora para Linux. macOS y Windows, pronto.',
+    hero_note: 'Instalador para Linux. En Windows y macOS, con un comando o con Docker.',
     why_title: '¿Para qué sirve?',
     why_body: 'Hoy tu información está repartida y, casi siempre, en servidores de grandes empresas que la guardan, la miran y la usan para ganar dinero: unas cosas en Google, otras en tu teléfono, otras en cada app. Dotrino Vault las junta en un solo lugar que es tuyo de verdad —tu computadora— y tus demás dispositivos acceden a ella de forma segura, estés donde estés. Tu información deja de estar prestada y vuelve a ser tuya.',
     how_title: 'Cómo funciona',
@@ -43,7 +43,15 @@ const I18N = {
     dl_install_t: 'Instalar',
     dl_pair_t: 'Conectar un dispositivo',
     dl_warn: 'Como es un programa gratuito y de código abierto (no le pagamos a nadie por "firmarlo"), tu sistema puede mostrarte un aviso al instalarlo. Es normal y seguro.',
-    dl_other: 'Las versiones para macOS y Windows están en camino. Por ahora, Linux.',
+    dl_win_t: 'Windows o macOS',
+    dl_win_lead: 'Aquí no hay instalador todavía, pero sí una forma de tenerlo funcionando en un minuto: un comando que se encarga de todo, incluido bajar lo que haga falta. No pide permisos de administrador.',
+    dl_win_ps: 'Windows (PowerShell)',
+    dl_win_sh: 'macOS o Linux (terminal)',
+    dl_win_note: 'Deja la ventana abierta: mientras esté abierta, tu bóveda está funcionando. Para conectar un aparato, abre otra ventana y pide el código.',
+    dl_docker_t: 'Docker',
+    dl_docker_lead: 'Si ya usas Docker, es la forma más limpia: se actualiza sola y no ensucia tu sistema. Funciona igual en Windows, macOS y Linux.',
+    dl_docker_note: 'No hace falta abrir ningún puerto ni tocar tu router: la bóveda no escucha nada, se conecta ella hacia afuera. Y ojo con una cosa: el volumen ES tu cuenta. Si lo borras, se perdió.',
+    dl_other: 'El instalador de un clic para Windows y macOS está en camino. Mientras tanto, las dos formas de arriba funcionan igual de bien.',
     nav_use: 'Cómo se usa',
     use_title: 'Cómo se usa, una vez instalada',
     use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda arranca sola con la computadora y trabaja de fondo. Esto es lo poco que sí harás alguna vez.',
@@ -84,7 +92,7 @@ const I18N = {
     hero_title: 'All your information, in one safe place',
     hero_sub: 'Your files, your contacts, your passwords and whatever your apps save, all together in a vault that lives on your own computer. Not on a company’s cloud: on your machine, under your control. No ads, no tracking, nobody selling your data.',
     hero_download: 'Download free', hero_source: 'View the code',
-    hero_note: 'For Linux for now. macOS and Windows, soon.',
+    hero_note: 'Installer for Linux. On Windows and macOS, with one command or with Docker.',
     why_title: 'What is it for?',
     why_body: 'Today your information is scattered and, almost always, sitting on big companies’ servers that keep it, look at it and use it to make money: some things on Google, others on your phone, others in each app. Dotrino Vault brings it all into one place that is truly yours —your computer— and your other devices reach it securely, wherever you are. Your information stops being borrowed and becomes yours again.',
     how_title: 'How it works',
@@ -113,7 +121,15 @@ const I18N = {
     dl_install_t: 'Install',
     dl_pair_t: 'Connect a device',
     dl_warn: 'Since it’s a free, open-source program (we don’t pay anyone to "sign" it), your system may show a warning when installing. That’s normal and safe.',
-    dl_other: 'macOS and Windows versions are on the way. For now, Linux.',
+    dl_win_t: 'Windows or macOS',
+    dl_win_lead: 'No installer here yet, but there is a way to have it running in a minute: one command that takes care of everything, including downloading whatever is missing. It does not ask for admin rights.',
+    dl_win_ps: 'Windows (PowerShell)',
+    dl_win_sh: 'macOS or Linux (terminal)',
+    dl_win_note: 'Leave the window open: while it is open, your vault is running. To connect a device, open another window and ask for the code.',
+    dl_docker_t: 'Docker',
+    dl_docker_lead: 'If you already use Docker, it is the cleanest way: it updates on its own and does not touch your system. Works the same on Windows, macOS and Linux.',
+    dl_docker_note: 'No ports to open and nothing to touch on your router: the vault listens to nothing, it connects outward. And one thing to keep in mind: the volume IS your account. If you delete it, it is gone.',
+    dl_other: 'The one-click installer for Windows and macOS is on the way. In the meantime, the two ways above work just as well.',
     nav_use: 'How to use it',
     use_title: 'How to use it, once installed',
     use_lead: 'Most of the time you do nothing: the vault starts with your computer and works in the background. This is the little you will actually do.',
@@ -156,6 +172,19 @@ const setLang = (l) => { lang.value = l; localStorage.setItem(LANG_KEY, l); docu
 
 const installCmd = 'tar xzf dotrino-vault-*-linux-x64.tar.gz\ncd dotrino-vault-*-linux-x64\nsh install.sh'
 const pairCmd = 'dotrino-vault pair'
+// Instalador universal del ecosistema (dotrino-home/public/install.{ps1,sh}): asegura
+// Node 20+ —lo baja LOCAL, sin admin— y corre el paquete. Es la vía probada en Windows.
+const winPsCmd = '& ([scriptblock]::Create((irm https://dotrino.com/install.ps1))) @dotrino/vaultd'
+const winShCmd = 'curl -fsSL https://dotrino.com/install.sh | sh -s -- @dotrino/vaultd'
+const npxCmd = 'npx -y @dotrino/vaultd'
+const dockerCmd = [
+  'docker volume create dotrino-vault',
+  'docker run -d --name dotrino-vault --restart unless-stopped \\',
+  '  -v dotrino-vault:/data ghcr.io/imdotrino/dotrino-vault',
+  '',
+  '# conectar un aparato:',
+  'docker exec -it dotrino-vault dotrino-vault pair'
+].join('\n')
 const serviceCmd = 'systemctl --user restart dotrino-vault\njournalctl --user -u dotrino-vault -f'
 
 const copied = ref('')
@@ -275,6 +304,43 @@ onMounted(() => { document.documentElement.lang = lang.value })
         </div>
 
         <p class="warn">{{ t.dl_warn }}</p>
+
+        <div class="dl-card">
+          <h3>{{ t.dl_win_t }}</h3>
+          <p class="dl-note">{{ t.dl_win_lead }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ t.dl_win_ps }}</span>
+              <button class="copy" @click="copy(winPsCmd, 'winps')">{{ copied === 'winps' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ winPsCmd }}</code></pre>
+          </div>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ t.dl_win_sh }}</span>
+              <button class="copy" @click="copy(winShCmd, 'winsh')">{{ copied === 'winsh' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ winShCmd }}</code></pre>
+          </div>
+          <div class="codeblock">
+            <div class="code-head"><span>Node ≥ 20</span>
+              <button class="copy" @click="copy(npxCmd, 'npx')">{{ copied === 'npx' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ npxCmd }}</code></pre>
+          </div>
+          <p class="dl-note">{{ t.dl_win_note }}</p>
+        </div>
+
+        <div class="dl-card">
+          <h3>{{ t.dl_docker_t }}</h3>
+          <p class="dl-note">{{ t.dl_docker_lead }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>Docker</span>
+              <button class="copy" @click="copy(dockerCmd, 'docker')">{{ copied === 'docker' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ dockerCmd }}</code></pre>
+          </div>
+          <p class="dl-note">{{ t.dl_docker_note }}</p>
+        </div>
+
         <p class="other">{{ t.dl_other }}</p>
       </section>
 
