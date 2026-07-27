@@ -155,16 +155,26 @@ Reglas (V8):
   Por eso solo funciona donde están las dos: hacen falta las dos claves de contenido.
 - **Nunca borra el origen por su cuenta.** Copia, verifica, y recién entonces ofrece borrar.
 
-**Lo que NO se mueve, y hay que decirlo en claro:** las calificaciones, los contactos que te
-guardaron y lo que firmaste **se quedan con la cuenta de origen**, porque cuelgan de su
-nombre. Si la borras, se pierden. Mover contenido resuelve «mis cosas en un solo lugar»; no
-resuelve —ni promete— «mi reputación en un solo lugar».
+#### Qué se mueve y qué no (la línea es «lo tuyo sí, lo de los demás no»)
+
+| | ¿Se mueve? |
+|---|---|
+| Tu contenido (documentos, historial, imágenes…) | **Sí.** Es tuyo y vive en tu almacén. |
+| **Tu agenda de contactos** (nombres, quién es quién) | **Sí.** El peer book es dato tuyo y está namespaceado por perfil (`dotrino-identity/vault/peerStore.js`), así que viaja con el resto. |
+| Las calificaciones que **te dieron** | **No.** Cuelgan del nombre de la cuenta que te las recibió. |
+| Las calificaciones que **tú diste** | **No** en el sentido que importa: aunque la agenda se copie, van firmadas con la llave vieja y quedan registradas a nombre de la cuenta vieja. Copiar la lista no las vuelve emitidas por la cuenta nueva. |
+| Que **otras personas te tengan guardado** | **No.** Esa entrada está en el aparato de esa persona, con la tarjeta de tu cuenta vieja. Nada de lo que hagas la cambia: si borras el origen, se queda apuntando a una cuenta que ya no existe y tiene que agregarte de nuevo. |
+
+Regla para no equivocarse al escribir la copy: **se mueve lo que guardaste tú; no se mueve lo
+que guardaron o dijeron otros**, en ninguna de las dos direcciones. Mover contenido resuelve
+«mis cosas en un solo lugar»; no resuelve —ni promete— «mi reputación en un solo lugar».
 
 **Qué decir en la UI** (lenguaje llano, sin jerga):
 
-> Tus dos cuentas siguen siendo dos. Puedes pasar tus cosas de una a la otra y luego borrar la
-> que ya no uses. Lo que no se pasa es lo que otras personas dijeron de ti: las
-> calificaciones y los contactos se quedan con la cuenta donde te los dieron.
+> Tus dos cuentas siguen siendo dos. Puedes pasar tus cosas —lo que guardaste y tu lista de
+> contactos— de una a la otra y luego borrar la que ya no uses. Lo que no se pasa es lo que
+> hicieron otras personas: las calificaciones que te dieron se quedan con la cuenta donde te
+> las dieron, y quien te tenga guardado en su aparato tendrá que agregarte de nuevo.
 
 ### 4.3 Orden: esto es la fase 2
 
@@ -264,6 +274,11 @@ idea, distinto almacén.
 
 - [ ] `moveContent({ from, to })` entre dos perfiles **de este dispositivo**: abre cada ítem
       con la CEK del perfil origen y lo vuelve a cifrar con la del destino.
+- [ ] **Incluye el peer book** (`peerStore.js`, `peers.<pid>.v1`): la agenda es dato del
+      usuario y se mueve con el resto. Los **nombres y pubkeys** se copian; las
+      **calificaciones emitidas** por la cuenta vieja no se re-atribuyen a la nueva (van
+      firmadas por la llave vieja) — se copian como referencia o se dejan, pero nunca se
+      presentan como emitidas por la cuenta destino.
 - [ ] Requiere tener **las dos claves de contenido**: solo procede si las dos cuentas están
       en este aparato y ninguna está bloqueada.
 - [ ] **Copiar → verificar → recién entonces ofrecer borrar** el origen. Nunca en un solo
