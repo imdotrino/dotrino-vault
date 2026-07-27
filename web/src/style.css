@@ -146,3 +146,6 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
   .actions { flex-basis: 100%; margin-left: 0; justify-content: flex-end; }
   .hero .shield { display: none; }
 }
+.use-cmds .cmds-how { color: var(--muted); font-size: .92rem; margin: 0 0 8px; }
+.use-cmds ul.cmds-how { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; }
+.use-cmds ul.cmds-how code { background: #0a1322; border-radius: 5px; padding: 1px 5px; }

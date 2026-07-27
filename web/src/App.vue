@@ -54,7 +54,7 @@ const I18N = {
     dl_other: 'El instalador de un clic para Windows y macOS está en camino. Mientras tanto, las dos formas de arriba funcionan igual de bien.',
     nav_use: 'Cómo se usa',
     use_title: 'Cómo se usa, una vez instalada',
-    use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda arranca sola con la computadora y trabaja de fondo. Esto es lo poco que sí harás alguna vez.',
+    use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda trabaja de fondo. Con el instalador de Linux y con Docker arranca sola cada vez que enciendes la computadora; si la levantaste con el comando de Windows o macOS, funciona mientras dejes esa ventana abierta. Esto es lo poco que sí harás alguna vez.',
     use_cards: [
       ['Conectar un teléfono o una laptop',
        'En tu computadora pides un código; en el aparato lo escaneas o lo pegas. El aparato te muestra seis dígitos y tú los escribes en la computadora. Ese ida y vuelta es lo que evita que alguien se cuele: aprobar exige tener el aparato en la mano.'],
@@ -81,7 +81,11 @@ const I18N = {
       ['dotrino-vault profile ls', 'tus cuentas en esta computadora'],
       ['dotrino-vault tui', 'todo lo anterior, en una pantalla'],
     ],
-    use_service_t: 'Y el servicio, si algo se atasca',
+    use_cmds_how: 'Cómo escribirlos depende de cómo la instalaste:',
+    use_cmds_linux: 'Con el instalador de Linux, tal cual.',
+    use_cmds_npx: 'Si la levantaste con el comando (Windows o macOS), antepón <code>npx -p @dotrino/vaultd</code>.',
+    use_cmds_docker: 'Con Docker, antepón <code>docker exec -it dotrino-vault</code>.',
+    use_service_t: 'Arrancar, parar y ver qué pasa',
     use_more: 'Todo esto también está en tu página de dispositivos, sin terminal.',
     foot_tag: 'Tu información, en tu lugar, bajo tus reglas.',
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
@@ -132,7 +136,7 @@ const I18N = {
     dl_other: 'The one-click installer for Windows and macOS is on the way. In the meantime, the two ways above work just as well.',
     nav_use: 'How to use it',
     use_title: 'How to use it, once installed',
-    use_lead: 'Most of the time you do nothing: the vault starts with your computer and works in the background. This is the little you will actually do.',
+    use_lead: 'Most of the time you do nothing: the vault works in the background. With the Linux installer and with Docker it starts on its own every time you turn the computer on; if you launched it with the Windows or macOS command, it runs while you leave that window open. This is the little you will actually do.',
     use_cards: [
       ['Connect a phone or a laptop',
        'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.'],
@@ -159,7 +163,11 @@ const I18N = {
       ['dotrino-vault profile ls', 'your accounts on this computer'],
       ['dotrino-vault tui', 'all of the above, on one screen'],
     ],
-    use_service_t: 'And the service, if something gets stuck',
+    use_cmds_how: 'How you type them depends on how you installed it:',
+    use_cmds_linux: 'With the Linux installer, just as they are.',
+    use_cmds_npx: 'If you launched it with the command (Windows or macOS), prefix them with <code>npx -p @dotrino/vaultd</code>.',
+    use_cmds_docker: 'With Docker, prefix them with <code>docker exec -it dotrino-vault</code>.',
+    use_service_t: 'Starting, stopping and seeing what is going on',
     use_more: 'All of this is also on your devices page, no terminal needed.',
     foot_tag: 'Your data, in your place, under your rules.',
     foot_eco: 'Part of the Dotrino ecosystem', foot_src: 'Source', foot_discord: 'Discord',
@@ -185,7 +193,17 @@ const dockerCmd = [
   '# conectar un aparato:',
   'docker exec -it dotrino-vault dotrino-vault pair'
 ].join('\n')
-const serviceCmd = 'systemctl --user restart dotrino-vault\njournalctl --user -u dotrino-vault -f'
+const serviceCmd = [
+  '# Linux (instalador)',
+  'systemctl --user restart dotrino-vault',
+  'journalctl --user -u dotrino-vault -f',
+  '',
+  '# Docker',
+  'docker restart dotrino-vault',
+  'docker logs -f dotrino-vault',
+  '',
+  '# Windows o macOS (el comando): cierra esa ventana y vuelve a correrlo'
+].join('\n')
 
 const copied = ref('')
 function copy (text, key) {
@@ -370,6 +388,12 @@ onMounted(() => { document.documentElement.lang = lang.value })
 
         <details class="use-cmds">
           <summary>{{ t.use_cmds_t }}</summary>
+          <p class="cmds-how">{{ t.use_cmds_how }}</p>
+          <ul class="cmds-how">
+            <li>{{ t.use_cmds_linux }}</li>
+            <li v-html="t.use_cmds_npx"></li>
+            <li v-html="t.use_cmds_docker"></li>
+          </ul>
           <table>
             <tbody>
               <tr v-for="(c, i) in t.use_cmds" :key="i">
