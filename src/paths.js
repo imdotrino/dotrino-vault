@@ -10,13 +10,23 @@ import fs from 'node:fs'
 
 /**
  * Dir de datos del vault. Override con DOTRINO_VAULT_DIR.
- * Default: ~/.local/share/dotrino/vault. DEBE coincidir exactamente con la unit
+ *
+ * En Linux/macOS: `~/.local/share/dotrino/vault`. DEBE coincidir exactamente con la unit
  * systemd (`%h/.local/share/...` + ReadWritePaths) y con install.sh (DATA_DIR),
  * porque el CLI de control corre en la shell del usuario SIN el `Environment=` del
  * servicio: si difieren, `dotrino-vault status/pair/devices` no encuentra al daemon.
+ *
+ * En Windows: `%LOCALAPPDATA%\Dotrino\vault`, que es donde Windows espera los datos de
+ * una app. El daemon y el CLI lo resuelven igual, así que el contrato por archivos entre
+ * los dos (ver `vaultControl.js`) sigue funcionando sin tocar nada.
  */
 export function dataDir () {
-  return process.env.DOTRINO_VAULT_DIR || path.join(os.homedir(), '.local', 'share', 'dotrino', 'vault')
+  if (process.env.DOTRINO_VAULT_DIR) return process.env.DOTRINO_VAULT_DIR
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    return path.join(base, 'Dotrino', 'vault')
+  }
+  return path.join(os.homedir(), '.local', 'share', 'dotrino', 'vault')
 }
 
 export function ensureDir (dir) {

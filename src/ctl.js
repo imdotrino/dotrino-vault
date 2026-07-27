@@ -54,11 +54,29 @@ const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 const VERSION = (typeof __VAULT_VERSION__ !== 'undefined') ? __VAULT_VERSION__ : 'dev'
 const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
+/**
+ * Cómo se arranca el vault EN ESTA MÁQUINA. El CLI corre en Linux (servicio systemd),
+ * en Windows/macOS (por npm, en primer plano o al inicio de sesión) y dentro de un
+ * contenedor, así que decir siempre «systemctl» manda a la mitad de la gente a un
+ * comando que no existe.
+ */
+const EN_DOCKER = !!process.env.DOTRINO_IN_DOCKER
+const START_HINT = EN_DOCKER
+  ? 'docker start dotrino-vault'
+  : process.platform === 'linux'
+    ? 'systemctl --user start dotrino-vault'
+    : 'dotrino-vaultd   (o: npx -y @dotrino/vaultd)'
+const RESTART_HINT = EN_DOCKER
+  ? 'docker restart dotrino-vault'
+  : process.platform === 'linux'
+    ? 'systemctl --user restart dotrino-vault'
+    : 'cierra el vault y vuelve a arrancarlo'
+
 function readState () {
   const s = readJson(stateFile, null)
   if (!s) {
     console.error('El vault no parece haber arrancado todavía (no hay state.json en %s).', dir)
-    console.error('Arrancá el servicio:  systemctl --user start dotrino-vault')
+    console.error('Arráncalo:  %s', START_HINT)
     process.exit(2)
   }
   return s
@@ -67,7 +85,7 @@ function alive (pid) { try { return !!pid && (process.kill(pid, 0) || true) } ca
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 function requireDaemon () {
   const s = readState()
-  if (!alive(s.pid)) { console.error('El daemon no está corriendo. Arrancalo: systemctl --user start dotrino-vault'); process.exit(1) }
+  if (!alive(s.pid)) { console.error('El daemon no está corriendo. Arráncalo: %s', START_HINT); process.exit(1) }
   return s
 }
 function deviceIdOf (sub) {
@@ -84,7 +102,7 @@ function cmdStatus () {
   // corriendo es más viejo que el CLI, avisar (nos mordió 3 veces).
   if (s.version && s.version !== VERSION) {
     console.log('  ⚠ el servicio corre la versión %s (binario instalado: %s).', s.version, VERSION)
-    console.log('    Reinicia para actualizarlo:  systemctl --user restart dotrino-vault')
+    console.log('    Reinicia para actualizarlo:  %s', RESTART_HINT)
   }
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
@@ -205,7 +223,11 @@ async function cmdMembers () {
   if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
   const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves' }
-  console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, (acta.profileId || '').slice(0, 24) + '…', acta.seq)
+  // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
+  // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
+  // misma que se enseña al emparejar y en la lista de miembros.
+  const perfilId = await deviceIdOf(acta.profileId).catch(() => '????-????')
+  console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, perfilId, acta.seq)
   for (const m of acta.members) {
     const quien = m.label || m.id
     const marcas = [
@@ -535,8 +557,12 @@ dispositivos siguen firmando y leyendo aunque esté bloqueado):
   unlock                            desbloquea para poder editar
   lock                              vuelve a bloquear (también al reiniciar el servicio)
 
-El servicio se gestiona con systemd --user:
-  systemctl --user {start,stop,restart} dotrino-vault · journalctl --user -u dotrino-vault -f`)
+Arrancar y parar, según dónde corra:
+  Linux (servicio)  systemctl --user {start,stop,restart} dotrino-vault
+                    journalctl --user -u dotrino-vault -f
+  Windows / macOS   dotrino-vaultd     (o sin instalar nada: npx -y @dotrino/vaultd)
+  Docker            docker {start,stop,restart} dotrino-vault · docker logs -f dotrino-vault
+                    (el CLI, dentro:  docker exec -it dotrino-vault dotrino-vault status)`)
 }
 
 export async function runCtl (argv) {

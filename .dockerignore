@@ -1,0 +1,12 @@
+node_modules
+dist
+.build
+.git
+.github
+test
+packaging
+twa
+docs
+*.md
+!README.md
+.dotrino
