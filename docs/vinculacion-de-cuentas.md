@@ -282,6 +282,22 @@ Qué daño hacía, medido y sin exagerar:
 
 ### 5.5 La pregunta, en la UI
 
+> **Parcialmente hecho (2026-07-27).** Mientras el camino A no exista no hay dos opciones
+> que ofrecer, así que las dos UIs (`vault.dotrino.com/dispositivos` y
+> `profile.dotrino.com/vault`) **avisan antes y explican después** en vez de preguntar:
+> qué va a pasar, que quedas con dos cuentas, y cómo soltar la que no quieras.
+> - [x] Aviso **antes** de emparejar: «se creará aquí una cuenta nueva; la que usas no se toca».
+> - [x] Explicación **después**, con los pasos para borrar la otra y el aviso de que es
+>       irreversible. Comprobado en el smoke de navegador.
+> - [x] **Borrar una cuenta existe** (`@dotrino/profile@0.16.0`, solo en la página del perfil,
+>       nunca sobre la que estás usando, en dos pasos). Antes `deleteProfile` estaba en
+>       identity pero **ninguna UI lo exponía**: no había forma de soltar una cuenta.
+> - [x] `profile.dotrino.com` **ya no pregunta «con qué perfil conectar esta bóveda»**: esa
+>       pregunta era del modelo viejo, en el que elegir una cuenta existente la reemplazaba.
+> - [ ] La pregunta de verdad (A o B) queda para cuando exista el camino A.
+> - [ ] La cuenta vacía que queda en un navegador estrenado: se limpia con esa misma pregunta.
+
+
 - [ ] Cuando los dos lados tienen cuenta, la consola pregunta **una sola cosa**, con las dos
       consecuencias escritas: *¿de qué cuenta estamos hablando?*
       - «La de este aparato» → camino A (la bóveda la guarda; el aparato deja de sellar).
