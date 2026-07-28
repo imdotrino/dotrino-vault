@@ -57,6 +57,8 @@ const T = {
     pair_code_t: 'Escribe este código en tu bóveda',
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
+    adopt_done: 'Listo, tu cuenta ya vive en tu bóveda.',
+    adopt_done_b: 'Sigue siendo la misma cuenta de siempre: los mismos contactos, lo mismo firmado, nada que volver a hacer. Lo que cambió es que ahora la guarda y la manda tu bóveda, y este aparato es uno más de los que la usan.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
     ann_t: 'Esto es lo que quiere hacer tu bóveda',
     ann_join_h: (n) => n ? `Crear en este dispositivo una cuenta nueva: «${n}», la de tu bóveda.` : 'Crear en este dispositivo una cuenta nueva: la de tu bóveda.',
@@ -124,6 +126,8 @@ const T = {
     pair_code_t: 'Type this code in your vault',
     pair_code_b: 'Open it and type these six digits to approve the connection. Nobody else knows them.',
     pair_done: 'Done, this device is connected.',
+    adopt_done: 'Done, your account now lives in your vault.',
+    adopt_done_b: 'It is the same account as always: same contacts, same signed history, nothing to redo. What changed is that your vault now keeps it and is in charge, and this device is one more that uses it.',
     pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
     ann_t: 'This is what your vault wants to do',
     ann_join_h: (n) => n ? `Create a new account on this device: “${n}”, your vault's.` : 'Create a new account on this device: your vault\'s.',
@@ -237,8 +241,6 @@ const pairCode = ref('')
 const pasted = ref('')
 // Recién emparejado: hay que explicar que el aparato quedó con DOS cuentas.
 const justPaired = ref(false)
-// Lo que la bóveda declara en el QR: { qr, mode: 'join'|'adopt', account }.
-const pendingPair = ref(null)
 const pairError = ref('')
 const scanHost = ref(null)
 const fileInput = ref(null)
@@ -261,11 +263,10 @@ const pairFlow = computed(() => {
   if (pairError.value) return 'error'
   if (pairCode.value) return 'code'
   if (pairing.value) return 'connecting'
-  if (pendingPair.value) return 'blocked' // solo `adopt`: no hay nada que hacer todavía
   return null
 })
 /** Sale del proceso y devuelve la consola completa. */
-const closeFlow = () => { pairError.value = ''; justPaired.value = false; pendingPair.value = null }
+const closeFlow = () => { pairError.value = ''; justPaired.value = false }
 
 /**
  * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
@@ -296,30 +297,31 @@ function announce (qr) {
   // `markRaw` + copia plana al conectar: el QR viaja por `postMessage` al iframe de
   // identidad, y un Proxy reactivo de Vue NO es clonable («could not be cloned») —
   // guardar el objeto en un ref rompía el emparejamiento entero.
-  if (mode === 'adopt') { // camino A: todavía no existe de este lado, solo se explica
-    pendingPair.value = { qr: markRaw(qr), mode, account }
-    return
-  }
   // Escanear el código YA es aceptar: se arranca de una y lo que la bóveda quiere
   // hacer se cuenta en la misma pantalla del código de seis dígitos.
   flowAccount.value = account
-  connect({ ...qr })
+  flowMode.value = mode
+  connect({ ...qr }, mode)
 }
 
-const cancelAnnounce = () => { pendingPair.value = null }
 /** La cuenta que la bóveda declaró, para nombrarla en la pantalla del código. */
 const flowAccount = ref('')
+/** Qué camino se está haciendo: `join` (camino B) o `adopt` (camino A). */
+const flowMode = ref('join')
 
-async function connect (qr) {
+async function connect (qr, mode = 'join') {
   if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
   pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
   const off = id.value.onVault((e) => { if (e?.phase === 'challenge') pairCode.value = e.code })
   try {
-    // Camino B (`vinculacion-de-cuentas.md` §3): la cuenta de la bóveda se materializa aquí
-    // como una cuenta MÁS, con llave nueva. La que estabas usando NO se toca — antes se
-    // sobrescribía sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
-    await id.value.enrollDevice(qr, { join: 'new' })
+    // Cuál de los dos caminos (`vinculacion-de-cuentas.md`), según lo que declaró la bóveda:
+    //   · `adopt` (camino A) → la cuenta que YA vive en este aparato pasa a vivir en la
+    //     bóveda. Sigue siendo la misma cuenta; lo que cambia es quién manda.
+    //   · `join`  (camino B) → la cuenta de la bóveda se materializa aquí como una cuenta
+    //     MÁS, con llave nueva. La que estabas usando NO se toca — antes se sobrescribía
+    //     sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
+    await id.value.enrollDevice(qr, { join: mode === 'adopt' ? 'adopt' : 'new' })
     // Emparejar deja DOS cuentas en el aparato, y eso hay que decirlo: si no, el
     // conmutador aparece con una entrada de más y nadie sabe de dónde salió.
     justPaired.value = true
@@ -463,28 +465,17 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         <p class="waiting">{{ t.flow_waiting }}</p>
         <div class="what" data-testid="announce-what">
           <strong>{{ t.ann_t }}</strong>
-          <p>{{ t.ann_join_h(flowAccount) }}</p>
-          <p class="muted">{{ t.ann_join_c }}</p>
-        </div>
-      </div>
-
-      <!-- Camino A (que la bóveda se quede con la cuenta de este aparato): todavía
-           no existe de este lado, así que se explica y no se hace nada. -->
-      <div v-else-if="pairFlow === 'blocked'" class="card announce" data-testid="pair-announce">
-        <strong>{{ t.ann_t }}</strong>
-        <p class="big">{{ t.ann_adopt_h(pendingPair.account) }}</p>
-        <p class="muted">{{ t.ann_adopt_c }}</p>
-        <p class="muted" data-testid="announce-adopt-no">{{ t.ann_adopt_no }}</p>
-        <div class="row">
-          <button class="btn ghost" data-testid="announce-cancel" @click="cancelAnnounce">{{ t.back }}</button>
+          <p>{{ flowMode === 'adopt' ? t.ann_adopt_h(flowAccount) : t.ann_join_h(flowAccount) }}</p>
+          <p class="muted">{{ flowMode === 'adopt' ? t.ann_adopt_c : t.ann_join_c }}</p>
         </div>
       </div>
 
       <!-- Listo, y qué quedó en el aparato -->
       <div v-else-if="pairFlow === 'done'" class="card done" data-testid="two-accounts">
-        <strong>{{ t.pair_done }}</strong>
-        <p>{{ t.two_title }}. {{ t.two_body }}</p>
-        <details>
+        <strong>{{ flowMode === 'adopt' ? t.adopt_done : t.pair_done }}</strong>
+        <p v-if="flowMode === 'adopt'">{{ t.adopt_done_b }}</p>
+        <p v-else>{{ t.two_title }}. {{ t.two_body }}</p>
+        <details v-if="flowMode !== 'adopt'">
           <summary>{{ t.two_del }}</summary>
           <ol class="muted">
             <li>{{ t.two_del_1 }}</li>

@@ -63,7 +63,9 @@ export function openProfiles (root = dataDir()) {
     createdAt: p.createdAt || null,
     protected: !!p.pwd,
     locked: !!p.pwd && !unlocked.has(p.id),
-    current: p.id === data.current
+    current: p.id === data.current,
+    // Nació para adoptar la cuenta de un aparato (camino A) y todavía no lo ha hecho.
+    ...(p.adopt ? { adopt: true } : {})
   })
 
   function assertExists (id) {
@@ -123,13 +125,28 @@ export function openProfiles (root = dataDir()) {
       return { id, migrated: legacy }
     },
 
-    add (name) {
+    /**
+     * Crea un perfil. Con `adopt: true` nace **para adoptar la cuenta de un aparato**
+     * (camino A): la bóveda le hace sitio, pero la cuenta —el `profileId`, la reputación,
+     * lo ya firmado— la trae el dispositivo. La marca la consume `startVault`, que se la
+     * pasa a la identidad (`prepareForAdoption`); sin ella, adoptar una cuenta ajena se
+     * leería como pisar una cuenta con datos y se rechazaría, que es lo que tiene que
+     * pasar cuando nadie lo pidió.
+     */
+    add (name, { adopt = false } = {}) {
       const id = newId()
       ensureDir(dirOf(id))
-      data.profiles.push({ id, name: cleanName(name), createdAt: Date.now() })
+      data.profiles.push({ id, name: cleanName(name), createdAt: Date.now(), ...(adopt ? { adopt: true } : {}) })
       if (!data.current) data.current = id
       save()
       return entry(find(id))
+    },
+
+    /** Quita la marca de «nació para adoptar» (ya adoptó, o se canceló). */
+    clearAdopt (id) {
+      const p = find(id)
+      if (p?.adopt) { delete p.adopt; save() }
+      return !!p
     },
 
     rename (id, name) {

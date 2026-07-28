@@ -166,9 +166,24 @@ async function cmdPair (args = []) {
     PROFILE = d.id // el emparejamiento y los comandos siguientes apuntan a ELLA
     console.log('Cuenta nueva: %s  (%s)', name, d.id)
   }
+  // `--adopt [nombre]`: la TERCERA respuesta a «¿de qué cuenta hablamos?» — el camino A.
+  // Aquí la cuenta NO sale de esta bóveda: la trae el aparato y esta bóveda pasa a
+  // guardarla y a mandarla. Por eso se crea un perfil VACÍO, que nace a la espera de
+  // adoptarla; sin ese sitio no habría dónde meterla.
+  const adIdx = args.findIndex((a) => a === '--adopt')
+  const adopt = adIdx >= 0
+  if (adopt) {
+    const next = args[adIdx + 1]
+    const name = (next && !next.startsWith('-')) ? next : `cuenta del dispositivo`
+    const d = await profileRequest('add', { name, adopt: true })
+    if (d.error) { console.error('%s', d.error); process.exit(1) }
+    if (!d.id) { console.error('El daemon no dijo qué cuenta creó.'); process.exit(1) }
+    PROFILE = d.id
+    console.log('Cuenta a la espera de adoptar la del dispositivo: %s  (%s)', name, d.id)
+  }
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', service ? { service } : {})
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(adopt ? { mode: 'adopt' } : {}) })
   avisar(s.pid, 'SIGUSR1')
 
   let pair = null

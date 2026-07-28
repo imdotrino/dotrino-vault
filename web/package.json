@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dotrino/identity": "0.34.0",
+    "@dotrino/identity": "0.35.0",
     "@dotrino/install": "0.2.3",
     "@dotrino/support": "0.8.0",
     "jsqr": "1.4.0",

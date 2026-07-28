@@ -35,7 +35,7 @@ import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
  *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
  *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
  */
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false } = {}) {
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
   // CIFRADO EN REPOSO ligado a esta máquina: `identity.json` deja de estar en claro, así
   // que copiarlo a otro equipo no sirve de nada. No protege contra quien ya tiene ESTA
@@ -47,6 +47,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   } catch (e) { log('[vault] no se pudo cifrar la identidad en reposo:', e.message) }
   const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
   if (!identity.me?.publickey) await identity.setMyNickname('')
+  // CAMINO A: este perfil nació para adoptar la cuenta de un aparato. La identidad se crea
+  // igual (su llave es la que entrará como miembro), pero se marca para que `joinProfile`
+  // acepte cambiar su acta recién nacida por la que traiga el dispositivo. Sin la marca,
+  // adoptar sería pisar una cuenta con datos y se rechaza — que es lo correcto por defecto.
+  if (forAdoption) {
+    try { await identity.prepareForAdoption() } catch (e) { log('[vault] no se pudo preparar el perfil para adoptar:', e.message) }
+  }
 
   const store = openStore(dir)
   const threads = openThreadStore(dir)
@@ -101,6 +108,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     sendByPubkey: (pub, obj) => client.sendByPubkey(pub, obj),
     audit,
     log,
+    // Camino A: lo que esta bóveda le manda al aparato para entrar en SU acta. La llave de
+    // cifrado es lo que le permite leer el contenido de la cuenta que va a custodiar; sin
+    // ella entraría mandando una cuenta que no puede abrir.
+    encPub: identity.me?.encryptionPubkey || null,
+    vaultLabel: 'bóveda',
+    onAdopted: (info) => { try { onAdopted?.(info) } catch (_) {} },
     defaultScope: [SCOPE.READ],
     onChallenge ({ deviceId, scope }) {
       log(`\n[vault] Un dispositivo quiere conectarse:`)
@@ -263,6 +276,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!payload || typeof payload !== 'object') return
     try {
       if (payload.type === MSG.ENROLL) return await desk.handleEnroll(from, payload)
+      if (payload.type === MSG.ACTA_SEALED) return await desk.handleActaSealed(from, payload)
       if (payload.type === MSG.SIGN) return await handleSign(from, payload)
       if (payload.type === MSG.GET) return await handleGet(from, payload)
       if (payload.type === MSG.STORE) return await handleStore(from, payload)

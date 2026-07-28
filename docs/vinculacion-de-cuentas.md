@@ -251,24 +251,34 @@ Qué daño hacía, medido y sin exagerar:
 
 ### 5.2 Protocolo: la intención viaja firmada (V7)
 
-- [ ] `intent: 'join' | 'adopt'` dentro del `data` firmado del `ENROLL`
-      (`dotrino-identity/vault/remote.js:83`). Sin `intent` ⇒ se trata como `join` **solo si
-      el perfil de origen está vacío**; si no, error claro (nunca adivinar).
-- [ ] Mensaje nuevo `vault.enroll.adopt`: la bóveda responde `{ pub, encPub, label, code }`
+- [x] `intent: 'join' | 'adopt'` dentro del `data` firmado del `ENROLL`. La bóveda **rechaza
+      el que no coincida** con el modo con el que ella abrió el emparejamiento
+      (`intent-mismatch`): lo que pasa es lo que el humano vio anunciado, y no algo que se
+      decidió a mitad de camino. Sin `intent` se asume `join` (bóvedas y aparatos viejos).
+- [x] Mensaje nuevo `vault.enroll.adopt`: la bóveda responde `{ pub, encPub, label, code }`
       en vez del cert. El teléfono lo acepta **solo si el código coincide con el suyo**
       (misma defensa que ya tiene el `ENROLLED`, en el otro sentido).
-- [ ] Mensaje nuevo `vault.acta.sealed`: el teléfono devuelve el acta con `admit` + `wrap` +
-      `handover` en un `seq`.
-- [ ] La bóveda, al recibirla: comprobar que **ella** es el `sealer`, guardar en el perfil
-      nuevo, re-emitir los certs de todos (D9) y devolver el acta resultante.
+- [x] Mensaje nuevo `vault.acta.sealed`: el teléfono devuelve el acta con `admit` + `wrap` +
+      `handover` en un `seq` (`vaultAdopt` en `vault/core.js`).
+- [x] La bóveda, al recibirla: comprueba que **ella** es el `sealer`, que la selló el
+      dispositivo de ESE emparejamiento y que es la cuenta que él declaró (`profileId`);
+      guarda en el perfil nuevo y devuelve el acta resultante.
+- [ ] **Re-emitir los certs de todos los miembros (D9).** Pendiente, y por un motivo de
+      fondo: el acta **no tiene una operación para cambiar el cert de un miembro** (`admit`
+      solo vale para uno que no está). Añadirla es tocar el protocolo del acta para todo el
+      mundo, así que se decide aparte. Mientras tanto: el aparato que entrega su cuenta no
+      necesita cert (su llave **es** la cuenta), y los demás miembros conservan el suyo,
+      firmado por quien ya no manda.
 
 ### 5.3 Bóveda: perfiles que nacen vacíos
 
-- [ ] `profiles.add(name, { adopt: true })` → un perfil **sin acta propia**, en espera de
-      adoptar una. Hoy todo perfil nuevo se crea su génesis y se declara su propia cuenta, y
-      entonces adoptar la del teléfono sería «otro perfil» y se rechazaría.
-- [ ] `startVault` tolera el perfil vacío (no sirve, no firma, no acepta enroll `join`) y sale
-      de ese estado al adoptar.
+- [x] `profiles.add(name, { adopt: true })` → un perfil marcado **a la espera de adoptar**.
+      Nace con su acta de génesis como cualquiera (su llave es la que entrará como miembro),
+      pero lleva la marca que `joinProfile` exige para cambiarla por la que traiga el
+      aparato. La marca se consume al adoptar. En la CLI: `dotrino-vault pair --adopt`.
+- [x] La marca de «nací para adoptar» vive en el **kv** del perfil, no en la lista interna
+      de perfiles: en la bóveda es un directorio por perfil y esa lista está vacía, así que
+      no había ninguna entrada que marcar (era `perfil-con-datos` siempre).
 - [ ] La CLI y `state.json` muestran el **`profileId`**, no la pubkey de la bóveda: desde el
       camino A dejan de ser la misma cosa (la llave de la bóveda es un miembro más).
 - [ ] `dotrino-vault profile ls` marca los perfiles adoptados y quién sella cada uno.
@@ -317,7 +327,7 @@ Qué daño hacía, medido y sin exagerar:
 >       identity pero **ninguna UI lo exponía**: no había forma de soltar una cuenta.
 > - [x] `profile.dotrino.com` **ya no pregunta «con qué perfil conectar esta bóveda»**: esa
 >       pregunta era del modelo viejo, en el que elegir una cuenta existente la reemplazaba.
-> - [ ] La pregunta de verdad (A o B) queda para cuando exista el camino A.
+> - [x] La pregunta de verdad (A o B) ya existe: `dotrino-vault pair --adopt`.
 > - [ ] La cuenta vacía que queda en un navegador estrenado: se limpia con esa misma pregunta.
 
 

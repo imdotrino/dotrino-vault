@@ -56,6 +56,10 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       proxyUrl,
       log: (...a) => log(`[${tag}]`, ...a),
       isLocked: () => profiles.isLocked(id),
+      // Camino A: nació para adoptar la cuenta de un aparato (ver profiles.add).
+      forAdoption: !!p?.adopt,
+      // Ya adoptó: la marca se consume (no vuelve a estar «a la espera»).
+      onAdopted: () => { try { profiles.clearAdopt(id) } catch (_) {} },
       onEnrollChallenge: (info) => onEnrollChallenge?.({ ...info, profile: id, profileName: p?.name || '' })
     })
     running.set(id, v)
@@ -88,10 +92,15 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     currentId: () => profiles.current(),
     resolve: (ref) => profiles.resolve(ref),
 
-    async add (name) {
-      const p = profiles.add(name)
+    /**
+     * Crea un perfil. Con `adopt: true` nace **vacío, esperando la cuenta de un aparato**
+     * (camino A): la bóveda pone el sitio y la llave que entrará como miembro, pero la
+     * cuenta la trae el dispositivo y se adopta al emparejar.
+     */
+    async add (name, { adopt = false } = {}) {
+      const p = profiles.add(name, { adopt })
       await open(p.id)
-      log('[vault] perfil creado: %s (%s)', p.name || '(sin nombre)', p.id)
+      log('[vault] perfil creado%s: %s (%s)', adopt ? ' (a la espera de adoptar una cuenta)' : '', p.name || '(sin nombre)', p.id)
       return profiles.get(p.id)
     },
 

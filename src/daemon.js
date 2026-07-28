@@ -123,7 +123,14 @@ export async function runDaemon () {
       // TAMBIÉN dentro del QR (`acct`) para que el dispositivo pueda anunciar qué va
       // a pasar antes de hacerlo (V9 de docs/vinculacion-de-cuentas.md).
       const profileName = mgr.profiles.get(profileId)?.name || ''
-      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode: 'join', account: profileName })
+      // MODO (V9): lo decide la bóveda y viaja en el QR para que el aparato pueda decir
+      // qué va a pasar antes de hacerlo.
+      //   · `join`  → el dispositivo entra a esta cuenta de la bóveda.
+      //   · `adopt` → la bóveda se queda con la cuenta que trae el aparato (camino A). El
+      //               perfil de esta bóveda tiene que haber nacido para eso (`--adopt`
+      //               crea uno vacío), o no habría dónde meterla.
+      const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
+      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
@@ -160,7 +167,7 @@ export async function runDaemon () {
       case 'list': return {} // el volcado de perfiles ya se hace abajo
       // `id`: quien la crea necesita saber CUÁL quedó, no adivinar por nombre (dos
       // cuentas pueden llamarse igual). Lo usa «emparejar en una cuenta nueva».
-      case 'add': { const p = await mgr.add(req.name); return { done: `perfil creado: ${p.name || p.id}`, id: p.id } }
+      case 'add': { const p = await mgr.add(req.name, { adopt: !!req.adopt }); return { done: `perfil creado: ${p.name || p.id}`, id: p.id, adopt: !!req.adopt } }
       case 'rm': { const r = await mgr.remove(req.profile); return { done: `perfil borrado: ${r.name || r.id}` } }
       case 'rename': { const p = mgr.profiles.rename(ref(), req.name); return { done: `perfil renombrado: ${p.name}` } }
       case 'use': { const p = mgr.profiles.setCurrent(ref()); return { done: `perfil activo: ${p.name || p.id}` } }
