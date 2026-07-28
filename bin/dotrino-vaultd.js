@@ -33,8 +33,21 @@ if (process.argv.includes('--tui')) {
   if (!process.stdout.isTTY) {
     console.error('--tui necesita un terminal interactivo (TTY). La bóveda sigue corriendo sin él.')
   } else {
+    // La TUI se adueña de la pantalla (pantalla alterna + modo crudo). Si el daemon sigue
+    // escribiendo sus logs en stdout, se los pinta ENCIMA y la deja ilegible. Se guardan
+    // y se sueltan al salir, para no perder un error por el camino.
+    const real = { log: console.log, error: console.error, warn: console.warn }
+    const guardados = []
+    const capturar = (nivel) => (...a) => { guardados.push([nivel, a]) }
+    console.log = capturar('log'); console.error = capturar('error'); console.warn = capturar('warn')
+
     const { runTui } = await import('../src/tui/app.js')
-    await runTui()          // al salir de la TUI, se para todo: es la misma ventana
+    try {
+      await runTui()        // al salir de la TUI, se para todo: es la misma ventana
+    } finally {
+      Object.assign(console, real)
+      for (const [nivel, a] of guardados) real[nivel](...a)
+    }
     process.exit(0)
   }
 }

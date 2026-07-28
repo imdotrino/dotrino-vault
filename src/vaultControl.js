@@ -88,10 +88,21 @@ function writeReq (name, obj, profile) {
   try { fs.chmodSync(p(name), 0o600) } catch (_) {}
 }
 
+/**
+ * Campanita para que el daemon lea la petición YA.
+ *
+ * Es best-effort A PROPÓSITO: SIGUSR1/SIGUSR2 **no existen en Windows** y ahí
+ * `process.kill` con ellas revienta — antes eso tumbaba la TUI entera (el CLI ya se había
+ * arreglado; este camino, que es el que usa la TUI, no). El daemon vigila su directorio de
+ * datos, así que la petición se atiende igual en cuanto el archivo está escrito; la señal
+ * solo ahorra la latencia del vigilante.
+ *
+ * Lo que SÍ sigue siendo un error es que el daemon no esté: sin él no hay quien atienda.
+ */
 function signal (sig) {
   const s = readState()
   if (!s || !pidAlive(s.pid)) throw new DaemonDownError()
-  process.kill(s.pid, sig)
+  try { process.kill(s.pid, sig) } catch (_) { /* Windows: no hay señales; lo verá el vigilante */ }
 }
 
 /**
