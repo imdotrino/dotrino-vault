@@ -8,7 +8,7 @@
  * (`@dotrino/identity`), que es quien custodia la llave y sella el acta.
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, markRaw, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
@@ -245,7 +245,10 @@ function announce (qr) {
   if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
   msg.value = null
-  pendingPair.value = { qr, mode: qr.m === 'adopt' ? 'adopt' : 'join', account: String(qr.acct || '').slice(0, 40) }
+  // `markRaw` + copia plana al aceptar: el QR viaja por `postMessage` al iframe de
+  // identidad, y un Proxy reactivo de Vue NO es clonable («could not be cloned») —
+  // guardar el objeto en un ref rompía el emparejamiento entero.
+  pendingPair.value = { qr: markRaw(qr), mode: qr.m === 'adopt' ? 'adopt' : 'join', account: String(qr.acct || '').slice(0, 40) }
 }
 
 const cancelAnnounce = () => { pendingPair.value = null }
@@ -253,7 +256,7 @@ function acceptAnnounce () {
   const p = pendingPair.value
   if (!p || p.mode !== 'join') return // `adopt` todavía no existe de este lado
   pendingPair.value = null
-  connect(p.qr)
+  connect({ ...p.qr })
 }
 
 async function connect (qr) {
