@@ -117,11 +117,13 @@ export async function runDaemon () {
       const isService = typeof pairReq?.service === 'string' && pairReq.service
       const scope = isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
       const label = pairReq?.label || (isService ? 'servicio:' + pairReq.service : 'cli')
-      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS })
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
-      // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`).
+      // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`). El nombre viaja
+      // TAMBIÉN dentro del QR (`acct`) para que el dispositivo pueda anunciar qué va
+      // a pasar antes de hacerlo (V9 de docs/vinculacion-de-cuentas.md).
       const profileName = mgr.profiles.get(profileId)?.name || ''
+      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode: 'join', account: profileName })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
@@ -217,7 +219,9 @@ export async function runDaemon () {
         rm(profileReqFile) // lleva la contraseña: fuera del disco cuanto antes
         let extra = {}
         try { extra = await handleProfileRequest(preq) }
-        catch (e) { extra = { error: e.message }; console.error('[vault] perfil: %s', e.message) }
+        // `code`: la TUI es bilingüe y traduce por código (un freno como el D12 tiene
+        // que leerse en el idioma de quien lo lee, no en el del daemon).
+        catch (e) { extra = { error: e.message, ...(e.code ? { code: e.code } : {}) }; console.error('[vault] perfil: %s', e.message) }
         dumpProfiles(extra)
       } else {
         dumpProfiles()

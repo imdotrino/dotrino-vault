@@ -48,6 +48,13 @@ const T = {
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
+    ann_t: 'Esto es lo que quiere hacer tu bóveda',
+    ann_join_h: (n) => n ? `Crear en este dispositivo una cuenta nueva: «${n}», la de tu bóveda.` : 'Crear en este dispositivo una cuenta nueva: la de tu bóveda.',
+    ann_join_c: 'La cuenta que estás usando ahora no se toca. Al terminar tendrás dos y podrás cambiar entre ellas cuando quieras.',
+    ann_adopt_h: (n) => n ? `Guardar y administrar tu cuenta «${n}»: pasaría a vivir en tu bóveda.` : 'Guardar y administrar la cuenta que usas en este dispositivo.',
+    ann_adopt_c: 'Tu cuenta seguiría siendo la misma para todo el mundo, pero a partir de ahí manda tu bóveda: este dispositivo dejaría de ser quien firma los cambios.',
+    ann_adopt_no: 'Este dispositivo todavía no sabe entregar su cuenta. Actualiza la página, o elige la otra opción en tu bóveda.',
+    ann_go: 'Continuar', ann_cancel: 'Cancelar',
     two_title: 'Ahora tienes dos cuentas en este aparato',
     two_body: 'La que ya usabas sigue intacta, y se agregó la de tu bóveda, que es la que estás usando ahora. Puedes cambiar entre ellas cuando quieras desde el botón de tu foto, arriba.',
     two_del: 'Si no quieres conservar la anterior:',
@@ -99,6 +106,13 @@ const T = {
     pair_code_b: 'Open it and type these six digits to approve the connection. Nobody else knows them.',
     pair_done: 'Done, this device is connected.',
     pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
+    ann_t: 'This is what your vault wants to do',
+    ann_join_h: (n) => n ? `Create a new account on this device: “${n}”, your vault's.` : 'Create a new account on this device: your vault\'s.',
+    ann_join_c: 'The account you are using now is left untouched. When it is done you will have two, and you can switch between them any time.',
+    ann_adopt_h: (n) => n ? `Keep and manage your account “${n}”: it would move into your vault.` : 'Keep and manage the account you use on this device.',
+    ann_adopt_c: 'Your account would stay the same for everyone else, but from then on your vault is in charge: this device would no longer sign its changes.',
+    ann_adopt_no: 'This device cannot hand its account over yet. Reload the page, or choose the other option in your vault.',
+    ann_go: 'Continue', ann_cancel: 'Cancel',
     two_title: 'You now have two accounts on this device',
     two_body: 'The one you were using is untouched, and your vault\'s was added — that is the one you are using now. You can switch between them any time from your photo button, above.',
     two_del: 'If you do not want to keep the previous one:',
@@ -166,7 +180,7 @@ onMounted(async () => {
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
   // (que nunca llega al servidor). Si viene, arrancamos la conexión sola.
   const payload = extractPayload(location.hash)
-  if (payload) { history.replaceState(null, '', location.pathname); connect(payload) }
+  if (payload) { history.replaceState(null, '', location.pathname); announce(payload) }
   offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
   await refreshSelf()
 })
@@ -200,6 +214,8 @@ const pairCode = ref('')
 const pasted = ref('')
 // Recién emparejado: hay que explicar que el aparato quedó con DOS cuentas.
 const justPaired = ref(false)
+// Lo que la bóveda declara en el QR: { qr, mode: 'join'|'adopt', account }.
+const pendingPair = ref(null)
 const scanHost = ref(null)
 const fileInput = ref(null)
 
@@ -215,6 +231,29 @@ function extractPayload (text) {
   const i = text.indexOf('#vault=')
   if (i >= 0) { try { return JSON.parse(b64urlDecode(text.slice(i + 7))) } catch { return null } }
   try { const o = JSON.parse(text); return (o && o.iss && o.token) ? o : null } catch { return null }
+}
+
+/**
+ * El QR NO empareja de una: primero se anuncia QUÉ quiere hacer la bóveda y QUÉ
+ * consecuencias tiene, y el dueño decide (V9 de `vinculacion-de-cuentas.md`: la
+ * pregunta la hace el vault, el dispositivo la muestra con sus consecuencias).
+ * El modo viaja en el QR (`m`) junto al nombre de la cuenta (`acct`); un código de
+ * una bóveda vieja no trae nada de eso y se trata como `join`, que es lo único que
+ * esa bóveda sabe hacer.
+ */
+function announce (qr) {
+  if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
+  if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
+  msg.value = null
+  pendingPair.value = { qr, mode: qr.m === 'adopt' ? 'adopt' : 'join', account: String(qr.acct || '').slice(0, 40) }
+}
+
+const cancelAnnounce = () => { pendingPair.value = null }
+function acceptAnnounce () {
+  const p = pendingPair.value
+  if (!p || p.mode !== 'join') return // `adopt` todavía no existe de este lado
+  pendingPair.value = null
+  connect(p.qr)
 }
 
 async function connect (qr) {
@@ -237,7 +276,7 @@ async function connect (qr) {
   } finally { off?.(); pairing.value = false; pairCode.value = '' }
 }
 
-const connectPasted = () => connect(extractPayload(pasted.value))
+const connectPasted = () => announce(extractPayload(pasted.value))
 
 function decodeImage (file) {
   return new Promise((resolve) => {
@@ -260,7 +299,7 @@ async function onFile (ev) {
   const f = ev.target.files?.[0]; if (!f) return
   const text = /^image\//.test(f.type) ? await decodeImage(f) : await f.text()
   if (!text) { msg.value = { kind: 'bad', text: t.value.no_qr }; return }
-  connect(extractPayload(text))
+  announce(extractPayload(text))
 }
 
 const scanning = ref(false)
@@ -275,7 +314,7 @@ async function scan () {
     if (raf) cancelAnimationFrame(raf)
     stream?.getTracks().forEach((x) => x.stop())
     scanning.value = false
-    if (val) connect(extractPayload(val))
+    if (val) announce(extractPayload(val))
   }
   scanStop = () => stop(null)
   const tick = () => {
@@ -420,6 +459,22 @@ onBeforeUnmount(() => clearInterval(selfTimer))
            data-testid="goto-profile">{{ t.two_del_link }}</a>
       </div>
 
+      <!-- Lo que la bóveda declaró en el código: qué va a hacer y qué consecuencias
+           tiene. Se dice ANTES, y no se toca nada hasta que el dueño acepta. -->
+      <div v-else-if="pendingPair" class="banner announce" data-testid="pair-announce">
+        <strong>{{ t.ann_t }}</strong>
+        <p data-testid="announce-what">
+          {{ pendingPair.mode === 'adopt' ? t.ann_adopt_h(pendingPair.account) : t.ann_join_h(pendingPair.account) }}
+        </p>
+        <p class="muted">{{ pendingPair.mode === 'adopt' ? t.ann_adopt_c : t.ann_join_c }}</p>
+        <p v-if="pendingPair.mode === 'adopt'" class="muted" data-testid="announce-adopt-no">{{ t.ann_adopt_no }}</p>
+        <div class="row">
+          <button v-if="pendingPair.mode !== 'adopt'" class="btn" data-testid="announce-go"
+                  :disabled="pairing" @click="acceptAnnounce">{{ t.ann_go }}</button>
+          <button class="btn ghost" data-testid="announce-cancel" @click="cancelAnnounce">{{ t.ann_cancel }}</button>
+        </div>
+      </div>
+
       <template v-else-if="!pairCode">
         <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
         <div class="row">
@@ -469,7 +524,11 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .banner { border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 14px; }
 .banner.ok { background: #0f2a1c; color: #7fe0a8; }
 .banner.bad { background: #2a1113; color: #ff9aa2; }
-.two-accounts { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.two-accounts, .announce { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+/* El aviso de lo que va a hacer la bóveda se lee ANTES de aceptar: destacado, no al vuelo. */
+.announce { border-color: #2f4a6d; }
+.announce p { margin: 0; }
+.announce strong { color: #9cc4ff; }
 .two-accounts p, .two-accounts ol { margin: 0; }
 .two-accounts ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .banner.info { background: #10203a; color: #9cc4ff; }

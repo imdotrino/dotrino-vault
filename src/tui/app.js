@@ -50,7 +50,8 @@ function humanErr (e, st) {
     NO_REPLY: t.errNoReply,
     NOT_APPLIED: t.errNotApplied,
     NOT_DELETED: t.errNotDeleted,
-    PAIR_FAILED: t.errPairFailed
+    PAIR_FAILED: t.errPairFailed,
+    MASTER_WITH_MEMBERS: t.errMasterWithMembers
   }
   return byCode[e?.code] || e?.message || String(e)
 }

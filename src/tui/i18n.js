@@ -179,7 +179,8 @@ const es = {
   errNoReply: 'El daemon no respondió.',
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
-  errPairFailed: 'El daemon no inició el emparejamiento.'
+  errPairFailed: 'El daemon no inició el emparejamiento.',
+  errMasterWithMembers: 'Esta cuenta la manda esta bóveda y tiene otros dispositivos: pásale primero el mando a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
 }
 
 // ---------------------------------- inglés ----------------------------------
@@ -333,7 +334,8 @@ const en = {
   errNoReply: 'The daemon did not answer.',
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
-  errPairFailed: 'The daemon did not start the pairing.'
+  errPairFailed: 'The daemon did not start the pairing.',
+  errMasterWithMembers: 'This vault is in charge of this account and it has other devices: hand the lead over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 
 // --------------------------- selección y persistencia -----------------------

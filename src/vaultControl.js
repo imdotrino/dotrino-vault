@@ -149,7 +149,7 @@ async function profileOp (op, { profile, name, password } = {}) {
   signalOrCleanup('SIGUSR2', [F.profileReq])
   const d = await waitFor(F.profilesList)
   if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
-  if (d.error) throw new Error(d.error)
+  if (d.error) throw coded(d.error, d.code) // p.ej. MASTER_WITH_MEMBERS (freno D12)
   return d // { profiles:[{id,name,protected,locked,current,fingerprint,iss,createdAt}], current, done? }
 }
 

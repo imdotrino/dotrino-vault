@@ -34,6 +34,7 @@ cuál firma, cuál guarda el contenido— sin que ninguna llave privada viaje nu
 | D9 | **Cadenas de un solo nivel.** Sólo el master emite certs, así que `verifyChain` sirve tal cual. Al ceder el master, el nuevo **re-emite** los certs de todos los miembros (ya se re-emiten cada 30 días por la renovación). |
 | D10 | **Renunciar a una capacidad propia es un registro suelto, unilateral y offline** — no toca el acta, y por eso no contradice D4 (§2.2). Sólo puede quitar, nunca otorgar. |
 | D11 | **El acta es un snapshot firmado con `seq` monotónico + hash del anterior**, no un log que se reproduce. Tamaño O(miembros), constante en el tiempo. |
+| D12 | **La bóveda NO puede borrar una cuenta que ella manda si quedan otros miembros: primero le pasa el acta a un dispositivo conectado.** *(Decidido por el dueño el 2026-07-28.)* Es D6 leído al derecho: borrar el master **es** perder la cuenta, y con más miembros no la pierde solo quien borra —los demás se quedan con su llave y sin nadie que pueda volver a sellar, así que la cuenta muere para todos y en silencio. **En el DISPOSITIVO no hay tal restricción**: borrar allí una cuenta se lleva su llave y su copia local, pero la cuenta sigue viva donde vive el master. |
 
 ### 0.3 Descartado explícitamente (no reintroducir)
 

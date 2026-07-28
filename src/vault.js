@@ -296,6 +296,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.
     profileMembers: () => identity.profileMembers(),
+    // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
+    isMaster: () => identity.isMaster(),
     setCaps: (pub, caps) => identity.setCaps(pub, caps),
     revokeDevice: (nonce) => desk.revoke(nonce),
     close () { try { client.close() } catch (_) {} identity.destroy() }
