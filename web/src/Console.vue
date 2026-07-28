@@ -228,12 +228,17 @@ function b64urlDecode (s) {
   return decodeURIComponent(escape(atob(b + '='.repeat((4 - b.length % 4) % 4))))
 }
 
-/** Saca el objeto de emparejamiento de un texto: URL con `#vault=…` o JSON crudo. */
+/** Saca el objeto de emparejamiento de un texto: URL con `#vault=<json|b64>` o JSON crudo. */
 function extractPayload (text) {
   if (!text) return null
   text = String(text).trim()
   const i = text.indexOf('#vault=')
-  if (i >= 0) { try { return JSON.parse(b64urlDecode(text.slice(i + 7))) } catch { return null } }
+  if (i >= 0) {
+    const payload = text.slice(i + 7)
+    // Nuevo: JSON crudo en la URL (menos datos en el QR). Viejo: base64url.
+    try { const o = JSON.parse(payload); if (o && o.iss && o.token) return o } catch {}
+    try { return JSON.parse(b64urlDecode(payload)) } catch { return null }
+  }
   try { const o = JSON.parse(text); return (o && o.iss && o.token) ? o : null } catch { return null }
 }
 

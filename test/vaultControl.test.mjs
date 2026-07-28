@@ -198,8 +198,9 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
   const pair = await vc.startPairing({ profile: 'p1' })
   assert.match(pair.url, /vault\.dotrino\.com\/dispositivos#vault=/)
   assert.ok(pair.payload.includes('tok'))
+  assert.ok(pair.url.endsWith(pair.payload))
   assert.ok(pair.b64.length > 0)
-  assert.ok(pair.url.endsWith(pair.b64))
+  assert.ok(pair.url.includes('#vault='))
   assert.ok(pair.expiresAt > Date.now())
 
   // simula un dispositivo conectándose (lo que escribiría el daemon real)

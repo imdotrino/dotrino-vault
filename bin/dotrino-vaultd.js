@@ -14,7 +14,7 @@
  */
 import { runDaemon } from '../src/daemon.js'
 import { qrToString } from '../src/qr.js'
-import { daemonAlive } from '../src/vaultControl.js'
+import { daemonAlive, pairUrl } from '../src/vaultControl.js'
 
 // `--tui` con una bóveda YA CORRIENDO en otra ventana: se engancha a ella y abre solo la
 // interfaz. Antes intentaba levantar una segunda bóveda sobre los mismos datos, chocaba
@@ -37,9 +37,11 @@ const mgr = await runDaemon()
 // Empareja contra el perfil ACTIVO.
 if (process.argv.includes('--pair')) {
   const { qr, expiresInMs } = mgr.current().startPairing({ label: 'cli' })
+  const { url, b64 } = pairUrl(qr)
   console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
-  console.log(qrToString(JSON.stringify(qr), 2))
-  console.log(JSON.stringify(qr))
+  console.log(qrToString(url, 2))
+  console.log(url)
+  console.log('\nO pegá este código:\n  ' + b64)
 }
 
 // --tui: la bóveda Y su interfaz en la MISMA ventana. Donde no queda como servicio
