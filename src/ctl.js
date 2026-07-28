@@ -83,6 +83,13 @@ function readState () {
   return s
 }
 function alive (pid) { try { return !!pid && (process.kill(pid, 0) || true) } catch { return false } }
+/**
+ * Campanita para que el daemon lea la petición YA. En Windows no existen SIGUSR1/SIGUSR2
+ * y `process.kill` con ellas falla: no es un error, es que ahí no hay señales. El daemon
+ * vigila la carpeta igualmente, así que la petición se atiende en cuanto se escribe el
+ * archivo; la señal solo se ahorra la latencia del watcher.
+ */
+function avisar (pid, sig) { try { process.kill(pid, sig) } catch (_) { /* Windows, o el daemon ya se enteró */ } }
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 function requireDaemon () {
   const s = readState()
@@ -149,7 +156,7 @@ async function cmdPair (args = []) {
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
   writeReq('pair-request.json', service ? { service } : {})
-  process.kill(s.pid, 'SIGUSR1')
+  avisar(s.pid, 'SIGUSR1')
 
   let pair = null
   for (let i = 0; i < 50; i++) { await sleep(100); const p = readJson(pairFile, null); if (p?.expiresAt > Date.now()) { pair = p; break } }
@@ -196,7 +203,7 @@ function cmdApprove (code) {
   if (!code) { console.error('uso: dotrino-vault approve <código>   (los dígitos que muestra el dispositivo)'); process.exit(2) }
   const s = requireDaemon()
   writeReq('approve-request.json', { code: String(code) })
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   console.log('Aprobando con el código %s… verifica con: dotrino-vault devices', code)
 }
 
@@ -204,7 +211,7 @@ function cmdReject (deviceId) {
   if (!deviceId) { console.error('uso: dotrino-vault reject <deviceId>'); process.exit(2) }
   const s = requireDaemon()
   writeReq('reject-request.json', { deviceId })
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   console.log('Rechazado %s.', deviceId)
 }
 
@@ -217,7 +224,7 @@ async function cmdMembers () {
   const actaFile = path.join(dataDir(), 'acta.json')
   try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {})
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   let acta = null
   for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
   if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
@@ -255,7 +262,7 @@ async function cmdCaps (args = []) {
   const actaFile = path.join(dataDir(), 'acta.json')
   try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {})
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   let acta = null
   for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
   const m = acta?.members?.find((x) => x.id === id.toUpperCase())
@@ -269,7 +276,7 @@ async function cmdCaps (args = []) {
     if (signo === '+') caps.add(cap); else caps.delete(cap)
   }
   writeReq('caps-request.json', { pub: m.pub, caps: [...caps] })
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   console.log('Listo. Compruébalo con: dotrino-vault members')
 }
 
@@ -277,7 +284,7 @@ async function cmdDevices () {
   const s = requireDaemon()
   try { fs.rmSync(devFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {}) // de qué perfil queremos los dispositivos
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   let snap = null
   for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
   if (!snap) { console.error('El daemon no respondió.'); process.exit(1) }
@@ -301,7 +308,7 @@ function cmdRevoke (nonce) {
   if (!nonce) { console.error('uso: dotrino-vault revoke <nonce>'); process.exit(2) }
   const s = requireDaemon()
   writeReq('revoke-request.json', { nonce })
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', nonce)
 }
 
@@ -349,7 +356,7 @@ async function cmdSecret (rest) {
   const signalAndWaitList = async () => {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
     writeReq('dump-request.json', {}) // de qué perfil son los secretos
-    process.kill(s.pid, 'SIGUSR2')
+    avisar(s.pid, 'SIGUSR2')
     for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
     console.error('El daemon no respondió.'); process.exit(1)
   }
@@ -416,7 +423,7 @@ async function profileRequest (op, extra = {}) {
   const s = requireDaemon()
   try { fs.rmSync(profilesFile, { force: true }) } catch (_) {}
   writeReq('profile-request.json', { op, ...extra })
-  process.kill(s.pid, 'SIGUSR2')
+  avisar(s.pid, 'SIGUSR2')
   for (let i = 0; i < 100; i++) {
     await sleep(100)
     const d = readJson(profilesFile, null)

@@ -389,8 +389,23 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 - ~~Escenario de navegador con Playwright en el smoke~~ ✅ **hecho**: `dotrino-test/smoke/
   navegador.mjs`, 4 escenarios (incluida la comprobación de que la llave del navegador **no
   es extraíble**), más los 9 headless y los 11 del protocolo.
-- **TPM 2.0** para el cifrado en reposo: el ligado a máquina actual sube el listón (copiar
-  el archivo a otro equipo no sirve) pero no protege contra quien ya tiene esa máquina.
+- **Proteger mejor la llave maestra en reposo** (pedido del dueño, 2026-07-27: *«que no sea
+  texto plano, como en el explorador»*). Hoy `identity.json` va cifrado con AES-256-GCM y
+  una clave derivada de material de la máquina (`/etc/machine-id`, `MachineGuid`,
+  `IOPlatformUUID`) + salt local, así que **copiarlo a otro equipo no sirve** — pero no
+  protege de quien ya está en esa máquina como tú. Por orden de coste:
+  1. **Enchufar la contraseña del perfil**, que hoy NO cifra nada: `machineKey(dir, password)`
+     acepta el parámetro y `src/vault.js:45` lo llama sin él. Es el arreglo más barato y da
+     cifrado por frase de verdad.
+  2. **DPAPI en Windows** y **Keychain en macOS**: atan el secreto a tu CUENTA, no solo a la
+     máquina. Se pueden usar **sin módulos nativos**, llamando a las herramientas del propio
+     sistema, así que no rompen el binario único.
+  3. **TPM 2.0 / Secure Enclave**: la única vía que da la propiedad de verdad — los bytes no
+     salen del chip.
+  Lo del navegador **no se puede copiar tal cual**: allí la llave es una `CryptoKey` no
+  extraíble y IndexedDB guarda el *manejador* mientras el navegador se queda los bytes. En
+  Node no existe ese almacén: lo que deba sobrevivir a un reinicio hay que exportarlo, y una
+  llave no extraíble por definición no se deja exportar.
 
 
 ### F0 — Deuda que habilita todo lo demás

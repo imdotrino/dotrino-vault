@@ -23,9 +23,36 @@ import { VERSION } from './version.js'
 const readJsonSafe = (f) => readJson(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
 
+/**
+ * UNA sola bóveda por directorio de datos.
+ *
+ * El dir NO depende de la carpeta desde la que lances el comando: es fijo por usuario
+ * (`%LOCALAPPDATA%\\Dotrino\\vault` o `~/.local/share/dotrino/vault`). Así que lanzar el
+ * comando dos veces —en dos ventanas, sin darse cuenta— daba DOS daemons sobre los mismos
+ * datos, los dos con tu identidad y los dos conectados al proxy; el segundo pisaba el pid
+ * de `state.json`, así que el CLI solo le hablaba a uno y el otro quedaba de fantasma.
+ *
+ * El candado es el propio `state.json`: si el pid que hay sigue vivo, no arrancamos. Un
+ * pid muerto (se cortó la luz) no estorba. Con `DOTRINO_VAULT_DIR` distintos conviven
+ * cuantas quieras: lo que colisiona es el directorio, no el programa.
+ */
+function comprobarInstanciaUnica (dir) {
+  let s = null
+  try { s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')) } catch (_) { return }
+  const pid = Number(s?.pid)
+  if (!pid || pid === process.pid) return
+  try { process.kill(pid, 0) } catch (_) { return } // no existe: el candado es de un muerto
+  console.error('Ya hay una bóveda corriendo sobre estos datos (proceso %d).', pid)
+  console.error('  datos: %s', dir)
+  console.error('Dos bóvedas sobre el mismo directorio se pisan: párá la otra, o usa')
+  console.error('DOTRINO_VAULT_DIR para darle a esta un directorio propio.')
+  process.exit(3)
+}
+
 export async function runDaemon () {
   const dir = dataDir()
   const proxyUrl = process.env.PROXY_URL || 'wss://proxy.dotrino.com'
+  comprobarInstanciaUnica(dir)
 
   const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId (y a QUÉ perfil
@@ -71,7 +98,7 @@ export async function runDaemon () {
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
   const pairReqFile = path.join(dir, 'pair-request.json')
-  process.on('SIGUSR1', () => {
+  async function atenderEmparejamiento () {
     try {
       rm(pendingEnrollFile)
       // Pairing manual por CLI = gesto explícito del dueño → cert de identidad completo.
@@ -103,7 +130,7 @@ export async function runDaemon () {
     } catch (e) {
       console.error('[vault] no se pudo iniciar emparejamiento:', e.message)
     }
-  })
+  }
 
   // --- SIGUSR2: approve / reject / revoke / secretos / perfiles + volcados ---
   const devFile = path.join(dir, 'devices.json')
@@ -137,7 +164,7 @@ export async function runDaemon () {
     }
   }
 
-  process.on('SIGUSR2', async () => {
+  async function atenderPeticiones () {
     try {
       const appr = readJsonSafe(approveReqFile)
       if (appr?.code) {
@@ -201,7 +228,53 @@ export async function runDaemon () {
     } catch (e) {
       console.error('[vault] error en señal de control:', e.message)
     }
-  })
+  }
+
+  // --- CÓMO LLEGAN LAS ÓRDENES DEL CLI ---
+  //
+  // El CLI escribe un archivo de petición en el dir de datos y hay que despertar al
+  // daemon para que lo lea. Durante mucho tiempo eso fue una SEÑAL (SIGUSR1/SIGUSR2), y
+  // por eso el vault no servía de nada en Windows: ahí esas señales no existen, así que
+  // `pair`, `approve`, `members` y la TUI no podían pedirle nada al daemon. El `status`
+  // engañaba, porque solo lee un archivo.
+  //
+  // Ahora la campanita es VIGILAR LA CARPETA (`fs.watch`), que funciona en los tres
+  // sistemas, más un repaso periódico por si el watcher se pierde un evento (pasa en
+  // carpetas de red y en algunos montajes). Las señales se mantienen donde existen: no
+  // estorban y hacen que la respuesta sea inmediata.
+  const REPASO_MS = 2000
+  let atendiendo = false
+  async function atender () {
+    if (atendiendo) return          // una a la vez: las peticiones se consumen y se borran
+    atendiendo = true
+    try {
+      // OJO: `fs.watch` avisa al CREAR el archivo, antes de que el CLI termine de
+      // escribirlo. Si se lee a medias, el JSON no parsea y la petición se pierde con
+      // sus datos — y el emparejamiento salía como si fuera de un dispositivo normal,
+      // sin el `--service`, emitiendo un cert con el scope equivocado. Así que solo se
+      // atiende cuando el archivo YA parsea; si no, lo recoge el repaso de 2 s.
+      if (readJsonSafe(pairReqFile)) await atenderEmparejamiento()
+      await atenderPeticiones()
+    } catch (e) { console.error('[vault] error atendiendo una petición:', e.message) }
+    finally { atendiendo = false }
+  }
+
+  try {
+    fs.watch(dir, (_ev, file) => { if (!file || /-request\.json$/.test(file)) atender() })
+  } catch (e) {
+    console.error('[vault] no se pudo vigilar %s (%s); se atenderá solo por repaso', dir, e.message)
+  }
+  const repaso = setInterval(atender, REPASO_MS)
+  repaso.unref?.()
+
+  // POSIX: la señal sigue valiendo como atajo inmediato. En Windows no existe y no pasa nada.
+  // Van por `atender()` y NO llaman directo: si no, la señal y el vigilante corren a la
+  // vez, la primera consume la petición y la segunda la lee vacía — y un `pair --service`
+  // acababa emitiendo un cert de dispositivo normal, con el scope equivocado.
+  if (process.platform !== 'win32') {
+    process.on('SIGUSR1', () => { atender() })
+    process.on('SIGUSR2', () => { atender() })
+  }
 
   // --- apagado limpio ---
   const shutdown = (sig) => {

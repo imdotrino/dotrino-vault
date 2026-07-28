@@ -26,4 +26,17 @@ if (process.argv.includes('--pair')) {
   console.log(JSON.stringify(qr))
 }
 
+// --tui: la bóveda Y su interfaz en la MISMA ventana. Donde no queda como servicio
+// (Windows, macOS) el daemon ocupa la ventana en primer plano, así que abrir la TUI
+// obligaba a una segunda ventana y a repetir el PATH de Node. Con esto, una sola.
+if (process.argv.includes('--tui')) {
+  if (!process.stdout.isTTY) {
+    console.error('--tui necesita un terminal interactivo (TTY). La bóveda sigue corriendo sin él.')
+  } else {
+    const { runTui } = await import('../src/tui/app.js')
+    await runTui()          // al salir de la TUI, se para todo: es la misma ventana
+    process.exit(0)
+  }
+}
+
 console.log('\n(Ctrl+C para detener)')
