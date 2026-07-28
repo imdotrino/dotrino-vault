@@ -89,6 +89,10 @@ const I18N = {
       ['dotrino-vault profile ls', 'tus cuentas en esta computadora'],
       ['dotrino-vault tui', 'todo lo anterior, en una pantalla'],
     ],
+    use_tui_t: 'La pantalla de control (y en Windows, todo en una ventana)',
+    use_tui_b: 'Hay una interfaz de terminal a pantalla completa donde ves tus dispositivos, apruebas los que se conectan y cambias permisos, sin acordarte de ningún comando. En Windows y macOS, donde la bóveda ocupa la ventana en la que la arrancaste, puedes abrir las dos a la vez:',
+    use_tui_alt: 'Si la bóveda ya está corriendo en otra ventana, ahí abres solo la pantalla:',
+    use_tui_path: 'En Windows, si el instalador te bajó Node, una ventana NUEVA no lo encuentra. Pega esto antes:',
     use_cmds_how: 'Cómo escribirlos depende de cómo la instalaste:',
     use_cmds_linux: 'Con el instalador de Linux, tal cual.',
     use_cmds_npx: 'Si la levantaste con el comando (Windows o macOS), antepón <code>npx -p @dotrino/vaultd</code>.',
@@ -179,6 +183,10 @@ const I18N = {
       ['dotrino-vault profile ls', 'your accounts on this computer'],
       ['dotrino-vault tui', 'all of the above, on one screen'],
     ],
+    use_tui_t: 'The control screen (and on Windows, everything in one window)',
+    use_tui_b: 'There is a full-screen terminal interface where you see your devices, approve the ones connecting and change permissions, without remembering any command. On Windows and macOS, where the vault takes over the window you started it in, you can open both at once:',
+    use_tui_alt: 'If the vault is already running in another window, there you open just the screen:',
+    use_tui_path: 'On Windows, if the installer downloaded Node for you, a NEW window will not find it. Paste this first:',
     use_cmds_how: 'How you type them depends on how you installed it:',
     use_cmds_linux: 'With the Linux installer, just as they are.',
     use_cmds_npx: 'If you launched it with the command (Windows or macOS), prefix them with <code>npx -p @dotrino/vaultd</code>.',
@@ -201,6 +209,11 @@ const pairCmd = 'dotrino-vault pair'
 const winPsCmd = '& ([scriptblock]::Create((irm https://install.dotrino.com/install.ps1))) @dotrino/vaultd'
 const winShCmd = 'curl -fsSL https://install.dotrino.com/install.sh | sh -s -- @dotrino/vaultd'
 const npxCmd = 'npx -y @dotrino/vaultd'
+// La bóveda Y su pantalla de control en la misma ventana: es lo que hace falta donde no
+// queda como servicio (Windows, macOS), porque si no hacen falta dos ventanas.
+const tuiJuntoCmd = 'npx -y @dotrino/vaultd --tui'
+const tuiSoloCmd = 'npx -y -p @dotrino/vaultd dotrino-vault tui'
+const winPathCmd = '$node = (Get-ChildItem "$env:USERPROFILE\\.dotrino" -Directory -Filter \'node-*-win-*\').FullName\n$env:Path = "$node;$env:Path"'
 
 /* Pestañas por sistema: las tres vías existen para los tres, así que mostrarlas todas
    juntas era la misma página tres veces. Se adivina el sistema y se puede cambiar. */
@@ -411,6 +424,31 @@ onMounted(() => { document.documentElement.lang = lang.value })
         <div class="use-warn" data-testid="use-warn">
           <h3>{{ t.use_warn_t }}</h3>
           <p>{{ t.use_warn_b }}</p>
+        </div>
+
+        <div class="use-tui" data-testid="use-tui">
+          <h3>{{ t.use_tui_t }}</h3>
+          <p>{{ t.use_tui_b }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>Windows · macOS · Linux</span>
+              <button class="copy" @click="copy(tuiJuntoCmd, 'tuij')">{{ copied === 'tuij' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ tuiJuntoCmd }}</code></pre>
+          </div>
+          <p>{{ t.use_tui_alt }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ t.dl_win_sh }}</span>
+              <button class="copy" @click="copy(tuiSoloCmd, 'tuis')">{{ copied === 'tuis' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ tuiSoloCmd }}</code></pre>
+          </div>
+          <p>{{ t.use_tui_path }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>PowerShell</span>
+              <button class="copy" @click="copy(winPathCmd, 'winpath')">{{ copied === 'winpath' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ winPathCmd }}</code></pre>
+          </div>
         </div>
 
         <p class="use-more">

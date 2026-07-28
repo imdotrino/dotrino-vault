@@ -157,3 +157,6 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 .os-hint { color: var(--muted); font-size: .85rem; margin: 0 0 18px; }
 .dl-card .m1-lead { margin: 0 0 14px; }
 .dl-card h4.sub { margin: 20px 0 12px; font-size: .95rem; color: var(--muted); font-weight: 600; }
+.use-tui { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; margin: 0 0 20px; }
+.use-tui h3 { margin: 0 0 8px; font-size: 1.02rem; color: var(--accent); }
+.use-tui p { margin: 0 0 10px; color: var(--muted); font-size: .95rem; }
