@@ -98,6 +98,49 @@ El **QR/objeto** (`{ v:2, iss:M, proxy, token, sn }`) deja de ser sensible en el
 
 Esto es la "dirección invertida" del diseño implementada de verdad: la **aprobación ocurre en la máquina que tiene la maestra**, y la decisión humana está atada a un código que el dispositivo legítimo muestra. No hay ningún secreto al portador cuya mera posesión conceda acceso.
 
+### 1.5 Cómo VIAJA ese objeto (formato compacto) — `lib/src/invite.js`
+
+El objeto de arriba es el contrato; su **codificación** es aparte, y está pensada para
+que el QR quepa en una terminal. Serializado como JSON pesa ~340 caracteres —182 de
+ellos son `iss`, que es una JWK *serializada como string*, con sus comillas
+escapadas— y eso da un QR de **69 módulos**: 77×39 con la zona de silencio, más alto
+que ninguna ventana de terminal razonable.
+
+La forma vigente (marca **`c`**) mete los datos en binario y el binario en base64url:
+**~100 caracteres**, QR de **41 módulos** (49×25). La misma cadena sirve para el QR y
+para copiar y pegar, así que ya no hay dos codificaciones que mantener.
+
+```
+'c' + base64url(
+  cabecera(1B)  bits 0-2 v · bit 3 modo (join/adopt) · bits 4-5 plantilla JWK
+                bit 6 proxy propio · bit 7 token/sn de 12 B (si no, 16)
+  iss(33B)      punto comprimido SEC1 de la P-256: 02/03 según la paridad de `y`,
+                seguido de `x`. El lector recupera `y` resolviendo la curva.
+  token(12B) · sn(12B) · len+acct(UTF-8) · [len+proxy(UTF-8)]
+)
+```
+
+Dos cosas que **no** son opcionales:
+
+1. **`iss` tiene que volver byte a byte igual.** El proxy direcciona por la string
+   exacta de la JWK (`pubkeyToTokens`), así que rearmarla "equivalente" no sirve: una
+   coma movida y el ENROLL no llega a ninguna parte. Por eso el orden de campos va en
+   la cabecera como índice de PLANTILLA (WebCrypto de Node y de navegador exportan la
+   JWK en órdenes distintos), y por eso `encodeInvite` **comprueba el viaje de vuelta**
+   antes de entregar la forma compacta: si no reproduce el original exactamente, emite
+   la forma larga (`b`, base64 del JSON). Una llave con una forma que no conocemos hace
+   el QR más grande; nunca lo rompe.
+2. **La invitación va en el `#fragment`, y el fragmento no se toca.** Hubo una versión
+   que achicaba el QR mandando el JSON crudo en el enlace; el navegador percent-codifica
+   `{`, `}` y `"`, así que lo que llegaba a `location.hash` ya no era lo emitido y el
+   emparejamiento moría con «ese código no vale». base64url es seguro en una URL y no
+   tiene ese problema. `parseInvite` sigue leyendo los formatos viejos (`j`, `b` y los
+   que no llevan marca) porque hay enlaces y bóvedas sin actualizar por ahí.
+
+El enlace es `https://vault.dotrino.com/d#v=<invitación>`; `/dispositivos#vault=` sigue
+valiendo. La ruta corta existe por lo mismo que todo lo anterior: 15 caracteres menos
+dentro del QR.
+
 ---
 
 ## 2. PIN + BORRADO: las tres acciones separadas, con el trigger de self-wipe autenticado

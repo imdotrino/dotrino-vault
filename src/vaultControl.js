@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
-import { encodeInvite, FMT_JSON, FMT_B64 } from '../lib/src/invite.js'
+import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
 
 const dir = dataDir()
 
@@ -256,24 +256,24 @@ export async function deleteScope (ns, profile) {
 // Emparejamiento de dispositivos (pares)
 // ---------------------------------------------------------------------------
 
-const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
-
 /**
- * Codifica el QR crudo en sus dos formas (ver `lib/src/invite.js`):
+ * Codifica el QR crudo para enseñarlo (ver `lib/src/invite.js`).
  *
- *   · `url`  → para el QR y el enlace: JSON CRUDO con marca `j`. Es lo más corto
- *              que hay, y en un QR cada carácter son módulos: con base64 el QR
- *              pide ~8 columnas y 4 filas más de terminal.
- *   · `code` → para copiar y pegar: base64url con marca `b`. Una sola palabra,
- *              sin comillas ni llaves, que sobrevive a un doble clic y a un chat.
+ * Las dos formas son **la misma invitación compacta**: binario en base64url, ~100
+ * caracteres. Sirve igual para el QR (donde cada carácter son módulos, y módulos
+ * son filas de terminal) que para copiar y pegar (una sola palabra, sin comillas
+ * ni llaves, que sobrevive a un doble clic y a un chat). Antes hacían falta dos
+ * codificaciones distintas porque la única forma de achicar el QR era mandar el
+ * JSON crudo, ilegible al pegarlo; comprimiendo de verdad, esa disyuntiva
+ * desaparece.
  *
- * La MARCA de formato (el primer carácter) existe para que el lector no tenga que
- * probar los dos formatos a ver cuál cuela: la lee y sabe.
+ *   · `url`     → el enlace del QR, `…/d#v=<invitación>`.
+ *   · `code`    → la invitación suelta, para pegar en la consola.
+ *   · `payload` → el JSON crudo. Ya no se emite; se devuelve para diagnóstico.
  */
 export function pairUrl (qr) {
-  const payload = JSON.stringify(qr)
-  const code = encodeInvite(qr, FMT_B64)
-  return { url: PROFILE_URL + encodeInvite(qr, FMT_JSON), code, payload, b64: code }
+  const code = encodeInvite(qr)
+  return { url: inviteUrl(qr), code, payload: JSON.stringify(qr), b64: code }
 }
 
 export async function startPairing ({ profile, service } = {}) {

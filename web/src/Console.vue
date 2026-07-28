@@ -12,7 +12,7 @@ import { ref, computed, markRaw, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
-import { parseInvite } from '../../lib/src/invite.js'
+import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
 const props = defineProps({ lang: { type: String, default: 'es' } })
 
@@ -226,9 +226,10 @@ const fileInput = ref(null)
 
 /**
  * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
- * formato del payload (`j` = JSON crudo del QR, `b` = base64 del código pegable)
- * dice cómo leerlo, sin probar a ver cuál cuela. También acepta los formatos
- * viejos, sin marca.
+ * formato del payload dice cómo leerlo, sin probar a ver cuál cuela. Hoy se emite
+ * `c` (compacta: binario en base64url, ~100 caracteres, la misma para el QR y para
+ * pegar); también acepta las formas largas (`b`, `j`) y las que no llevan marca,
+ * porque hay bóvedas sin actualizar por ahí.
  */
 function extractPayload (text) {
   const o = parseInvite(text)
@@ -363,7 +364,10 @@ const selfToggle = () => run('self', async () => {
 })
 const selfPair = () => run('selfpair', async () => {
   const r = await id.value.selfVaultPairing({})
-  selfQr.value = r?.qr ? qrSvg(JSON.stringify(r.qr)) : null
+  // El QR lleva el ENLACE compacto, no el JSON: así el otro aparato lo escanea con
+  // la cámara y se le abre esta misma consola, en vez de quedarse con un texto que
+  // hay que pegar a mano. Y de paso cabe: el JSON daba un QR de 69 módulos.
+  selfQr.value = r?.qr ? qrSvg(inviteUrl(r.qr)) : null
   clearInterval(selfTimer)
   selfTimer = setInterval(refreshSelf, 2000)
 })
@@ -494,7 +498,7 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         <details>
           <summary>{{ t.pair_paste }}</summary>
           <textarea v-model="pasted" rows="3" data-testid="pair-paste"
-                    placeholder='{"v":2,"iss":"…","proxy":"…","token":"…","sn":"…"}'></textarea>
+                    placeholder="cAgKy9m6jD310-TFoQuRirKOoh5EUSYOfjGi9BPEe-GX9sZT…"></textarea>
           <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
         </details>
       </template>

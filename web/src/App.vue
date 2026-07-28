@@ -258,13 +258,17 @@ function copy (text, key) {
   navigator.clipboard?.writeText(text).then(() => { copied.value = key; setTimeout(() => (copied.value = ''), 1400) })
 }
 
-/* Ruta: la landing en `/` y la consola de dispositivos en `/dispositivos`. El QR de
-   `dotrino-vault pair` abre `/dispositivos#vault=<código>` — el código viaja en el
-   #fragment, que nunca llega al servidor. */
+/* Ruta: la landing en `/` y la consola de dispositivos en `/dispositivos`, con `/d`
+   como atajo. El QR de `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta
+   existe porque cada carácter del enlace son módulos del QR, y los módulos son filas
+   de terminal. La forma larga (`/dispositivos#vault=`) es la que la gente ya tiene y
+   sigue valiendo. En los dos casos la invitación viaja en el #fragment, que nunca
+   llega al servidor. */
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
-  view.value = (/\/dispositivos$/.test(p) || location.hash.includes('#vault=')) ? 'console' : 'home'
+  const invitado = location.hash.includes('#vault=') || location.hash.includes('#v=')
+  view.value = (/\/(dispositivos|d)$/.test(p) || invitado) ? 'console' : 'home'
 }
 routeNow()
 function go (v, ev) {

@@ -209,7 +209,7 @@ test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
 test('el QR se dibuja cuando cabe de ancho, y el código pegable es base64', () => {
   const t = makeTheme()
   const st = baseState({ screen: 'pairing' })
-  st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2}', b64: 'eyJ2IjoyfQ', expiresAt: Date.now() + 200000 }
+  st.pairing = { url: 'https://vault.dotrino.com/d#v=AAAA', payload: '{"v":2}', b64: 'eyJ2IjoyfQ', expiresAt: Date.now() + 200000 }
   const body = V.pairingBody(st, t, 80, 20)
   const text = body.join('\n')
   // El QR debe aparecer (líneas con escapes ANSI de bloques Unicode).
@@ -217,6 +217,37 @@ test('el QR se dibuja cuando cabe de ancho, y el código pegable es base64', () 
   // El código pegable es el base64, no el JSON crudo.
   assert.match(text, /eyJ2IjoyfQ/)
   assert.doesNotMatch(text, /"v":2/)
+})
+
+/**
+ * El QR de un emparejamiento REAL tiene que caber en una terminal normal. Es la
+ * razón de ser del formato compacto: con el JSON de antes salía de 69 módulos
+ * (77×39 con la zona de silencio) y no había ventana que lo mostrara entero.
+ */
+test('el QR de una invitación real cabe en una terminal normal', async () => {
+  const { inviteUrl } = await import('../lib/src/invite.js')
+  const { qrToString } = await import('../src/qr.js')
+  const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const qr = {
+    v: 2,
+    iss: JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey)),
+    proxy: 'wss://proxy.dotrino.com',
+    token: hex(12),
+    sn: hex(12),
+    m: 'join',
+    acct: 'Perfil 1'
+  }
+  const lineas = qrToString(inviteUrl(qr)).replace(/\n$/, '').split('\n')
+  const ancho = Math.max(...lineas.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length))
+  assert.ok(ancho <= 53, `el QR mide ${ancho} columnas`)
+  assert.ok(lineas.length <= 27, `el QR mide ${lineas.length} filas`)
+
+  // Y se dibuja de verdad en la pantalla de emparejar de una terminal de 80 columnas.
+  const st = baseState({ screen: 'pairing' })
+  st.pairing = { url: inviteUrl(qr), b64: 'x', payload: '{}', expiresAt: Date.now() + 200000 }
+  const text = V.pairingBody(st, makeTheme(), 80, 40).join('\n')
+  assert.match(text, /\x1b\[[0-9;]*m▀/)
 })
 
 test('scrollBody desplaza líneas planas sin perder el ancho', () => {

@@ -196,13 +196,13 @@ test('secretos: set / list / delete variable / delete scope', async () => {
 
 test('dispositivos: pair / pending / approve / revoke', async () => {
   const pair = await vc.startPairing({ profile: 'p1' })
-  assert.match(pair.url, /vault\.dotrino\.com\/dispositivos#vault=/)
+  assert.match(pair.url, /vault\.dotrino\.com\/d#v=/)
   assert.ok(pair.payload.includes('tok'))
-  // La URL lleva el JSON crudo marcado (`j`, lo más corto para el QR) y el código
-  // pegable el base64 marcado (`b`). Ver lib/src/invite.js y test/invite.test.mjs.
-  assert.ok(pair.url.includes('#vault=j{'))
+  // Este QR de mentira (token 'tok1', `iss` que no es una JWK) no se puede
+  // comprimir: el codec lo detecta y cae solo a la forma larga (`b`) en vez de
+  // inventarse una invitación que no reproduce el original.
   assert.match(pair.code, /^b[A-Za-z0-9_-]+$/)
-  assert.ok(pair.url.includes('#vault='))
+  assert.ok(pair.url.endsWith(pair.code))
   assert.ok(pair.expiresAt > Date.now())
 
   // simula un dispositivo conectándose (lo que escribiría el daemon real)
@@ -242,34 +242,35 @@ test('daemon caído: señalar lanza DAEMON_DOWN', async () => {
 })
 
 /**
- * REGRESIÓN (2026-07-28): el enlace del QR lleva JSON crudo (más corto = QR más
- * chico) y el navegador lo percent-codifica al abrirlo. Lo que hay que garantizar
- * no es que la URL sea "limpia", sino que lo que le llega al cliente DESPUÉS del
- * navegador se siga leyendo. La marca de formato (`j`/`b`) es lo que evita andar
- * probando formatos a ver cuál cuela.
+ * REGRESIÓN (2026-07-28): el enlace del QR tiene que salir CORTO —cada carácter son
+ * módulos, y los módulos son filas de terminal— y tiene que seguir leyéndose
+ * DESPUÉS de pasar por el navegador. Hubo una versión que lo achicaba mandando JSON
+ * crudo en el `#fragment`: el navegador percent-codifica las comillas y el cliente
+ * ya no lo entendía. Hoy va comprimido en base64url, que es seguro en una URL.
  */
-test('el enlace del QR sobrevive al navegador y se lee por su marca', async () => {
+test('el enlace del QR sale corto y sobrevive al navegador', async () => {
   const { pairUrl } = await import('../src/vaultControl.js')
   const { parseInvite } = await import('../lib/src/invite.js')
+  const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
   const qr = {
     v: 2,
-    iss: JSON.stringify({ key_ops: ['verify'], ext: true, kty: 'EC', x: 'AAA', y: 'BBB', crv: 'P-256' }),
+    iss: JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey)),
     proxy: 'wss://proxy.dotrino.com',
-    token: 'a'.repeat(32),
-    sn: 'b'.repeat(32),
+    token: 'a'.repeat(24),
+    sn: 'b'.repeat(24),
     m: 'join',
     acct: 'Perfil 1'
   }
   const { url, code, payload } = pairUrl(qr)
 
-  // 1. El QR lleva el JSON crudo: más corto que el base64 (ese es todo el punto).
-  assert.ok(url.includes('#vault=j{'))
-  assert.ok(url.length < (PROFILE_LEN + code.length + 1), 'el enlace del QR es más corto que con base64')
-  // 2. Tras el navegador (percent-encoding), se sigue leyendo.
+  // 1. Corto: el enlace entero pesa menos que el JSON que representa.
+  assert.match(url, /^https:\/\/vault\.dotrino\.com\/d#v=c[A-Za-z0-9_-]+$/)
+  assert.ok(url.length < JSON.stringify(qr).length / 2, `el enlace del QR es corto (${url.length})`)
+  // 2. Base64url es seguro en una URL: el navegador no lo toca.
+  assert.equal(encodeURI(url), url)
   assert.deepEqual(parseInvite(encodeURI(url)), qr)
-  // 3. El código pegable es base64 marcado, sin comillas ni llaves.
-  assert.match(code, /^b[A-Za-z0-9_-]+$/)
+  // 3. La misma invitación sirve para pegar: una palabra, sin comillas ni llaves.
+  assert.equal(code, url.slice(url.indexOf('#v=') + 3))
   assert.deepEqual(parseInvite(code), qr)
   assert.equal(payload, JSON.stringify(qr))
 })
-const PROFILE_LEN = 'https://vault.dotrino.com/dispositivos#vault='.length

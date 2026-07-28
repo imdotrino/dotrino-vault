@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
 import { qrToString } from './qr.js'
+import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
 import { VERSION } from './version.js'
 
 const dir = dataDir()
@@ -52,8 +53,6 @@ const writeReq = (name, obj) => fs.writeFileSync(path.join(dir, name), JSON.stri
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
-
-const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
 /**
  * Cómo se arranca el vault EN ESTA MÁQUINA. El CLI corre en Linux (servicio systemd),
@@ -176,9 +175,10 @@ async function cmdPair (args = []) {
   for (let i = 0; i < 50; i++) { await sleep(100); const p = readJson(pairFile, null); if (p?.expiresAt > Date.now()) { pair = p; break } }
   if (!pair) { console.error('No se recibió respuesta del daemon para el emparejamiento.'); process.exit(1) }
 
-  const payload = JSON.stringify(pair.qr)
-  const b64 = Buffer.from(payload, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  const url = PROFILE_URL + b64
+  // Una sola forma para las dos cosas: la invitación compacta (base64url de ~100
+  // caracteres) va igual de bien dentro del QR que pegada a mano. Ver `lib/src/invite.js`.
+  const b64 = encodeInvite(pair.qr)
+  const url = inviteUrl(pair.qr)
   const mins = Math.round((pair.expiresAt - Date.now()) / 60000)
   // QUÉ CUENTA se comparte: el vault puede tener varias bóvedas y este QR sale de
   // UNA (la activa, o la de --profile). Decirlo evita enrolar el dispositivo en la
@@ -186,7 +186,7 @@ async function cmdPair (args = []) {
   const acct = pair.profileName || pair.profile
   if (acct) console.log('\nCuenta que se comparte: %s%s', acct, pair.profileName && pair.profile ? `  (${pair.profile})` : '')
   console.log('\nEscanea este QR con el dispositivo que quieres conectar (válido %d min):\n', mins)
-  console.log(qrToString(url)) // el QR abre vault.dotrino.com/dispositivos y empareja solo
+  console.log(qrToString(url)) // el QR abre la consola de dispositivos y empareja solo
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)

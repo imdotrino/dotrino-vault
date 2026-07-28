@@ -11,21 +11,26 @@ const commitMeta = {
   transformIndexHtml (html) { return html.replace('</head>', `  <meta name="commit" content="${commit}" />\n  </head>`) },
 }
 
-// GitHub Pages no sabe de rutas de una SPA. Dos capas:
-//  · `dispositivos/index.html` — la ruta REAL a la que apunta el QR del emparejamiento
-//    (`/dispositivos#vault=…`). Sin esto la página se veía igual pero respondía **404**,
-//    y un 404 en la puerta de entrada del emparejamiento es pedir problemas (cachés,
-//    navegadores embebidos, previsualizaciones de enlace).
+// GitHub Pages no sabe de rutas de una SPA. Tres capas:
+//  · `d/index.html` — la ruta CORTA a la que apunta el QR de hoy (`/d#v=…`). Es corta
+//    a propósito: dentro de un QR cada carácter se paga en módulos, y los módulos son
+//    filas y columnas de terminal (`lib/src/invite.js`).
+//  · `dispositivos/index.html` — la ruta larga de siempre (`/dispositivos#vault=…`),
+//    la que la gente ya tiene guardada. Sin esto la página se veía igual pero respondía
+//    **404**, y un 404 en la puerta de entrada del emparejamiento es pedir problemas
+//    (cachés, navegadores embebidos, previsualizaciones de enlace).
 //  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
 //    enruta en el cliente.
 const spaFallback = {
   name: 'spa-404',
   closeBundle () {
     try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
-    try {
-      mkdirSync('dist/dispositivos', { recursive: true })
-      copyFileSync('dist/index.html', 'dist/dispositivos/index.html')
-    } catch (_) {}
+    for (const ruta of ['dispositivos', 'd']) {
+      try {
+        mkdirSync('dist/' + ruta, { recursive: true })
+        copyFileSync('dist/index.html', `dist/${ruta}/index.html`)
+      } catch (_) {}
+    }
   },
 }
 

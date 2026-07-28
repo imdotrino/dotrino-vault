@@ -195,6 +195,15 @@ entre las dos pantallas y corras `approve`. Un código robado ya no alcanza para
 entrar; la revocación de un dispositivo le ordena **autoborrarse** (con firma de la
 maestra, no por un mensaje cualquiera).
 
+La invitación viaja **comprimida** (`lib/src/invite.js`): los datos van en binario y el
+binario en base64url, ~100 caracteres en vez de los ~340 del JSON. Eso baja el QR de 69
+módulos a 41 —de 77×39 a 49×25 en la terminal— y de paso deja un código pegable de una
+sola palabra. El grueso del ahorro es la llave maestra: en el QR va el **punto comprimido**
+de la curva (33 bytes) y el lector rearma la JWK con una plantilla, comprobando que sale
+**byte a byte** igual, porque el proxy direcciona por esa string exacta. Si una llave no
+encaja en ninguna plantilla, la invitación sale en su forma larga: se hace grande, nunca
+incorrecta.
+
 El servicio se gestiona con systemd `--user`
 (`systemctl --user {start,stop,restart} dotrino-vault`). Tus datos —clave maestra
 incluida— viven en `~/.local/share/dotrino/vault` (permisos `0600`/`0700`), con un
@@ -323,6 +332,7 @@ sin vault; solo la feature que los necesita (TURN) espera. Primer consumidor:
 - `src/store.js` — árbol de contenidos (`vault.json`, versionado).
 - `src/client.js` — helper de **dispositivo** (enrolar / pedir firma / leer).
 - `src/protocol.js` — tipos de mensaje y scopes. · `src/qr.js` — QR ASCII. · `src/paths.js` — dirs.
+- `lib/src/invite.js` — la invitación de emparejamiento: cómo se comprime y cómo se lee.
 - `bin/sea-entry.js` — entrypoint del binario único (multicall daemon / `--ctl` / `--tui`).
 - `bin/dotrino-vaultd.js` — entrypoint de desarrollo (node directo).
 - `bin/dotrino-vault-tui.js` — entrypoint de desarrollo de la TUI.
