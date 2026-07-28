@@ -14,6 +14,22 @@
  */
 import { runDaemon } from '../src/daemon.js'
 import { qrToString } from '../src/qr.js'
+import { daemonAlive } from '../src/vaultControl.js'
+
+// `--tui` con una bóveda YA CORRIENDO en otra ventana: se engancha a ella y abre solo la
+// interfaz. Antes intentaba levantar una segunda bóveda sobre los mismos datos, chocaba
+// con el candado y se cerraba la ventana de golpe — que desde fuera se ve como un crash.
+// Es el caso normal, no el raro: la gente deja el daemon en una consola y abre la TUI en
+// otra.
+if (process.argv.includes('--tui') && daemonAlive()) {
+  if (!process.stdout.isTTY) {
+    console.error('--tui necesita un terminal interactivo (TTY).')
+    process.exit(2)
+  }
+  const { runTui } = await import('../src/tui/app.js')
+  await runTui()
+  process.exit(0)
+}
 
 const mgr = await runDaemon()
 
