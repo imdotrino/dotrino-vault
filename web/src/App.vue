@@ -51,8 +51,10 @@ const I18N = {
     m1_soon: 'Para este sistema todavía no hay instalador de un clic: está en camino. Las dos formas de abajo ya funcionan y dejan tu bóveda igual de lista.',
     m2_t: '2 · Un comando',
     m2_lead: 'Un comando que se encarga de todo, incluido bajar lo que haga falta. No pide permisos de administrador ni instala nada en el sistema.',
-    m2_note: 'Deja la ventana abierta: mientras esté abierta, tu bóveda está funcionando. Para conectar un aparato, abre otra ventana y pide el código.',
+    m2_tui: 'O con la pantalla de control incluida, que es lo más cómodo: te enseña tus dispositivos y ahí mismo apruebas el que se conecta, sin tener que abrir otra ventana ni recordar comandos.',
+    m2_note: 'Deja la ventana abierta: mientras esté abierta, tu bóveda está funcionando.',
     m3_t: '3 · Docker',
+    m3_tui_tag: 'con pantalla de control',
     dl_win_ps: 'PowerShell',
     dl_win_sh: 'Terminal',
     dl_docker_lead: 'Si ya usas Docker, es la forma más limpia: arranca sola con la máquina, se actualiza fácil y no ensucia tu sistema.',
@@ -145,8 +147,10 @@ const I18N = {
     m1_soon: 'There is no one-click installer for this system yet: it is on the way. The two ways below already work and leave your vault just as ready.',
     m2_t: '2 · One command',
     m2_lead: 'One command that takes care of everything, including downloading whatever is missing. It does not ask for admin rights and installs nothing system-wide.',
-    m2_note: 'Leave the window open: while it is open, your vault is running. To connect a device, open another window and ask for the code.',
+    m2_tui: 'Or with the control screen included, which is the most comfortable: it shows your devices and you approve the one connecting right there, without opening another window or remembering commands.',
+    m2_note: 'Leave the window open: while it is open, your vault is running.',
     m3_t: '3 · Docker',
+    m3_tui_tag: 'with control screen',
     dl_win_ps: 'PowerShell',
     dl_win_sh: 'Terminal',
     dl_docker_lead: 'If you already use Docker, it is the cleanest way: it starts with the machine, updates easily and does not touch your system.',
@@ -213,6 +217,10 @@ const npxCmd = 'npx -y @dotrino/vaultd'
 // queda como servicio (Windows, macOS), porque si no hacen falta dos ventanas.
 const tuiJuntoCmd = 'npx -y @dotrino/vaultd --tui'
 const tuiSoloCmd = 'npx -y -p @dotrino/vaultd dotrino-vault tui'
+// El instalador pasa lo que le sigue al paquete, así que la bóveda CON su pantalla de
+// control cabe en el mismo comando de instalar: nada de instalar y luego averiguar.
+const winPsTuiCmd = '& ([scriptblock]::Create((irm https://install.dotrino.com/install.ps1))) @dotrino/vaultd --tui'
+const winShTuiCmd = 'curl -fsSL https://install.dotrino.com/install.sh | sh -s -- @dotrino/vaultd --tui'
 const winPathCmd = '$node = (Get-ChildItem "$env:USERPROFILE\\.dotrino" -Directory -Filter \'node-*-win-*\').FullName\n$env:Path = "$node;$env:Path"'
 
 /* Pestañas por sistema: las tres vías existen para los tres, así que mostrarlas todas
@@ -378,6 +386,13 @@ onMounted(() => { document.documentElement.lang = lang.value })
               <button class="copy" @click="copy(npxCmd, 'npx')">{{ copied === 'npx' ? '✓' : '⧉' }}</button>
             </div>
             <pre><code>{{ npxCmd }}</code></pre>
+          </div>
+          <p class="dl-note m1-lead">{{ t.m2_tui }}</p>
+          <div class="codeblock">
+            <div class="code-head"><span>{{ os === 'windows' ? t.dl_win_ps : t.dl_win_sh }} · {{ t.m3_tui_tag }}</span>
+              <button class="copy" @click="copy(os === 'windows' ? winPsTuiCmd : winShTuiCmd, 'cmdtui')">{{ copied === 'cmdtui' ? '✓' : '⧉' }}</button>
+            </div>
+            <pre><code>{{ os === 'windows' ? winPsTuiCmd : winShTuiCmd }}</code></pre>
           </div>
           <p class="dl-note">{{ t.m2_note }}</p>
         </div>
