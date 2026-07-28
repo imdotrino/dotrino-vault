@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'node:child_process'
-import { copyFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync } from 'node:fs'
 
 let commit = 'dev'
 try { commit = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* sin git */ }
@@ -11,11 +11,22 @@ const commitMeta = {
   transformIndexHtml (html) { return html.replace('</head>', `  <meta name="commit" content="${commit}" />\n  </head>`) },
 }
 
-// GitHub Pages no sabe de rutas de una SPA: una visita directa a /dispositivos daría 404.
-// Sirviendo el mismo HTML como 404.html, Pages lo devuelve y la app enruta en el cliente.
+// GitHub Pages no sabe de rutas de una SPA. Dos capas:
+//  · `dispositivos/index.html` — la ruta REAL a la que apunta el QR del emparejamiento
+//    (`/dispositivos#vault=…`). Sin esto la página se veía igual pero respondía **404**,
+//    y un 404 en la puerta de entrada del emparejamiento es pedir problemas (cachés,
+//    navegadores embebidos, previsualizaciones de enlace).
+//  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
+//    enruta en el cliente.
 const spaFallback = {
   name: 'spa-404',
-  closeBundle () { try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {} },
+  closeBundle () {
+    try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
+    try {
+      mkdirSync('dist/dispositivos', { recursive: true })
+      copyFileSync('dist/index.html', 'dist/dispositivos/index.html')
+    } catch (_) {}
+  },
 }
 
 export default defineConfig({
