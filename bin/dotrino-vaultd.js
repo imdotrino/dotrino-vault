@@ -38,7 +38,7 @@ const mgr = await runDaemon()
 if (process.argv.includes('--pair')) {
   const { qr, expiresInMs } = mgr.current().startPairing({ label: 'cli' })
   console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
-  console.log(qrToString(JSON.stringify(qr)))
+  console.log(qrToString(JSON.stringify(qr), 2))
   console.log(JSON.stringify(qr))
 }
 

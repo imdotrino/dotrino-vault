@@ -186,7 +186,7 @@ async function cmdPair (args = []) {
   const acct = pair.profileName || pair.profile
   if (acct) console.log('\nCuenta que se comparte: %s%s', acct, pair.profileName && pair.profile ? `  (${pair.profile})` : '')
   console.log('\nEscanea este QR con el dispositivo que quieres conectar (válido %d min):\n', mins)
-  console.log(qrToString(url)) // el QR abre vault.dotrino.com/dispositivos y empareja solo
+  console.log(qrToString(payload, 2)) // QR con el JSON crudo (menos datos) y zona de silencio reducida
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
