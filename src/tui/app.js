@@ -694,10 +694,8 @@ function pairingBody (st, t, cols, height) {
   // en la cuenta equivocada sin enterarse.
   const ap = activeProfile(st)
   const acct = info.profileName || ap?.name || info.profile || ap?.id || '—'
-  lines.push(t.bold(i.pairAccount(acct)))
   const left = Math.max(0, Math.round((info.expiresAt - Date.now()) / 60000))
-  lines.push(t.muted(i.pairValid(left)))
-  lines.push('')
+  lines.push(t.bold(i.pairAccount(acct, left)))
   // QR: se dibuja siempre que quepa de ancho; si es más alto que la pantalla se
   // puede hacer scroll hacia arriba/abajo para verlo completo.
   let qr = ''
@@ -711,6 +709,7 @@ function pairingBody (st, t, cols, height) {
     lines.push(t.warn(i.pairQrTooNarrow(cols, qrWidth)))
     lines.push('')
   }
+  lines.push(t.muted(i.pairScan))
   lines.push(t.bold(i.pairUrl) + info.url)
   lines.push('')
   lines.push(t.muted(i.pairPaste))

@@ -134,8 +134,10 @@ const es = {
   newAccountLabel: 'Nombre de la cuenta nueva',
   newAccountHint: 'nace vacía; el dispositivo será su primer invitado',
   accountCreated: (name) => `Cuenta creada: ${name}`,
-  pairAccount: (name) => `Cuenta que se comparte: ${name}`,
-  pairValid: (min) => `Válido ~${min} min. Escanéalo o abre la URL en el dispositivo.`,
+  // Cuenta + vigencia en UNA línea: cada línea de cabecera es una fila menos de QR
+  // visible antes de tener que hacer scroll.
+  pairAccount: (name, min) => `Cuenta que se comparte: ${name}  ·  válido ~${min} min`,
+  pairScan: 'Escanéalo, o abre esta dirección en el dispositivo:',
   pairUrl: 'URL: ',
   pairPaste: 'O pega este código en vault.dotrino.com/dispositivos:',
   pairWarning: '⚠ Este código deja LEER tus datos y FIRMAR con tu identidad. No lo compartas.',
@@ -297,8 +299,8 @@ const en = {
   newAccountLabel: 'Name of the new account',
   newAccountHint: 'born empty; the device will be its first guest',
   accountCreated: (name) => `Account created: ${name}`,
-  pairAccount: (name) => `Account being shared: ${name}`,
-  pairValid: (min) => `Valid ~${min} min. Scan it or open the URL on the device.`,
+  pairAccount: (name, min) => `Account being shared: ${name}  ·  valid ~${min} min`,
+  pairScan: 'Scan it, or open this address on the device:',
   pairUrl: 'URL: ',
   pairPaste: 'Or paste this code into vault.dotrino.com/dispositivos:',
   pairWarning: '⚠ This code lets someone READ your data and SIGN as you. Do not share it.',

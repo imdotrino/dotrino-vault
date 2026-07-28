@@ -38,6 +38,15 @@ const T = {
     confirm_handover: 'A partir de ahora mandará ese dispositivo y este dejará de poder cambiar el acta. ¿Seguir?',
     confirm_renounce: 'Este dispositivo dejará de firmar por ti. Podrás devolvérselo desde el que manda. ¿Seguir?',
     yes: 'Sí, hazlo', cancel: 'Cancelar',
+    // --- Pantalla del PROCESO de conectar (se lleva la página entera) ---
+    flow_t: 'Conectar este dispositivo',
+    flow_b: 'Lo único que falta es que lo apruebes en tu bóveda.',
+    flow_connecting: 'Hablando con tu bóveda…',
+    flow_connecting_b: 'Un momento. En cuanto responda te daremos un código de seis dígitos.',
+    flow_waiting: 'Esperando a que lo apruebes…',
+    pair_code_cli: 'Si tu bóveda es la de la computadora:',
+    flow_close: 'Ver mis dispositivos',
+    flow_failed: 'No se pudo conectar',
     pair_t: 'Conectar este dispositivo a una bóveda',
     pair_b: 'Escanea el código que te muestra tu bóveda, o pégalo aquí.',
     pair_scan: 'Escanear con la cámara', pair_file: 'Abrir imagen o archivo',
@@ -96,6 +105,15 @@ const T = {
     confirm_handover: 'From now on that device will be in charge and this one will no longer be able to change the record. Continue?',
     confirm_renounce: 'This device will stop signing for you. You can give it back from the one in charge. Continue?',
     yes: 'Yes, do it', cancel: 'Cancel',
+    // --- The pairing PROCESS screen (takes over the whole page) ---
+    flow_t: 'Connect this device',
+    flow_b: 'The only thing left is to approve it in your vault.',
+    flow_connecting: 'Talking to your vault…',
+    flow_connecting_b: 'One moment. As soon as it answers we will give you a six-digit code.',
+    flow_waiting: 'Waiting for you to approve it…',
+    pair_code_cli: 'If your vault is the one on your computer:',
+    flow_close: 'See my devices',
+    flow_failed: 'Could not connect',
     pair_t: 'Connect this device to a vault',
     pair_b: 'Scan the code your vault shows you, or paste it here.',
     pair_scan: 'Scan with the camera', pair_file: 'Open image or file',
@@ -221,8 +239,33 @@ const pasted = ref('')
 const justPaired = ref(false)
 // Lo que la bóveda declara en el QR: { qr, mode: 'join'|'adopt', account }.
 const pendingPair = ref(null)
+const pairError = ref('')
 const scanHost = ref(null)
 const fileInput = ref(null)
+
+/**
+ * Conectar un dispositivo se lleva la página entera mientras dura. Antes los seis
+ * dígitos eran un recuadro más dentro de la consola completa —acta, lista de
+ * dispositivos, permisos, «que este dispositivo sea la bóveda»—: llegabas por el QR
+ * y no se entendía ni que estabas en medio de algo ni cuál de todos los botones te
+ * tocaba.
+ *
+ * Y es UNA pantalla, no dos: escanear el QR YA es tu aceptación, así que no se
+ * pregunta otra vez con un «Continuar» de por medio. Lo que la bóveda quiere hacer
+ * se lee **junto al código de seis dígitos**, en la misma pantalla, mientras
+ * esperas. El que decide de verdad es ese código: no se emite ningún certificado
+ * hasta que lo tecleas en la bóveda, y ahí sí puedes no hacerlo.
+ */
+const pairFlow = computed(() => {
+  if (justPaired.value) return 'done'
+  if (pairError.value) return 'error'
+  if (pairCode.value) return 'code'
+  if (pairing.value) return 'connecting'
+  if (pendingPair.value) return 'blocked' // solo `adopt`: no hay nada que hacer todavía
+  return null
+})
+/** Sale del proceso y devuelve la consola completa. */
+const closeFlow = () => { pairError.value = ''; justPaired.value = false; pendingPair.value = null }
 
 /**
  * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
@@ -248,37 +291,43 @@ function announce (qr) {
   if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
   msg.value = null
-  // `markRaw` + copia plana al aceptar: el QR viaja por `postMessage` al iframe de
+  const mode = qr.m === 'adopt' ? 'adopt' : 'join'
+  const account = String(qr.acct || '').slice(0, 40)
+  // `markRaw` + copia plana al conectar: el QR viaja por `postMessage` al iframe de
   // identidad, y un Proxy reactivo de Vue NO es clonable («could not be cloned») —
   // guardar el objeto en un ref rompía el emparejamiento entero.
-  pendingPair.value = { qr: markRaw(qr), mode: qr.m === 'adopt' ? 'adopt' : 'join', account: String(qr.acct || '').slice(0, 40) }
+  if (mode === 'adopt') { // camino A: todavía no existe de este lado, solo se explica
+    pendingPair.value = { qr: markRaw(qr), mode, account }
+    return
+  }
+  // Escanear el código YA es aceptar: se arranca de una y lo que la bóveda quiere
+  // hacer se cuenta en la misma pantalla del código de seis dígitos.
+  flowAccount.value = account
+  connect({ ...qr })
 }
 
 const cancelAnnounce = () => { pendingPair.value = null }
-function acceptAnnounce () {
-  const p = pendingPair.value
-  if (!p || p.mode !== 'join') return // `adopt` todavía no existe de este lado
-  pendingPair.value = null
-  connect({ ...p.qr })
-}
+/** La cuenta que la bóveda declaró, para nombrarla en la pantalla del código. */
+const flowAccount = ref('')
 
 async function connect (qr) {
   if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
-  pairing.value = true; pairCode.value = ''; msg.value = { kind: 'info', text: t.value.pair_wait }
-  const off = id.value.onVault((e) => { if (e?.phase === 'challenge') { pairCode.value = e.code; msg.value = null } })
+  pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
+  const off = id.value.onVault((e) => { if (e?.phase === 'challenge') pairCode.value = e.code })
   try {
     // Camino B (`vinculacion-de-cuentas.md` §3): la cuenta de la bóveda se materializa aquí
     // como una cuenta MÁS, con llave nueva. La que estabas usando NO se toca — antes se
     // sobrescribía sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
     await id.value.enrollDevice(qr, { join: 'new' })
-    msg.value = { kind: 'ok', text: t.value.pair_done }
     // Emparejar deja DOS cuentas en el aparato, y eso hay que decirlo: si no, el
     // conmutador aparece con una entrada de más y nadie sabe de dónde salió.
     justPaired.value = true
     await refresh()
   } catch (e) {
-    msg.value = { kind: 'bad', text: t.value.pair_fail + (e?.message || e) }
+    // El error se queda DENTRO del proceso: si se soltara a la consola entera, el
+    // dueño acabaría en una pantalla llena de botones sin saber qué salió mal.
+    pairError.value = t.value.pair_fail + (e?.message || e)
   } finally { off?.(); pairing.value = false; pairCode.value = '' }
 }
 
@@ -383,11 +432,82 @@ onBeforeUnmount(() => clearInterval(selfTimer))
 
 <template>
   <section class="console">
-    <h1>{{ t.title }}</h1>
-    <p class="lead">{{ t.lead }}</p>
+    <h1>{{ pairFlow ? t.flow_t : t.title }}</h1>
+    <p class="lead">{{ pairFlow ? t.flow_b : t.lead }}</p>
 
     <p v-if="loading" class="muted">{{ t.loading }}</p>
     <div v-else-if="fatal" class="banner bad">{{ fatal }}</div>
+
+    <!-- ═══ Conectando este dispositivo: la página es SOLO esto mientras dura ═══
+         Tres pasos, uno visible a la vez. Nada de acta, ni lista de dispositivos,
+         ni permisos, ni «que este dispositivo sea la bóveda»: eso vuelve al
+         terminar. Llegar por un QR y encontrarte la consola entera era no
+         entender ni que estabas en medio de algo ni qué botón te tocaba. -->
+    <div v-else-if="pairFlow" class="flow" data-testid="pair-flow">
+      <!-- Hablando con la bóveda (dura un segundo) -->
+      <div v-if="pairFlow === 'connecting'" class="card" data-testid="pair-connecting">
+        <p class="big">{{ t.flow_connecting }}</p>
+        <p class="muted">{{ t.flow_connecting_b }}</p>
+      </div>
+
+      <!-- LA pantalla del emparejamiento: los seis dígitos y, al lado, qué quiere
+           hacer la bóveda. Aquí no hay botones a propósito — lo único que hay que
+           hacer está en la bóveda, y no aprobar ahí es la forma de decir que no. -->
+      <div v-else-if="pairFlow === 'code'" class="card codebox" data-testid="pair-code">
+        <p class="big">{{ t.pair_code_t }}</p>
+        <div class="digits">{{ pairCode }}</div>
+        <p class="muted">{{ t.pair_code_b }}</p>
+        <!-- Si la bóveda es la del PC, la acción es literalmente esta línea. Decirla
+             quita toda duda sobre «dónde se aprueba». -->
+        <p class="cmd">{{ t.pair_code_cli }} <code>dotrino-vault approve {{ pairCode }}</code></p>
+        <p class="waiting">{{ t.flow_waiting }}</p>
+        <div class="what" data-testid="announce-what">
+          <strong>{{ t.ann_t }}</strong>
+          <p>{{ t.ann_join_h(flowAccount) }}</p>
+          <p class="muted">{{ t.ann_join_c }}</p>
+        </div>
+      </div>
+
+      <!-- Camino A (que la bóveda se quede con la cuenta de este aparato): todavía
+           no existe de este lado, así que se explica y no se hace nada. -->
+      <div v-else-if="pairFlow === 'blocked'" class="card announce" data-testid="pair-announce">
+        <strong>{{ t.ann_t }}</strong>
+        <p class="big">{{ t.ann_adopt_h(pendingPair.account) }}</p>
+        <p class="muted">{{ t.ann_adopt_c }}</p>
+        <p class="muted" data-testid="announce-adopt-no">{{ t.ann_adopt_no }}</p>
+        <div class="row">
+          <button class="btn ghost" data-testid="announce-cancel" @click="cancelAnnounce">{{ t.back }}</button>
+        </div>
+      </div>
+
+      <!-- Listo, y qué quedó en el aparato -->
+      <div v-else-if="pairFlow === 'done'" class="card done" data-testid="two-accounts">
+        <strong>{{ t.pair_done }}</strong>
+        <p>{{ t.two_title }}. {{ t.two_body }}</p>
+        <details>
+          <summary>{{ t.two_del }}</summary>
+          <ol class="muted">
+            <li>{{ t.two_del_1 }}</li>
+            <li>{{ t.two_del_2 }}</li>
+            <li>{{ t.two_del_3 }}</li>
+          </ol>
+          <a class="btn ghost sm" href="https://profile.dotrino.com/" target="_blank" rel="noopener"
+             data-testid="goto-profile">{{ t.two_del_link }}</a>
+        </details>
+        <div class="row">
+          <button class="btn" data-testid="flow-close" @click="closeFlow">{{ t.flow_close }}</button>
+        </div>
+      </div>
+
+      <!-- No salió -->
+      <div v-else-if="pairFlow === 'error'" class="card bad" data-testid="pair-error">
+        <strong>{{ t.flow_failed }}</strong>
+        <p>{{ pairError }}</p>
+        <div class="row">
+          <button class="btn ghost" data-testid="flow-back" @click="closeFlow">{{ t.back }}</button>
+        </div>
+      </div>
+    </div>
 
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
@@ -444,64 +564,27 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         </li>
       </ul>
 
-      <!-- Conectar este dispositivo a una bóveda -->
+      <!-- Conectar este dispositivo a una bóveda. Aquí solo está la ENTRADA al
+           proceso (escanear / abrir archivo / pegar); en cuanto hay una invitación,
+           la pantalla del proceso se lo lleva todo (ver `pairFlow`). -->
       <h2>{{ t.pair_t }}</h2>
       <p class="muted">{{ t.pair_b }}</p>
-      <div v-if="pairCode" class="codebox" data-testid="pair-code">
-        <p>{{ t.pair_code_t }}</p>
-        <div class="digits">{{ pairCode }}</div>
-        <p class="muted">{{ t.pair_code_b }}</p>
+      <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
+      <div class="row">
+        <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
+        <button class="btn ghost" :disabled="pairing" @click="fileInput.click()">{{ t.pair_file }}</button>
       </div>
-      <!-- Emparejar deja el aparato con DOS cuentas: se dice, y se dice cómo deshacerse
-           de la que no quieras. Lo contrario es que aparezca una entrada de más en el
-           conmutador y nadie sepa de dónde salió. -->
-      <div v-if="justPaired" class="banner two-accounts" data-testid="two-accounts">
-        <strong>{{ t.two_title }}</strong>
-        <p>{{ t.two_body }}</p>
-        <p class="muted">{{ t.two_del }}</p>
-        <ol class="muted">
-          <li>{{ t.two_del_1 }}</li>
-          <li>{{ t.two_del_2 }}</li>
-          <li>{{ t.two_del_3 }}</li>
-        </ol>
-        <a class="btn ghost sm" href="https://profile.dotrino.com/" target="_blank" rel="noopener"
-           data-testid="goto-profile">{{ t.two_del_link }}</a>
+      <input ref="fileInput" type="file" accept="image/*,.dpair,.json,text/plain" hidden @change="onFile" />
+      <div ref="scanHost" class="scanbox" v-show="scanning">
+        <video playsinline muted></video>
+        <button class="btn ghost sm" @click="scanStop && scanStop()">{{ t.cancel }}</button>
       </div>
-
-      <!-- Lo que la bóveda declaró en el código: qué va a hacer y qué consecuencias
-           tiene. Se dice ANTES, y no se toca nada hasta que el dueño acepta. -->
-      <div v-else-if="pendingPair" class="banner announce" data-testid="pair-announce">
-        <strong>{{ t.ann_t }}</strong>
-        <p data-testid="announce-what">
-          {{ pendingPair.mode === 'adopt' ? t.ann_adopt_h(pendingPair.account) : t.ann_join_h(pendingPair.account) }}
-        </p>
-        <p class="muted">{{ pendingPair.mode === 'adopt' ? t.ann_adopt_c : t.ann_join_c }}</p>
-        <p v-if="pendingPair.mode === 'adopt'" class="muted" data-testid="announce-adopt-no">{{ t.ann_adopt_no }}</p>
-        <div class="row">
-          <button v-if="pendingPair.mode !== 'adopt'" class="btn" data-testid="announce-go"
-                  :disabled="pairing" @click="acceptAnnounce">{{ t.ann_go }}</button>
-          <button class="btn ghost" data-testid="announce-cancel" @click="cancelAnnounce">{{ t.ann_cancel }}</button>
-        </div>
-      </div>
-
-      <template v-else-if="!pairCode">
-        <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
-        <div class="row">
-          <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
-          <button class="btn ghost" :disabled="pairing" @click="fileInput.click()">{{ t.pair_file }}</button>
-        </div>
-        <input ref="fileInput" type="file" accept="image/*,.dpair,.json,text/plain" hidden @change="onFile" />
-        <div ref="scanHost" class="scanbox" v-show="scanning">
-          <video playsinline muted></video>
-          <button class="btn ghost sm" @click="scanStop && scanStop()">{{ t.cancel }}</button>
-        </div>
-        <details>
-          <summary>{{ t.pair_paste }}</summary>
-          <textarea v-model="pasted" rows="3" data-testid="pair-paste"
-                    placeholder="cAgKy9m6jD310-TFoQuRirKOoh5EUSYOfjGi9BPEe-GX9sZT…"></textarea>
-          <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
-        </details>
-      </template>
+      <details>
+        <summary>{{ t.pair_paste }}</summary>
+        <textarea v-model="pasted" rows="3" data-testid="pair-paste"
+                  placeholder="cAgKy9m6jD310-TFoQuRirKOoh5EUSYOfjGi9BPEe-GX9sZT…"></textarea>
+        <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
+      </details>
 
       <!-- Este dispositivo como bóveda -->
       <h2>{{ t.self_t }}</h2>
@@ -533,13 +616,30 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .banner { border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 14px; }
 .banner.ok { background: #0f2a1c; color: #7fe0a8; }
 .banner.bad { background: #2a1113; color: #ff9aa2; }
+/* ── La pantalla del PROCESO de conectar ─────────────────────────────────────
+   Una sola tarjeta grande, centrada, con los tres pasos arriba. Nada compite con
+   ella: mientras dura el proceso no hay nada más en la página. */
+.flow { max-width: 560px; margin: 8px auto 0; }
+.card { background: #0f1725; border: 1px solid #24344d; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.card p { margin: 0; }
+.card strong { color: #9cc4ff; font-size: 15px; }
+/* Lo que la bóveda va a hacer se lee ANTES de aceptar: en grande, no al vuelo. */
+.card .big { font-size: 18px; line-height: 1.35; color: #eaf1fb; }
+.card.announce { border-color: #2f4a6d; }
+.card.done { border-color: #2c5c44; }
+.card.done strong { color: #7fe0a8; }
+.card.bad { border-color: #5a2027; }
+.card.bad strong { color: #ff9aa2; }
+.card details { width: 100%; }
+.card ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; }
+.waiting { color: #ffd98a; font-size: 13px; }
+/* Qué quiere hacer la bóveda: en la MISMA pantalla del código, debajo. Es
+   información para leer mientras esperas, no una pregunta que responder. */
+.what { border-top: 1px solid #1e2a3d; margin-top: 8px; padding-top: 14px; text-align: left; width: 100%; }
+.what p { margin: 4px 0 0; }
+.cmd { font-size: 12px; color: #8ea0b8; }
+.cmd code { background: #131c2b; border-radius: 6px; padding: 2px 6px; font-family: ui-monospace, monospace; color: #bfe0ff; }
 .two-accounts, .announce { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-/* El aviso de lo que va a hacer la bóveda se lee ANTES de aceptar: destacado, no al vuelo. */
-.announce { border-color: #2f4a6d; }
-.announce p { margin: 0; }
-.announce strong { color: #9cc4ff; }
-.two-accounts p, .two-accounts ol { margin: 0; }
-.two-accounts ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .banner.info { background: #10203a; color: #9cc4ff; }
 .banner.warn { background: #2a2310; color: #ffd98a; }
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
@@ -562,8 +662,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .btn:disabled { opacity: .5; cursor: default; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
 textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; font-size: 12px; }
-.codebox { background: #0f1725; border: 1px solid #2f5f8f; border-radius: 12px; padding: 16px; text-align: center; margin: 12px 0; }
-.digits { font-size: 34px; letter-spacing: .18em; font-family: ui-monospace, monospace; color: #bfe0ff; margin: 6px 0; }
+.codebox { border-color: #2f5f8f; text-align: center; align-items: center; }
+.digits { font-size: clamp(38px, 12vw, 56px); letter-spacing: .18em; font-family: ui-monospace, monospace; color: #bfe0ff; margin: 6px 0; }
 .qrbox { background: #fff; padding: 12px; border-radius: 12px; width: max-content; margin: 12px 0; }
 .qrbox :deep(svg) { width: 220px; height: 220px; display: block; }
 .scanbox { margin: 10px 0; }
