@@ -54,7 +54,7 @@ test('render de todas las pantallas no lanza y respeta el tamaño', () => {
     for (const screen of ['profiles', 'devices', 'secrets', 'pairing']) {
       const term = fakeTerm(cols, rows)
       const st = baseState({ screen })
-      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000 }
+      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', b64: 'AAAA', expiresAt: Date.now() + 200000 }
       V.render(term, st)
       assertClean(term, cols, rows)
     }
@@ -121,7 +121,7 @@ test('en inglés: todas las pantallas dibujan igual de bien', () => {
     for (const screen of ['profiles', 'devices', 'secrets', 'pairing']) {
       const term = fakeTerm(cols, rows)
       const st = baseState({ screen, lang: 'en' })
-      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000, profileName: 'Work' }
+      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', b64: 'AAAA', expiresAt: Date.now() + 200000, profileName: 'Work' }
       V.render(term, st)
       assertClean(term, cols, rows)
     }
@@ -195,7 +195,7 @@ test('antes del QR, el vault PREGUNTA a qué cuenta entra el dispositivo', () =>
 test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
   const t = makeTheme()
   const st = baseState({ screen: 'pairing' })
-  st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2}', expiresAt: Date.now() + 200000, profile: 'p9', profileName: 'Trabajo' }
+  st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2}', b64: 'AAAA', expiresAt: Date.now() + 200000, profile: 'p9', profileName: 'Trabajo' }
   assert.match(V.pairingBody(st, t, 80, 20)[0], /Cuenta que se comparte: Trabajo/)
 
   // Sin nombre en el pair.json, cae al de la bóveda activa (nunca queda vacío).
@@ -204,6 +204,30 @@ test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
 
   st.lang = 'en'
   assert.match(V.pairingBody(st, t, 80, 20)[0], /Account being shared/)
+})
+
+test('el QR se dibuja cuando cabe de ancho, y el código pegable es base64', () => {
+  const t = makeTheme()
+  const st = baseState({ screen: 'pairing' })
+  st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2}', b64: 'eyJ2IjoyfQ', expiresAt: Date.now() + 200000 }
+  const body = V.pairingBody(st, t, 80, 20)
+  const text = body.join('\n')
+  // El QR debe aparecer (líneas con escapes ANSI de bloques Unicode).
+  assert.match(text, /\x1b\[[0-9;]*m▀/)
+  // El código pegable es el base64, no el JSON crudo.
+  assert.match(text, /eyJ2IjoyfQ/)
+  assert.doesNotMatch(text, /"v":2/)
+})
+
+test('scrollBody desplaza líneas planas sin perder el ancho', () => {
+  const lines = ['a', 'b', 'c', 'd', 'e']
+  const ref = { value: 0 }
+  assert.deepEqual(V.scrollBody(lines, 3, ref), ['a', 'b', 'c'])
+  ref.value = 2
+  assert.deepEqual(V.scrollBody(lines, 3, ref), ['c', 'd', 'e'])
+  ref.value = 10
+  assert.deepEqual(V.scrollBody(lines, 3, ref), ['c', 'd', 'e'])
+  assert.equal(ref.value, 2)
 })
 
 test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => {

@@ -141,6 +141,7 @@ const es = {
   pairWarning: '⚠ Este código deja LEER tus datos y FIRMAR con tu identidad. No lo compartas.',
   pairConnected: (id) => `⧗ Se conectó: ${id} — pulsa A y escribe el código que muestra.`,
   pairWaiting: 'Esperando a que el dispositivo se conecte…',
+  pairQrTooNarrow: (cols, need) => `Agranda el terminal (el QR necesita ${need} cols; hay ${cols}).`,
 
   // confirmación / entrada
   confirmKeys: '  (s / N)',
@@ -154,7 +155,7 @@ const es = {
   helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'u desbloq', 'k bloquear', 'l English', 'q salir'],
   helpDevices: ['←→ pestaña', '↑↓', 'p emparejar', 'a aprobar', 'x rechazar', 'v revocar', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
   helpSecrets: ['←→ pestaña', '↑↓', 'n nueva variable', 'x quitar (variable/scope)', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
-  helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', 'Esc atrás', 'l English'],
+  helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
 
   // pantalla "daemon caído"
@@ -303,6 +304,7 @@ const en = {
   pairWarning: '⚠ This code lets someone READ your data and SIGN as you. Do not share it.',
   pairConnected: (id) => `⧗ Connected: ${id} — press A and type the code it shows.`,
   pairWaiting: 'Waiting for the device to connect…',
+  pairQrTooNarrow: (cols, need) => `Widen the terminal (the QR needs ${need} cols; you have ${cols}).`,
 
   confirmKeys: '  (y / N)',
   helpInput: 'Enter confirm · Esc cancel · Ctrl-U clear',
@@ -311,7 +313,7 @@ const en = {
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
   helpDevices: ['←→ tab', '↑↓', 'p pair', 'a approve', 'x reject', 'v revoke', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
   helpSecrets: ['←→ tab', '↑↓', 'n new variable', 'x remove (variable/scope)', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
-  helpPairing: ['a approve', 'x reject', 'r restart', 'Esc back', 'l Español'],
+  helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
 
   downTitle: 'The vault daemon is not running.',

@@ -119,6 +119,19 @@ function renderList (rows, selIdx, height, cols, t, scrollRef) {
 }
 
 /**
+ * Scroll simple para una lista de líneas planas (no seleccionables). Igual idea
+ * que `renderList`, pero sin índice de selección: solo desplaza la ventana.
+ */
+function scrollBody (lines, height, scrollRef) {
+  let top = scrollRef.value || 0
+  top = Math.max(0, Math.min(top, Math.max(0, lines.length - height)))
+  scrollRef.value = top
+  const out = []
+  for (let i = 0; i < height; i++) out.push(lines[top + i] ?? '')
+  return out
+}
+
+/**
  * Barra de ayuda que SIEMPRE deja ver lo global (idioma y salir): si los segmentos
  * no caben, recorta desde el MEDIO y marca el corte con «…». Sin esto, en 80
  * columnas la ayuda se cortaba por la derecha y las teclas del final (justo las
@@ -450,7 +463,7 @@ async function onKeyDevices (term, st, key) {
 /** Abre el emparejamiento contra `profile` y salta a la pantalla del QR. */
 async function beginPairing (term, st, profile) {
   const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile }))
-  if (r.ok) { st.pairing = r.v; st.pending = null; st.screen = 'pairing' }
+  if (r.ok) { st.pairing = r.v; st.pending = null; st.scroll.pairing = { value: 0 }; st.screen = 'pairing' }
   return r.ok
 }
 
@@ -514,6 +527,21 @@ async function onKeyPairing (term, st, key) {
     if (pend) st.pending = pend
     return true
   }
+  // Scroll vertical para ver el QR completo cuando no cabe en la pantalla.
+  if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) {
+    const { rows } = term.size()
+    const contentH = Math.max(1, rows - 7)
+    const pb = pairingBody(st, term.t, term.size().cols, contentH)
+    const maxScroll = Math.max(0, pb.length - contentH)
+    const scroll = st.scroll.pairing || (st.scroll.pairing = { value: 0 })
+    if (key.name === 'up') scroll.value = Math.max(0, scroll.value - 1)
+    else if (key.name === 'down') scroll.value = Math.min(maxScroll, scroll.value + 1)
+    else if (key.name === 'pageup') scroll.value = Math.max(0, scroll.value - 5)
+    else if (key.name === 'pagedown') scroll.value = Math.min(maxScroll, scroll.value + 5)
+    else if (key.name === 'home') scroll.value = 0
+    else if (key.name === 'end') scroll.value = maxScroll
+    return true
+  }
   if (ch === 'a' && st.pending) { promptApprove(term, st); return true }
   if (ch === 'x' && st.pending) {
     const r = await guard(term, st, i.rejecting, () => vc.rejectPending(st.pending.deviceId, activeId(st)))
@@ -522,7 +550,7 @@ async function onKeyPairing (term, st, key) {
   }
   if (ch === 'r') { // restart: reiniciar el emparejamiento
     const r = await guard(term, st, i.restartingPairing, () => vc.startPairing({ profile: activeId(st) }))
-    if (r.ok) { st.pairing = r.v; st.pending = null }
+    if (r.ok) { st.pairing = r.v; st.pending = null; st.scroll.pairing = { value: 0 } }
     return true
   }
   if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.pairing = null; await refreshDevices(term, st) }
@@ -670,20 +698,23 @@ function pairingBody (st, t, cols, height) {
   const left = Math.max(0, Math.round((info.expiresAt - Date.now()) / 60000))
   lines.push(t.muted(i.pairValid(left)))
   lines.push('')
-  // QR solo si entra cómodo (es "alto": ~ (módulos+8)/2 filas).
+  // QR: se dibuja siempre que quepa de ancho; si es más alto que la pantalla se
+  // puede hacer scroll hacia arriba/abajo para verlo completo.
   let qr = ''
   try { qr = qrToString(info.url) } catch (_) {}
   const qrLines = qr ? qr.replace(/\n$/, '').split('\n') : []
   const qrWidth = qrLines.length ? Math.max(...qrLines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length)) : 0
-  const reserved = 9 // encabezado + cuenta + URL + payload + aviso
-  if (qrLines.length && qrWidth <= cols && qrLines.length <= height - reserved) {
+  if (qrLines.length && qrWidth <= cols) {
     for (const l of qrLines) lines.push(l)
+    lines.push('')
+  } else if (qrLines.length) {
+    lines.push(t.warn(i.pairQrTooNarrow(cols, qrWidth)))
     lines.push('')
   }
   lines.push(t.bold(i.pairUrl) + info.url)
   lines.push('')
   lines.push(t.muted(i.pairPaste))
-  lines.push(info.payload)
+  lines.push(info.b64 || info.payload)
   lines.push('')
   lines.push(t.danger(i.pairWarning))
   lines.push('')
@@ -731,8 +762,7 @@ function render (term, st) {
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
-    body = pb.slice(0, contentH)
-    while (body.length < contentH) body.push('')
+    body = scrollBody(pb, contentH, scrollRef)
   }
   for (let n = 0; n < contentH; n++) lines[top + n] = body[n] ?? ''
 
@@ -887,4 +917,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, pairModeRows, pairingBody, fitHelp, toggleLang }
+export const __test = { render, profileRows, deviceRows, secretRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }

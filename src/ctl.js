@@ -190,7 +190,7 @@ async function cmdPair (args = []) {
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
-  console.log('\nO pega este código en vault.dotrino.com/dispositivos :\n  ' + payload)
+  console.log('\nO pega este código en vault.dotrino.com/dispositivos :\n  ' + b64)
 
   // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.
   const saveIdx = args.indexOf('--save')

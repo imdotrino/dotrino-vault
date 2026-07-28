@@ -262,7 +262,7 @@ export function pairUrl (qr) {
   const payload = JSON.stringify(qr)
   const b64 = Buffer.from(payload, 'utf8').toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  return { url: PROFILE_URL + b64, payload }
+  return { url: PROFILE_URL + b64, payload, b64 }
 }
 
 /**
@@ -279,11 +279,11 @@ export async function startPairing ({ profile, service } = {}) {
     await sleep(100)
     const pr = read(F.pair, null)
     if (pr?.expiresAt > Date.now()) {
-      const { url, payload } = pairUrl(pr.qr)
+      const { url, payload, b64 } = pairUrl(pr.qr)
       // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault
       // puede tener varias y el emparejamiento mete al dispositivo en UNA; la TUI
       // y la CLI lo muestran para que no se enrole en la equivocada.
-      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, profile: pr.profile || null, profileName: pr.profileName || '' }
+      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, b64, profile: pr.profile || null, profileName: pr.profileName || '' }
     }
   }
   throw coded('el daemon no inició el emparejamiento', 'PAIR_FAILED')
