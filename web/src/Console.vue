@@ -174,7 +174,11 @@ async function refresh () {
 }
 
 onMounted(async () => {
-  try { id.value = await Identity.connect(opcionesIdentidad()) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
+  // `markRaw`: la identidad NO puede volverse reactiva. Vue envuelve en un Proxy lo
+  // que metes en un ref, y esta instancia habla con su iframe por `postMessage`, que
+  // no sabe clonar un Proxy: emparejar moría con «#<Object> could not be cloned».
+  // (Venía roto desde que existe esta consola; lo destapó una prueba de punta a punta.)
+  try { id.value = markRaw(await Identity.connect(opcionesIdentidad())) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
   await refresh()
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
