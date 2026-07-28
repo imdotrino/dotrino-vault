@@ -65,10 +65,16 @@ test('LAS TECLAS SON LAS MISMAS EN LOS DOS IDIOMAS (mnemónico inglés)', () => 
   for (const screen of ['helpProfiles', 'helpDevices', 'helpSecrets', 'helpPairing', 'downHelp']) {
     assert.deepEqual(keysOf(dict('en')[screen]), keysOf(dict('es')[screen]), `teclas distintas en ${screen}`)
   }
-  // Y son las inglesas: locK, password/pair, language… (el candado ya no es `l`).
+  // Y son las inglesas: locK, pair, change-password, language… (el candado ya no es `l`).
   assert.ok(dict('es').helpProfiles.some((s) => s.startsWith('k ')), 'k = locK')
-  assert.ok(dict('es').helpProfiles.some((s) => s.startsWith('p ')), 'p = password')
-  assert.ok(dict('es').helpDevices.some((s) => s.startsWith('p ')), 'p = pair')
+  assert.ok(dict('es').helpProfiles.some((s) => s.startsWith('c ')), 'c = change password')
+  // `p` = emparejar en las DOS pantallas: una tecla, un significado.
+  for (const screen of ['helpProfiles', 'helpDevices']) {
+    for (const lang of ['es', 'en']) {
+      const seg = dict(lang)[screen].find((s) => s.startsWith('p '))
+      assert.ok(seg && /(emparejar|pair)/.test(seg), `p debería ser emparejar en ${screen}/${lang}: ${seg}`)
+    }
+  }
   assert.ok(dict('es').helpPairing.some((s) => s.startsWith('r ')), 'r = restart')
 
   // Ninguna tecla se repite dentro de la misma pantalla.

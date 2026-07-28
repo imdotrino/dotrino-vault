@@ -100,8 +100,10 @@ raw mode).
 los dispositivos/variables que estás viendo:
 
 1. **Bóvedas** es la pantalla de entrada: lista tus perfiles (`↑↓` mover, `Enter`
-   **entrar** a uno — lo activa si no lo estaba). Ahí también creas una bóveda
-   nueva, renombras, borras y pones/quitas/usas la contraseña (candado).
+   **entrar** a uno — lo activa si no lo estaba). Ahí también **conectas un
+   dispositivo** con `p` (sin entrar: activa la bóveda elegida y abre la pregunta
+   de a qué cuenta entra), creas una bóveda nueva, renombras, borras y
+   pones/quitas/usas la contraseña (candado).
 2. Al entrar caes en sus **pestañas horizontales**, que cambias con `←→`:
    - **Dispositivos (pares):** verlos, **emparejar** uno nuevo, **aprobar** con el
      código que muestra el dispositivo, **rechazar** y **revocar**. Al emparejar, la
@@ -132,7 +134,8 @@ en español (solo se traduce la palabra que las explica en la barra de ayuda).
 | `n` | new — bóveda nueva / variable nueva | Bóvedas · Scopes |
 | `r` | rename (Bóvedas) · refresh (Dispositivos/Scopes) · restart (Emparejar) | — |
 | `d` | delete — borrar la bóveda | Bóvedas |
-| `p` | password (Bóvedas) · pair — emparejar (Dispositivos) | — |
+| `p` | **pair — conectar un dispositivo** (desde Bóvedas entra directo, sin `Enter`) | Bóvedas · Dispositivos |
+| `c` | change password — poner/cambiar la contraseña | Bóvedas |
 | `x` | quitar: contraseña · dispositivo pendiente · variable/scope | todas |
 | `u` / `k` | unlock / locK — candado de la bóveda | Bóvedas |
 | `a` | approve — aprobar el dispositivo | Dispositivos · Emparejar |

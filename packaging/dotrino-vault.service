@@ -2,7 +2,7 @@
 # dotrino-vault — certificador personal de Dotrino (daemon headless).
 # Unidad de usuario (systemd --user): corre sin sudo, bajo tu propia cuenta.
 # El daemon CONECTA HACIA AFUERA al proxy (wss://proxy.dotrino.com); no abre puertos.
-Description=Dotrino Vault (certificador personal)
+Description=Dotrino Vault (your personal vault)
 Documentation=https://dotrino.com
 # Espera a tener red antes de arrancar (best-effort en sesión de usuario).
 After=network-online.target

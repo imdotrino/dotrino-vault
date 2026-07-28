@@ -11,6 +11,10 @@
 # Reejecutable sin efectos secundarios: actualiza binario + unit y reinicia.
 #
 # Uso:  sh install.sh        (desde el tarball descomprimido)
+#
+# La SALIDA de los instaladores va en INGLÉS (decisión del dueño, 2026-07-28): se
+# lee en terminales de cualquier parte y se pega tal cual en un issue. Los
+# comentarios del código siguen en español, como el resto del repo.
 set -eu
 
 # --- rutas XDG (con defaults) -------------------------------------------------
@@ -22,12 +26,12 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 DATA_DIR="$HOME/.local/share/dotrino/vault"
 SRC="$(cd "$(dirname "$0")" && pwd)"
 
-echo "dotrino-vault · instalando…"
+echo "dotrino-vault · installing…"
 
 # --- 0. comprobaciones --------------------------------------------------------
 if ! command -v systemctl >/dev/null 2>&1; then
-  echo "ERROR: no se encontró systemd (systemctl). v1 solo soporta Linux con systemd." >&2
-  echo "       Podés arrancar el daemon a mano:  $BIN_DIR/dotrino-vaultd" >&2
+  echo "ERROR: systemd (systemctl) not found. v1 only supports Linux with systemd." >&2
+  echo "       You can start the daemon by hand:  $BIN_DIR/dotrino-vaultd" >&2
   exit 1
 fi
 
@@ -35,13 +39,13 @@ fi
 mkdir -p "$BIN_DIR"
 install -m 0755 "$SRC/dotrino-vaultd" "$BIN_DIR/dotrino-vaultd"
 install -m 0755 "$SRC/dotrino-vault"  "$BIN_DIR/dotrino-vault"
-echo "  binario   → $BIN_DIR/dotrino-vaultd"
-echo "  control   → $BIN_DIR/dotrino-vault"
+echo "  binary    → $BIN_DIR/dotrino-vaultd"
+echo "  cli       → $BIN_DIR/dotrino-vault"
 
 # Aviso si ~/.local/bin no está en el PATH (no es fatal: el CLI es opcional).
 case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
-  *) echo "  NOTA: $BIN_DIR no está en tu PATH. Añadilo a ~/.profile para usar 'dotrino-vault'." ;;
+  *) echo "  NOTE: $BIN_DIR is not in your PATH. Add it to ~/.profile to use 'dotrino-vault'." ;;
 esac
 
 # --- 2. dir de datos (0700) ---------------------------------------------------
@@ -51,17 +55,17 @@ chmod 700 "$DATA_DIR" 2>/dev/null || true
 # --- 3. unit systemd --user ---------------------------------------------------
 mkdir -p "$UNIT_DIR"
 install -m 0644 "$SRC/dotrino-vault.service" "$UNIT_DIR/dotrino-vault.service"
-echo "  servicio  → $UNIT_DIR/dotrino-vault.service"
+echo "  service   → $UNIT_DIR/dotrino-vault.service"
 
 # --- 4. linger: corre sin sesión iniciada (al boot) ---------------------------
 # loginctl enable-linger normalmente NO pide sudo para el propio usuario.
 if command -v loginctl >/dev/null 2>&1; then
   if loginctl enable-linger "$USER" >/dev/null 2>&1; then
-    echo "  linger    → activado (el vault arranca en el boot, sin login gráfico)"
+    echo "  linger    → enabled (the vault starts at boot, no graphical login needed)"
   else
-    echo "  linger    → NO se pudo activar automáticamente."
-    echo "              Ejecutá una vez:  sudo loginctl enable-linger $USER"
-    echo "              (sin esto, el vault se detiene al cerrar sesión.)"
+    echo "  linger    → could NOT be enabled automatically."
+    echo "              Run this once:  sudo loginctl enable-linger $USER"
+    echo "              (without it, the vault stops when you log out.)"
   fi
 fi
 
@@ -73,7 +77,7 @@ systemctl --user restart dotrino-vault.service
 
 # --- 6. esperar primer arranque y mostrar el fingerprint ----------------------
 echo
-echo "dotrino-vault · esperando a que la identidad esté lista…"
+echo "dotrino-vault · waiting for the identity to be ready…"
 i=0
 while [ "$i" -lt 30 ]; do
   if [ -f "$DATA_DIR/state.json" ]; then break; fi
@@ -85,18 +89,18 @@ echo
 if "$BIN_DIR/dotrino-vault" status 2>/dev/null; then
   :
 else
-  echo "El servicio está arrancando. Revisá el estado con:  dotrino-vault status"
+  echo "The service is starting. Check it with:  dotrino-vault status"
 fi
 
 cat <<EOF
 
-Listo. El vault corre como servicio y se reinicia solo / arranca en el boot.
+Done. The vault runs as a service: it restarts itself and starts at boot.
 
-  Estado:        dotrino-vault status
-  Logs en vivo:  journalctl --user -u dotrino-vault -f
-  Emparejar:     dotrino-vault pair        (muestra QR para tu teléfono/laptop)
-  Desinstalar:   sh uninstall.sh
+  Status:        dotrino-vault status
+  Live logs:     journalctl --user -u dotrino-vault -f
+  Pair a device: dotrino-vault pair        (shows a QR for your phone/laptop)
+  Uninstall:     sh uninstall.sh
 
-Tus datos (clave maestra incluida) viven en:
-  $DATA_DIR   (permisos 0600/0700, en claro en v1)
+Your data (master key included) lives in:
+  $DATA_DIR   (0600/0700 permissions, in the clear in v1)
 EOF

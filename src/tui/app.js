@@ -18,8 +18,9 @@
  * LAS TECLAS NO CAMBIAN CON EL IDIOMA: son mnemónicos en INGLÉS y son las mismas
  * en español (lo que se traduce es la palabra que las explica en la barra de
  * ayuda). new · rename · delete · password · unlock · locK · pair · approve ·
- * reject · reVoke · refresh · back · language · quit. Por eso el candado dejó de
- * ser `l` (hoy idioma) y es `k`, la contraseña es `p` y emparejar es `p`.
+ * reject · reVoke · refresh · back · language · quit. Una tecla significa LO MISMO
+ * en todas las pantallas: `p` es SIEMPRE emparejar (también en Bóvedas, sin tener
+ * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
  */
 import { execFile } from 'node:child_process'
 import { createTerm, widthOf } from './term.js'
@@ -318,6 +319,19 @@ async function onKeyProfiles (term, st, key) {
     }
     st.screen = 'devices'
     await refreshDevices(term, st)
+  } else if (ch === 'p' && cur) {
+    // Emparejar SIN tener que entrar antes: `p` significa lo mismo aquí que en la
+    // pestaña Dispositivos. Se activa la bóveda elegida (el QR sale de UNA, y las
+    // acciones siguientes —aprobar, revocar— miran a la activa) y se abre la
+    // pregunta de a qué cuenta entra el dispositivo.
+    if (!cur.current) {
+      const r = await guard(term, st, i.switchingVault, () => vc.useProfile(cur.id))
+      if (!r.ok) return true
+      await refreshAll(term, st)
+    }
+    st.sel.pairmode = 0
+    st.scroll.pairmode = { value: 0 }
+    st.screen = 'pairmode'
   } else if (ch === 'n') {
     setInput(st, {
       label: i.newVaultLabel,
@@ -355,7 +369,7 @@ async function onKeyProfiles (term, st, key) {
       },
       onCancel: () => { st.input = null }
     }))
-  } else if (ch === 'p' && cur) { // password
+  } else if (ch === 'c' && cur) { // change password (la `p` es emparejar, igual que en Dispositivos)
     await ensureUnlocked(term, st, cur, (p = cur) => setInput(st, {
       label: i.newPasswordLabel(p.name || p.id),
       mask: true,

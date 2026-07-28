@@ -12,7 +12,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dotrino/vault"
 PURGE=0
 [ "${1:-}" = "--purge" ] && PURGE=1
 
-echo "dotrino-vault · desinstalando…"
+echo "dotrino-vault · uninstalling…"
 
 # --- 1. parar + deshabilitar el servicio (idempotente) ------------------------
 if command -v systemctl >/dev/null 2>&1; then
@@ -20,24 +20,24 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl --user disable dotrino-vault.service >/dev/null 2>&1 || true
   rm -f "$UNIT_DIR/dotrino-vault.service"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  echo "  servicio  → detenido y removido"
+  echo "  service   → stopped and removed"
 fi
 
 # Nota: NO desactivamos linger por vos (podés tener otros servicios que lo usen).
 
 # --- 2. binarios --------------------------------------------------------------
 rm -f "$BIN_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vault"
-echo "  binarios  → removidos de $BIN_DIR"
+echo "  binaries  → removed from $BIN_DIR"
 
 # --- 3. datos (solo con --purge) ---------------------------------------------
 if [ "$PURGE" -eq 1 ]; then
   rm -rf "$DATA_DIR"
-  echo "  datos     → BORRADOS ($DATA_DIR)"
+  echo "  data      → DELETED ($DATA_DIR)"
   echo
-  echo "ATENCIÓN: borraste tu clave maestra. Esa identidad no se puede recuperar."
+  echo "WARNING: you deleted your master key. That identity cannot be recovered."
 else
-  echo "  datos     → CONSERVADOS en $DATA_DIR"
-  echo "              (para borrarlos:  sh uninstall.sh --purge)"
+  echo "  data      → KEPT in $DATA_DIR"
+  echo "              (to delete it too:  sh uninstall.sh --purge)"
 fi
 
-echo "Listo."
+echo "Done."
