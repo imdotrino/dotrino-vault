@@ -114,6 +114,31 @@ los dispositivos/variables que estás viendo:
 sale desde cualquier pantalla. Las teclas de cada acción se listan en la barra
 inferior.
 
+**Idioma (`l`).** La TUI está en **español e inglés** y la tecla `l` conmuta entre
+los dos en cualquier pantalla (incluida la de "el daemon no está corriendo"). El
+idioma elegido se recuerda en `prefs.json` del dir de datos. Sin elección previa
+se toma del entorno (`DOTRINO_LANG`, o el locale `LC_ALL`/`LANG`), con el español
+por defecto.
+
+**Las teclas NO cambian con el idioma**: son mnemónicos en **inglés** y valen igual
+en español (solo se traduce la palabra que las explica en la barra de ayuda).
+
+| Tecla | Acción | Dónde |
+|---|---|---|
+| `Enter` | open — entrar a la bóveda | Bóvedas |
+| `n` | new — bóveda nueva / variable nueva | Bóvedas · Scopes |
+| `r` | rename (Bóvedas) · refresh (Dispositivos/Scopes) · restart (Emparejar) | — |
+| `d` | delete — borrar la bóveda | Bóvedas |
+| `p` | password (Bóvedas) · pair — emparejar (Dispositivos) | — |
+| `x` | quitar: contraseña · dispositivo pendiente · variable/scope | todas |
+| `u` / `k` | unlock / locK — candado de la bóveda | Bóvedas |
+| `a` | approve — aprobar el dispositivo | Dispositivos · Emparejar |
+| `v` | reVoke — revocar un dispositivo enrolado | Dispositivos |
+| `y` | yes — confirmar (también se acepta `s`) | confirmaciones |
+| `b` / `Esc` | back — volver | pestañas · Emparejar |
+| `l` | language — español ⇄ English | todas |
+| `q` | quit — salir | todas |
+
 ### Varios perfiles en el mismo PC
 
 Puedes tener varias identidades tuyas en la misma máquina (p. ej. personal y

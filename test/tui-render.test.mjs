@@ -116,6 +116,72 @@ test('render sin datos cargados todavía (todo null)', () => {
   }
 })
 
+test('en inglés: todas las pantallas dibujan igual de bien', () => {
+  for (const [cols, rows] of [[80, 24], [40, 12], [120, 40]]) {
+    for (const screen of ['profiles', 'devices', 'secrets', 'pairing']) {
+      const term = fakeTerm(cols, rows)
+      const st = baseState({ screen, lang: 'en' })
+      if (screen === 'pairing') st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2,"token":"tok"}', expiresAt: Date.now() + 200000, profileName: 'Work' }
+      V.render(term, st)
+      assertClean(term, cols, rows)
+    }
+  }
+})
+
+test('el idioma cambia el texto (pestañas, título y ayuda), no el tamaño', () => {
+  const term = fakeTerm(100, 24)
+  V.render(term, baseState({ screen: 'devices', lang: 'en' }))
+  assert.match(term.last[3], /Devices/)
+  assert.match(term.last[3], /Scopes & variables/)
+  assert.match(term.last[23], /q quit/)
+
+  V.render(term, baseState({ screen: 'profiles', lang: 'en' }))
+  assert.match(term.last[3], /Vaults/)
+  assert.match(term.last[1], /Active vault/)
+
+  V.render(term, baseState({ screen: 'profiles', lang: 'es' }))
+  assert.match(term.last[3], /Bóvedas/)
+  assert.match(term.last[23], /q salir/)
+})
+
+test('la barra de ayuda siempre deja ver el idioma y la salida', () => {
+  // En 80 columnas la ayuda de Bóvedas no cabe entera: se recorta del MEDIO.
+  for (const lang of ['es', 'en']) {
+    for (const cols of [120, 80, 60, 40]) {
+      const term = fakeTerm(cols, 24)
+      V.render(term, baseState({ screen: 'profiles', lang }))
+      const help = term.last[23]
+      assert.ok(/ l /.test(help) || /·\s*l /.test(help), `falta la tecla de idioma en ${cols} cols (${lang}): ${help}`)
+      assert.match(help, /q (salir|quit)/, `falta la salida en ${cols} cols (${lang})`)
+      assert.equal(widthOf(help), cols)
+    }
+  }
+})
+
+test('fitHelp respeta el ancho y conserva la cola', () => {
+  const segs = ['↑↓', 'aaaa uno', 'bbbb dos', 'cccc tres', 'dddd cuatro', 'l English', 'q salir']
+  assert.equal(V.fitHelp(segs, 200), segs.join(' · '))
+  for (const cols of [80, 40, 30, 20]) {
+    const out = V.fitHelp(segs, cols)
+    assert.ok(out.includes('l English') && out.includes('q salir'), `cola perdida en ${cols}: ${out}`)
+    if (cols >= 30) assert.ok(widthOf(out) + 1 <= cols, `no cabe en ${cols}: ${out}`)
+  }
+})
+
+test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
+  const t = makeTheme()
+  const st = baseState({ screen: 'pairing' })
+  st.pairing = { url: 'https://vault.dotrino.com/dispositivos#vault=AAAA', payload: '{"v":2}', expiresAt: Date.now() + 200000, profile: 'p9', profileName: 'Trabajo' }
+  assert.match(V.pairingBody(st, t, 80, 20)[0], /Cuenta que se comparte: Trabajo/)
+
+  // Sin nombre en el pair.json, cae al de la bóveda activa (nunca queda vacío).
+  st.pairing.profileName = ''
+  assert.match(V.pairingBody(st, t, 80, 20)[0], /Cuenta que se comparte: Perfil 1/)
+
+  st.lang = 'en'
+  assert.match(V.pairingBody(st, t, 80, 20)[0], /Account being shared/)
+})
+
 test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => {
   const term = fakeTerm(80, 24)
   V.render(term, baseState({ screen: 'devices' }))

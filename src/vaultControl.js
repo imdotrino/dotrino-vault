@@ -68,6 +68,13 @@ class DaemonDownError extends Error {
 }
 
 /**
+ * Error con `code`: la CLI sigue imprimiendo el mensaje tal cual y la TUI, que es
+ * bilingüe (`src/tui/i18n.js`), lo traduce por el código. Los errores que REENVÍA
+ * el daemon no llevan código: son diagnósticos del servicio, no copy de interfaz.
+ */
+const coded = (message, code) => Object.assign(new Error(message), { code })
+
+/**
  * Exige el daemon vivo ANTES de escribir cualquier petición. Es clave para las
  * peticiones que llevan secretos (contraseña de perfil, valor de secreto): si el
  * daemon está caído no habría quien las consuma ni borre, y quedarían en claro en
@@ -141,7 +148,7 @@ async function profileOp (op, { profile, name, password } = {}) {
   writeReq(F.profileReq, { op, ...extra }, profile)
   signalOrCleanup('SIGUSR2', [F.profileReq])
   const d = await waitFor(F.profilesList)
-  if (!d) throw new Error('el daemon no respondió')
+  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
   if (d.error) throw new Error(d.error)
   return d // { profiles:[{id,name,protected,locked,current,fingerprint,iss,createdAt}], current, done? }
 }
@@ -181,7 +188,7 @@ export async function snapshot (profile) {
  */
 export async function listDevices (profile) {
   const { devices } = await snapshot(profile)
-  if (!devices) throw new Error('el daemon no respondió')
+  if (!devices) throw coded('el daemon no respondió', 'NO_REPLY')
   const issued = devices.issued || devices.active || devices.delegations || []
   const withIds = await Promise.all(issued.map(async (d) => ({
     ...d, deviceId: d.sub ? await deviceIdOf(d.sub) : '????-????'
@@ -205,7 +212,7 @@ export async function revokeDevice (nonce, profile) {
 /** Scopes→[claves] del perfil (NUNCA los valores; el daemon no los expone). */
 export async function listSecrets (profile) {
   const { secrets } = await snapshot(profile)
-  if (!secrets) throw new Error('el daemon no respondió')
+  if (!secrets) throw coded('el daemon no respondió', 'NO_REPLY')
   return secrets.ns || {}
 }
 
@@ -217,8 +224,8 @@ export async function setSecret (ns, key, value, profile) {
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
-  if (!d) throw new Error('el daemon no respondió')
-  if (!(d.ns?.[ns] || []).includes(key)) throw new Error('el daemon no aplicó el cambio (revisa los logs del servicio)')
+  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
+  if (!(d.ns?.[ns] || []).includes(key)) throw coded('el daemon no aplicó el cambio (revisa los logs del servicio)', 'NOT_APPLIED')
   return d.ns
 }
 
@@ -230,8 +237,8 @@ export async function deleteSecret (ns, key, profile) {
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
-  if (!d) throw new Error('el daemon no respondió')
-  if ((d.ns?.[ns] || []).includes(key)) throw new Error('el daemon no borró la variable (revisa los logs del servicio)')
+  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
+  if ((d.ns?.[ns] || []).includes(key)) throw coded('el daemon no borró la variable (revisa los logs del servicio)', 'NOT_DELETED')
   return d.ns
 }
 
@@ -273,10 +280,13 @@ export async function startPairing ({ profile, service } = {}) {
     const pr = read(F.pair, null)
     if (pr?.expiresAt > Date.now()) {
       const { url, payload } = pairUrl(pr.qr)
-      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload }
+      // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault
+      // puede tener varias y el emparejamiento mete al dispositivo en UNA; la TUI
+      // y la CLI lo muestran para que no se enrole en la equivocada.
+      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, profile: pr.profile || null, profileName: pr.profileName || '' }
     }
   }
-  throw new Error('el daemon no inició el emparejamiento')
+  throw coded('el daemon no inició el emparejamiento', 'PAIR_FAILED')
 }
 
 /** Dispositivo pendiente de aprobar (el que se conectó con el QR), o null. */

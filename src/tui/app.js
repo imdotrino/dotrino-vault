@@ -11,10 +11,20 @@
  * Cada "bóveda" es un PERFIL (maestra propia, dir propio, dispositivos y secretos
  * propios). Las acciones operan sobre la bóveda ACTIVA; para operar otra, cámbiala
  * en la pantalla de bóvedas.
+ *
+ * BILINGÜE (CONVENCIONES §9): todo el texto sale de `i18n.js` según `st.lang`; la
+ * tecla `l` conmuta es/en en cualquier pantalla y recuerda la elección.
+ *
+ * LAS TECLAS NO CAMBIAN CON EL IDIOMA: son mnemónicos en INGLÉS y son las mismas
+ * en español (lo que se traduce es la palabra que las explica en la barra de
+ * ayuda). new · rename · delete · password · unlock · locK · pair · approve ·
+ * reject · reVoke · refresh · back · language · quit. Por eso el candado dejó de
+ * ser `l` (hoy idioma) y es `k`, la contraseña es `p` y emparejar es `p`.
  */
 import { execFile } from 'node:child_process'
-import { createTerm } from './term.js'
+import { createTerm, widthOf } from './term.js'
 import { qrToString } from '../qr.js'
+import { dict, otherLang, loadLang, saveLang } from './i18n.js'
 import * as vc from '../vaultControl.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -25,9 +35,24 @@ const KEY_RE = /^[A-Z0-9_]{1,64}$/
 
 // ------------------------------- utilidades --------------------------------
 
-function humanErr (e) {
-  if (e?.code === 'DAEMON_DOWN') return 'El daemon no está corriendo. Arráncalo: systemctl --user start dotrino-vault (o reinicia la TUI).'
-  return e?.message || String(e)
+/** Diccionario del idioma activo (español si el estado aún no lo trae). */
+const L = (st) => dict(st?.lang)
+
+/**
+ * Errores en el idioma de la TUI. Los que nacen aquí o en `vaultControl` tienen
+ * `code` y se traducen; los que REENVÍA el daemon llegan como texto y se muestran
+ * tal cual (son diagnósticos del servicio, no copy de la interfaz).
+ */
+function humanErr (e, st) {
+  const t = L(st)
+  const byCode = {
+    DAEMON_DOWN: t.errDaemonDown,
+    NO_REPLY: t.errNoReply,
+    NOT_APPLIED: t.errNotApplied,
+    NOT_DELETED: t.errNotDeleted,
+    PAIR_FAILED: t.errPairFailed
+  }
+  return byCode[e?.code] || e?.message || String(e)
 }
 
 function flash (st, text, kind = 'ok') { st.flash = { text, kind, at: Date.now() } }
@@ -91,52 +116,75 @@ function renderList (rows, selIdx, height, cols, t, scrollRef) {
   return out
 }
 
+/**
+ * Barra de ayuda que SIEMPRE deja ver lo global (idioma y salir): si los segmentos
+ * no caben, recorta desde el MEDIO y marca el corte con «…». Sin esto, en 80
+ * columnas la ayuda se cortaba por la derecha y las teclas del final (justo las
+ * globales) no existían para quien no las supiera de memoria.
+ */
+function fitHelp (segs, cols) {
+  const join = (a) => a.join(' · ')
+  if (widthOf(join(segs)) + 1 <= cols) return join(segs)
+  const head = segs.slice(0, 1)
+  const tail = segs.slice(-2)
+  const mid = segs.slice(1, -2)
+  while (mid.length) {
+    mid.pop()
+    const cand = join([...head, ...mid, '…', ...tail])
+    if (widthOf(cand) + 1 <= cols) return cand
+  }
+  return join([...head, '…', ...tail])
+}
+
 // --------------------------------- pantallas -------------------------------
 
 function profileRows (st, t) {
+  const i = L(st)
   const list = st.profiles?.profiles || []
   return list.map((p) => {
     const mark = p.current ? t.accent('●') : ' '
-    const lk = !p.protected ? t.muted('sin clave') : (p.locked ? t.warn('🔒 bloqueada') : t.ok('🔓 abierta'))
-    const name = p.current ? t.bold(p.name || '(sin nombre)') : (p.name || '(sin nombre)')
+    const lk = !p.protected ? t.muted(i.noPassword) : (p.locked ? t.warn(i.locked) : t.ok(i.unlocked))
+    const name = p.current ? t.bold(p.name || i.noName) : (p.name || i.noName)
     return { text: ` ${mark} ${name}   ${t.muted(p.id)}   ${t.muted(p.fingerprint || '—')}   ${lk}`, sel: true, meta: p }
   })
 }
 
 function deviceRows (st, t) {
+  const i = L(st)
   const rows = []
   const pend = st.pending
   if (pend) {
-    rows.push({ text: t.warn(` ⧗ PENDIENTE: ${pend.deviceId}`) + t.muted('  — pulsa A para aprobar, X para rechazar'), sel: false })
+    rows.push({ text: t.warn(i.pendingDevice(pend.deviceId)) + t.muted(i.pendingHint), sel: false })
     rows.push({ text: '', sel: false })
   }
   const issued = st.devices?.issued || []
   if (!issued.length) {
-    rows.push({ text: t.muted('  (sin dispositivos enrolados — pulsa E para emparejar uno)'), sel: false })
+    rows.push({ text: t.muted(i.noDevices), sel: false })
   }
   for (const d of issued) {
-    const label = d.label || t.muted('(sin etiqueta)')
+    const label = d.label || t.muted(i.noLabel)
     const line = ` ${t.bold(d.deviceId)}  ${label}  ${t.muted('scope:' + shortScope(d.scope))}  ${t.muted('exp:' + fmtExp(d.exp))}  ${t.muted('nonce:' + (d.nonce ?? '—'))}`
     rows.push({ text: line, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
     rows.push({ text: '', sel: false })
-    rows.push({ text: t.muted(`  Revocados: ${revoked.length}`), sel: false })
+    rows.push({ text: t.muted(i.revokedCount(revoked.length)), sel: false })
   }
   return rows
 }
 
 function secretRows (st, t) {
+  const i = L(st)
   const ns = st.secrets || {}
   const names = Object.keys(ns).sort()
   const rows = []
   if (!names.length) {
-    rows.push({ text: t.muted('  (sin scopes — pulsa N para agregar la primera variable)'), sel: false })
+    rows.push({ text: t.muted(i.noScopes), sel: false })
     return rows
   }
   for (const n of names) {
-    rows.push({ text: t.accent(` ▸ ${n}`) + t.muted(`   (scope vault:secrets:${n})`), sel: true, meta: { ns: n, key: null } })
+    rows.push({ text: t.accent(` ▸ ${n}`) + t.muted(i.scopeOf(n)), sel: true, meta: { ns: n, key: null } })
     for (const k of ns[n].slice().sort()) {
       rows.push({ text: `      ${k}   ${t.muted('••••••')}`, sel: true, meta: { ns: n, key: k } })
     }
@@ -156,11 +204,11 @@ function setConfirm (st, opts) { st.confirm = { ...opts } }
 async function guard (term, st, msg, fn) {
   st.busy = msg
   render(term, st)
-  try { const v = await fn(); st.busy = null; return { ok: true, v } } catch (e) { st.busy = null; flash(st, humanErr(e), 'danger'); return { ok: false, e } }
+  try { const v = await fn(); st.busy = null; return { ok: true, v } } catch (e) { st.busy = null; flash(st, humanErr(e, st), 'danger'); return { ok: false, e } }
 }
 
 async function refreshAll (term, st) {
-  const r = await guard(term, st, 'Cargando…', () => vc.snapshot(activeId(st)))
+  const r = await guard(term, st, L(st).loading, () => vc.snapshot(activeId(st)))
   if (!r.ok) return
   const { devices, secrets, profiles } = r.v
   if (profiles) st.profiles = profiles
@@ -172,28 +220,29 @@ async function refreshAll (term, st) {
 }
 
 async function refreshDevices (term, st) {
-  const r = await guard(term, st, 'Cargando dispositivos…', () => vc.listDevices(activeId(st)))
+  const r = await guard(term, st, L(st).loadingDevices, () => vc.listDevices(activeId(st)))
   if (r.ok) st.devices = r.v
 }
 async function refreshSecrets (term, st) {
-  const r = await guard(term, st, 'Cargando secretos…', () => vc.listSecrets(activeId(st)))
+  const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
   if (r.ok) st.secrets = r.v
 }
 async function refreshProfiles (term, st) {
-  const r = await guard(term, st, 'Cargando bóvedas…', () => vc.listProfiles())
+  const r = await guard(term, st, L(st).loadingVaults, () => vc.listProfiles())
   if (r.ok) st.profiles = r.v
 }
 
 /** Asegura la bóveda desbloqueada antes de EDITARLA (rename/rm/password). */
 async function ensureUnlocked (term, st, p, thenFn) {
   if (!p.protected || !p.locked) return thenFn()
+  const i = L(st)
   setInput(st, {
-    label: `Contraseña de "${p.name || p.id}"`,
+    label: i.passwordOf(p.name || p.id),
     mask: true,
-    hint: 'necesaria para editar la bóveda',
+    hint: i.passwordToEdit,
     onSubmit: async (pwd) => {
       st.input = null
-      const r = await guard(term, st, 'Desbloqueando…', () => vc.unlockProfile(p.id, pwd))
+      const r = await guard(term, st, i.unlocking, () => vc.unlockProfile(p.id, pwd))
       if (!r.ok) return
       await refreshProfiles(term, st)
       const fresh = (st.profiles.profiles || []).find((x) => x.id === p.id) || p
@@ -218,7 +267,15 @@ function moveSel (st, key, screen, count) {
   else if (key.name === 'end') st.sel[screen] = count - 1
 }
 
+/** Conmuta es⇄en, lo recuerda y lo dice en el idioma NUEVO. */
+function toggleLang (st) {
+  st.lang = otherLang(st.lang)
+  saveLang(st.lang)
+  flash(st, L(st).langChanged)
+}
+
 async function onKeyProfiles (term, st, key) {
+  const i = L(st)
   const rows = profileRows(st, term.t)
   const sels = rows.filter((r) => r.sel).map((r) => r.meta)
   moveSel(st, key, 'profiles', sels.length)
@@ -229,65 +286,65 @@ async function onKeyProfiles (term, st, key) {
     // Entrar a la bóveda: la activa (si no lo estaba ya) y pasa a sus pestañas
     // (Dispositivos/Scopes) — así siempre es explícito de qué bóveda son los ítems.
     if (!cur.current) {
-      const r = await guard(term, st, 'Cambiando de bóveda…', () => vc.useProfile(cur.id))
+      const r = await guard(term, st, i.switchingVault, () => vc.useProfile(cur.id))
       if (!r.ok) return true
-      flash(st, `Bóveda activa: ${cur.name || cur.id}`)
+      flash(st, i.vaultNowActive(cur.name || cur.id))
       await refreshAll(term, st)
     }
     st.screen = 'devices'
     await refreshDevices(term, st)
   } else if (ch === 'n') {
     setInput(st, {
-      label: 'Nombre de la nueva bóveda',
-      hint: 'crea una identidad nueva y vacía',
+      label: i.newVaultLabel,
+      hint: i.newVaultHint,
       onSubmit: async (name) => {
         st.input = null
-        if (!name.trim()) { flash(st, 'El nombre no puede estar vacío', 'danger'); return }
-        const r = await guard(term, st, 'Creando bóveda…', () => vc.addProfile(name.trim()))
-        if (r.ok) { flash(st, `Bóveda creada: ${name.trim()}`); await refreshProfiles(term, st) }
+        if (!name.trim()) { flash(st, i.nameEmpty, 'danger'); return }
+        const r = await guard(term, st, i.creatingVault, () => vc.addProfile(name.trim()))
+        if (r.ok) { flash(st, i.vaultCreated(name.trim())); await refreshProfiles(term, st) }
       },
       onCancel: () => { st.input = null }
     })
   } else if (ch === 'r' && cur) {
     await ensureUnlocked(term, st, cur, (p = cur) => setInput(st, {
-      label: `Nuevo nombre para "${p.name || p.id}"`,
+      label: i.renameLabel(p.name || p.id),
       value: p.name || '',
       onSubmit: async (name) => {
         st.input = null
-        if (!name.trim()) { flash(st, 'El nombre no puede estar vacío', 'danger'); return }
-        const r = await guard(term, st, 'Renombrando…', () => vc.renameProfile(p.id, name.trim()))
-        if (r.ok) { flash(st, 'Bóveda renombrada'); await refreshProfiles(term, st) }
+        if (!name.trim()) { flash(st, i.nameEmpty, 'danger'); return }
+        const r = await guard(term, st, i.renaming, () => vc.renameProfile(p.id, name.trim()))
+        if (r.ok) { flash(st, i.vaultRenamed); await refreshProfiles(term, st) }
       },
       onCancel: () => { st.input = null }
     }))
   } else if ((key.name === 'delete' || ch === 'd') && cur) {
-    if ((st.profiles.profiles || []).length <= 1) { flash(st, 'No se puede borrar la única bóveda', 'danger'); return true }
+    if ((st.profiles.profiles || []).length <= 1) { flash(st, i.cantDeleteLast, 'danger'); return true }
     await ensureUnlocked(term, st, cur, (p = cur) => setInput(st, {
-      label: `Escribe "${p.name || p.id}" para BORRARLA (irreversible)`,
-      hint: 'se pierde su clave; sus dispositivos dejan de funcionar',
+      label: i.deleteLabel(p.name || p.id),
+      hint: i.deleteHint,
       onSubmit: async (typed) => {
         st.input = null
-        if (typed.trim() !== (p.name || p.id)) { flash(st, 'Cancelado (el nombre no coincide)', 'warn'); return }
-        const r = await guard(term, st, 'Borrando bóveda…', () => vc.removeProfile(p.id))
-        if (r.ok) { flash(st, 'Bóveda borrada'); st.sel.profiles = 0; await refreshAll(term, st) }
+        if (typed.trim() !== (p.name || p.id)) { flash(st, i.deleteMismatch, 'warn'); return }
+        const r = await guard(term, st, i.deletingVault, () => vc.removeProfile(p.id))
+        if (r.ok) { flash(st, i.vaultDeleted); st.sel.profiles = 0; await refreshAll(term, st) }
       },
       onCancel: () => { st.input = null }
     }))
-  } else if (ch === 'k' && cur) {
+  } else if (ch === 'p' && cur) { // password
     await ensureUnlocked(term, st, cur, (p = cur) => setInput(st, {
-      label: `Contraseña nueva para "${p.name || p.id}" (mín. 4)`,
+      label: i.newPasswordLabel(p.name || p.id),
       mask: true,
       onSubmit: async (pwd) => {
         st.input = null
-        if (pwd.length < 4) { flash(st, 'La contraseña debe tener al menos 4 caracteres', 'danger'); return }
+        if (pwd.length < 4) { flash(st, i.passwordTooShort, 'danger'); return }
         setInput(st, {
-          label: 'Repite la contraseña',
+          label: i.repeatPassword,
           mask: true,
           onSubmit: async (again) => {
             st.input = null
-            if (again !== pwd) { flash(st, 'Las contraseñas no coinciden', 'danger'); return }
-            const r = await guard(term, st, 'Guardando contraseña…', () => vc.setProfilePassword(p.id, pwd))
-            if (r.ok) { flash(st, 'Contraseña guardada'); await refreshProfiles(term, st) }
+            if (again !== pwd) { flash(st, i.passwordMismatch, 'danger'); return }
+            const r = await guard(term, st, i.savingPassword, () => vc.setProfilePassword(p.id, pwd))
+            if (r.ok) { flash(st, i.passwordSaved); await refreshProfiles(term, st) }
           },
           onCancel: () => { st.input = null }
         })
@@ -295,24 +352,25 @@ async function onKeyProfiles (term, st, key) {
       onCancel: () => { st.input = null }
     }))
   } else if (ch === 'x' && cur) { // quitar contraseña
-    if (!cur.protected) { flash(st, 'Esta bóveda no tiene contraseña', 'warn'); return true }
+    if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
     await ensureUnlocked(term, st, cur, async (p = cur) => {
-      const r = await guard(term, st, 'Quitando contraseña…', () => vc.removeProfilePassword(p.id))
-      if (r.ok) { flash(st, 'Contraseña quitada'); await refreshProfiles(term, st) }
+      const r = await guard(term, st, i.removingPassword, () => vc.removeProfilePassword(p.id))
+      if (r.ok) { flash(st, i.passwordRemoved); await refreshProfiles(term, st) }
     })
   } else if (ch === 'u' && cur) {
-    if (!cur.protected) { flash(st, 'Esta bóveda no tiene contraseña', 'warn'); return true }
-    if (!cur.locked) { flash(st, 'Ya está desbloqueada', 'warn'); return true }
-    await ensureUnlocked(term, st, cur, async () => { flash(st, 'Bóveda desbloqueada'); await refreshProfiles(term, st) })
-  } else if (ch === 'l' && cur) {
-    if (!cur.protected) { flash(st, 'Esta bóveda no tiene contraseña', 'warn'); return true }
-    const r = await guard(term, st, 'Bloqueando…', () => vc.lockProfile(cur.id))
-    if (r.ok) { flash(st, 'Bóveda bloqueada'); await refreshProfiles(term, st) }
+    if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
+    if (!cur.locked) { flash(st, i.alreadyUnlocked, 'warn'); return true }
+    await ensureUnlocked(term, st, cur, async () => { flash(st, i.vaultUnlocked); await refreshProfiles(term, st) })
+  } else if (ch === 'k' && cur) { // locK (antes `l`, que ahora es el idioma)
+    if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
+    const r = await guard(term, st, i.lockingVault, () => vc.lockProfile(cur.id))
+    if (r.ok) { flash(st, i.vaultLocked); await refreshProfiles(term, st) }
   }
   return true
 }
 
 async function onKeyDevices (term, st, key) {
+  const i = L(st)
   // Sondea el dispositivo pendiente en cada tick (uno puede conectarse mientras
   // estás en esta pantalla, no solo en la de emparejamiento).
   if (key.name === 'tick') { st.pending = vc.pendingEnroll(); return true }
@@ -323,23 +381,23 @@ async function onKeyDevices (term, st, key) {
   const cur = sels[Math.min(st.sel.devices, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
-  if (ch === 'e') {
-    const r = await guard(term, st, 'Iniciando emparejamiento…', () => vc.startPairing({ profile: activeId(st) }))
+  if (ch === 'p') { // pair
+    const r = await guard(term, st, i.startingPairing, () => vc.startPairing({ profile: activeId(st) }))
     if (r.ok) { st.pairing = r.v; st.pending = null; st.screen = 'pairing' }
   } else if (ch === 'a') { // aprobar el pendiente
-    if (!st.pending) { flash(st, 'No hay ningún dispositivo pendiente', 'warn'); return true }
+    if (!st.pending) { flash(st, i.noPending, 'warn'); return true }
     promptApprove(term, st)
   } else if (ch === 'x') { // rechazar el pendiente
-    if (!st.pending) { flash(st, 'No hay ningún dispositivo pendiente para rechazar', 'warn'); return true }
-    const r = await guard(term, st, 'Rechazando…', () => vc.rejectPending(st.pending.deviceId, activeId(st)))
-    if (r.ok) { flash(st, 'Dispositivo rechazado'); st.pending = null }
+    if (!st.pending) { flash(st, i.noPendingToReject, 'warn'); return true }
+    const r = await guard(term, st, i.rejecting, () => vc.rejectPending(st.pending.deviceId, activeId(st)))
+    if (r.ok) { flash(st, i.deviceRejected); st.pending = null }
   } else if ((ch === 'v' || key.name === 'delete') && cur?.nonce != null) { // revocar el enrolado seleccionado
     setConfirm(st, {
-      text: `¿Revocar ${cur.deviceId}? Se le ordena autoborrarse al reconectar.`,
+      text: i.revokeConfirm(cur.deviceId),
       onYes: async () => {
         st.confirm = null
-        const r = await guard(term, st, 'Revocando…', () => vc.revokeDevice(cur.nonce, activeId(st)))
-        if (r.ok) { flash(st, `Revocado ${cur.deviceId}`); st.devices = r.v; st.sel.devices = 0 }
+        const r = await guard(term, st, i.revoking, () => vc.revokeDevice(cur.nonce, activeId(st)))
+        if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); st.devices = r.v; st.sel.devices = 0 }
       },
       onNo: () => { st.confirm = null }
     })
@@ -350,20 +408,22 @@ async function onKeyDevices (term, st, key) {
 }
 
 function promptApprove (term, st) {
+  const i = L(st)
   setInput(st, {
-    label: `Código que MUESTRA el dispositivo ${st.pending?.deviceId || ''}`,
-    hint: 'el vault no lo conoce: compáralo en la otra pantalla',
+    label: i.approveLabel(st.pending?.deviceId || ''),
+    hint: i.approveHint,
     onSubmit: async (code) => {
       st.input = null
-      if (!code.trim()) { flash(st, 'Falta el código', 'danger'); return }
-      const r = await guard(term, st, 'Aprobando…', () => vc.approvePending(code.trim(), activeId(st)))
-      if (r.ok) { flash(st, 'Dispositivo aprobado'); st.devices = r.v; st.pending = null; st.screen = 'devices' }
+      if (!code.trim()) { flash(st, i.codeMissing, 'danger'); return }
+      const r = await guard(term, st, i.approving, () => vc.approvePending(code.trim(), activeId(st)))
+      if (r.ok) { flash(st, i.deviceApproved); st.devices = r.v; st.pending = null; st.screen = 'devices' }
     },
     onCancel: () => { st.input = null }
   })
 }
 
 async function onKeyPairing (term, st, key) {
+  const i = L(st)
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
   if (key.name === 'tick') {
     const pend = vc.pendingEnroll()
@@ -372,12 +432,12 @@ async function onKeyPairing (term, st, key) {
   }
   if (ch === 'a' && st.pending) { promptApprove(term, st); return true }
   if (ch === 'x' && st.pending) {
-    const r = await guard(term, st, 'Rechazando…', () => vc.rejectPending(st.pending.deviceId, activeId(st)))
-    if (r.ok) { flash(st, 'Dispositivo rechazado'); st.pending = null }
+    const r = await guard(term, st, i.rejecting, () => vc.rejectPending(st.pending.deviceId, activeId(st)))
+    if (r.ok) { flash(st, i.deviceRejected); st.pending = null }
     return true
   }
-  if (ch === 'e') { // reiniciar emparejamiento
-    const r = await guard(term, st, 'Reiniciando emparejamiento…', () => vc.startPairing({ profile: activeId(st) }))
+  if (ch === 'r') { // restart: reiniciar el emparejamiento
+    const r = await guard(term, st, i.restartingPairing, () => vc.startPairing({ profile: activeId(st) }))
     if (r.ok) { st.pairing = r.v; st.pending = null }
     return true
   }
@@ -386,6 +446,7 @@ async function onKeyPairing (term, st, key) {
 }
 
 async function onKeySecrets (term, st, key) {
+  const i = L(st)
   const rows = secretRows(st, term.t)
   const sels = rows.filter((r) => r.sel).map((r) => r.meta)
   moveSel(st, key, 'secrets', sels.length)
@@ -397,22 +458,22 @@ async function onKeySecrets (term, st, key) {
   } else if ((ch === 'x' || key.name === 'delete') && cur) {
     if (cur.key) {
       setConfirm(st, {
-        text: `¿Quitar la variable ${cur.ns}/${cur.key}?`,
+        text: i.removeVarConfirm(cur.ns, cur.key),
         onYes: async () => {
           st.confirm = null
-          const r = await guard(term, st, 'Quitando variable…', () => vc.deleteSecret(cur.ns, cur.key, activeId(st)))
-          if (r.ok) { flash(st, 'Variable quitada'); st.secrets = r.v; st.sel.secrets = Math.max(0, st.sel.secrets - 1) }
+          const r = await guard(term, st, i.removingVar, () => vc.deleteSecret(cur.ns, cur.key, activeId(st)))
+          if (r.ok) { flash(st, i.varRemoved); st.secrets = r.v; st.sel.secrets = Math.max(0, st.sel.secrets - 1) }
         },
         onNo: () => { st.confirm = null }
       })
     } else {
       const count = (st.secrets?.[cur.ns] || []).length
       setConfirm(st, {
-        text: `¿Quitar el scope "${cur.ns}" ENTERO (${count} variable(s))?`,
+        text: i.removeScopeConfirm(cur.ns, count),
         onYes: async () => {
           st.confirm = null
-          const r = await guard(term, st, 'Quitando scope…', () => vc.deleteScope(cur.ns, activeId(st)))
-          if (r.ok) { flash(st, `Scope "${cur.ns}" quitado`); st.secrets = r.v; st.sel.secrets = 0 }
+          const r = await guard(term, st, i.removingScope, () => vc.deleteScope(cur.ns, activeId(st)))
+          if (r.ok) { flash(st, i.scopeRemoved(cur.ns)); st.secrets = r.v; st.sel.secrets = 0 }
         },
         onNo: () => { st.confirm = null }
       })
@@ -424,30 +485,31 @@ async function onKeySecrets (term, st, key) {
 }
 
 function promptNewVariable (term, st) {
+  const i = L(st)
   const existing = Object.keys(st.secrets || {})
   setInput(st, {
-    label: 'Scope (namespace del servicio)',
-    hint: existing.length ? `[a-z0-9-] · existen: ${existing.join(', ')}` : '[a-z0-9-], p. ej. proxy',
+    label: i.nsLabel,
+    hint: existing.length ? i.nsHintExisting(existing.join(', ')) : i.nsHint,
     onSubmit: (ns) => {
       const nsv = ns.trim()
-      if (!NS_RE.test(nsv)) { flash(st, 'Scope inválido: usa [a-z0-9-]{1,32}', 'danger'); promptNewVariable(term, st); return }
+      if (!NS_RE.test(nsv)) { flash(st, i.nsInvalid, 'danger'); promptNewVariable(term, st); return }
       st.input = null
       setInput(st, {
-        label: `Variable en "${nsv}" (MAYUSCULAS_CON_GUION_BAJO)`,
-        hint: '[A-Z0-9_], p. ej. TURN_KEY_ID',
+        label: i.keyLabel(nsv),
+        hint: i.keyHint,
         onSubmit: (key) => {
           const kv = key.trim()
-          if (!KEY_RE.test(kv)) { flash(st, 'Clave inválida: usa [A-Z0-9_]{1,64}', 'danger'); return }
+          if (!KEY_RE.test(kv)) { flash(st, i.keyInvalid, 'danger'); return }
           st.input = null
           setInput(st, {
-            label: `Valor de ${nsv}/${kv}`,
+            label: i.valueLabel(nsv, kv),
             mask: true,
-            hint: 'el valor nunca se muestra; se guarda en la bóveda',
+            hint: i.valueHint,
             onSubmit: async (value) => {
               st.input = null
-              if (!value) { flash(st, 'El valor no puede estar vacío', 'danger'); return }
-              const r = await guard(term, st, 'Guardando variable…', () => vc.setSecret(nsv, kv, value, activeId(st)))
-              if (r.ok) { flash(st, `Guardado ${nsv}/${kv}`); st.secrets = r.v }
+              if (!value) { flash(st, i.valueEmpty, 'danger'); return }
+              const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsv, kv, value, activeId(st)))
+              if (r.ok) { flash(st, i.varSaved(nsv, kv)); st.secrets = r.v }
             },
             onCancel: () => { st.input = null }
           })
@@ -475,6 +537,8 @@ async function onInputKey (st, key) {
 async function onConfirmKey (st, key) {
   const cf = st.confirm
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  // La tecla es `y` (yes) en los dos idiomas —como el resto, mnemónico inglés—;
+  // `s` (sí) se sigue aceptando por costumbre, pero no se anuncia en la ayuda.
   if (ch === 's' || ch === 'y') { const f = cf.onYes; st.confirm = null; await f?.() }
   else if (ch === 'n' || key.name === 'escape' || key.name === 'enter' || key.name === 'ctrl-c') { const f = cf.onNo; st.confirm = null; await f?.() }
 }
@@ -484,62 +548,69 @@ async function onConfirmKey (st, key) {
 // Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
 // bóvedas (profiles) es el nivel de arriba (se entra con Enter, no es una pestaña).
 const INNER_TABS = ['devices', 'secrets']
-const TAB_LABEL = { devices: 'Dispositivos', secrets: 'Scopes y variables' }
+const tabLabel = (i, k) => (k === 'devices' ? i.tabDevices : i.tabSecrets)
 
-const HELP = {
-  profiles: '↑↓ · Enter entrar · n nueva · r renombrar · d borrar · k clave · x quitar-clave · u desbloq · l bloq · q salir',
-  devices: '←→ pestaña · ↑↓ · e emparejar · a aprobar · x rechazar · v revocar · r refrescar · Esc bóvedas · q salir',
-  secrets: '←→ pestaña · ↑↓ · n nueva variable · x quitar (variable/scope) · r refrescar · Esc bóvedas · q salir',
-  pairing: 'a aprobar · x rechazar · e reiniciar · Esc atrás'
-}
-const TITLE = {
-  profiles: 'Bóvedas',
-  pairing: 'Emparejar un dispositivo'
-}
+const helpSegs = (i, screen) => ({
+  profiles: i.helpProfiles,
+  devices: i.helpDevices,
+  secrets: i.helpSecrets,
+  pairing: i.helpPairing
+})[screen] || []
+
+const title = (i, screen) => (screen === 'profiles' ? i.titleProfiles : screen === 'pairing' ? i.titlePairing : '')
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
 function renderTabs (st, t) {
+  const i = L(st)
   return INNER_TABS.map((k) => {
     const active = st.screen === k
-    return active ? t.bold(t.accent('▐ ' + TAB_LABEL[k] + ' ▌')) : t.muted('  ' + TAB_LABEL[k] + '  ')
-  }).join('   ') + t.muted('   (←→ cambiar)')
+    return active ? t.bold(t.accent('▐ ' + tabLabel(i, k) + ' ▌')) : t.muted('  ' + tabLabel(i, k) + '  ')
+  }).join('   ') + t.muted(i.tabsHint)
 }
 
 function pairingBody (st, t, cols, height) {
+  const i = L(st)
   const info = st.pairing
   const lines = []
+  // QUÉ CUENTA se está compartiendo: el vault puede tener varias y el QR sale de
+  // UNA (la bóveda en la que entraste). Decirlo aquí evita enrolar un dispositivo
+  // en la cuenta equivocada sin enterarse.
+  const ap = activeProfile(st)
+  const acct = info.profileName || ap?.name || info.profile || ap?.id || '—'
+  lines.push(t.bold(i.pairAccount(acct)))
   const left = Math.max(0, Math.round((info.expiresAt - Date.now()) / 60000))
-  lines.push(t.muted(`Válido ~${left} min. Escanéalo o abre la URL en el dispositivo.`))
+  lines.push(t.muted(i.pairValid(left)))
   lines.push('')
   // QR solo si entra cómodo (es "alto": ~ (módulos+8)/2 filas).
   let qr = ''
   try { qr = qrToString(info.url) } catch (_) {}
   const qrLines = qr ? qr.replace(/\n$/, '').split('\n') : []
   const qrWidth = qrLines.length ? Math.max(...qrLines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length)) : 0
-  const reserved = 8 // encabezado + URL + payload + aviso
+  const reserved = 9 // encabezado + cuenta + URL + payload + aviso
   if (qrLines.length && qrWidth <= cols && qrLines.length <= height - reserved) {
     for (const l of qrLines) lines.push(l)
     lines.push('')
   }
-  lines.push(t.bold('URL: ') + info.url)
+  lines.push(t.bold(i.pairUrl) + info.url)
   lines.push('')
-  lines.push(t.muted('O pega este código en la pestaña #vault de profile.dotrino.com:'))
+  lines.push(t.muted(i.pairPaste))
   lines.push(info.payload)
   lines.push('')
-  lines.push(t.danger('⚠ Este código deja LEER tus datos y FIRMAR con tu identidad. No lo compartas.'))
+  lines.push(t.danger(i.pairWarning))
   lines.push('')
-  if (st.pending) lines.push(t.warn(`⧗ Se conectó: ${st.pending.deviceId} — pulsa A y escribe el código que muestra.`))
-  else lines.push(t.muted('Esperando a que el dispositivo se conecte…'))
+  if (st.pending) lines.push(t.warn(i.pairConnected(st.pending.deviceId)))
+  else lines.push(t.muted(i.pairWaiting))
   return lines
 }
 
 function render (term, st) {
   const t = term.t
+  const i = L(st)
   const { cols, rows } = term.size()
   // La distribución necesita: header+contexto (5) + 1 de contenido + estado + ayuda.
   // En un terminal más chico, en vez de escribir en índices fuera de rango, avisamos.
   if (rows < 9 || cols < 24) {
-    term.render([t.warn('Terminal muy pequeño'), `Agranda a ≥ 24×9 (hay ${cols}×${rows}).`])
+    term.render([t.warn(i.tooSmall), i.tooSmallHint(cols, rows)])
     return
   }
   const lines = new Array(rows).fill('')
@@ -547,16 +618,16 @@ function render (term, st) {
   const s = st.state
   const up = st.daemonUp
   const ver = s?.version || 'dev'
-  const daemonTxt = up ? 'corriendo' : 'DETENIDO'
+  const daemonTxt = up ? i.daemonRunning : i.daemonStopped
   lines[0] = t.bar(`dotrino-vault ${ver}   daemon: ${daemonTxt}   ${vc.vaultDir()}`, cols)
 
   const ap = activeProfile(st)
-  const apTxt = ap ? `${t.accent('●')} ${t.bold(ap.name || '(sin nombre)')} ${lockGlyph(ap)} ${t.muted('· ' + (ap.fingerprint || '—'))}` : t.muted('—')
-  lines[1] = ' Bóveda activa: ' + apTxt
+  const apTxt = ap ? `${t.accent('●')} ${t.bold(ap.name || i.noName)} ${lockGlyph(ap)} ${t.muted('· ' + (ap.fingerprint || '—'))}` : t.muted('—')
+  lines[1] = ' ' + i.activeVault + apTxt
   lines[2] = ''
   // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
   // el resto muestra su título simple.
-  lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + (TITLE[st.screen] || ''))
+  lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + title(i, st.screen))
   lines[4] = ''
 
   const top = 5
@@ -573,7 +644,7 @@ function render (term, st) {
     body = pb.slice(0, contentH)
     while (body.length < contentH) body.push('')
   }
-  for (let i = 0; i < contentH; i++) lines[top + i] = body[i] ?? ''
+  for (let n = 0; n < contentH; n++) lines[top + n] = body[n] ?? ''
 
   // línea de estado: input / confirm / flash / busy
   const statusRow = rows - 2
@@ -584,7 +655,7 @@ function render (term, st) {
     const hint = inp.hint ? t.muted('  [' + inp.hint + ']') : ''
     lines[statusRow] = ' ' + t.bold(inp.label + ': ') + shown + t.accent('▏') + hint
   } else if (st.confirm) {
-    lines[statusRow] = ' ' + t.warn(st.confirm.text) + t.muted('  (s / N)')
+    lines[statusRow] = ' ' + t.warn(st.confirm.text) + t.muted(i.confirmKeys)
   } else if (st.flash) {
     const kind = st.flash.kind
     const style = kind === 'danger' ? t.danger : kind === 'warn' ? t.warn : t.ok
@@ -592,9 +663,9 @@ function render (term, st) {
   } else lines[statusRow] = ''
 
   // barra de ayuda
-  let help = HELP[st.screen] || ''
-  if (st.input) help = 'Enter confirmar · Esc cancelar · Ctrl-U limpiar'
-  else if (st.confirm) help = 's confirmar · n/Esc cancelar'
+  let help = fitHelp(helpSegs(i, st.screen), cols)
+  if (st.input) help = i.helpInput
+  else if (st.confirm) help = i.helpConfirm
   lines[rows - 1] = t.bar(help, cols)
 
   term.render(lines)
@@ -605,39 +676,42 @@ function render (term, st) {
 async function daemonDownScreen (term, st) {
   while (true) {
     const t = term.t
+    const i = L(st)
     const { cols, rows } = term.size()
     const lines = new Array(Math.max(rows, 2)).fill('')
     // Contenido en orden; se coloca desde la fila 2 y se corta si no cabe (no se
     // escribe nunca en índices fijos que se salgan de un terminal pequeño).
     const content = [
-      t.danger('El daemon del vault no está corriendo.'),
+      t.danger(i.downTitle),
       '',
-      'La TUI le da órdenes al daemon (custodio de tu clave). Sin él no puede',
-      'crear bóvedas, listar dispositivos ni tocar secretos.',
+      i.downBody1,
+      i.downBody2,
       '',
-      t.bold('S') + '  intentar arrancarlo:  ' + t.muted('systemctl --user start dotrino-vault'),
-      t.bold('R') + '  volver a comprobar',
-      t.bold('Q') + '  salir',
+      t.bold('S') + i.downStart + t.muted('systemctl --user start dotrino-vault'),
+      t.bold('R') + i.downRecheck,
+      t.bold('l') + i.downLang,
+      t.bold('Q') + i.downQuit,
       '',
-      t.muted('En desarrollo, arráncalo a mano:  node bin/dotrino-vaultd.js')
+      t.muted(i.downDev)
     ]
     if (st.flash) content.push('', (st.flash.kind === 'danger' ? t.danger : t.warn)(st.flash.text))
-    lines[0] = t.bar('dotrino-vault   daemon: DETENIDO', cols)
-    for (let i = 0; i < content.length && 2 + i < rows - 1; i++) lines[2 + i] = ' ' + content[i]
-    lines[rows - 1] = t.bar('S arrancar · R comprobar · Q salir', cols)
+    lines[0] = t.bar(i.downHeader, cols)
+    for (let n = 0; n < content.length && 2 + n < rows - 1; n++) lines[2 + n] = ' ' + content[n]
+    lines[rows - 1] = t.bar(fitHelp(i.downHelp, cols), cols)
     term.render(lines)
 
     const key = await term.readKey()
     const ch = key.name === 'char' ? key.ch.toLowerCase() : null
     if (ch === 'q' || key.name === 'ctrl-c') return false
-    if (ch === 'r') { if (vc.daemonAlive()) return true; flash(st, 'Sigue sin responder', 'warn') }
+    if (ch === 'l') { toggleLang(st); continue }
+    if (ch === 'r') { if (vc.daemonAlive()) return true; flash(st, L(st).stillDown, 'warn') }
     if (ch === 's') {
-      st.busy = 'Arrancando el servicio…'; // (no re-render aquí; mensaje simple)
-      flash(st, 'Arrancando…', 'warn'); term.render(lines)
+      st.busy = L(st).starting // (no re-render aquí; mensaje simple)
+      flash(st, L(st).startingShort, 'warn'); term.render(lines)
       const r = await startDaemonService()
       await sleep(1500)
       if (vc.daemonAlive()) return true
-      flash(st, r.ok ? 'Arrancó pero aún no responde; pulsa R' : ('No se pudo arrancar: ' + r.err), 'danger')
+      flash(st, r.ok ? L(st).startedNotReady : L(st).startFailed(r.err), 'danger')
       st.busy = null
     }
   }
@@ -649,6 +723,7 @@ export async function runTui () {
   const term = createTerm()
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
+    lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
     sel: { profiles: 0, devices: 0, secrets: 0 },
     scroll: {},
     profiles: null,
@@ -696,10 +771,12 @@ export async function runTui () {
       const ch = key.name === 'char' ? key.ch.toLowerCase() : null
       // 'q' global sale.
       if (ch === 'q') { running = false; continue }
+      // 'l' global: idioma es⇄en en cualquier pantalla (por eso el candado es 'c').
+      if (ch === 'l') { toggleLang(st); continue }
       // ←→ cambia entre las pestañas de la bóveda entrada (Dispositivos/Scopes).
       if ((key.name === 'left' || key.name === 'right') && INNER_TABS.includes(st.screen)) {
-        const i = INNER_TABS.indexOf(st.screen)
-        st.screen = INNER_TABS[(i + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length]
+        const n = INNER_TABS.indexOf(st.screen)
+        st.screen = INNER_TABS[(n + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length]
         continue
       }
       // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
@@ -719,4 +796,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, pairingBody }
+export const __test = { render, profileRows, deviceRows, secretRows, pairingBody, fitHelp, toggleLang }

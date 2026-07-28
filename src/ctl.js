@@ -136,7 +136,7 @@ function showChallenge (pe) {
   console.log('  dispositivo : %s%s%s', B, pe.deviceId, Z)
   console.log('\n  Ingresa el código que MUESTRA el dispositivo (el vault no lo conoce):')
   console.log('    %sdotrino-vault approve <código>%s', B, Z)
-  console.log('  Si no reconocés este dispositivo:  dotrino-vault reject %s\n', pe.deviceId)
+  console.log('  Si no reconoces este dispositivo:  dotrino-vault reject %s\n', pe.deviceId)
 }
 
 async function cmdPair (args = []) {
@@ -144,7 +144,7 @@ async function cmdPair (args = []) {
   try { fs.rmSync(pairFile, { force: true }) } catch (_) {}
   try { fs.rmSync(pendingFile, { force: true }) } catch (_) {}
   // --service <ns>: emparejar un SERVICIO (proxy, geo…) con cert limitado a
-  // vault:secrets:<ns> (no puede firmar como vos ni leer tus datos).
+  // vault:secrets:<ns> (no puede firmar como tú ni leer tus datos).
   const svcIdx = args.indexOf('--service')
   let service = null
   if (svcIdx >= 0) {
@@ -166,11 +166,16 @@ async function cmdPair (args = []) {
   const b64 = Buffer.from(payload, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
   const url = PROFILE_URL + b64
   const mins = Math.round((pair.expiresAt - Date.now()) / 60000)
-  console.log('\nEscaneá este QR con el dispositivo que querés conectar (válido %d min):\n', mins)
+  // QUÉ CUENTA se comparte: el vault puede tener varias bóvedas y este QR sale de
+  // UNA (la activa, o la de --profile). Decirlo evita enrolar el dispositivo en la
+  // equivocada; es la misma línea que muestra la TUI.
+  const acct = pair.profileName || pair.profile
+  if (acct) console.log('\nCuenta que se comparte: %s%s', acct, pair.profileName && pair.profile ? `  (${pair.profile})` : '')
+  console.log('\nEscanea este QR con el dispositivo que quieres conectar (válido %d min):\n', mins)
   console.log(qrToString(url)) // el QR abre vault.dotrino.com/dispositivos y empareja solo
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
-  console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escaneálo en TU dispositivo.${Z}`)
-  console.log('\nO abrí esta dirección en el dispositivo:\n  ' + url)
+  console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
+  console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
   console.log('\nO pega este código en vault.dotrino.com/dispositivos :\n  ' + payload)
 
   // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.

@@ -118,7 +118,11 @@ export async function runDaemon () {
       const scope = isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
       const label = pairReq?.label || (isService ? 'servicio:' + pairReq.service : 'cli')
       const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS })
-      writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId })
+      // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
+      // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
+      // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`).
+      const profileName = mgr.profiles.get(profileId)?.name || ''
+      writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
       const tok = qr.token
