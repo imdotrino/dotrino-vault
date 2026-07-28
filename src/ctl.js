@@ -153,6 +153,20 @@ async function cmdPair (args = []) {
       console.error('uso: dotrino-vault pair --service <ns>   (ns en minúsculas, p.ej. proxy)'); process.exit(2)
     }
   }
+  // `--new-account [nombre]`: la otra respuesta a «¿a qué cuenta entra?». En vez de
+  // meter el dispositivo en una cuenta que ya vive aquí, se ESTRENA una (vacía) y
+  // entra a ella; las demás no se tocan. En la TUI esto es una pregunta con sus
+  // opciones; en la CLI es una bandera, para que siga sirviendo en un script.
+  const naIdx = args.findIndex((a) => a === '--new-account')
+  if (naIdx >= 0) {
+    const next = args[naIdx + 1]
+    const name = (next && !next.startsWith('-')) ? next : `cuenta ${new Date().toISOString().slice(0, 10)}`
+    const d = await profileRequest('add', { name })
+    if (d.error) { console.error('%s', d.error); process.exit(1) }
+    if (!d.id) { console.error('El daemon no dijo qué cuenta creó.'); process.exit(1) }
+    PROFILE = d.id // el emparejamiento y los comandos siguientes apuntan a ELLA
+    console.log('Cuenta nueva: %s  (%s)', name, d.id)
+  }
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
   writeReq('pair-request.json', service ? { service } : {})
@@ -539,6 +553,9 @@ function help () {
   tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
   status              estado del servicio + fingerprint
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
+  pair --new-account [nombre]
+                      estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
+                      (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
   secret set <ns> <CLAVE> <valor>   guarda un secreto para el servicio <ns>
   secret rm <ns> <CLAVE>            borra un secreto

@@ -37,6 +37,7 @@ const es = {
   tabsHint: '   (←→ cambiar)',
   titleProfiles: 'Bóvedas',
   titlePairing: 'Emparejar un dispositivo',
+  titlePairMode: 'Emparejar: ¿a qué cuenta entra?',
 
   // bóvedas (perfiles)
   noPassword: 'sin clave',
@@ -122,7 +123,17 @@ const es = {
   savingVar: 'Guardando variable…',
   varSaved: (ns, key) => `Guardado ${ns}/${key}`,
 
-  // emparejamiento
+  // emparejamiento — la PREGUNTA es del vault, que es quien lo inicia
+  pairModeIntro: 'Un dispositivo puede entrar a una cuenta que ya vive aquí, o estrenar una.',
+  pairModeHere: (name) => `Entrar a esta cuenta: ${name}`,
+  pairModeHereHint: 'el dispositivo pasa a ver y firmar lo de esta cuenta',
+  pairModeNew: 'Estrenar una cuenta nueva en este vault',
+  pairModeNewHint: 'se crea aquí, vacía, y el dispositivo entra a ELLA (las otras no se tocan)',
+  pairModeAdopt: 'Adoptar la cuenta que trae el dispositivo',
+  pairModeAdoptSoon: 'todavía no: el dispositivo aún no sabe entregar la suya',
+  newAccountLabel: 'Nombre de la cuenta nueva',
+  newAccountHint: 'nace vacía; el dispositivo será su primer invitado',
+  accountCreated: (name) => `Cuenta creada: ${name}`,
   pairAccount: (name) => `Cuenta que se comparte: ${name}`,
   pairValid: (min) => `Válido ~${min} min. Escanéalo o abre la URL en el dispositivo.`,
   pairUrl: 'URL: ',
@@ -144,6 +155,7 @@ const es = {
   helpDevices: ['←→ pestaña', '↑↓', 'p emparejar', 'a aprobar', 'x rechazar', 'v revocar', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
   helpSecrets: ['←→ pestaña', '↑↓', 'n nueva variable', 'x quitar (variable/scope)', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', 'Esc atrás', 'l English'],
+  helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
 
   // pantalla "daemon caído"
   downTitle: 'El daemon del vault no está corriendo.',
@@ -190,6 +202,7 @@ const en = {
   tabsHint: '   (←→ switch)',
   titleProfiles: 'Vaults',
   titlePairing: 'Pair a device',
+  titlePairMode: 'Pairing: which account does it join?',
 
   noPassword: 'no password',
   locked: '🔒 locked',
@@ -272,6 +285,16 @@ const en = {
   savingVar: 'Saving variable…',
   varSaved: (ns, key) => `Saved ${ns}/${key}`,
 
+  pairModeIntro: 'A device can join an account that already lives here, or start a new one.',
+  pairModeHere: (name) => `Join this account: ${name}`,
+  pairModeHereHint: 'the device gets to see and sign for this account',
+  pairModeNew: 'Start a new account in this vault',
+  pairModeNewHint: 'created here, empty, and the device joins THAT one (the others are untouched)',
+  pairModeAdopt: 'Adopt the account the device brings',
+  pairModeAdoptSoon: 'not yet: the device cannot hand its own over',
+  newAccountLabel: 'Name of the new account',
+  newAccountHint: 'born empty; the device will be its first guest',
+  accountCreated: (name) => `Account created: ${name}`,
   pairAccount: (name) => `Account being shared: ${name}`,
   pairValid: (min) => `Valid ~${min} min. Scan it or open the URL on the device.`,
   pairUrl: 'URL: ',
@@ -288,6 +311,7 @@ const en = {
   helpDevices: ['←→ tab', '↑↓', 'p pair', 'a approve', 'x reject', 'v revoke', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
   helpSecrets: ['←→ tab', '↑↓', 'n new variable', 'x remove (variable/scope)', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
   helpPairing: ['a approve', 'x reject', 'r restart', 'Esc back', 'l Español'],
+  helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
 
   downTitle: 'The vault daemon is not running.',
   downBody1: 'The TUI gives orders to the daemon (the keeper of your key). Without it',

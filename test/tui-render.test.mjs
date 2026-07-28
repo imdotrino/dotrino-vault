@@ -168,6 +168,30 @@ test('fitHelp respeta el ancho y conserva la cola', () => {
   }
 })
 
+test('antes del QR, el vault PREGUNTA a qué cuenta entra el dispositivo', () => {
+  const t = makeTheme()
+  for (const [lang, aqui, nueva] of [['es', /Entrar a esta cuenta: Perfil 1/, /Estrenar una cuenta nueva/], ['en', /Join this account: Perfil 1/, /Start a new account/]]) {
+    const rows = V.pairModeRows(baseState({ screen: 'pairmode', lang }), t)
+    const opciones = rows.filter((r) => r.sel)
+    assert.equal(opciones.length, 2, 'hoy se puede responder de dos formas')
+    assert.deepEqual(opciones.map((r) => r.meta.mode), ['here', 'new'])
+    assert.match(rows.map((r) => r.text).join('\n'), aqui)
+    assert.match(rows.map((r) => r.text).join('\n'), nueva)
+    // La tercera (adoptar la cuenta del dispositivo) se nombra pero NO se puede elegir.
+    assert.match(rows.map((r) => r.text).join('\n'), lang === 'es' ? /Adoptar la cuenta que trae/ : /Adopt the account the device brings/)
+    assert.ok(!opciones.some((r) => r.meta.mode === 'adopt'))
+  }
+
+  // Y se dibuja entera, en los dos idiomas y en terminales chicos.
+  for (const lang of ['es', 'en']) {
+    for (const [cols, rows] of [[80, 24], [40, 12]]) {
+      const term = fakeTerm(cols, rows)
+      V.render(term, baseState({ screen: 'pairmode', lang }))
+      assertClean(term, cols, rows)
+    }
+  }
+})
+
 test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
   const t = makeTheme()
   const st = baseState({ screen: 'pairing' })

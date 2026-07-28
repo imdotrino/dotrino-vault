@@ -174,6 +174,30 @@ function deviceRows (st, t) {
   return rows
 }
 
+/**
+ * LA PREGUNTA DEL EMPAREJAMIENTO. La decisión es del vault (es quien lo inicia) y
+ * este daemon puede tener varias cuentas: antes de mostrar el QR hay que decir a
+ * cuál entra el dispositivo. Hoy se responde con las dos formas que existen —una
+ * cuenta que ya vive aquí, o una nueva que se estrena para él—; la tercera
+ * («adoptar la que trae el aparato») necesita el protocolo de adopción y se
+ * muestra desactivada para no prometer lo que todavía no hace
+ * (docs/vinculacion-de-cuentas.md §5).
+ */
+function pairModeRows (st, t) {
+  const i = L(st)
+  const ap = activeProfile(st)
+  const rows = [{ text: t.muted(' ' + i.pairModeIntro), sel: false }, { text: '', sel: false }]
+  rows.push({ text: ` ${t.bold(i.pairModeHere(ap?.name || ap?.id || '—'))}`, sel: true, meta: { mode: 'here' } })
+  rows.push({ text: t.muted('     ' + i.pairModeHereHint), sel: false })
+  rows.push({ text: '', sel: false })
+  rows.push({ text: ` ${t.bold(i.pairModeNew)}`, sel: true, meta: { mode: 'new' } })
+  rows.push({ text: t.muted('     ' + i.pairModeNewHint), sel: false })
+  rows.push({ text: '', sel: false })
+  rows.push({ text: ' ' + t.muted(i.pairModeAdopt), sel: false })
+  rows.push({ text: t.muted('     (' + i.pairModeAdoptSoon + ')'), sel: false })
+  return rows
+}
+
 function secretRows (st, t) {
   const i = L(st)
   const ns = st.secrets || {}
@@ -381,9 +405,10 @@ async function onKeyDevices (term, st, key) {
   const cur = sels[Math.min(st.sel.devices, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
-  if (ch === 'p') { // pair
-    const r = await guard(term, st, i.startingPairing, () => vc.startPairing({ profile: activeId(st) }))
-    if (r.ok) { st.pairing = r.v; st.pending = null; st.screen = 'pairing' }
+  if (ch === 'p') { // pair → primero LA PREGUNTA (a qué cuenta entra), luego el QR
+    st.sel.pairmode = 0
+    st.scroll.pairmode = { value: 0 }
+    st.screen = 'pairmode'
   } else if (ch === 'a') { // aprobar el pendiente
     if (!st.pending) { flash(st, i.noPending, 'warn'); return true }
     promptApprove(term, st)
@@ -404,6 +429,50 @@ async function onKeyDevices (term, st, key) {
   } else if (ch === 'r') {
     await refreshDevices(term, st)
   }
+  return true
+}
+
+/** Abre el emparejamiento contra `profile` y salta a la pantalla del QR. */
+async function beginPairing (term, st, profile) {
+  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile }))
+  if (r.ok) { st.pairing = r.v; st.pending = null; st.screen = 'pairing' }
+  return r.ok
+}
+
+async function onKeyPairMode (term, st, key) {
+  const i = L(st)
+  const rows = pairModeRows(st, term.t)
+  const sels = rows.filter((r) => r.sel).map((r) => r.meta)
+  moveSel(st, key, 'pairmode', sels.length)
+  const cur = sels[Math.min(st.sel.pairmode, sels.length - 1)]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+
+  if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; return true }
+  if (key.name !== 'enter' || !cur) return true
+
+  if (cur.mode === 'here') { await beginPairing(term, st, activeId(st)); return true }
+
+  // Cuenta nueva: se crea aquí, se ACTIVA (así aprobar/rechazar y las listas miran
+  // a la misma que el QR) y recién entonces se abre el emparejamiento contra ella.
+  setInput(st, {
+    label: i.newAccountLabel,
+    hint: i.newAccountHint,
+    onSubmit: async (name) => {
+      st.input = null
+      const nombre = name.trim()
+      if (!nombre) { flash(st, i.nameEmpty, 'danger'); return }
+      const r = await guard(term, st, i.creatingVault, () => vc.addProfile(nombre))
+      if (!r.ok) return
+      const nuevo = r.v?.id || (r.v?.profiles || []).find((p) => p.name === nombre)?.id
+      if (!nuevo) { flash(st, i.errNoReply, 'danger'); return }
+      const u = await guard(term, st, i.switchingVault, () => vc.useProfile(nuevo))
+      if (!u.ok) return
+      await refreshAll(term, st)
+      flash(st, i.accountCreated(nombre))
+      await beginPairing(term, st, nuevo)
+    },
+    onCancel: () => { st.input = null }
+  })
   return true
 }
 
@@ -554,10 +623,15 @@ const helpSegs = (i, screen) => ({
   profiles: i.helpProfiles,
   devices: i.helpDevices,
   secrets: i.helpSecrets,
-  pairing: i.helpPairing
+  pairing: i.helpPairing,
+  pairmode: i.helpPairMode
 })[screen] || []
 
-const title = (i, screen) => (screen === 'profiles' ? i.titleProfiles : screen === 'pairing' ? i.titlePairing : '')
+const title = (i, screen) => ({
+  profiles: i.titleProfiles,
+  pairing: i.titlePairing,
+  pairmode: i.titlePairMode
+})[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
 function renderTabs (st, t) {
@@ -639,6 +713,7 @@ function render (term, st) {
   if (st.screen === 'profiles') body = renderList(profileRows(st, t), st.sel.profiles, contentH, cols, t, scrollRef)
   else if (st.screen === 'devices') body = renderList(deviceRows(st, t), st.sel.devices, contentH, cols, t, scrollRef)
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
+  else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = pb.slice(0, contentH)
@@ -724,7 +799,7 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0 },
     scroll: {},
     profiles: null,
     devices: null,
@@ -788,6 +863,7 @@ export async function runTui () {
       if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
       else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
+      else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
     }
   } finally {
@@ -796,4 +872,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, pairingBody, fitHelp, toggleLang }
+export const __test = { render, profileRows, deviceRows, secretRows, pairModeRows, pairingBody, fitHelp, toggleLang }

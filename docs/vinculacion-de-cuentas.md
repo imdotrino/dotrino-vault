@@ -23,6 +23,7 @@ Nada más. No hay un tercer camino que junte dos cuentas en una.
 | **V5** | **Ninguna cuenta que ya existe se sobrescribe jamás.** El camino B **crea una cuenta nueva** en el dispositivo (con llave nueva); nunca reemplaza la que estabas usando. |
 | **V6** | **El contenido no se re-cifra al vincular.** En A es una copia byte a byte (misma CEK, mismo perfil); en B no se mueve nada (solo se envuelve la CEK para la llave nueva). |
 | **V7** | **La intención viaja firmada en el emparejamiento** (`intent`). Sin intención explícita no se toca ninguna cuenta existente: el emparejamiento se detiene y pregunta. |
+| **V9** | **PREGUNTA EL VAULT, y las dos respuestas existen.** *(Decidido por el dueño el 2026-07-28, precisa a V3 y mueve la pregunta de §5.5.)* El emparejamiento lo **inicia la bóveda**, así que es **ella** —no el aparato— la que decide y pregunta **antes de mostrar el QR**: (a) el dispositivo entra a una cuenta que ya vive aquí (¿cuál?), (b) se estrena aquí una cuenta nueva y entra a ella, (c) se **adopta** la cuenta que trae el aparato (camino A). El aparato **no vuelve a preguntar**: honra el modo declarado en el QR, y si no puede cumplirlo (p. ej. no es el master de su cuenta) **falla en voz alta** en vez de improvisar. `intent` (V7) sigue siendo obligatorio: es el eco firmado del modo, y el vault **rechaza** el que no coincida con el que abrió. |
 
 ---
 
@@ -281,6 +282,28 @@ Qué daño hacía, medido y sin exagerar:
 - [ ] Al terminar, cambiar al perfil nuevo (con recarga, como todo cambio de perfil).
 
 ### 5.5 La pregunta, en la UI
+
+> **⚠️ REESCRITA el 2026-07-28 (decisión V9): la pregunta es del VAULT, no del aparato.**
+> Lo de abajo (avisar en la UI del dispositivo) queda como registro de lo que se hizo
+> mientras solo existía el camino B. El estado hoy:
+>
+> - [x] **La bóveda pregunta antes del QR.** En la TUI, `p` (pair) abre la pantalla
+>       **«Emparejar: ¿a qué cuenta entra?»** con las respuestas que existen: *entrar a
+>       esta cuenta* y *estrenar una cuenta nueva en este vault* (se crea vacía, se activa
+>       y el QR sale de ELLA). La tercera —*adoptar la que trae el dispositivo*— aparece
+>       nombrada y **desactivada**, para no prometer lo que todavía no hace.
+> - [x] En la CLI, que tiene que servir en un script, la pregunta es una bandera:
+>       `dotrino-vault pair --new-account [nombre]` (sin ella, la cuenta activa o la de
+>       `--profile`).
+> - [x] **Se dice a qué cuenta entra**: `pair.json` ya traía el perfil; ahora lo muestran
+>       la pantalla de emparejamiento («Cuenta que se comparte: …») y `dotrino-vault pair`.
+>       Antes, con varias bóvedas, no había forma de saberlo.
+> - [ ] **La tercera respuesta (adoptar) es lo que falta**, y es el resto de §5.2–5.4 +
+>       §5.6: modo `adopt` en el QR + `intent` firmado que el vault compara, perfil que
+>       nace vacío en la bóveda, `vault.enroll.adopt` / `vault.acta.sealed`, traspaso del
+>       master y re-emisión de certs. Del lado del aparato las piezas ya existen en
+>       `@dotrino/identity` (`admitMember`, `handoverMaster` —que sella admit+handover en
+>       un solo `seq`—, `adoptActa`): falta el camino que las use al emparejar.
 
 > **Parcialmente hecho (2026-07-27).** Mientras el camino A no exista no hay dos opciones
 > que ofrecer, así que las dos UIs (`vault.dotrino.com/dispositivos` y

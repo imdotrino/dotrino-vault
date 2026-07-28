@@ -103,9 +103,12 @@ los dispositivos/variables que estás viendo:
    **entrar** a uno — lo activa si no lo estaba). Ahí también creas una bóveda
    nueva, renombras, borras y pones/quitas/usas la contraseña (candado).
 2. Al entrar caes en sus **pestañas horizontales**, que cambias con `←→`:
-   - **Dispositivos (pares):** verlos, **emparejar** uno nuevo (muestra el QR y la
-     URL, y espera a que se conecte), **aprobar** con el código que muestra el
-     dispositivo, **rechazar** y **revocar**.
+   - **Dispositivos (pares):** verlos, **emparejar** uno nuevo, **aprobar** con el
+     código que muestra el dispositivo, **rechazar** y **revocar**. Al emparejar, la
+     bóveda **pregunta primero a qué cuenta entra el dispositivo** —a esta, o a una
+     cuenta nueva que se estrena para él— y recién después muestra el QR, que además
+     dice de qué cuenta salió. (En la CLI: `dotrino-vault pair --new-account
+     [nombre]`.)
    - **Scopes y variables (secretos):** ver los scopes y sus variables (nunca los
      valores), **agregar** una variable (con su scope) y **quitar** una variable o
      un scope entero.

@@ -156,7 +156,9 @@ export async function runDaemon () {
     const ref = () => mgr.resolve(req.profile || mgr.currentId())
     switch (req.op) {
       case 'list': return {} // el volcado de perfiles ya se hace abajo
-      case 'add': { const p = await mgr.add(req.name); return { done: `perfil creado: ${p.name || p.id}` } }
+      // `id`: quien la crea necesita saber CUÁL quedó, no adivinar por nombre (dos
+      // cuentas pueden llamarse igual). Lo usa «emparejar en una cuenta nueva».
+      case 'add': { const p = await mgr.add(req.name); return { done: `perfil creado: ${p.name || p.id}`, id: p.id } }
       case 'rm': { const r = await mgr.remove(req.profile); return { done: `perfil borrado: ${r.name || r.id}` } }
       case 'rename': { const p = mgr.profiles.rename(ref(), req.name); return { done: `perfil renombrado: ${p.name}` } }
       case 'use': { const p = mgr.profiles.setCurrent(ref()); return { done: `perfil activo: ${p.name || p.id}` } }
