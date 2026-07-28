@@ -39,7 +39,7 @@ if (process.argv.includes('--pair')) {
   const { qr, expiresInMs } = mgr.current().startPairing({ label: 'cli' })
   const { url, b64 } = pairUrl(qr)
   console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
-  console.log(qrToString(url, 2))
+  console.log(qrToString(url))
   console.log(url)
   console.log('\nO pegá este código:\n  ' + b64)
 }

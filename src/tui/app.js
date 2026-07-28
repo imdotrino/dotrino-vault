@@ -701,7 +701,7 @@ function pairingBody (st, t, cols, height) {
   // QR: se dibuja siempre que quepa de ancho; si es más alto que la pantalla se
   // puede hacer scroll hacia arriba/abajo para verlo completo.
   let qr = ''
-  try { qr = qrToString(info.url, 2) } catch (_) {}
+  try { qr = qrToString(info.url) } catch (_) {}
   const qrLines = qr ? qr.replace(/\n$/, '').split('\n') : []
   const qrWidth = qrLines.length ? Math.max(...qrLines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length)) : 0
   if (qrLines.length && qrWidth <= cols) {

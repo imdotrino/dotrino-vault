@@ -20,6 +20,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
+import { encodeInvite, FMT_JSON, FMT_B64 } from '../lib/src/invite.js'
 
 const dir = dataDir()
 
@@ -258,22 +259,23 @@ export async function deleteScope (ns, profile) {
 const PROFILE_URL = 'https://vault.dotrino.com/dispositivos#vault='
 
 /**
- * Codifica el QR crudo como URL de la consola de vault.dotrino.com.
- * El QR codifica la URL con el JSON crudo en el fragmento (menos datos que base64);
- * el código que el usuario COPIA Y PEGA sigue siendo base64url.
+ * Codifica el QR crudo en sus dos formas (ver `lib/src/invite.js`):
+ *
+ *   · `url`  → para el QR y el enlace: JSON CRUDO con marca `j`. Es lo más corto
+ *              que hay, y en un QR cada carácter son módulos: con base64 el QR
+ *              pide ~8 columnas y 4 filas más de terminal.
+ *   · `code` → para copiar y pegar: base64url con marca `b`. Una sola palabra,
+ *              sin comillas ni llaves, que sobrevive a un doble clic y a un chat.
+ *
+ * La MARCA de formato (el primer carácter) existe para que el lector no tenga que
+ * probar los dos formatos a ver cuál cuela: la lee y sabe.
  */
 export function pairUrl (qr) {
   const payload = JSON.stringify(qr)
-  const b64 = Buffer.from(payload, 'utf8').toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  return { url: PROFILE_URL + payload, payload, b64 }
+  const code = encodeInvite(qr, FMT_B64)
+  return { url: PROFILE_URL + encodeInvite(qr, FMT_JSON), code, payload, b64: code }
 }
 
-/**
- * Inicia un emparejamiento. `service` (opcional) enrola un SERVICIO con acceso
- * SOLO a `vault:secrets:<service>` (no firma por ti ni lee tus datos).
- * Devuelve { qr, expiresAt, url, payload }.
- */
 export async function startPairing ({ profile, service } = {}) {
   requireAlive()
   rm(F.pair); rm(F.pending)
@@ -283,11 +285,11 @@ export async function startPairing ({ profile, service } = {}) {
     await sleep(100)
     const pr = read(F.pair, null)
     if (pr?.expiresAt > Date.now()) {
-      const { url, payload, b64 } = pairUrl(pr.qr)
+      const { url, payload, code } = pairUrl(pr.qr)
       // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault
       // puede tener varias y el emparejamiento mete al dispositivo en UNA; la TUI
       // y la CLI lo muestran para que no se enrole en la equivocada.
-      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, b64, profile: pr.profile || null, profileName: pr.profileName || '' }
+      return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, code, b64: code, profile: pr.profile || null, profileName: pr.profileName || '' }
     }
   }
   throw coded('el daemon no inició el emparejamiento', 'PAIR_FAILED')

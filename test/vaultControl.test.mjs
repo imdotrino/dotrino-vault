@@ -198,8 +198,10 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
   const pair = await vc.startPairing({ profile: 'p1' })
   assert.match(pair.url, /vault\.dotrino\.com\/dispositivos#vault=/)
   assert.ok(pair.payload.includes('tok'))
-  assert.ok(pair.url.endsWith(pair.payload))
-  assert.ok(pair.b64.length > 0)
+  // La URL lleva el JSON crudo marcado (`j`, lo más corto para el QR) y el código
+  // pegable el base64 marcado (`b`). Ver lib/src/invite.js y test/invite.test.mjs.
+  assert.ok(pair.url.includes('#vault=j{'))
+  assert.match(pair.code, /^b[A-Za-z0-9_-]+$/)
   assert.ok(pair.url.includes('#vault='))
   assert.ok(pair.expiresAt > Date.now())
 
@@ -238,3 +240,36 @@ test('daemon caído: señalar lanza DAEMON_DOWN', async () => {
   await assert.rejects(() => vc.listProfiles(), (e) => e.code === 'DAEMON_DOWN')
   fs.writeFileSync(P('state.json'), saved)
 })
+
+/**
+ * REGRESIÓN (2026-07-28): el enlace del QR lleva JSON crudo (más corto = QR más
+ * chico) y el navegador lo percent-codifica al abrirlo. Lo que hay que garantizar
+ * no es que la URL sea "limpia", sino que lo que le llega al cliente DESPUÉS del
+ * navegador se siga leyendo. La marca de formato (`j`/`b`) es lo que evita andar
+ * probando formatos a ver cuál cuela.
+ */
+test('el enlace del QR sobrevive al navegador y se lee por su marca', async () => {
+  const { pairUrl } = await import('../src/vaultControl.js')
+  const { parseInvite } = await import('../lib/src/invite.js')
+  const qr = {
+    v: 2,
+    iss: JSON.stringify({ key_ops: ['verify'], ext: true, kty: 'EC', x: 'AAA', y: 'BBB', crv: 'P-256' }),
+    proxy: 'wss://proxy.dotrino.com',
+    token: 'a'.repeat(32),
+    sn: 'b'.repeat(32),
+    m: 'join',
+    acct: 'Perfil 1'
+  }
+  const { url, code, payload } = pairUrl(qr)
+
+  // 1. El QR lleva el JSON crudo: más corto que el base64 (ese es todo el punto).
+  assert.ok(url.includes('#vault=j{'))
+  assert.ok(url.length < (PROFILE_LEN + code.length + 1), 'el enlace del QR es más corto que con base64')
+  // 2. Tras el navegador (percent-encoding), se sigue leyendo.
+  assert.deepEqual(parseInvite(encodeURI(url)), qr)
+  // 3. El código pegable es base64 marcado, sin comillas ni llaves.
+  assert.match(code, /^b[A-Za-z0-9_-]+$/)
+  assert.deepEqual(parseInvite(code), qr)
+  assert.equal(payload, JSON.stringify(qr))
+})
+const PROFILE_LEN = 'https://vault.dotrino.com/dispositivos#vault='.length

@@ -12,6 +12,7 @@ import { ref, computed, markRaw, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
+import { parseInvite } from '../../lib/src/invite.js'
 
 const props = defineProps({ lang: { type: String, default: 'es' } })
 
@@ -223,23 +224,15 @@ const pendingPair = ref(null)
 const scanHost = ref(null)
 const fileInput = ref(null)
 
-function b64urlDecode (s) {
-  const b = s.replace(/-/g, '+').replace(/_/g, '/')
-  return decodeURIComponent(escape(atob(b + '='.repeat((4 - b.length % 4) % 4))))
-}
-
-/** Saca el objeto de emparejamiento de un texto: URL con `#vault=<json|b64>` o JSON crudo. */
+/**
+ * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
+ * formato del payload (`j` = JSON crudo del QR, `b` = base64 del código pegable)
+ * dice cómo leerlo, sin probar a ver cuál cuela. También acepta los formatos
+ * viejos, sin marca.
+ */
 function extractPayload (text) {
-  if (!text) return null
-  text = String(text).trim()
-  const i = text.indexOf('#vault=')
-  if (i >= 0) {
-    const payload = text.slice(i + 7)
-    // Nuevo: JSON crudo en la URL (menos datos en el QR). Viejo: base64url.
-    try { const o = JSON.parse(payload); if (o && o.iss && o.token) return o } catch {}
-    try { return JSON.parse(b64urlDecode(payload)) } catch { return null }
-  }
-  try { const o = JSON.parse(text); return (o && o.iss && o.token) ? o : null } catch { return null }
+  const o = parseInvite(text)
+  return (o && o.iss && o.token) ? o : null
 }
 
 /**
