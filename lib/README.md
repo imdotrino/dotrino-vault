@@ -91,6 +91,25 @@ que los secretos estén. Si el vault no está disponible, **espera** (reintento 
 backoff) — un servicio sin vault no arranca, no opera con secretos viejos ni vacíos.
 Un fallo NO transitorio (sin enrolar, cert revocado, scope equivocado) sí aborta.
 
+#### Esperar al vault es la REGLA. La excepción es una sola
+
+Un agente enrolado **espera**. No es una preferencia: arrancar igual significaría
+operar con la configuración vieja del `.env`, que es justo lo que el vault vino a
+dejar de ser. Y la espera casi nunca duele, porque estos agentes no son críticos:
+que un bot o un firmador tarden en levantar no rompe a nadie.
+
+La **única** excepción conocida es **el proxio**, y no por importancia sino por una
+razón estructural: el vault habla con sus servicios **por el proxio**. Un proxio que
+espera al vault espera a alguien que necesita que el proxio ya esté escuchando —
+abrazo mortal, y con él se cae el vault de todo el mundo. Por eso el proxio arranca
+con lo que tenga y aplica la configuración cuando llega, con `applyEnv`.
+
+> `applyEnv` existe **para ese caso**, no como alternativa cómoda al bloqueo. Si tu
+> agente no está en el camino por el que viaja el propio vault, usa
+> `import '@dotrino/vault/config'` y deja que espere. El precio de la excepción es
+> real: lo que sólo se lee al arrancar llega tarde y no toma efecto hasta reiniciar,
+> así que hay que avisarlo en el log — el proxio lo hace.
+
 Para procesos que no son Node, el CLI los inyecta en el entorno de un hijo:
 
 ```bash
