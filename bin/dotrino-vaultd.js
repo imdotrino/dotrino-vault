@@ -36,7 +36,9 @@ const mgr = await runDaemon()
 // Atajo de dev: --pair imprime el QR directo en stdout (en producción se usa el CLI).
 // Empareja contra el perfil ACTIVO.
 if (process.argv.includes('--pair')) {
-  const { qr, expiresInMs } = mgr.current().startPairing({ label: 'cli' })
+  // `startPairing` es asíncrono desde que el QR lleva una CITA del proxio (hay
+  // que pedírsela) en vez de la dirección de la conexión.
+  const { qr, expiresInMs } = await mgr.current().startPairing({ label: 'cli' })
   const { url, b64 } = pairUrl(qr)
   console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
   console.log(qrToString(url))

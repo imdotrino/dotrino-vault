@@ -180,17 +180,22 @@ test('un punto que no está en la curva no se acepta como llave', async () => {
  * formas, así que los dos lados tienen que ir juntos.
  */
 test('la invitación corta lleva solo dirección y nonce', () => {
-  const qr = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
+  const qr = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
   const inv = encodeInvite(qr)
   assert.equal(inv[0], 't')
-  assert.ok(inv.length <= 20, `la corta son ${inv.length} caracteres`)
-  assert.ok(inviteUrl(qr).length <= 50, 'el enlace entero cabe en un QR chico')
+  // 21 caracteres, no 19: la cita del proxio pasó de 4 a 6 caracteres (lleva
+  // delante el prefijo del nodo, que es lo que la hace resoluble desde otro
+  // proxio). Son 2 bytes más de payload. Se pagan a gusto: lo que va en el QR
+  // dejó de ser una dirección permanente y pasó a ser un código de UN SOLO USO
+  // que caduca en minutos.
+  assert.ok(inv.length <= 21, `la corta son ${inv.length} caracteres`)
+  assert.ok(inviteUrl(qr).length <= 52, 'el enlace entero cabe en un QR chico')
   assert.deepEqual(parseInvite(inviteUrl(qr)), qr)
   assert.deepEqual(parseInvite(inv), qr)
 })
 
 test('la corta distingue el modo y no acepta basura', () => {
-  const adopt = { v: 2, conn: 'zZ9!', sn: 'ffffffffffffffff', m: 'adopt', proxy: 'wss://proxy.dotrino.com' }
+  const adopt = { v: 2, conn: 'M2zZ9!', sn: 'ffffffffffffffff', m: 'adopt', proxy: 'wss://proxy.dotrino.com' }
   assert.deepEqual(parseInvite(encodeInvite(adopt)), adopt)
   for (const basura of ['t', 'tAAAA', 't' + 'A'.repeat(60)]) assert.equal(parseInvite(basura), null, basura)
 })
@@ -202,11 +207,11 @@ test('la corta distingue el modo y no acepta basura', () => {
  * esperando. Lo cazó el E2E de secretos, que levanta un proxy local.
  */
 test('la corta lleva el proxy cuando no es el del ecosistema', () => {
-  const propio = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'ws://127.0.0.1:8787' }
+  const propio = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'ws://127.0.0.1:8787' }
   const inv = encodeInvite(propio)
   assert.equal(inv[0], 't')
   assert.deepEqual(parseInvite(inv), propio, 'el proxy propio tiene que volver')
   // Y el del ecosistema NO viaja: se sobreentiende y no gasta módulos.
-  const eco = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
+  const eco = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
   assert.ok(encodeInvite(eco).length < inv.length)
 })

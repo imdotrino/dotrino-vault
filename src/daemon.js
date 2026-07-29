@@ -130,7 +130,7 @@ export async function runDaemon () {
       //               perfil de esta bóveda tiene que haber nacido para eso (`--adopt`
       //               crea uno vacío), o no habría dónde meterla.
       const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
-      const { qr, expiresInMs } = vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
+      const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
       writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).

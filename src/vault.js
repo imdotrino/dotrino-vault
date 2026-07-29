@@ -113,8 +113,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // ella entraría mandando una cuenta que no puede abrir.
     encPub: identity.me?.encryptionPubkey || null,
     vaultLabel: 'bóveda',
-    // Nuestra dirección en el proxy: lo único que lleva el QR corto.
-    connToken: () => client.token,
+    // Lo único que lleva el QR corto: una CITA del proxio, que es un código de 6
+    // caracteres de un solo uso y con minutos de vida. Antes iba la dirección de
+    // la conexión, que eran 4 caracteres; hoy esa dirección es una instancia de
+    // 24 (para poder rutearla entre proxios) y no cabe cómoda en un QR ni
+    // conviene dejarla impresa en algo que circula. Se pide una por
+    // emparejamiento: si el proxio es viejo y no las conoce, se cae solo a la
+    // invitación larga, que sigue funcionando.
+    connToken: async () => {
+      try { return (await client.requestPairingCode())?.code || null }
+      catch (_) { return null }
+    },
     onAdopted: (info) => { try { onAdopted?.(info) } catch (_) {} },
     defaultScope: [SCOPE.READ],
     onChallenge ({ deviceId, scope }) {

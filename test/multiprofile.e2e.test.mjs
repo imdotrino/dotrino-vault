@@ -47,7 +47,7 @@ after(async () => {
 
 /** Empareja un dispositivo con un perfil: QR → enroll → el dueño aprueba con el código. */
 async function pair (vault) {
-  const { qr } = vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'test', ttlMs: 60_000 })
+  const { qr } = await vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'test', ttlMs: 60_000 })
   const res = await enrollDevice({
     qr: { ...qr, proxy: proxyUrl },
     onChallenge: ({ code }) => { vault.approveDevice(code).catch(() => {}) }

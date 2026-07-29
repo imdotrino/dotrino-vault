@@ -45,7 +45,7 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   assert.deepEqual(vault.listSecrets(), { proxy: ['TURN_KEY_ID', 'TURN_KEY_API_TOKEN'] })
 
   // pair --service proxy (mismo scope que arma el daemon)
-  const { qr } = vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'servicio:proxy', ttlMs: 24 * 60 * 60 * 1000 })
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'servicio:proxy', ttlMs: 24 * 60 * 60 * 1000 })
 
   const { enrollService, fetchSecrets, readServiceIdentity } = await import('../lib/src/service.js')
   const { device, cert } = await enrollService({

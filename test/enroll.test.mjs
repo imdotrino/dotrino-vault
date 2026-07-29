@@ -68,7 +68,7 @@ async function deviceEnroll (qr, { label = 'test', ts = Date.now(), code = makeP
 
 test('flujo feliz: con el código correcto se emite un cert válido para ESE dispositivo', async () => {
   const { identity, desk, sent } = await mount()
-  const { qr } = desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000, label: 'cel' })
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000, label: 'cel' })
   const { device, code, payload } = await deviceEnroll(qr)
 
   await desk.handleEnroll('tok-1', payload)
@@ -90,7 +90,7 @@ test('flujo feliz: con el código correcto se emite un cert válido para ESE dis
 
 test('CÓDIGO EQUIVOCADO: no se emite ningún certificado', async () => {
   const { identity, desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const { code, payload } = await deviceEnroll(qr)
   await desk.handleEnroll('tok-1', payload)
 
@@ -108,7 +108,7 @@ test('CÓDIGO EQUIVOCADO: no se emite ningún certificado', async () => {
 
 test('cliente viejo sin compromiso: se rechaza el enrolamiento con un mensaje claro', async () => {
   const { desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const device = await makeDeviceKey({ label: 'viejo' })
   const data = { op: 'enroll', dpub: device.publickey, token: qr.token, sn: qr.sn, label: 'viejo', ts: Date.now() }
   const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
@@ -121,7 +121,7 @@ test('cliente viejo sin compromiso: se rechaza el enrolamiento con un mensaje cl
 
 test('firma de dispositivo inválida: no pasa del ENROLL', async () => {
   const { desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const { payload } = await deviceEnroll(qr)
   const otro = await makeDeviceKey({})
   payload.data.dpub = otro.publickey // la firma ya no corresponde a este dpub
@@ -134,7 +134,7 @@ test('firma de dispositivo inválida: no pasa del ENROLL', async () => {
 
 test('replay: un ENROLL con ts viejo se descarta', async () => {
   const { desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const { payload } = await deviceEnroll(qr, { ts: Date.now() - 10 * 60 * 1000 })
 
   await desk.handleEnroll('tok-1', payload)
@@ -144,7 +144,7 @@ test('replay: un ENROLL con ts viejo se descarta', async () => {
 
 test('token/sesión que no son de este emparejamiento', async () => {
   const { desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
 
   const ajeno = await deviceEnroll({ ...qr, token: 'otro-token' })
   await desk.handleEnroll('tok-1', ajeno.payload)
@@ -157,7 +157,7 @@ test('token/sesión que no son de este emparejamiento', async () => {
 
 test('rechazar: el dispositivo se entera y deja de estar pendiente', async () => {
   const { identity, desk, sent } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const { payload } = await deviceEnroll(qr)
   await desk.handleEnroll('tok-1', payload)
 
@@ -170,7 +170,7 @@ test('rechazar: el dispositivo se entera y deja de estar pendiente', async () =>
 
 test('revocar emite un vault.revoked FIRMADO por la maestra, dirigido al dispositivo', async () => {
   const { identity, desk, byPubkey } = await mount()
-  const { qr } = desk.startPairing()
+  const { qr } = await desk.startPairing()
   const { device, code, payload } = await deviceEnroll(qr)
   await desk.handleEnroll('tok-1', payload)
   await desk.approve(code)
@@ -186,8 +186,8 @@ test('revocar emite un vault.revoked FIRMADO por la maestra, dirigido al disposi
 
 test('un solo emparejamiento a la vez: abrir otro invalida el anterior', async () => {
   const { desk, sent } = await mount()
-  const { qr: primero } = desk.startPairing()
-  desk.startPairing() // el dueño reinició el emparejamiento
+  const { qr: primero } = await desk.startPairing()
+  await desk.startPairing() // el dueño reinició el emparejamiento
 
   const { payload } = await deviceEnroll(primero)
   await desk.handleEnroll('tok-1', payload)
