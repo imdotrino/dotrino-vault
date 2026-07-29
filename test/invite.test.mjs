@@ -180,7 +180,7 @@ test('un punto que no está en la curva no se acepta como llave', async () => {
  * formas, así que los dos lados tienen que ir juntos.
  */
 test('la invitación corta lleva solo dirección y nonce', () => {
-  const qr = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join' }
+  const qr = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
   const inv = encodeInvite(qr)
   assert.equal(inv[0], 't')
   assert.ok(inv.length <= 20, `la corta son ${inv.length} caracteres`)
@@ -190,7 +190,23 @@ test('la invitación corta lleva solo dirección y nonce', () => {
 })
 
 test('la corta distingue el modo y no acepta basura', () => {
-  const adopt = { v: 2, conn: 'zZ9!', sn: 'ffffffffffffffff', m: 'adopt' }
+  const adopt = { v: 2, conn: 'zZ9!', sn: 'ffffffffffffffff', m: 'adopt', proxy: 'wss://proxy.dotrino.com' }
   assert.deepEqual(parseInvite(encodeInvite(adopt)), adopt)
   for (const basura of ['t', 'tAAAA', 't' + 'A'.repeat(60)]) assert.equal(parseInvite(basura), null, basura)
+})
+
+/**
+ * REGRESIÓN: el token de conexión solo existe EN SU PROXY. Si el QR corto no lleva la
+ * URL cuando no es la del ecosistema, el aparato se conecta al proxy público y le habla
+ * a un token de otro servidor: el mensaje no llega y el emparejamiento se queda
+ * esperando. Lo cazó el E2E de secretos, que levanta un proxy local.
+ */
+test('la corta lleva el proxy cuando no es el del ecosistema', () => {
+  const propio = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'ws://127.0.0.1:8787' }
+  const inv = encodeInvite(propio)
+  assert.equal(inv[0], 't')
+  assert.deepEqual(parseInvite(inv), propio, 'el proxy propio tiene que volver')
+  // Y el del ecosistema NO viaja: se sobreentiende y no gasta módulos.
+  const eco = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
+  assert.ok(encodeInvite(eco).length < inv.length)
 })
