@@ -97,6 +97,29 @@ Para procesos que no son Node, el CLI los inyecta en el entorno de un hijo:
 dotrino-env run --ns miapp -- ./mi-binario
 ```
 
+### Un agente tiene UNA identidad, y se la da el vault
+
+Un **aparato** puede llevar varios perfiles, y hasta meter su propia cuenta al vault
+por adopción: llega con una historia que conservar. Un **agente** no es eso. Es un
+servicio: su identidad se la cede el vault y no hay caso en que quiera empujar la
+suya hacia arriba. De ahí tres reglas, que el paquete aplica solas:
+
+- **No adopta, nunca.** La invitación declara su modo (`join` / `adopt`); si viene
+  abierta para adoptar, `enrollService` la **rechaza al pegarla**, sin salir a la red.
+  La intención `join` va además firmada dentro de la petición, para que nadie en el
+  medio la convierta en otra cosa.
+- **No acumula.** Enrolar de nuevo **reemplaza** la identidad anterior, que deja de
+  existir en ese agente. No es un error a desbloquear con `--force`: es la forma de
+  **rotar** la identidad de un agente comprometido. Se avisa por `onReplace` qué se
+  descarta.
+- **Un agente, un `ns`.** Varios agentes pueden convivir en una máquina (un
+  directorio por namespace); lo que no existe es un agente que sea varios.
+
+> ⚠ Si esa llave es además la **identidad de red** del servicio —el caso del proxio,
+> cuyo id de nodo se deriva de ella— reemplazarla le cambia el nombre en la red: las
+> instancias y citas vivas dejan de resolver y los peers que lo tenían pineado lo
+> rechazan hasta re-pinearlo. Es a propósito: así se echa a un nodo comprometido.
+
 ### Precedencia: el vault MANDA
 
 Los valores del vault **pisan** los del `.env` y los del entorno. El vault no
