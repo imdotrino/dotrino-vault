@@ -173,6 +173,94 @@ test('un agente NUNCA adopta: el camino de transferir identidad se rechaza de en
   )
 })
 
+test('la bóveda AVISA al agente cuando su configuración cambia (agrupado)', async () => {
+  // Guardar un secreto no sirve de nada si quien lo usa no se entera. El aviso no
+  // lleva valores: solo dice «el ns cambió», y el agente reacciona saliendo para
+  // que su supervisor lo levante limpio — así lee todo fresco y, sobre todo, el
+  // valor viejo deja de existir en su memoria (en JS un string no se puede borrar).
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const avisos = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
+    onChange: (i) => avisos.push(i)
+  })
+  try {
+    // Los tests anteriores también guardaron secretos de este ns, y su aviso
+    // agrupado puede seguir en vuelo: se deja pasar la ventana y se cuenta desde
+    // cero, o se estaría midiendo el eco de otra prueba.
+    await new Promise((r) => setTimeout(r, 4000))
+    avisos.length = 0
+
+    vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-1')
+    // AGRUPADO: tres escrituras seguidas son UN cambio de configuración, no tres.
+    vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 'rotada-2')
+    vault.setSecret('proxy', 'OTRA', 'rotada-3')
+
+    await esperarA(() => avisos.length > 0, 'el aviso de cambio')
+    await new Promise((r) => setTimeout(r, 1500))
+    assert.equal(avisos.length, 1, 'tres `secret set` seguidos avisan UNA vez, no tres')
+    assert.equal(avisos[0].ns, 'proxy')
+  } finally { w.stop() }
+})
+
+test('el aviso de otro namespace no le llega a este agente', async () => {
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const avisos = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
+    onChange: (i) => avisos.push(i)
+  })
+  try {
+    // El aviso dice QUÉ ns cambió, así que mandárselo a un agente ajeno sería
+    // contarle que ese namespace existe. Se manda solo a los del ns.
+    vault.setSecret('geo', 'DB_URL', 'nada-que-ver')
+    await new Promise((r) => setTimeout(r, 1500))
+    assert.equal(avisos.length, 0, 'el agente del ns «proxy» no se entera de lo de «geo»')
+  } finally { w.stop() }
+})
+
+test('un aviso mal firmado NO reinicia a nadie (sería un ataque de denegación)', async () => {
+  // Es la defensa que hace que esto no sea un arma: si cualquiera pudiera mandar
+  // el aviso, cualquiera podría reiniciar la flota ajena cuando quisiera.
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const { MSG } = await import('../lib/src/protocol.js')
+  const { makeDeviceKey, signWithDevice } = await import('@dotrino/identity/capabilities')
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+
+  const avisos = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
+    onChange: (i) => avisos.push(i)
+  })
+  try {
+    // Un impostor con llave propia y bien formada: firma de verdad, pero NO es la
+    // maestra que este agente tiene pineada.
+    const impostor = await makeDeviceKey({ label: 'impostor' })
+    const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+    await c.connect()
+    const body = { op: 'secrets.changed', ns: 'proxy', ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: impostor.privateJwk, data: body })
+    const yo = readServiceIdentitySync()
+    c.sendByPubkey(yo.device.publickey, { type: MSG.SECRETS_CHANGED, body, signature })
+    await new Promise((r) => setTimeout(r, 1500))
+    c.close()
+    assert.equal(avisos.length, 0, 'un aviso que no viene de TU bóveda se ignora')
+  } finally { w.stop() }
+})
+
+function readServiceIdentitySync () {
+  return JSON.parse(fs.readFileSync(path.join(svcDir, 'service-identity.json'), 'utf8'))
+}
+
+async function esperarA (fn, que, timeoutMs = 8000) {
+  const t = Date.now() + timeoutMs
+  while (Date.now() < t) {
+    if (await fn()) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('se agotó la espera de ' + que)
+}
+
 test('el scope corta el acceso a otro namespace', async () => {
   vault.setSecret('geo', 'DB_PASSWORD', 'nope')
   await assert.rejects(

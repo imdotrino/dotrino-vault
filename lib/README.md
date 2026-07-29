@@ -139,6 +139,48 @@ suya hacia arriba. De ahí tres reglas, que el paquete aplica solas:
 > instancias y citas vivas dejan de resolver y los peers que lo tenían pineado lo
 > rechazan hasta re-pinearlo. Es a propósito: así se echa a un nodo comprometido.
 
+### Rotar: la bóveda avisa y el agente SE REINICIA
+
+Cambiar un secreto en la bóveda no sirve de nada si quien lo usa no se entera. Al
+guardar, la bóveda manda un **aviso firmado** a los agentes de ese `ns` (sin
+valores: sólo dice que cambió), **agrupando** las escrituras seguidas para que
+cargar cinco valores no provoque cinco reinicios.
+
+El agente **no recarga en caliente: termina**, y lo levanta su supervisor (pm2,
+systemd `Restart=always`). Con `import '@dotrino/vault/config'` ya viene puesto.
+
+Salir en vez de recargar, por tres razones — y la primera es la de peso:
+
+1. **Borra de memoria el valor viejo.** En JavaScript un secreto no se puede
+   borrar: los strings son inmutables, no hay `zeroize`, y el valor sigue en el
+   heap hasta que al recolector le apetezca, más lo que capturó cada *closure* y
+   cada caché derivada. Una llave se rota casi siempre **porque se filtró**, así
+   que dejarla viva en el proceso anula el motivo de rotarla. Un proceso nuevo
+   empieza con el heap limpio.
+2. **Lee todo fresco.** Recargar en caliente exige que cada sitio que leyó una
+   variable sepa releerla; esa lista hay que mantenerla para siempre y, cuando se
+   queda corta, falla en silencio.
+3. **Es un interruptor de emergencia.** Revocar el cert de un agente ya no espera a
+   que alguien se acuerde de reiniciarlo: recibe el `REVOKED` firmado, se apaga, y
+   al arrancar `fetchSecrets` recibe «no autorizado: revoked», que no se arregla
+   reintentando. Antes, revocar no le quitaba nada a un proceso ya corriendo.
+
+Defensas, porque una señal que provoca reinicios es un arma si se descuida: firma
+de la maestra pineada, `ns` que coincida, frescura y anti-replay, **gracia de
+arranque** y **piso entre avisos** (si la configuración nueva rompe el arranque, sin
+eso el servicio entra en ciclo) y **jitter** (diez agentes del mismo `ns` no salen
+todos en el mismo segundo).
+
+```js
+import { watchEnv } from '@dotrino/vault/env'
+await watchEnv({ ns: 'miapp' })                       // termina el proceso al cambiar
+await watchEnv({ ns: 'proxy', onUpdate: (i) => … })   // o decide tú (ver abajo)
+```
+
+`onUpdate` es para cuando terminar **no es una opción**. El caso real es el proxio:
+reiniciarlo corta el transporte de todo el ecosistema, así que anota el aviso, lo
+publica en su `GET /peers` y deja el momento a un humano.
+
 ### Precedencia: el vault MANDA
 
 Los valores del vault **pisan** los del `.env` y los del entorno. El vault no

@@ -305,9 +305,63 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // ----- API local (CLI/UI de control) -----
   // Emparejar / aprobar / rechazar / revocar viven en el núcleo compartido (`desk`).
 
+  // ----- AVISO DE CAMBIO a los agentes del ns -----
+  //
+  // Guardar un secreto no sirve de nada si quien lo usa no se entera. La bóveda
+  // avisa (sin mandar valores: solo «el ns cambió») y el agente decide — el
+  // estándar es que SALGA y lo levante su supervisor, para leer todo fresco y,
+  // sobre todo, para que el valor viejo deje de existir en su memoria.
+  //
+  // AGRUPADO a propósito: cargar cinco valores seguidos con `secret set` son cinco
+  // escrituras, pero un solo cambio de configuración. Sin esta ventana serían cinco
+  // reinicios en cadena, y el agente se pasaría la carga entera reiniciándose.
+  const AVISO_AGRUPA_MS = Number(process.env.DOTRINO_VAULT_AVISO_MS) || 3000
+  const avisosPendientes = new Map()   // ns → timer
+
+  async function avisarCambio (ns) {
+    let destinos = []
+    try {
+      const { issued } = await identity.listDelegations()
+      const revocados = await revocationSet()
+      const scope = secretsScope(ns)
+      // Los agentes de ESE ns y nadie más: el aviso dice qué namespace cambió, así
+      // que mandárselo a otro sería filtrarle que existe.
+      //
+      // Y UNO POR LLAVE, no uno por delegación: renovar el cert emite una
+      // delegación nueva para la MISMA sub-clave, así que un agente que lleve
+      // tiempo enrolado aparece varias veces y recibiría el aviso repetido.
+      const vistas = new Set()
+      destinos = (issued || []).filter((x) => {
+        if (!x.sub || revocados.has(x.nonce) || !(x.scope || []).includes(scope)) return false
+        if (vistas.has(x.sub)) return false
+        vistas.add(x.sub)
+        return true
+      })
+    } catch (e) { return log('[vault] no se pudo listar a quién avisar:', e.message) }
+    if (!destinos.length) return
+
+    const body = { op: 'secrets.changed', ns, ts: Date.now() }
+    const { signature } = await identity.signData(body)
+    for (const d of destinos) {
+      try { client.sendByPubkey(d.sub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
+    }
+    audit('secrets.changed', { ns, avisados: destinos.length })
+    log(`[vault] configuración de «${ns}» cambió: avisados ${destinos.length} agente(s)`)
+  }
+
+  function programarAviso (ns) {
+    clearTimeout(avisosPendientes.get(ns))
+    const t = setTimeout(() => {
+      avisosPendientes.delete(ns)
+      avisarCambio(ns).catch((e) => log('[vault] aviso de cambio falló:', e.message))
+    }, AVISO_AGRUPA_MS)
+    t.unref?.()
+    avisosPendientes.set(ns, t)
+  }
+
   // API local de secretos (solo CLI/UI del dueño; audita cada cambio).
-  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }) }
-  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) audit('secret.rm', { ns, key }); return ok }
+  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }); programarAviso(ns) }
+  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); programarAviso(ns) } return ok }
   function listSecrets () { return secrets.list() }
 
   return {
@@ -326,6 +380,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     isMaster: () => identity.isMaster(),
     setCaps: (pub, caps) => identity.setCaps(pub, caps),
     revokeDevice: (nonce) => desk.revoke(nonce),
-    close () { try { client.close() } catch (_) {} identity.destroy() }
+    close () {
+      for (const t of avisosPendientes.values()) clearTimeout(t)
+      avisosPendientes.clear()
+      try { client.close() } catch (_) {} identity.destroy()
+    }
   }
 }
