@@ -27,9 +27,14 @@ const qrcode = typeof qrcodeMod === 'function' ? qrcodeMod : qrcodeMod.default
  * módulos por línea) y siempre con el contraste correcto.
  *
  * @param {string} text  Contenido a codificar (modo byte / UTF-8).
- * @param {number} [quiet=4]  Zona de silencio en módulos (mín. recomendado: 4).
+ * @param {number} [quiet=5]  Zona de silencio en módulos.
+ *
+ * La norma pide 4 como MÍNIMO; aquí va uno más a propósito. En una terminal el blanco
+ * que dibujamos es lo único que separa el código del fondo oscuro y del texto de la
+ * línea de arriba, y un módulo de margen cuesta 2 columnas y 1 fila — mucho menos que
+ * un QR que no engancha. Ir por debajo de 4 no se hace ni para ganar filas.
  */
-export function qrToString (text, quiet = 4) {
+export function qrToString (text, quiet = 5) {
   // typeNumber 0 = autoseleccionar la versión mínima; EC level 'L' (más capacidad).
   const qr = qrcode(0, 'L')
   qr.addData(text) // 'Byte' por defecto para datos no numéricos/alfanuméricos

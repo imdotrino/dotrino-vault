@@ -8,7 +8,7 @@ import qrcode from 'qrcode-generator'
 
 try { qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'] } catch {}
 
-export function qrSvg (text, { ecc = 'L', margin = 4 } = {}) {
+export function qrSvg (text, { ecc = 'L', margin = 5 } = {}) {
   const qr = qrcode(0, ecc)
   qr.addData(text)
   qr.make()
