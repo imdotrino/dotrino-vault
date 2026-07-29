@@ -172,3 +172,25 @@ test('un punto que no está en la curva no se acepta como llave', async () => {
   }
   assert.ok(rotos > 0, 'al menos algunos puntos tocados se rechazan por no estar en la curva')
 })
+
+/**
+ * La invitación CORTA (`t`): dirección + nonce, sin la llave. Es la que va a dejar el
+ * QR en ~39×20; el mostrador de la bóveda ya la sabe servir (`vault.hello`) pero no la
+ * emite hasta que el lado del dispositivo sepa pedirla — un QR no puede llevar las dos
+ * formas, así que los dos lados tienen que ir juntos.
+ */
+test('la invitación corta lleva solo dirección y nonce', () => {
+  const qr = { v: 2, conn: 'aB3x', sn: '0123456789abcdef', m: 'join' }
+  const inv = encodeInvite(qr)
+  assert.equal(inv[0], 't')
+  assert.ok(inv.length <= 20, `la corta son ${inv.length} caracteres`)
+  assert.ok(inviteUrl(qr).length <= 50, 'el enlace entero cabe en un QR chico')
+  assert.deepEqual(parseInvite(inviteUrl(qr)), qr)
+  assert.deepEqual(parseInvite(inv), qr)
+})
+
+test('la corta distingue el modo y no acepta basura', () => {
+  const adopt = { v: 2, conn: 'zZ9!', sn: 'ffffffffffffffff', m: 'adopt' }
+  assert.deepEqual(parseInvite(encodeInvite(adopt)), adopt)
+  for (const basura of ['t', 'tAAAA', 't' + 'A'.repeat(60)]) assert.equal(parseInvite(basura), null, basura)
+})

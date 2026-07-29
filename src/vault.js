@@ -113,6 +113,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // ella entraría mandando una cuenta que no puede abrir.
     encPub: identity.me?.encryptionPubkey || null,
     vaultLabel: 'bóveda',
+    // Nuestra dirección en el proxy: lo único que lleva el QR corto.
+    connToken: () => client.token,
     onAdopted: (info) => { try { onAdopted?.(info) } catch (_) {} },
     defaultScope: [SCOPE.READ],
     onChallenge ({ deviceId, scope }) {
@@ -275,6 +277,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   client.on('message', async (from, payload) => {
     if (!payload || typeof payload !== 'object') return
     try {
+      if (payload.type === MSG.HELLO) return desk.handleHello(from, payload)
       if (payload.type === MSG.ENROLL) return await desk.handleEnroll(from, payload)
       if (payload.type === MSG.ACTA_SEALED) return await desk.handleActaSealed(from, payload)
       if (payload.type === MSG.SIGN) return await handleSign(from, payload)
