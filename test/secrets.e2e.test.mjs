@@ -60,22 +60,28 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   assert.deepEqual(secrets, { TURN_KEY_ID: 'k-123', TURN_KEY_API_TOKEN: 't-456' })
 })
 
-test('loadEnv() inyecta los secretos en process.env (el "dotenv contra el vault")', async () => {
+test('loadEnv() inyecta los secretos en process.env y PISA el .env', async () => {
   delete process.env.TURN_KEY_ID
-  process.env.TURN_KEY_API_TOKEN = 'ya-estaba'   // lo presente en el entorno manda (sin override)
+  delete process.env.DOTRINO_ENV_OVERRIDE
+  // Esto es lo que deja un `.env` cargado antes: un valor viejo ya en el entorno.
+  // El vault tiene que ganarle, o rotar la llave no sirve de nada mientras quede
+  // una copia rancia en la máquina.
+  process.env.TURN_KEY_API_TOKEN = 'la-vieja-del-env'
 
   const { loadEnv } = await import('../lib/src/env.js')
-  const { ns, injected, skipped } = await loadEnv({ ns: 'proxy', dir: svcDir, wait: false })
+  const { ns, injected, overridden, skipped } = await loadEnv({ ns: 'proxy', dir: svcDir, wait: false })
 
   assert.equal(ns, 'proxy')
   assert.equal(process.env.TURN_KEY_ID, 'k-123')
-  assert.deepEqual(injected, ['TURN_KEY_ID'])
-  assert.deepEqual(skipped, ['TURN_KEY_API_TOKEN'])
-  assert.equal(process.env.TURN_KEY_API_TOKEN, 'ya-estaba')
+  assert.equal(process.env.TURN_KEY_API_TOKEN, 't-456', 'el vault manda sobre el entorno')
+  assert.deepEqual(injected.sort(), ['TURN_KEY_API_TOKEN', 'TURN_KEY_ID'])
+  assert.deepEqual(overridden, ['TURN_KEY_API_TOKEN'], 'se reporta lo pisado')
+  assert.deepEqual(skipped, [])
 
-  // override: pisa lo que ya estaba
-  await loadEnv({ ns: 'proxy', dir: svcDir, wait: false, override: true })
-  assert.equal(process.env.TURN_KEY_API_TOKEN, 't-456')
+  // La escotilla de depuración devuelve la precedencia clásica sin tocar código.
+  process.env.TURN_KEY_API_TOKEN = 'la-del-operador'
+  await loadEnv({ ns: 'proxy', dir: svcDir, wait: false, override: false })
+  assert.equal(process.env.TURN_KEY_API_TOKEN, 'la-del-operador')
 
   // required: si falta una clave, no arranca
   await assert.rejects(

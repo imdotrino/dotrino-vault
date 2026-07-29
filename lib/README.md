@@ -97,12 +97,38 @@ Para procesos que no son Node, el CLI los inyecta en el entorno de un hijo:
 dotrino-env run --ns miapp -- ./mi-binario
 ```
 
+### Precedencia: el vault MANDA
+
+Los valores del vault **pisan** los del `.env` y los del entorno. El vault no
+reemplaza al `.env` —que sigue siendo lo que arranca una máquina sin enrolar— pero
+sí tiene la última palabra sobre las claves que administra.
+
+Esa es la pieza que hace barata la **rotación**: cambias el valor en un solo lugar y
+ningún `.env` viejo olvidado en un VPS puede seguir ganando. Con la precedencia al
+revés (como estaba hasta la 0.14.0) rotar exigía además ir a limpiar cada copia
+rancia —el trabajo que se quería evitar— y, peor, el servicio arrancaba con la llave
+vieja **sin decir nada**.
+
+Lo que sí se dice en voz alta: al arrancar se listan las claves que el vault tuvo que
+pisar. Es la señal de que en esa máquina quedó un `.env` por limpiar.
+
+```bash
+DOTRINO_ENV_OVERRIDE=0 node server.js   # escotilla: por esta corrida, gana el entorno
+dotrino-env check                        # dice qué claves pisaría en esta máquina
+```
+
 ### API `@dotrino/vault/env`
 
-- `loadEnv({ ns?, dir?, override?, wait?, required?, onRetry? }) → { ns, secrets, injected, skipped }`
-  (por defecto **no pisa** variables ya presentes en el entorno; `override: true` sí)
+- `loadEnv({ ns?, dir?, override?, wait?, required?, onRetry? }) → { ns, secrets, injected, overridden, skipped }`
+  (por defecto **pisa** lo que ya esté en el entorno; `override: false` invierte la regla).
+  `overridden` son las claves que tenían otro valor y el vault reemplazó.
+- `applyEnv(secrets, override?) → { injected, overridden, skipped }` — vuelca un bundle
+  ya obtenido, sin pedirlo. Para servicios que **no pueden bloquear su arranque**
+  esperando al vault y lo aplican cuando llega (el caso del proxy: el vault le habla
+  *por* el proxy, así que esperarlo sería un abrazo mortal).
 - `serviceDir(ns)`, `serviceRoot()`, `listEnrolled()`, `resolveNs(ns?)`
-- Entorno: `DOTRINO_NS` · `DOTRINO_ENV_DIR` · `DOTRINO_ENV_HOME` · `DOTRINO_ENV_QUIET`
+- Entorno: `DOTRINO_NS` · `DOTRINO_ENV_DIR` · `DOTRINO_ENV_HOME` · `DOTRINO_ENV_QUIET` ·
+  `DOTRINO_ENV_OVERRIDE`
 - CLI: `dotrino-env enroll|status|check|run`  (`check` lista **nombres** de secretos, nunca valores)
 
 Bajo el capó es `@dotrino/vault/service` (`enrollService` / `waitForSecrets`): petición

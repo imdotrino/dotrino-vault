@@ -42,13 +42,24 @@ function fakeNodeIdentity (dir) {
 }
 
 let proxy, proxyUrl, vault
+/** Filtro (2 chars) del nodo de este proxio. Se DERIVA de su llave, ver abajo. */
+let hint
 
 before(async () => {
   process.env.NODE_ENV = 'test'
   process.env.PROXY_DB_FILE = ':memory:'
-  // Antes del require: server.js lee la identidad y el prefijo al cargarse.
-  process.env.VAULT_SERVICE_DIR = fakeNodeIdentity(path.join(tmp('proxy-node-'), 'vault-service'))
-  process.env.PROXY_NODE_PREFIX = 'K7'
+  // Antes del require: server.js lee la identidad del nodo al cargarse.
+  const dir = fakeNodeIdentity(path.join(tmp('proxy-node-'), 'vault-service'))
+  process.env.VAULT_SERVICE_DIR = dir
+
+  // El id del nodo NO se declara: sale de hashear su llave pública, y la llave
+  // acá es nueva en cada corrida. Fijar un prefijo esperado a mano (como hacía
+  // este test con `PROXY_NODE_PREFIX='K7'`, una variable que ya no existe) es
+  // apostar a que el hash caiga donde uno quiere. Se calcula con el mismo
+  // módulo que usa el proxio, que es además lo que se quiere comprobar.
+  const { loadNodeIdentity } = require(path.join(HERE, '..', '..', 'dotrino-proxy', 'nodeIdentity.js'))
+  hint = loadNodeIdentity(dir).hint
+
   proxy = require(proxyServerPath)
   const port = await proxy.start(0)
   proxyUrl = `ws://127.0.0.1:${port}`
@@ -65,7 +76,7 @@ after(async () => {
 test('el QR corto lleva una CITA de 6 caracteres, no la instancia', async () => {
   const { qr } = await vault.startPairing({ label: 'test' })
   assert.ok(qr.conn, 'el QR corto trae dirección de encuentro')
-  assert.match(qr.conn, /^K7[1-9A-Z]{4}$/, `esperaba una cita del nodo K7, llegó ${qr.conn}`)
+  assert.match(qr.conn, new RegExp(`^${hint}[1-9A-Z]{4}$`), `esperaba una cita del nodo ${hint}, llegó ${qr.conn}`)
   assert.equal(qr.iss, undefined, 'la forma corta no lleva la llave maestra')
 })
 
@@ -92,7 +103,7 @@ test('el otro lado canjea la cita y alcanza a la bóveda', async () => {
   try {
     const r = await client.redeemPairingCode(qr.conn)
     assert.equal(r.ok, true, `el canje falló: ${r.error}`)
-    assert.match(r.instance, /^K7/, 'la instancia que devuelve es del nodo que emitió la cita')
+    assert.match(r.instance, new RegExp(`^${hint}`), 'la instancia que devuelve es del nodo que emitió la cita')
 
     // Y no vale una segunda vez.
     const otra = await client.redeemPairingCode(qr.conn)

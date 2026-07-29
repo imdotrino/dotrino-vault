@@ -287,6 +287,14 @@ import { loadEnv } from '@dotrino/vault/env'
 const { secrets } = await loadEnv({ ns: 'proxy', required: ['TURN_KEY_ID'] })
 ```
 
+**Precedencia — el vault MANDA (desde 0.14.0):** lo que venga del vault **pisa** el
+`.env` y el entorno. No lo reemplaza (el `.env` sigue arrancando cualquier máquina sin
+enrolar), pero tiene la última palabra sobre las claves que administra. Es lo que hace
+barata la **rotación**: se cambia en un solo lugar y ningún `.env` rancio olvidado en un
+VPS puede seguir ganando. Al arrancar se listan las claves pisadas — es el aviso de que
+esa máquina tiene un `.env` por limpiar. Escotilla para una corrida suelta:
+`DOTRINO_ENV_OVERRIDE=0`.
+
 **Modos de fallo (importante):**
 
 - **Vault caído / proxy caído** → **espera** (reintento con backoff, para siempre). Sin
