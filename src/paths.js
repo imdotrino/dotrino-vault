@@ -1,8 +1,14 @@
 /**
  * Resolución del directorio de datos y escritura de archivos con permisos
- * restrictivos (0600). En v1 la clave maestra va en claro dentro de este dir
- * (la guarda `@dotrino/identity` en `identity.json`); 0600 evita que sea
- * world-readable. v2 añadirá cifrado en reposo con contraseña maestra.
+ * restrictivos (0600) **y cifrados en reposo**.
+ *
+ * `readJson`/`writeJson` aceptan un códec de reposo (`atRestFor(dir)`, ver
+ * `atrest.js`): con él, el contenido del archivo NO queda en claro en el disco.
+ * Lo usan TODOS los archivos de datos del vault —identidad, árbol de contenido
+ * (`vault.json`), hilos y perfil (`threads.json`) y secretos de servicios
+ * (`secrets.json`)—, no solo la identidad: el contenido del usuario merece el
+ * mismo trato que la maestra. `decrypt` deja pasar el texto en claro, así que
+ * una instalación anterior se lee igual y queda cifrada en la primera escritura.
  */
 import os from 'node:os'
 import path from 'node:path'
@@ -33,15 +39,25 @@ export function ensureDir (dir) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
 }
 
-export function readJson (file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch (_) { return fallback }
+/** @param {{decrypt:(t:string)=>string}} [atRest] códec de reposo (`atRestFor(dir)`). */
+export function readJson (file, fallback, atRest) {
+  try {
+    let text = fs.readFileSync(file, 'utf8')
+    if (atRest) text = atRest.decrypt(text)
+    return JSON.parse(text)
+  } catch (_) { return fallback }
 }
 
-/** Escritura atómica (tmp + rename) con modo 0600. */
-export function writeJson (file, obj) {
+/**
+ * Escritura atómica (tmp + rename) con modo 0600. Con `atRest`, el archivo se
+ * escribe CIFRADO (nunca toca el disco en claro: se cifra antes del tmp).
+ * @param {{encrypt:(t:string)=>string}} [atRest]
+ */
+export function writeJson (file, obj, atRest) {
   ensureDir(path.dirname(file))
+  const text = JSON.stringify(obj, null, 2)
   const tmp = file + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 })
+  fs.writeFileSync(tmp, atRest ? atRest.encrypt(text) : text, { mode: 0o600 })
   fs.renameSync(tmp, file)
   try { fs.chmodSync(file, 0o600) } catch (_) {}
 }

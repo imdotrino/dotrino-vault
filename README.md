@@ -471,18 +471,28 @@ puede leer con `vault.get`, pero ningún mensaje del protocolo escribe nodos.)
 
 ## Cifrado en reposo
 
-`identity.json` va **cifrado** con AES-256-GCM y una clave derivada de material de
-**esta máquina** (`/etc/machine-id` en Linux, `MachineGuid` en Windows,
-`IOPlatformUUID` en macOS) más un salt local. El daemon lo migra solo al arrancar,
-verificando que puede volver a leerlo antes de reemplazar el original. Copiar el
-archivo a otro equipo **no sirve de nada**.
+**Todo** lo que la bóveda guarda va **cifrado** con AES-256-GCM y una clave derivada de
+material de **esta máquina** (`/etc/machine-id` en Linux, `MachineGuid` en Windows,
+`IOPlatformUUID` en macOS) más un salt local: `identity.json` (la maestra),
+`vault.json` (el árbol de contenido), `threads.json` (hilos, aperturas y tu perfil) y
+`secrets.json` (los secretos de servicios). Copiar cualquiera de esos archivos a otro
+equipo **no sirve de nada**.
+
+En la máquina del **servicio** pasa lo mismo con `service-identity.json`
+(`@dotrino/vault/env`), que lleva la llave privada de su dispositivo.
+
+La migración es sola y sin pedir nada: un archivo de una instalación anterior se lee
+igual estando en claro y queda cifrado en la primera escritura (la identidad se migra
+al arrancar, verificando que puede volver a leerse antes de reemplazar el original).
+Queda fuera a propósito `activity.log`, la bitácora de auditoría: no guarda payloads
+(solo op, dispositivo y hora) y se quiere legible para diagnosticar.
 
 Lo que **no** resuelve, dicho sin adornos: no protege contra alguien con acceso a esta
 misma máquina como tu usuario o como root — puede leer el mismo material que leemos
 nosotros. Es subir el listón (de «copiar un archivo» a «tener tu máquina»), no una
 imposibilidad criptográfica. Y hoy la **contraseña del perfil no participa** en esa
-clave, aunque `machineKey` ya la acepta. El resto del directorio —`secrets.json`,
-`threads.json`, `vault.json`— sigue **en claro** con permisos `0600`.
+clave, aunque `machineKey` ya la acepta. Todos los archivos conservan además sus
+permisos `0600` dentro de un dir `0700`.
 
 ## Desarrollo
 

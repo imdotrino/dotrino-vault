@@ -37,8 +37,10 @@ import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
  */
 export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
-  // CIFRADO EN REPOSO ligado a esta máquina: `identity.json` deja de estar en claro, así
-  // que copiarlo a otro equipo no sirve de nada. No protege contra quien ya tiene ESTA
+  // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
+  // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando
+  // antes de reemplazar); el resto —`vault.json`, `threads.json`, `secrets.json`— lo hace
+  // su propio store al abrirse. No protege contra quien ya tiene ESTA
   // máquina (puede leer el mismo material); es subir el listón, no una imposibilidad.
   // La migración verifica antes de reemplazar: si algo falla, el original queda intacto.
   try {

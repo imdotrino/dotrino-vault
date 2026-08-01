@@ -240,7 +240,7 @@ test('un aviso mal firmado NO reinicia a nadie (sería un ataque de denegación)
     await c.connect()
     const body = { op: 'secrets.changed', ns: 'proxy', ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: impostor.privateJwk, data: body })
-    const yo = readServiceIdentitySync()
+    const yo = await readServiceIdentitySync()
     c.sendByPubkey(yo.device.publickey, { type: MSG.SECRETS_CHANGED, body, signature })
     await new Promise((r) => setTimeout(r, 1500))
     c.close()
@@ -248,8 +248,11 @@ test('un aviso mal firmado NO reinicia a nadie (sería un ataque de denegación)
   } finally { w.stop() }
 })
 
-function readServiceIdentitySync () {
-  return JSON.parse(fs.readFileSync(path.join(svcDir, 'service-identity.json'), 'utf8'))
+// El archivo va CIFRADO en reposo (ligado a la máquina), así que se lee por el
+// mismo camino que el servicio, no con un JSON.parse a pelo.
+async function readServiceIdentitySync () {
+  const { readServiceIdentity } = await import('../lib/src/service.js')
+  return readServiceIdentity(svcDir)
 }
 
 async function esperarA (fn, que, timeoutMs = 8000) {

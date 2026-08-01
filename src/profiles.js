@@ -28,8 +28,14 @@ const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // mismo coste que el candado del navegador
 const MAX_NAME = 40
 
-/** Archivos de un perfil que en la versión mono-perfil vivían sueltos en la raíz. */
-const LEGACY_FILES = ['identity.json', 'peers.json', 'vault.json', 'threads.json', 'secrets.json', 'activity.log']
+/**
+ * Archivos de un perfil que en la versión mono-perfil vivían sueltos en la raíz.
+ *
+ * `atrest.salt` va en la lista y NO es un detalle: los datos van cifrados con una clave
+ * derivada del salt que vive JUNTO a ellos, así que mover los archivos sin el salt los
+ * dejaría ilegibles (la clave se derivaría de un salt nuevo). Se mudan juntos.
+ */
+const LEGACY_FILES = ['identity.json', 'peers.json', 'vault.json', 'threads.json', 'secrets.json', 'activity.log', 'atrest.salt']
 
 const b64 = (buf) => Buffer.from(new Uint8Array(buf)).toString('base64')
 

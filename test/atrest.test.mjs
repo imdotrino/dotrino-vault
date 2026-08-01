@@ -51,3 +51,45 @@ test('sin archivo no hay nada que migrar', () => {
   assert.equal(migrateFile(path.join(d, 'no-existe.json'), machineKey(d)), 'sin-archivo')
   fs.rmSync(d, { recursive: true, force: true })
 })
+
+/**
+ * La brecha que esto cierra: el contenido del USUARIO (árbol, hilos, perfil) y los
+ * SECRETOS de servicios se escribían en claro; solo la maestra iba cifrada. Cada store
+ * cifra ahora con la misma clave ligada a la máquina, y un archivo de una instalación
+ * anterior se lee igual y queda cifrado al abrirlo.
+ */
+test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', async () => {
+  const { openStore } = await import('../src/store.js')
+  const { openThreadStore } = await import('../src/threadStore.js')
+  const { openSecretsStore } = await import('../src/secretsStore.js')
+  const d = tmp()
+
+  // Una instalación anterior: los tres archivos, en claro.
+  fs.writeFileSync(path.join(d, 'vault.json'), JSON.stringify({ schemaVersion: 1, tree: { id: 'root', children: [] }, settings: { nota: 'ARBOL' } }))
+  fs.writeFileSync(path.join(d, 'threads.json'), JSON.stringify({ v: 1, threads: { k: [{ id: '1', ts: 1, texto: 'HILO' }] }, opens: {} }))
+  fs.writeFileSync(path.join(d, 'secrets.json'), JSON.stringify({ schemaVersion: 1, ns: { proxy: { TURN_KEY_ID: 'TOKEN' } } }))
+
+  // Abrir basta para migrar: no se le pide nada al usuario.
+  assert.equal(openStore(d).getSetting('nota'), 'ARBOL')
+  assert.equal(openThreadStore(d).methods.listThread({ threadKey: 'k' })[0].texto, 'HILO')
+  assert.equal(openSecretsStore(d).get('proxy').TURN_KEY_ID, 'TOKEN')
+
+  for (const [f, secreto] of [['vault.json', 'ARBOL'], ['threads.json', 'HILO'], ['secrets.json', 'TOKEN']]) {
+    const raw = fs.readFileSync(path.join(d, f), 'utf8')
+    assert.ok(isEncrypted(raw), f + ' tiene que quedar cifrado')
+    assert.ok(!raw.includes(secreto), f + ' no puede dejar el contenido a la vista')
+  }
+  fs.rmSync(d, { recursive: true, force: true })
+})
+
+test('el salt viaja con los datos: mover un perfil sin él los dejaría ilegibles', async () => {
+  const { openSecretsStore } = await import('../src/secretsStore.js')
+  const origen = tmp(); const destino = tmp()
+  openSecretsStore(origen).set('proxy', 'TURN_KEY_ID', 'TOKEN')
+
+  // Migración legacy → dir del perfil, tal como la hace profiles.js.
+  for (const f of ['secrets.json', 'atrest.salt']) fs.renameSync(path.join(origen, f), path.join(destino, f))
+  assert.equal(openSecretsStore(destino).get('proxy').TURN_KEY_ID, 'TOKEN')
+
+  fs.rmSync(origen, { recursive: true, force: true }); fs.rmSync(destino, { recursive: true, force: true })
+})

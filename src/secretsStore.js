@@ -1,12 +1,14 @@
 /**
  * Store de SECRETOS de servicios (`secrets.json`, 0600, mismo dir 0700 que la
- * maestra — mismo dominio de confianza, v1 en claro en reposo igual que
- * `identity.json`; el cifrado en reposo con contraseña llega con v2 para todo
- * el dir). Organizado por NAMESPACE de servicio (`proxy`, `geo`, `bots`…):
- * un cert `vault:secrets:<ns>` solo puede leer SU ns.
+ * maestra — mismo dominio de confianza, y **cifrado en reposo** con la misma
+ * clave ligada a la máquina que la identidad, ver `atrest.js`: son tokens y
+ * llaves de producción, no pueden quedar en claro en el disco). Organizado por
+ * NAMESPACE de servicio (`proxy`, `geo`, `bots`…): un cert
+ * `vault:secrets:<ns>` solo puede leer SU ns.
  */
 import path from 'node:path'
 import { readJson, writeJson } from './paths.js'
+import { atRestFor } from './atrest.js'
 import { isValidSecretsNs } from './protocol.js'
 
 const SCHEMA_VERSION = 1
@@ -15,12 +17,13 @@ const KEY_RE = /^[A-Z0-9_]{1,64}$/
 
 export function openSecretsStore (dir) {
   const file = path.join(dir, 'secrets.json')
-  let data = readJson(file, null)
+  const atRest = atRestFor(dir)
+  let data = readJson(file, null, atRest)
   if (!data || data.schemaVersion !== SCHEMA_VERSION) {
     data = { schemaVersion: SCHEMA_VERSION, ns: {} }
-    writeJson(file, data)
   }
-  const save = () => writeJson(file, data)
+  writeJson(file, data, atRest) // reescribe al abrir: cifra lo que venía en claro
+  const save = () => writeJson(file, data, atRest)
 
   const assertNs = (ns) => {
     if (!isValidSecretsNs(ns)) throw new Error('namespace inválido (usa [a-z0-9-]{1,32}, p.ej. "proxy")')

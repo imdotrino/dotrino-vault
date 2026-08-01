@@ -9,19 +9,25 @@
  *
  * File-backed (`threads.json`), síncrono y simple (sin cuota/IndexedDB). Es el
  * backend autoritativo; el navegador usa su IndexedDB como caché y sincroniza.
+ * **Cifrado en reposo** con la clave ligada a la máquina (`atrest.js`): aquí
+ * vive el contenido de las apps y el perfil del usuario, que es exactamente lo
+ * que el ecosistema promete que no queda en claro en ningún disco.
  */
 import path from 'node:path'
 import { readJson, writeJson } from './paths.js'
+import { atRestFor } from './atrest.js'
 
 const MAX_PER_THREAD = 1000
 
 export function openThreadStore (dir) {
   const file = path.join(dir, 'threads.json')
-  let data = readJson(file, null)
+  const atRest = atRestFor(dir)
+  let data = readJson(file, null, atRest)
   if (!data || typeof data !== 'object') data = { v: 1, threads: {}, opens: {} }
   if (!data.threads) data.threads = {}
   if (!data.opens) data.opens = {}
-  const save = () => writeJson(file, data)
+  const save = () => writeJson(file, data, atRest)
+  save() // reescribe al abrir: cifra lo que venía en claro
   const trim = (arr) => { if (arr.length > MAX_PER_THREAD) arr.splice(0, arr.length - MAX_PER_THREAD) }
 
   const methods = {

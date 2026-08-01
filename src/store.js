@@ -1,12 +1,14 @@
 /**
- * Store del árbol de contenidos del vault (`vault.json`). Versionado con
- * `schemaVersion` para que v2 pueda introducir cifrado en reposo sin migración
- * dolorosa. NO guarda identidad/dispositivos/certs: de eso se encarga
+ * Store del árbol de contenidos del vault (`vault.json`). **Cifrado en reposo**
+ * con la misma clave ligada a la máquina que la identidad (`atrest.js`): el
+ * contenido del usuario no es menos sensible que la maestra. NO guarda
+ * identidad/dispositivos/certs: de eso se encarga
  * `@dotrino/identity` dentro del mismo dir (keypair, contactos, delegaciones,
  * revocaciones). Aquí vive solo lo del usuario: el árbol y los settings.
  */
 import path from 'node:path'
 import { readJson, writeJson } from './paths.js'
+import { atRestFor } from './atrest.js'
 
 const SCHEMA_VERSION = 1
 
@@ -28,12 +30,15 @@ function findNode (node, id) {
 
 export function openStore (dir) {
   const file = path.join(dir, 'vault.json')
-  let data = readJson(file, null)
+  const atRest = atRestFor(dir)
+  let data = readJson(file, null, atRest)
   if (!data || data.schemaVersion !== SCHEMA_VERSION) {
     data = { schemaVersion: SCHEMA_VERSION, tree: newTree(), settings: {} }
-    writeJson(file, data)
   }
-  const save = () => writeJson(file, data)
+  // Se reescribe SIEMPRE al abrir: así un archivo de una instalación anterior
+  // (en claro) queda cifrado sin pedirle nada al usuario.
+  writeJson(file, data, atRest)
+  const save = () => writeJson(file, data, atRest)
 
   return {
     get raw () { return data },
