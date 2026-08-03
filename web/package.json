@@ -9,6 +9,9 @@
     "build": "vite build",
     "preview": "vite preview"
   },
+  "overrides": {
+    "@dotrino/proxy-client": "0.10.0"
+  },
   "dependencies": {
     "@dotrino/identity": "0.37.0",
     "@dotrino/install": "0.2.3",

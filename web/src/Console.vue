@@ -168,8 +168,11 @@ const t = computed(() => T[props.lang] || T.es)
  */
 function opcionesIdentidad () {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
-  const url = local ? new URLSearchParams(location.search).get('vault') : null
-  return url ? { vaultUrl: url } : {}
+  if (!local) return {}
+  // En localhost usamos el iframe de `/id/` (vite sirve @dotrino/identity con
+  // proxy-client actualizado). `?vault=` sigue valiendo para apuntar a otro sitio.
+  const url = new URLSearchParams(location.search).get('vault') || `${location.origin}/id/`
+  return { vaultUrl: url }
 }
 
 const id = ref(null)
@@ -269,15 +272,22 @@ const pairFlow = computed(() => {
 const closeFlow = () => { pairError.value = ''; justPaired.value = false }
 
 /**
+ * Invitación legible: compacta (`iss`+`token`) o corta (`conn`), siempre con `sn`.
+ * La bóveda vigente emite `t` (cita del proxy); las formas `c`/`b`/`j` siguen valiendo.
+ */
+function validInvite (o) {
+  if (!o || !o.sn) return false
+  if (o.v && o.v < 2) return false
+  return !!((o.iss && o.token) || o.conn)
+}
+
+/**
  * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
- * formato del payload dice cómo leerlo, sin probar a ver cuál cuela. Hoy se emite
- * `c` (compacta: binario en base64url, ~100 caracteres, la misma para el QR y para
- * pegar); también acepta las formas largas (`b`, `j`) y las que no llevan marca,
- * porque hay bóvedas sin actualizar por ahí.
+ * formato del payload dice cómo leerlo, sin probar a ver cuál cuela.
  */
 function extractPayload (text) {
   const o = parseInvite(text)
-  return (o && o.iss && o.token) ? o : null
+  return validInvite(o) ? o : null
 }
 
 /**
@@ -289,8 +299,7 @@ function extractPayload (text) {
  * esa bóveda sabe hacer.
  */
 function announce (qr) {
-  if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
-  if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
+  if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   msg.value = null
   const mode = qr.m === 'adopt' ? 'adopt' : 'join'
   const account = String(qr.acct || '').slice(0, 40)
@@ -310,8 +319,7 @@ const flowAccount = ref('')
 const flowMode = ref('join')
 
 async function connect (qr, mode = 'join') {
-  if (!qr?.iss || !qr?.token) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
-  if (!qr.sn || (qr.v && qr.v < 2)) { msg.value = { kind: 'bad', text: t.value.pair_old }; return }
+  if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
   const off = id.value.onVault((e) => { if (e?.phase === 'challenge') pairCode.value = e.code })
   try {
