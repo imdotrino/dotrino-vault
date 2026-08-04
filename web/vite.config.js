@@ -2,7 +2,42 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'node:child_process'
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/**
+ * Sirve el iframe de identidad en `/id/` con el proxy-client del node_modules
+ * (tiene `redeemPairingCode`). El vendor embebido en @dotrino/identity es 0.6.4
+ * y no entiende los QR cortos de vault 0.12; id.dotrino.com tampoco, hasta que
+ * se actualice el deploy de dotrino-identity.
+ */
+const identityVaultDev = {
+  name: 'identity-vault-dev',
+  configureServer (server) {
+    const vaultDir = path.resolve(__dirname, 'node_modules/@dotrino/identity/vault')
+    const proxyClientDir = path.resolve(__dirname, 'node_modules/@dotrino/proxy-client/src')
+    const mime = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json' }
+
+    server.middlewares.use((req, res, next) => {
+      const raw = (req.url || '').split('?')[0]
+      if (!raw.startsWith('/id')) return next()
+
+      let rel = raw.slice('/id'.length) || '/index.html'
+      if (rel.endsWith('/')) rel += 'index.html'
+
+      const fromVendor = rel.startsWith('/vendor/proxy-client/')
+      const base = fromVendor ? proxyClientDir : vaultDir
+      const filePath = path.join(base, fromVendor ? rel.slice('/vendor/proxy-client/'.length) : rel.slice(1))
+      if (!path.resolve(filePath).startsWith(base) || !existsSync(filePath)) return next()
+
+      res.setHeader('Content-Type', mime[path.extname(filePath)] || 'application/octet-stream')
+      res.end(readFileSync(filePath))
+    })
+  },
+}
 
 let commit = 'dev'
 try { commit = execSync('git rev-parse --short HEAD').toString().trim() } catch { /* sin git */ }
@@ -38,6 +73,7 @@ export default defineConfig({
   base: '/',
   plugins: [
     vue(),
+    identityVaultDev,
     commitMeta,
     spaFallback,
     VitePWA({
