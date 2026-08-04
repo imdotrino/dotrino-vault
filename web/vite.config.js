@@ -9,10 +9,14 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
- * Sirve el iframe de identidad en `/id/` con el proxy-client del node_modules
- * (tiene `redeemPairingCode`). El vendor embebido en @dotrino/identity es 0.6.4
- * y no entiende los QR cortos de vault 0.12; id.dotrino.com tampoco, hasta que
- * se actualice el deploy de dotrino-identity.
+ * SOLO desarrollo (`npm run dev`): sirve el iframe de identidad en `/id/` y
+ * sustituye su vendor de proxy-client por el del node_modules. Permite probar
+ * emparejamiento con QR cortos en local sin depender del deploy de id.dotrino.com.
+ *
+ * NO arregla producción: la web pública usa id.dotrino.com. El arreglo real fue
+ * publicar @dotrino/identity con proxy-client ≥0.10.0 en el vendor del iframe
+ * (dotrino-identity#1). Este plugin queda como comodidad de dev — no sustituye
+ * ese despliegue.
  */
 const identityVaultDev = {
   name: 'identity-vault-dev',

@@ -159,18 +159,17 @@ const T = {
 const t = computed(() => T[props.lang] || T.es)
 
 /**
- * En desarrollo se puede apuntar la identidad a un iframe LOCAL con `?vault=<url>`, para
- * poder probar la consola entera sin salir de la máquina.
+ * En localhost, la consola apunta al iframe de `/id/` servido por el plugin
+ * `identityVaultDev` (solo `npm run dev`). En producción usa id.dotrino.com.
+ * `?vault=` sigue valiendo para apuntar a otro origen en local.
  *
- * Solo se acepta si esta página se está sirviendo desde localhost. Es importante: sin ese
- * cerrojo, un enlace del tipo `vault.dotrino.com/dispositivos?vault=…` podría apuntar tu
- * identidad a un iframe ajeno, que es exactamente el ataque que este proyecto evita.
+ * Solo se acepta en localhost: sin ese cerrojo, un enlace
+ * `vault.dotrino.com/dispositivos?vault=…` podría apuntar tu identidad a un
+ * iframe ajeno, que es exactamente el ataque que este proyecto evita.
  */
 function opcionesIdentidad () {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
   if (!local) return {}
-  // En localhost usamos el iframe de `/id/` (vite sirve @dotrino/identity con
-  // proxy-client actualizado). `?vault=` sigue valiendo para apuntar a otro sitio.
   const url = new URLSearchParams(location.search).get('vault') || `${location.origin}/id/`
   return { vaultUrl: url }
 }
@@ -209,7 +208,7 @@ onMounted(async () => {
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
   // (que nunca llega al servidor). Si viene, arrancamos la conexión sola.
-  const payload = extractPayload(location.hash)
+  const payload = parsePayload(location.hash)
   if (payload) { history.replaceState(null, '', location.pathname); announce(payload) }
   offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
   await refreshSelf()
@@ -273,21 +272,30 @@ const closeFlow = () => { pairError.value = ''; justPaired.value = false }
 
 /**
  * Invitación legible: compacta (`iss`+`token`) o corta (`conn`), siempre con `sn`.
- * La bóveda vigente emite `t` (cita del proxy); las formas `c`/`b`/`j` siguen valiendo.
+ * Devuelve `'old'` si v<2, `'bad'` si no se puede leer, `null` si vale.
  */
-function validInvite (o) {
-  if (!o || !o.sn) return false
-  if (o.v && o.v < 2) return false
-  return !!((o.iss && o.token) || o.conn)
+function inviteError (o) {
+  if (!o || !o.sn) return 'bad'
+  if (o.v && o.v < 2) return 'old'
+  if (!((o.iss && o.token) || o.conn)) return 'bad'
+  return null
 }
 
-/**
- * Lee la invitación con el parser COMPARTIDO (`lib/src/invite.js`): la marca de
- * formato del payload dice cómo leerlo, sin probar a ver cuál cuela.
- */
-function extractPayload (text) {
-  const o = parseInvite(text)
-  return validInvite(o) ? o : null
+function validInvite (o) {
+  return inviteError(o) === null
+}
+
+function rejectInvite (qr) {
+  const err = inviteError(qr)
+  if (!err) return false
+  msg.value = { kind: 'bad', text: err === 'old' ? t.value.pair_old : t.value.pair_bad }
+  return true
+}
+
+/** Lee una invitación con el parser compartido (`lib/src/invite.js`). */
+function parsePayload (text) {
+  if (!text) return null
+  return parseInvite(String(text).trim())
 }
 
 /**
@@ -299,7 +307,7 @@ function extractPayload (text) {
  * esa bóveda sabe hacer.
  */
 function announce (qr) {
-  if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
+  if (rejectInvite(qr)) return
   msg.value = null
   const mode = qr.m === 'adopt' ? 'adopt' : 'join'
   const account = String(qr.acct || '').slice(0, 40)
@@ -319,7 +327,7 @@ const flowAccount = ref('')
 const flowMode = ref('join')
 
 async function connect (qr, mode = 'join') {
-  if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
+  if (rejectInvite(qr)) return
   pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
   const off = id.value.onVault((e) => { if (e?.phase === 'challenge') pairCode.value = e.code })
   try {
@@ -341,7 +349,7 @@ async function connect (qr, mode = 'join') {
   } finally { off?.(); pairing.value = false; pairCode.value = '' }
 }
 
-const connectPasted = () => announce(extractPayload(pasted.value))
+const connectPasted = () => announce(parsePayload(pasted.value))
 
 function decodeImage (file) {
   return new Promise((resolve) => {
@@ -364,7 +372,7 @@ async function onFile (ev) {
   const f = ev.target.files?.[0]; if (!f) return
   const text = /^image\//.test(f.type) ? await decodeImage(f) : await f.text()
   if (!text) { msg.value = { kind: 'bad', text: t.value.no_qr }; return }
-  announce(extractPayload(text))
+  announce(parsePayload(text))
 }
 
 const scanning = ref(false)
@@ -379,7 +387,7 @@ async function scan () {
     if (raf) cancelAnimationFrame(raf)
     stream?.getTracks().forEach((x) => x.stop())
     scanning.value = false
-    if (val) announce(extractPayload(val))
+    if (val) announce(parsePayload(val))
   }
   scanStop = () => stop(null)
   const tick = () => {
