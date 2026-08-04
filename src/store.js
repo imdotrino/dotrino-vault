@@ -46,7 +46,7 @@ export function openStore (dir) {
     getNode (id) { return findNode(data.tree, id || 'root') },
     addNode (parentId, node) {
       const parent = findNode(data.tree, parentId || 'root')
-      if (!parent) throw new Error('nodo padre no encontrado: ' + parentId)
+      if (!parent) throw new Error('parent node not found: ' + parentId)
       if (!Array.isArray(parent.children)) parent.children = []
       parent.children.push(node)
       save()

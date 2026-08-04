@@ -48,7 +48,7 @@ test('sin cert `vault:admin` no se administra nada', async () => {
   for (const op of ADMIN_OPS) {
     const r = await admin.handle({ op, nonce: nonce(), ts: Date.now(), code: '111111', certNonce: 'n1' })
     assert.equal(r.ok, false, `${op} debe rechazarse`)
-    assert.match(r.error, /no autorizado/)
+    assert.match(r.error, /unauthorized/)
   }
   assert.deepEqual(desk.calls, [], 'no se tocó el mostrador ni una vez')
   assert.ok(audits.every(([op]) => op === 'rejected'), 'y todo quedó en la bitácora')
@@ -67,7 +67,7 @@ test('el nonce es obligatorio y de un solo uso (approve no se reproduce)', async
   // El mismo mensaje otra vez, dentro de la ventana de frescura: no vale.
   const dos = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
   assert.equal(dos.ok, false)
-  assert.match(dos.error, /ya se usó/)
+  assert.match(dos.error, /already used/)
   assert.equal(desk.calls.filter(([c]) => c === 'approve').length, 1, 'se aprobó UNA vez')
 })
 
@@ -87,7 +87,7 @@ test('EL LÍMITE: un admin no concede «administra» ni claves de servicio', asy
   for (const malo of [['vault:admin'], ['vault:read', 'vault:admin'], ['vault:secrets:proxy']]) {
     const r = await admin.handle({ op: 'pair', scope: malo, nonce: nonce(String(malo)) })
     assert.equal(r.ok, false, `${malo} debe rechazarse`)
-    assert.match(r.error, /en el PC/, 'y decir dónde SÍ se hace')
+    assert.match(r.error, /vault machine/, 'y decir dónde SÍ se hace')
   }
   assert.deepEqual(desk.calls, [], 'ningún emparejamiento llegó a abrirse')
   assert.ok(audits.some(([, i]) => i?.reason === 'forbidden-scope'))
@@ -103,7 +103,7 @@ test('no existen las operaciones que no se delegan', async () => {
   for (const op of ['caps', 'handover', 'secrets', 'unlock', 'remove-profile']) {
     const r = await admin.handle({ op, nonce: nonce(op.padEnd(32, 'x')) })
     assert.equal(r.ok, false)
-    assert.match(r.error, /operación inválida/)
+    assert.match(r.error, /invalid operation/)
   }
 })
 

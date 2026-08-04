@@ -95,7 +95,7 @@ test('CÓDIGO EQUIVOCADO: no se emite ningún certificado', async () => {
   await desk.handleEnroll('tok-1', payload)
 
   const wrong = String((Number(code) + 1) % 1000000).padStart(6, '0')
-  await assert.rejects(() => desk.approve(wrong), /no coincide/)
+  await assert.rejects(() => desk.approve(wrong), /does not match/)
 
   assert.equal(identity.issued.length, 0, 'la maestra NO firmó nada')
   assert.equal(sent.filter((m) => m.type === 'vault.enrolled').length, 0, 'no se envió ningún cert')
@@ -115,7 +115,7 @@ test('cliente viejo sin compromiso: se rechaza el enrolamiento con un mensaje cl
 
   await desk.handleEnroll('tok-1', { type: 'vault.enroll', data, signature })
   assert.equal(sent.at(-1).type, 'vault.error')
-  assert.match(sent.at(-1).error, /versión antigua/)
+  assert.match(sent.at(-1).error, /old pairing version/)
   assert.equal(desk.listPending().length, 0, 'no queda nada pendiente de aprobar')
 })
 
@@ -128,7 +128,7 @@ test('firma de dispositivo inválida: no pasa del ENROLL', async () => {
 
   await desk.handleEnroll('tok-1', payload)
   assert.equal(sent.at(-1).type, 'vault.error')
-  assert.match(sent.at(-1).error, /firma de dispositivo inválida/)
+  assert.match(sent.at(-1).error, /invalid device signature/)
   assert.equal(desk.listPending().length, 0)
 })
 
@@ -139,7 +139,7 @@ test('replay: un ENROLL con ts viejo se descarta', async () => {
 
   await desk.handleEnroll('tok-1', payload)
   assert.equal(sent.at(-1).type, 'vault.error')
-  assert.match(sent.at(-1).error, /vencida/)
+  assert.match(sent.at(-1).error, /stale request/)
 })
 
 test('token/sesión que no son de este emparejamiento', async () => {
@@ -148,11 +148,11 @@ test('token/sesión que no son de este emparejamiento', async () => {
 
   const ajeno = await deviceEnroll({ ...qr, token: 'otro-token' })
   await desk.handleEnroll('tok-1', ajeno.payload)
-  assert.match(sent.at(-1).error, /token de emparejamiento inválido/)
+  assert.match(sent.at(-1).error, /pairing token/)
 
   const snMalo = await deviceEnroll({ ...qr, sn: 'otro-sn' })
   await desk.handleEnroll('tok-1', snMalo.payload)
-  assert.match(sent.at(-1).error, /sesión inválida/)
+  assert.match(sent.at(-1).error, /invalid session/)
 })
 
 test('rechazar: el dispositivo se entera y deja de estar pendiente', async () => {
@@ -191,5 +191,5 @@ test('un solo emparejamiento a la vez: abrir otro invalida el anterior', async (
 
   const { payload } = await deviceEnroll(primero)
   await desk.handleEnroll('tok-1', payload)
-  assert.match(sent.at(-1).error, /token de emparejamiento inválido/)
+  assert.match(sent.at(-1).error, /pairing token/)
 })

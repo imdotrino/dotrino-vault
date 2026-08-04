@@ -26,7 +26,7 @@ export function openSecretsStore (dir) {
   const save = () => writeJson(file, data, atRest)
 
   const assertNs = (ns) => {
-    if (!isValidSecretsNs(ns)) throw new Error('namespace inválido (usa [a-z0-9-]{1,32}, p.ej. "proxy")')
+    if (!isValidSecretsNs(ns)) throw new Error('invalid namespace (use [a-z0-9-]{1,32}, e.g. "proxy")')
   }
 
   return {
@@ -37,9 +37,9 @@ export function openSecretsStore (dir) {
     },
     set (ns, key, value) {
       assertNs(ns)
-      if (!KEY_RE.test(String(key || ''))) throw new Error('clave inválida (usa MAYUSCULAS_CON_GUION_BAJO, p.ej. TURN_KEY_ID)')
-      if (typeof value !== 'string' || !value) throw new Error('el valor debe ser un string no vacío')
-      if (value.length > MAX_VALUE_LEN) throw new Error(`valor demasiado largo (máx ${MAX_VALUE_LEN})`)
+      if (!KEY_RE.test(String(key || ''))) throw new Error('invalid key (use UPPERCASE_WITH_UNDERSCORES, e.g. TURN_KEY_ID)')
+      if (typeof value !== 'string' || !value) throw new Error('value must be a non-empty string')
+      if (value.length > MAX_VALUE_LEN) throw new Error(`value too long (max ${MAX_VALUE_LEN})`)
       if (!data.ns[ns]) data.ns[ns] = {}
       data.ns[ns][key] = value
       save()

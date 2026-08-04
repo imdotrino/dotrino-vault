@@ -66,12 +66,12 @@ function handleProfile (req) {
   switch (req.op) {
     case 'list': return {}
     case 'add': { const id = 'p' + (++pcount); model.profiles.push({ id, name: req.name || '', protected: false, locked: false, createdAt: Date.now(), fingerprint: 'fp-' + id }); model.secrets[id] = {}; model.devices[id] = { issued: [], revoked: [] }; return { done: 'perfil creado: ' + (req.name || id) } }
-    case 'rm': { if (model.profiles.length <= 1) throw new Error('no se puede borrar el único perfil'); const p = find(t); if (p.protected && p.locked) throw new Error('perfil bloqueado'); model.profiles = model.profiles.filter((x) => x.id !== t); delete model.secrets[t]; delete model.devices[t]; if (model.current === t) model.current = model.profiles[0].id; return { done: 'perfil borrado: ' + (p.name || t) } }
-    case 'rename': { const p = find(t); if (p.protected && p.locked) throw new Error('perfil bloqueado'); p.name = req.name; return { done: 'renombrado' } }
+    case 'rm': { if (model.profiles.length <= 1) throw new Error('no se puede borrar el único perfil'); const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); model.profiles = model.profiles.filter((x) => x.id !== t); delete model.secrets[t]; delete model.devices[t]; if (model.current === t) model.current = model.profiles[0].id; return { done: 'perfil borrado: ' + (p.name || t) } }
+    case 'rename': { const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); p.name = req.name; return { done: 'renombrado' } }
     case 'use': { model.current = t; return { done: 'activo' } }
-    case 'unlock': { const p = find(t); if (p.protected) { if (req.password !== 'secret') throw new Error('contraseña incorrecta'); p.locked = false } return { done: 'desbloqueado' } }
+    case 'unlock': { const p = find(t); if (p.protected) { if (req.password !== 'secret') throw new Error('wrong password'); p.locked = false } return { done: 'desbloqueado' } }
     case 'lock': { const p = find(t); if (p.protected) p.locked = true; return { done: 'bloqueado' } }
-    case 'password-set': { const p = find(t); if (p.protected && p.locked) throw new Error('perfil bloqueado'); p.protected = true; p.locked = false; return { done: 'contraseña guardada' } }
+    case 'password-set': { const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); p.protected = true; p.locked = false; return { done: 'contraseña guardada' } }
     case 'password-rm': { const p = find(t); p.protected = false; p.locked = false; return { done: 'contraseña quitada' } }
     default: throw new Error('op desconocida')
   }
@@ -164,9 +164,9 @@ test('candado: unlock exige la contraseña; rename bloqueado falla', async () =>
   assert.equal(d.profiles[0].locked, true)
 
   // editar bloqueada => error propagado del daemon
-  await assert.rejects(() => vc.renameProfile('p1', 'X'), /bloqueado/)
+  await assert.rejects(() => vc.renameProfile('p1', 'X'), /profile locked/)
 
-  await assert.rejects(() => vc.unlockProfile('p1', 'mala'), /incorrecta/)
+  await assert.rejects(() => vc.unlockProfile('p1', 'mala'), /wrong password/)
   d = await vc.unlockProfile('p1', 'secret')
   assert.equal(d.done, 'desbloqueado')
 

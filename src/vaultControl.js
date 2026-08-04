@@ -149,7 +149,7 @@ async function profileOp (op, { profile, name, password } = {}) {
   writeReq(F.profileReq, { op, ...extra }, profile)
   signalOrCleanup('SIGUSR2', [F.profileReq])
   const d = await waitFor(F.profilesList)
-  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
   if (d.error) throw coded(d.error, d.code) // p.ej. MASTER_WITH_MEMBERS (freno D12)
   return d // { profiles:[{id,name,protected,locked,current,fingerprint,iss,createdAt}], current, done? }
 }
@@ -189,7 +189,7 @@ export async function snapshot (profile) {
  */
 export async function listDevices (profile) {
   const { devices } = await snapshot(profile)
-  if (!devices) throw coded('el daemon no respondió', 'NO_REPLY')
+  if (!devices) throw coded('the daemon did not reply', 'NO_REPLY')
   const issued = devices.issued || devices.active || devices.delegations || []
   const withIds = await Promise.all(issued.map(async (d) => ({
     ...d, deviceId: d.sub ? await deviceIdOf(d.sub) : '????-????'
@@ -213,7 +213,7 @@ export async function revokeDevice (nonce, profile) {
 /** Scopes→[claves] del perfil (NUNCA los valores; el daemon no los expone). */
 export async function listSecrets (profile) {
   const { secrets } = await snapshot(profile)
-  if (!secrets) throw coded('el daemon no respondió', 'NO_REPLY')
+  if (!secrets) throw coded('the daemon did not reply', 'NO_REPLY')
   return secrets.ns || {}
 }
 
@@ -225,8 +225,8 @@ export async function setSecret (ns, key, value, profile) {
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
-  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
-  if (!(d.ns?.[ns] || []).includes(key)) throw coded('el daemon no aplicó el cambio (revisa los logs del servicio)', 'NOT_APPLIED')
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  if (!(d.ns?.[ns] || []).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   return d.ns
 }
 
@@ -238,8 +238,8 @@ export async function deleteSecret (ns, key, profile) {
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
-  if (!d) throw coded('el daemon no respondió', 'NO_REPLY')
-  if ((d.ns?.[ns] || []).includes(key)) throw coded('el daemon no borró la variable (revisa los logs del servicio)', 'NOT_DELETED')
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  if ((d.ns?.[ns] || []).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
   return d.ns
 }
 
@@ -292,7 +292,7 @@ export async function startPairing ({ profile, service } = {}) {
       return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, code, b64: code, profile: pr.profile || null, profileName: pr.profileName || '' }
     }
   }
-  throw coded('el daemon no inició el emparejamiento', 'PAIR_FAILED')
+  throw coded('the daemon did not start the pairing', 'PAIR_FAILED')
 }
 
 /** Dispositivo pendiente de aprobar (el que se conectó con el QR), o null. */

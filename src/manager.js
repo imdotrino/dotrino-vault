@@ -72,7 +72,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
 
   const get = (id) => {
     const v = running.get(id)
-    if (!v) throw new Error('el perfil no está abierto: ' + id)
+    if (!v) throw new Error('profile is not open: ' + id)
     return v
   }
 
@@ -120,7 +120,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
         ])
         assertCanRemove({ isMaster: soyMaster, memberCount: (acta?.members || []).length, name: profiles.get(id)?.name || id })
       } else {
-        log('[vault] perfil %s no está abierto: se borra sin poder comprobar su acta', id)
+        log('[vault] profile %s is not open: deleting without being able to check its record', id)
       }
       const res = profiles.remove(id) // valida: no es el único, no está bloqueado
       try { running.get(id)?.close() } catch (_) {}

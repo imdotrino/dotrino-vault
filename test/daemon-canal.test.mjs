@@ -70,7 +70,7 @@ test('una segunda bóveda sobre los MISMOS datos no arranca', async () => {
   primera.p.kill()
 
   assert.equal(code, 3, 'sale con error, no se pone a competir')
-  assert.match(segunda.log(), /Ya hay una bóveda corriendo/i)
+  assert.match(segunda.log(), /vault is already running/i)
   assert.match(segunda.log(), /DOTRINO_VAULT_DIR/, 'y dice cómo tener dos a propósito')
   fs.rmSync(dir, { recursive: true, force: true })
 })

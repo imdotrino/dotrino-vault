@@ -58,7 +58,7 @@ test('resolve acepta id o nombre, y rechaza el ambiguo en vez de adivinar', () =
   assert.equal(p.resolve(a.id), a.id)
   p.add('Trabajo')
   assert.throws(() => p.resolve('Trabajo'), /hay 2 perfiles/)
-  assert.throws(() => p.resolve('nope'), /no existe/)
+  assert.throws(() => p.resolve('nope'), /does not exist/)
 })
 
 test('sin contraseña, el perfil nunca está bloqueado', () => {
@@ -77,7 +77,7 @@ test('la contraseña bloquea, y la correcta desbloquea', async () => {
 
   p.lock(id)
   assert.equal(p.isLocked(id), true)
-  await assert.rejects(() => p.unlock(id, 'mala'), /incorrecta/)
+  await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   assert.equal(p.isLocked(id), true)
   await p.unlock(id, 'secreta')
   assert.equal(p.isLocked(id), false)
@@ -107,15 +107,15 @@ test('la contraseña no se guarda: solo un verificador con sal', async () => {
   assert.ok(entry.pwd.salt && entry.pwd.verifier && entry.pwd.iter >= 300000)
 })
 
-test('con el perfil bloqueado no se puede editar ni quitar la contraseña', async () => {
+test('con el profile locked no se puede editar ni quitar la contraseña', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
   p.add('Otro') // que borrar no choque antes con «no se puede borrar el único perfil»
   await p.setPassword(id, 'secreta')
   p.lock(id)
-  assert.throws(() => p.rename(id, 'otro'), /bloqueado/)
-  assert.throws(() => p.removePassword(id), /bloqueado/)
-  assert.throws(() => p.remove(id), /bloqueado/)
+  assert.throws(() => p.rename(id, 'otro'), /profile locked/)
+  assert.throws(() => p.removePassword(id), /profile locked/)
+  assert.throws(() => p.remove(id), /profile locked/)
   await p.unlock(id, 'secreta')
   assert.equal(p.rename(id, 'otro').name, 'otro')
 })
@@ -140,7 +140,7 @@ test('borrar un perfil elimina su dir, y el último no se puede borrar', () => {
   p.remove(b.id)
   assert.ok(!fs.existsSync(bdir), 'se lleva la maestra del perfil')
   assert.equal(p.list().length, 1)
-  assert.throws(() => p.remove(p.list()[0].id), /único perfil/)
+  assert.throws(() => p.remove(p.list()[0].id), /only profile/)
 })
 
 test('borrar el perfil activo pasa el activo a otro', () => {
@@ -157,12 +157,12 @@ test('tras 5 fallos, el freno de fuerza bruta hace esperar', async () => {
   const { id } = p.migrate()
   await p.setPassword(id, 'secreta')
   p.lock(id)
-  for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /incorrecta/)
+  for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   await assert.rejects(() => p.unlock(id, 'secreta'), /demasiados intentos/, 'ni con la buena, hasta que pase la espera')
 })
 
 test('la contraseña exige un mínimo', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
-  await assert.rejects(() => p.setPassword(id, '123'), /al menos 4/)
+  await assert.rejects(() => p.setPassword(id, '123'), /at least 4/)
 })

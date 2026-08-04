@@ -268,7 +268,7 @@ test('el scope corta el acceso a otro namespace', async () => {
   vault.setSecret('geo', 'DB_PASSWORD', 'nope')
   await assert.rejects(
     fetchNsWithSavedCert('geo'),
-    /no autorizado: scope/
+    /unauthorized: scope/
   )
 })
 
@@ -277,7 +277,7 @@ test('un cert revocado deja de poder leer', async () => {
   const mine = issued.find((d) => d.label === 'servicio:proxy')
   assert.ok(mine, 'el servicio enrolado aparece en delegations')
   await vault.revokeDevice(mine.nonce)
-  await assert.rejects(fetchNsWithSavedCert('proxy'), /no autorizado: revoked/)
+  await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)
 })
 
 async function fetchSecretsFrom (dir) {

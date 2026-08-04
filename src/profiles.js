@@ -76,7 +76,7 @@ export function openProfiles (root = dataDir()) {
 
   function assertExists (id) {
     const p = find(id)
-    if (!p) throw new Error('el perfil no existe: ' + id)
+    if (!p) throw new Error('profile does not exist: ' + id)
     return p
   }
 
@@ -98,7 +98,7 @@ export function openProfiles (root = dataDir()) {
       const hits = data.profiles.filter((p) => (p.name || '').toLowerCase() === needle)
       if (hits.length === 1) return hits[0].id
       if (hits.length > 1) throw new Error(`hay ${hits.length} perfiles llamados "${ref}"; usa su id (dotrino-vault profile ls)`)
-      throw new Error('el perfil no existe: ' + ref)
+      throw new Error('profile does not exist: ' + ref)
     },
 
     /**
@@ -168,7 +168,7 @@ export function openProfiles (root = dataDir()) {
     /** Borra el perfil y TODOS sus datos (incluida su maestra). Irreversible. */
     remove (id) {
       const p = assertExists(id)
-      if (data.profiles.length <= 1) throw new Error('no se puede borrar el único perfil')
+      if (data.profiles.length <= 1) throw new Error('cannot delete the only profile')
       api.assertUnlocked(id)
       data.profiles = data.profiles.filter((x) => x.id !== id)
       if (data.current === id) data.current = data.profiles[0].id
@@ -183,7 +183,7 @@ export function openProfiles (root = dataDir()) {
     isProtected: (id) => !!find(id)?.pwd,
     isLocked: (id) => { const p = find(id); return !!p?.pwd && !unlocked.has(id) },
     assertUnlocked (id) {
-      if (api.isLocked(id)) throw new Error('perfil bloqueado: desbloquéalo con tu contraseña (dotrino-vault unlock)')
+      if (api.isLocked(id)) throw new Error('profile locked: unlock it with your password (dotrino-vault unlock)')
     },
 
     async unlock (id, password) {
@@ -199,7 +199,7 @@ export function openProfiles (root = dataDir()) {
       if (proof !== p.pwd.verifier) {
         p.tries = { n: tries.n + 1, at: Date.now() }
         save()
-        throw new Error('contraseña incorrecta')
+        throw new Error('wrong password')
       }
       delete p.tries
       save()
@@ -213,7 +213,7 @@ export function openProfiles (root = dataDir()) {
     async setPassword (id, password) {
       const p = assertExists(id)
       api.assertUnlocked(id)
-      if (!password || String(password).length < 4) throw new Error('la contraseña debe tener al menos 4 caracteres')
+      if (!password || String(password).length < 4) throw new Error('password must be at least 4 characters')
       const salt = b64(crypto.getRandomValues(new Uint8Array(16)))
       p.pwd = { v: 1, salt, iter: PWD_ITER, verifier: await derivePwd(password, salt, PWD_ITER) }
       delete p.tries

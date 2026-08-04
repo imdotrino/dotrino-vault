@@ -46,8 +46,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // La migración verifica antes de reemplazar: si algo falla, el original queda intacto.
   try {
     const r = migrateFile(path.join(dir, 'identity.json'), machineKey(dir))
-    if (r === 'migrado') log('[vault] identidad cifrada en reposo (ligada a esta máquina)')
-  } catch (e) { log('[vault] no se pudo cifrar la identidad en reposo:', e.message) }
+    if (r === 'migrado') log('[vault] identity encrypted at rest (bound to this machine)')
+  } catch (e) { log('[vault] could not encrypt the identity at rest:', e.message) }
   const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
   if (!identity.me?.publickey) await identity.setMyNickname('')
   // CAMINO A: este perfil nació para adoptar la cuenta de un aparato. La identidad se crea
@@ -55,7 +55,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // acepte cambiar su acta recién nacida por la que traiga el dispositivo. Sin la marca,
   // adoptar sería pisar una cuenta con datos y se rechaza — que es lo correcto por defecto.
   if (forAdoption) {
-    try { await identity.prepareForAdoption() } catch (e) { log('[vault] no se pudo preparar el perfil para adoptar:', e.message) }
+    try { await identity.prepareForAdoption() } catch (e) { log('[vault] could not prepare the profile for adoption:', e.message) }
   }
 
   const store = openStore(dir)
@@ -72,7 +72,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   const reply = (to, obj) => {
-    try { client.send(to, obj) } catch (e) { log('[vault] no se pudo responder:', e.message) }
+    try { client.send(to, obj) } catch (e) { log('[vault] could not reply:', e.message) }
   }
 
   // FRESCURA anti-replay: toda petición firmada debe traer `data.ts` dentro de una
@@ -97,7 +97,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const FRESH_WINDOW_MS = 5 * 60 * 1000
   const isFresh = (d) => typeof d?.ts === 'number' && Math.abs(Date.now() - d.ts) <= FRESH_WINDOW_MS
-  const staleReply = (from) => reply(from, { type: MSG.ERROR, error: 'petición vencida: ts fuera de la ventana ±5 min (posible replay, o el reloj del dispositivo está desfasado)' })
+  const staleReply = (from) => reply(from, { type: MSG.ERROR, error: 'stale request: ts outside the ±5 min window (possible replay, or the device clock is off)' })
 
   // --- ENROLL / aprobación / revocación: núcleo COMPARTIDO (lib/src/enroll.js) ---
   // El mismo módulo lo usan «este dispositivo es bóveda» (@dotrino/vault) y la copia
@@ -145,9 +145,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) { audit('rejected', { what: 'sign', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
+    if (!chk.ok) { audit('rejected', { what: 'sign', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
     const toSign = p.data?.payload
-    if (toSign == null) return reply(from, { type: MSG.ERROR, error: 'data.payload requerido' })
+    if (toSign == null) return reply(from, { type: MSG.ERROR, error: 'data.payload required' })
     const { signature, publickey } = await identity.signData(toSign)
     audit('sign', { device: await deviceIdOf(chk.device) })
     reply(from, { type: MSG.SIGNED, signature, publickey, device: chk.device })
@@ -159,7 +159,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
     const id = p.data?.id || 'root'
     reply(from, { type: MSG.DATA, id, node: store.getNode(id) })
   }
@@ -169,7 +169,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleStore (from, p) {
     const d = p.data
     if (!d || typeof d.method !== 'string' || !threads.methods[d.method]) {
-      return reply(from, { type: MSG.ERROR, error: 'store: método inválido' })
+      return reply(from, { type: MSG.ERROR, error: 'store: invalid method' })
     }
     if (!isFresh(d)) return staleReply(from)
     // CANDADO del perfil (contraseña opcional): solo frena EDITAR el perfil. Un
@@ -177,14 +177,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // lo que no puede es reescribir quién sos mientras el perfil está bloqueado.
     if (PROFILE_EDIT_METHODS.has(d.method) && isLocked()) {
       audit('rejected', { what: 'store', method: d.method, reason: 'locked' })
-      return reply(from, { type: MSG.ERROR, error: 'perfil bloqueado: desbloquéalo en el PC del vault (dotrino-vault unlock) para editarlo' })
+      return reply(from, { type: MSG.ERROR, error: 'profile locked: unlock it on the vault machine (dotrino-vault unlock) to edit it' })
     }
     const revoked = await revocationSet()
     let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
       chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
     }
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
     try {
       // CIFRADO de punta a punta con la clave de contenido del perfil: el proxy transporta
       // pero no ve nada de lo que el usuario guarda. Si el dispositivo mandó `enc`, se abre
@@ -193,7 +193,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       let cek = null
       if (d.enc) {
         cek = await identity.contentKey?.().catch(() => null)
-        if (!cek) return reply(from, { type: MSG.ERROR, error: 'store: esta bóveda no tiene la clave de contenido del perfil' })
+        if (!cek) return reply(from, { type: MSG.ERROR, error: 'store: this vault does not hold the profile content key' })
         args = JSON.parse(await identity.openContent(d.enc))
       }
       const result = await threads.methods[d.method](args)
@@ -210,7 +210,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason })
+    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -239,13 +239,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleRenew (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) { audit('rejected', { what: 'renew', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
+    if (!chk.ok) { audit('rejected', { what: 'renew', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
     const prev = (issued || []).find((x) => x.nonce === p.cert.nonce)
     const { cert } = await identity.signDelegation(p.cert.sub, p.cert.scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
     audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '' })
-    log(`[vault] cert renovado para ${await deviceIdOf(p.cert.sub)} (30 días)`)
+    log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} (30 days)`)
     reply(from, { type: MSG.RENEWED, cert })
   }
 
@@ -259,26 +259,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleSecrets (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'secrets', reason: 'stale' }); return staleReply(from) }
     const ns = p.data?.ns
-    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: namespace inválido' })
-    if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: falta ek (llave efímera del solicitante)' })
+    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
+    if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) { audit('rejected', { what: 'secrets', ns, reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'no autorizado: ' + chk.reason }) }
+    if (!chk.ok) { audit('rejected', { what: 'secrets', ns, reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
     // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
     // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
     // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
     const acta = (await identity.profileActa?.().catch(() => null))?.acta
     if (acta && !Acta.memberCanReadSecrets(acta, chk.device, ns)) {
       audit('rejected', { what: 'secrets', ns, reason: 'cn' })
-      return reply(from, { type: MSG.ERROR, error: `no autorizado: cn — el acta no reconoce a este miembro como el servicio «${ns}»` })
+      return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
     }
     let enc
     try {
       enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns) } })
     } catch (e) {
-      return reply(from, { type: MSG.ERROR, error: 'secrets: ek inválida' })
+      return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
     }
     const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
     const { signature } = await identity.signData(body)
@@ -341,7 +341,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         vistas.add(x.sub)
         return true
       })
-    } catch (e) { return log('[vault] no se pudo listar a quién avisar:', e.message) }
+    } catch (e) { return log('[vault] could not list who to notify:', e.message) }
     if (!destinos.length) return
 
     const body = { op: 'secrets.changed', ns, ts: Date.now() }
@@ -350,14 +350,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       try { client.sendByPubkey(d.sub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
     }
     audit('secrets.changed', { ns, avisados: destinos.length })
-    log(`[vault] configuración de «${ns}» cambió: avisados ${destinos.length} agente(s)`)
+    log(`[vault] config for "${ns}" changed: notified ${destinos.length} agent(s)`)
   }
 
   function programarAviso (ns) {
     clearTimeout(avisosPendientes.get(ns))
     const t = setTimeout(() => {
       avisosPendientes.delete(ns)
-      avisarCambio(ns).catch((e) => log('[vault] aviso de cambio falló:', e.message))
+      avisarCambio(ns).catch((e) => log('[vault] change notice failed:', e.message))
     }, AVISO_AGRUPA_MS)
     t.unref?.()
     avisosPendientes.set(ns, t)

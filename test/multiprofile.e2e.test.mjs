@@ -79,11 +79,11 @@ test('un dispositivo de un perfil no puede usar el otro perfil', async () => {
   // Su cert es válido… pero pidiéndoselo a la maestra del OTRO perfil.
   await assert.rejects(
     () => store({ ...dev, master: mgr.get(b.id).master }, 'getStats'),
-    /no autorizado/
+    /unauthorized/
   )
 })
 
-test('con el perfil bloqueado: NO se edita el perfil, pero sí se firma y se guarda', async () => {
+test('con el profile locked: NO se edita el perfil, pero sí se firma y se guarda', async () => {
   const [a] = mgr.list()
   const vault = mgr.get(a.id)
   const dev = await pair(vault)
@@ -96,7 +96,7 @@ test('con el perfil bloqueado: NO se edita el perfil, pero sí se firma y se gua
   mgr.profiles.lock(a.id)
 
   // Bloqueado: editar el perfil se rechaza y el dato NO cambia.
-  await assert.rejects(() => store(dev, 'profileSet', { me: { nickname: 'Hackeado' } }), /bloqueado/)
+  await assert.rejects(() => store(dev, 'profileSet', { me: { nickname: 'Hackeado' } }), /profile locked/)
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
   // …pero leer el perfil, guardar contenido de las apps y FIRMAR siguen
@@ -106,7 +106,7 @@ test('con el perfil bloqueado: NO se edita el perfil, pero sí se firma y se gua
   await store(dev, 'appendMessage', { threadKey: 'chat', entry: { id: 'x', text: 'hola' } })
   await store(dev, 'recordOpen', { appId: 'chat' })
   const signed = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
-  assert.ok(signed.signature, 'la maestra sigue firmando con el perfil bloqueado')
+  assert.ok(signed.signature, 'la maestra sigue firmando con el profile locked')
   assert.equal(signed.publickey, vault.master)
 
   // Desbloqueado: se vuelve a poder editar.

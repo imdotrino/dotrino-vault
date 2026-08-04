@@ -36,7 +36,7 @@ function waitFor (client, predicate, timeoutMs = 30000) {
     const off = client.on('message', (_from, payload) => {
       if (payload && typeof payload === 'object' && predicate(payload)) { cleanup(); resolve(payload) }
     })
-    const t = setTimeout(() => { cleanup(); reject(new Error('timeout esperando respuesta del vault')) }, timeoutMs)
+    const t = setTimeout(() => { cleanup(); reject(new Error('timeout waiting for the vault response')) }, timeoutMs)
     const cleanup = () => { off(); clearTimeout(t) }
   })
 }
@@ -51,7 +51,7 @@ function waitFor (client, predicate, timeoutMs = 30000) {
  * @returns {Promise<{ device, cert, iss:string }>}  GUARDAR `device` (incluye la privada) + `cert`. `iss` = qr.iss verificado.
  */
 export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeoutMs = 180000 } = {}) {
-  if (!qr?.iss || !qr?.proxy || !qr?.token || !qr?.sn) throw new Error('qr inválido (v2): faltan iss/proxy/token/sn')
+  if (!qr?.iss || !qr?.proxy || !qr?.token || !qr?.sn) throw new Error('invalid qr (v2): missing iss/proxy/token/sn')
   const client = await freshClient({ proxyUrl: qr.proxy, dir })
   try {
     const device = await makeDeviceKey({ label })
@@ -77,7 +77,7 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
           cleanup(); reject(new Error(p.error))
         }
       })
-      const t = setTimeout(() => { cleanup(); reject(new Error('timeout esperando la aprobación en el vault')) }, approveTimeoutMs)
+      const t = setTimeout(() => { cleanup(); reject(new Error('timeout waiting for approval at the vault')) }, approveTimeoutMs)
       const cleanup = () => { off(); clearTimeout(t) }
     })
     client.sendByPubkey(qr.iss, { type: MSG.ENROLL, data, signature })
@@ -85,9 +85,9 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
 
     // VALIDACIÓN ESTRICTA antes de persistir (cierra inyección de cert / sustitución de maestra).
     const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey })
-    if (!v.ok) throw new Error('cert inválido: ' + v.reason)
-    if (res.cert.iss !== qr.iss) throw new Error('cert firmado por una maestra distinta a la que viste (posible proxy malicioso)')
-    if (res.cert.sub !== device.publickey) throw new Error('cert emitido para otro dispositivo')
+    if (!v.ok) throw new Error('invalid cert: ' + v.reason)
+    if (res.cert.iss !== qr.iss) throw new Error('cert signed by a master other than the one you saw (possible malicious proxy)')
+    if (res.cert.sub !== device.publickey) throw new Error('cert issued for a different device')
     // OJO: devolvemos qr.iss (la maestra que el usuario VIO), NO res.iss.
     return { device, cert: res.cert, iss: qr.iss }
   } finally { client.close() }

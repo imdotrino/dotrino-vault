@@ -1,6 +1,7 @@
 # Consola remota de la bóveda — plan de diseño
 
-> Estado: **PROPUESTO**, sin implementar. Complementa `acta-de-perfil.md` (el modelo) y
+> Estado: **F1–F3 IMPLEMENTADAS** (capacidad, operaciones remotas y avisos, con pruebas).
+> Faltan F4 (datos sensibles) y F5 (la interfaz). Complementa `acta-de-perfil.md` (el modelo) y
 > `pairing-protocol.md` (el emparejamiento endurecido). Si hay conflicto, mandan esos dos.
 
 ## 1. Qué se quiere
@@ -56,10 +57,13 @@ reconozcas el `deviceId`, y el aviso a todos los dispositivos (§5).
 - `SCOPE_TO_CAP` en `lib/src/enroll.js:55` suma `'vault:admin': 'admin'`.
 - **Reglas de forma** (validación del acta, en `@dotrino/identity/acta` — un acta que las
   incumpla **no valida**, como ya pasa con `secretos-sin-cn`):
-  - `admin` solo en miembros con **`cn: null`**: un servicio nunca administra
-    (`admin-con-cn`).
+  - `admin` solo en miembros con **`cn: null`**: un servicio nunca administra. No hace
+    falta una regla nueva — al no estar en `SERVICE_CAPS`, un acta que se la dé a un
+    miembro con CN falla con el `servicio-con-capacidades-de-dispositivo` de siempre.
   - `admin` **no implica** `sign`/`store`/`read`; son ortogonales.
   - El **master siempre puede todo** sin llevar `admin` en la lista.
+- `PAIRED_CAPS` (nuevo) es lo que recibe un recién emparejado: `sign`/`store`/`read`, sin
+  `admin`. La génesis nace con eso mismo.
 - **`admin` no se emparejaba: se concede.** No hay `dotrino-vault pair --admin`. Un
   dispositivo entra normal y después, **en el PC**, `dotrino-vault caps <ID> +admin`. Así
   el QR que circula nunca puede otorgar administración, y conceder es un gesto deliberado
@@ -69,18 +73,20 @@ reconozcas el `deviceId`, y el aviso a todos los dispositivos (§5).
 
 ## 4. F2 — Las operaciones remotas
 
-Mensajes nuevos en `lib/src/protocol.js`, todos **dispositivo → bóveda** con
-`{ data, signature, cert }`, verificados como los demás: `verifyChain` contra la maestra,
-`expectedScope: 'vault:admin'`, revocación y ventana de frescura ±5 min.
+**UN** mensaje `vault.admin` con `data.op`, no seis: la regla vive en un solo sitio
+(`lib/src/admin.js`, módulo puro como `enroll.js`) y por lo tanto se comprueba una sola
+vez. Va **dispositivo → bóveda** con `{ data, signature, cert }`, verificado como los
+demás: `verifyChain` contra la maestra, `expectedScope: 'vault:admin'`, revocación y
+ventana de frescura ±5 min. Responde `vault.admin.result`.
 
-| Mensaje | `data` | Qué hace |
+| `data.op` | Campos | Qué hace |
 |---|---|---|
-| `vault.admin.pending` | `{ op, ts, nonce }` | devuelve `desk.listPending()` |
-| `vault.admin.pair` | `{ op, scope?, label?, ts, nonce }` | `desk.startPairing()`; responde la **invitación ya codificada** (`lib/src/invite.js`) para que la app pinte el QR |
-| `vault.admin.approve` | `{ op, code, deviceId, ts, nonce }` | `desk.approve(code, { deviceId })` |
-| `vault.admin.reject` | `{ op, deviceId, ts, nonce }` | `desk.reject(deviceId)` |
-| `vault.admin.revoke` | `{ op, nonce: certNonce, ts, nonce }` | `desk.revoke(certNonce)` |
-| `vault.admin.audit` | `{ op, since?, ts, nonce }` | últimas N entradas de la bitácora |
+| `pending` | `{ ts, nonce }` | devuelve `desk.listPending()` |
+| `pair` | `{ scope?, label?, ts, nonce }` | `desk.startPairing()`; responde la **invitación ya codificada** (`lib/src/invite.js`) para que la app pinte el QR |
+| `approve` | `{ code, deviceId, ts, nonce }` | `desk.approve(code, { deviceId })` |
+| `reject` | `{ deviceId, ts, nonce }` | `desk.reject(deviceId)` |
+| `revoke` | `{ certNonce, ts, nonce }` | `desk.revoke(certNonce)` |
+| `audit` | `{ limit?, ts, nonce }` | últimas N entradas de la bitácora (tope 500) |
 
 Tres cosas que **no** son opcionales:
 

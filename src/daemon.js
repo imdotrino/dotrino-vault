@@ -42,10 +42,10 @@ function comprobarInstanciaUnica (dir) {
   const pid = Number(s?.pid)
   if (!pid || pid === process.pid) return
   try { process.kill(pid, 0) } catch (_) { return } // no existe: el candado es de un muerto
-  console.error('Ya hay una bóveda corriendo sobre estos datos (proceso %d).', pid)
-  console.error('  datos: %s', dir)
-  console.error('Dos bóvedas sobre el mismo directorio se pisan: párá la otra, o usa')
-  console.error('DOTRINO_VAULT_DIR para darle a esta un directorio propio.')
+  console.error('A vault is already running on this data (process %d).', pid)
+  console.error('  data: %s', dir)
+  console.error('Two vaults on the same directory step on each other: stop the other one,')
+  console.error('or use DOTRINO_VAULT_DIR to give this one its own directory.')
   process.exit(3)
 }
 
@@ -91,7 +91,7 @@ export async function runDaemon () {
     try {
       const id = req?.profile ? mgr.resolve(req.profile) : mgr.currentId()
       return { id, vault: mgr.get(id) }
-    } catch (e) { console.error('[vault] perfil inválido en la petición:', e.message); return null }
+    } catch (e) { console.error('[vault] invalid profile in the request:', e.message); return null }
   }
   const targetOf = (req) => resolveTarget(req)?.vault || null
 
@@ -139,7 +139,7 @@ export async function runDaemon () {
         const cur = readJsonSafe(pairFile)
         if (cur?.qr?.token === tok) rm(pairFile)
       }, expiresInMs + 1000).unref?.()
-      console.log('[vault] emparejamiento iniciado (válido %d min)', expiresInMs / 60000)
+      console.log('[vault] pairing started (valid for %d min)', expiresInMs / 60000)
     } catch (e) {
       console.error('[vault] no se pudo iniciar emparejamiento:', e.message)
     }
@@ -175,7 +175,7 @@ export async function runDaemon () {
       case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
       case 'password-set': { await mgr.profiles.setPassword(ref(), req.password); return { done: 'contraseña guardada' } }
       case 'password-rm': { mgr.profiles.removePassword(ref()); return { done: 'contraseña quitada' } }
-      default: throw new Error('operación de perfil desconocida: ' + req.op)
+      default: throw new Error('unknown profile operation: ' + req.op)
     }
   }
 
@@ -186,7 +186,7 @@ export async function runDaemon () {
         try {
           const vault = targetOf(appr)
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile); console.log('[vault] aprobado %s', r.deviceId)
-        } catch (e) { console.error('[vault] aprobación falló:', e.message) }
+        } catch (e) { console.error('[vault] approval failed:', e.message) }
         rm(approveReqFile)
       }
       const rej = readJsonSafe(rejectReqFile)
@@ -200,13 +200,13 @@ export async function runDaemon () {
         rm(path.join(dir, 'caps-request.json'))
         try {
           await targetOf(capsReq)?.setCaps(capsReq.pub, capsReq.caps)
-          console.log('[vault] permisos actualizados: %s', capsReq.caps.join(', ') || '(ninguno)')
-        } catch (e) { console.error('[vault] no se pudieron cambiar los permisos:', e.message) }
+          console.log('[vault] permissions updated: %s', capsReq.caps.join(', ') || '(ninguno)')
+        } catch (e) { console.error('[vault] could not change permissions:', e.message) }
       }
       const req = readJsonSafe(revokeReqFile)
       if (req?.nonce) {
-        try { await targetOf(req)?.revokeDevice(req.nonce); console.log('[vault] revocado nonce=%s', req.nonce) }
-        catch (e) { console.error('[vault] revocación falló:', e.message) }
+        try { await targetOf(req)?.revokeDevice(req.nonce); console.log('[vault] revoked nonce=%s', req.nonce) }
+        catch (e) { console.error('[vault] revocation failed:', e.message) }
         rm(revokeReqFile)
       }
       // Secretos de servicios: `secret set/rm` del CLI. El archivo con el valor
@@ -216,9 +216,9 @@ export async function runDaemon () {
         rm(secretReqFile)
         try {
           const vault = targetOf(sec)
-          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value); console.log('[vault] secreto guardado: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secreto borrado: %s/%s', sec.ns, sec.key) }
-        } catch (e) { console.error('[vault] secreto falló:', e.message) }
+          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+        } catch (e) { console.error('[vault] secret failed:', e.message) }
       }
       // Perfiles / candado.
       const preq = readJsonSafe(profileReqFile)
@@ -228,7 +228,7 @@ export async function runDaemon () {
         try { extra = await handleProfileRequest(preq) }
         // `code`: la TUI es bilingüe y traduce por código (un freno como el D12 tiene
         // que leerse en el idioma de quien lo lee, no en el del daemon).
-        catch (e) { extra = { error: e.message, ...(e.code ? { code: e.code } : {}) }; console.error('[vault] perfil: %s', e.message) }
+        catch (e) { extra = { error: e.message, ...(e.code ? { code: e.code } : {}) }; console.error('[vault] profile: %s', e.message) }
         dumpProfiles(extra)
       } else {
         dumpProfiles()
@@ -243,7 +243,7 @@ export async function runDaemon () {
       // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
       try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
     } catch (e) {
-      console.error('[vault] error en señal de control:', e.message)
+      console.error('[vault] error handling a control signal:', e.message)
     }
   }
 
@@ -272,14 +272,14 @@ export async function runDaemon () {
       // atiende cuando el archivo YA parsea; si no, lo recoge el repaso de 2 s.
       if (readJsonSafe(pairReqFile)) await atenderEmparejamiento()
       await atenderPeticiones()
-    } catch (e) { console.error('[vault] error atendiendo una petición:', e.message) }
+    } catch (e) { console.error('[vault] error serving a request:', e.message) }
     finally { atendiendo = false }
   }
 
   try {
     fs.watch(dir, (_ev, file) => { if (!file || /-request\.json$/.test(file)) atender() })
   } catch (e) {
-    console.error('[vault] no se pudo vigilar %s (%s); se atenderá solo por repaso', dir, e.message)
+    console.error('[vault] could not watch %s (%s); will be served by polling only', dir, e.message)
   }
   const repaso = setInterval(atender, REPASO_MS)
   repaso.unref?.()
