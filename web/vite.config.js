@@ -9,10 +9,14 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
- * Sirve el iframe de identidad en `/id/` con el proxy-client del node_modules
- * (tiene `redeemPairingCode`). El vendor embebido en @dotrino/identity es 0.6.4
- * y no entiende los QR cortos de vault 0.12; id.dotrino.com tampoco, hasta que
- * se actualice el deploy de dotrino-identity.
+ * Sirve el iframe de identidad en `/id/`, contra el disco: se toca la consola y el
+ * iframe a la vez sin salir de esta máquina, y sin depender de que lo desplegado en
+ * `id.dotrino.com` vaya al día.
+ *
+ * Nació como parche —el vendor embebido en @dotrino/identity era 0.6.4, sin el
+ * `redeemPairingCode` que pide el QR corto, y el deploy tampoco lo tenía—, pero eso
+ * ya está arreglado en @dotrino/identity 0.37.1 y desplegado. Se queda como
+ * comodidad de desarrollo, no como muleta: en producción manda `id.dotrino.com`.
  */
 const identityVaultDev = {
   name: 'identity-vault-dev',
