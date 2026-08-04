@@ -264,7 +264,7 @@ async function cmdMembers () {
   if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
   if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
-  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves' }
+  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}` }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
   // misma que se enseña al emparejar y en la lista de miembros.
@@ -280,7 +280,9 @@ async function cmdMembers () {
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
     console.log('  %s  %s%s\n      %s', m.id, quien, marcas.length ? '  [' + marcas.join(' · ') + ']' : '', caps)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra')
+  console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
+  console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
   console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
 }
 
@@ -288,10 +290,13 @@ async function cmdMembers () {
 async function cmdCaps (args = []) {
   const [id, ...cambios] = args
   if (!id || !cambios.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra')
     process.exit(2)
   }
-  const NOMBRE = { firma: 'sign', guarda: 'store', lee: 'read', sign: 'sign', store: 'store', read: 'read' }
+  const NOMBRE = {
+    firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin',
+    sign: 'sign', store: 'store', read: 'read', admin: 'admin'
+  }
   const s = requireDaemon()
   const actaFile = path.join(dataDir(), 'acta.json')
   try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
@@ -580,7 +585,7 @@ function help () {
   reject <deviceId>   rechaza un dispositivo pendiente
   devices             lista dispositivos enrolados / revocados
   members             el acta del perfil: quién es tuyo y qué puede hacer
-  caps <ID> ±permiso  cambia permisos (+firma -guarda …)
+  caps <ID> ±permiso  cambia permisos (+firma -guarda +administra …)
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio

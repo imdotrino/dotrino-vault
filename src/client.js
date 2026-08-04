@@ -146,4 +146,36 @@ export async function requestStore ({ masterPubkey, proxyUrl, device, cert, meth
   } finally { client.close() }
 }
 
+/**
+ * CONSOLA REMOTA (scope `vault:admin`, docs/consola-remota.md): administrar el perfil
+ * desde un dispositivo, sin venir al PC. `op`: pending · pair · approve · reject ·
+ * revoke · audit.
+ *
+ * El `nonce` de un solo uso NO es decorativo: `approve` y `revoke` cambian estado, así
+ * que la ventana de frescura de ±5 min no basta para descartar un replay.
+ */
+export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, op, dir, ...rest } = {}) {
+  const client = await freshClient({ proxyUrl, dir })
+  try {
+    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
+    const data = { op, ...rest, publickey: device.publickey, ts: Date.now(), nonce }
+    const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+    const pending = waitFor(client, (p) => p.type === MSG.ADMIN_RESULT || p.type === MSG.ERROR)
+    client.sendByPubkey(masterPubkey, { type: MSG.ADMIN, data, signature, cert })
+    const res = await pending
+    if (res.type === MSG.ERROR) throw new Error(res.error)
+    return res.result
+  } finally { client.close() }
+}
+
+/**
+ * Verifica que un `vault.admin.event` (entró o salió alguien del perfil) viene
+ * FIRMADO por la maestra pineada. Un aviso sin firma no se muestra: si no, cualquiera
+ * podría llenar de alarmas falsas los dispositivos del usuario.
+ */
+export async function verifyAdminEvent ({ body, signature, master }) {
+  if (!body || typeof body.ev !== 'string') return false
+  return verifyDeviceSig({ publickey: master, data: body, signature })
+}
+
 export { identifyAsDevice }

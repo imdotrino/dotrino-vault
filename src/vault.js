@@ -15,7 +15,8 @@ import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
 import * as Acta from '@dotrino/identity/acta'
-import { createEnrollDesk, deviceIdOf } from '../lib/src/enroll.js'
+import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
+import { createAdminDesk } from '../lib/src/admin.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
@@ -297,6 +298,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
       if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
       if (payload.type === MSG.SECRETS) return await handleSecrets(from, payload)
+      if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -361,6 +363,60 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     avisosPendientes.set(ns, t)
   }
 
+  // --- CONSOLA REMOTA (docs/consola-remota.md) ---------------------------------
+  // Un dispositivo con cert `vault:admin` puede ADMITIR y EXPULSAR miembros sin venir
+  // al PC. No puede cambiar permisos, traspasar el mando, conceder `admin` ni tocar los
+  // secretos: esas operaciones no existen como mensaje, a propósito. Así un aparato con
+  // `admin` robado hace daño acotado y reversible (se le revoca) en vez de poder dejar
+  // al dueño fuera de su propia cuenta, que no tiene vuelta atrás.
+  /** Últimas entradas de la bitácora (JSONL), de la más reciente hacia atrás. */
+  function readActivity (limit = 100) {
+    try {
+      return fs.readFileSync(activityFile, 'utf8').split('\n').filter(Boolean).slice(-limit)
+        .map((l) => { try { return JSON.parse(l) } catch (_) { return null } }).filter(Boolean).reverse()
+    } catch (_) { return [] }
+  }
+
+  /**
+   * Avisa a TODOS los miembros de que el perfil cambió, firmado por la maestra. Sin
+   * esto, administrar a distancia sería invisible para el resto de los dispositivos —
+   * y esa visibilidad es lo que hace DETECTABLE a un admin comprometido. Va por
+   * `sendByPubkey`, así que al que está apagado le llega cuando encienda (cola 24 h).
+   */
+  async function notifyMembers (ev, info = {}) {
+    try {
+      const body = { ev, ...info, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      const { issued } = await identity.listDelegations()
+      for (const d of issued || []) {
+        if (!d.sub) continue
+        try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {}
+      }
+    } catch (e) { log('[vault] could not notify members of the change:', e.message) }
+  }
+
+  const admin = createAdminDesk({
+    desk,
+    deviceIdOf,
+    ttlMs: DEVICE_TTL_MS,
+    audit,
+    notify: notifyMembers,
+    readActivity,
+    verify: async ({ data, signature, cert }) => verifyChain({
+      data, signature, cert,
+      expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
+    })
+  })
+
+  async function handleAdmin (from, p) {
+    // La frescura se comprueba aquí (es del transporte, igual que en el resto de
+    // handlers); el resto de la regla vive en el módulo puro.
+    if (!isFresh(p.data)) return staleReply(from)
+    const r = await admin.handle(p.data, { signature: p.signature, cert: p.cert })
+    if (!r.ok) return reply(from, { type: MSG.ERROR, error: r.error })
+    reply(from, { type: MSG.ADMIN_RESULT, op: p.data.op, result: r.result })
+  }
+
   // API local de secretos (solo CLI/UI del dueño; audita cada cambio).
   function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }); programarAviso(ns) }
   function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); programarAviso(ns) } return ok }
@@ -371,7 +427,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
-    approveDevice: (code) => desk.approve(code),
+    // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
+    // dispositivos se entera de que entró alguien, venga de donde venga.
+    approveDevice: async (code) => {
+      const r = await desk.approve(code)
+      await notifyMembers('enrolled', { deviceId: r?.deviceId || null, by: 'pc' })
+      return r
+    },
     rejectDevice: (deviceId) => desk.reject(deviceId),
     setSecret, deleteSecret, listSecrets,
     listDevices: () => identity.listDelegations(),
@@ -380,8 +442,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     profileMembers: () => identity.profileMembers(),
     // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
     isMaster: () => identity.isMaster(),
-    setCaps: (pub, caps) => identity.setCaps(pub, caps),
-    revokeDevice: (nonce) => desk.revoke(nonce),
+    setCaps: async (pub, caps) => {
+      const r = await identity.setCaps(pub, caps)
+      audit('caps', { device: await deviceIdOf(pub).catch(() => null), caps })
+      await notifyMembers('caps', { deviceId: await deviceIdOf(pub).catch(() => null), caps })
+      return r
+    },
+    revokeDevice: async (nonce) => {
+      const r = await desk.revoke(nonce)
+      await notifyMembers('revoked', { certNonce: nonce, by: 'pc' })
+      return r
+    },
     close () {
       for (const t of avisosPendientes.values()) clearTimeout(t)
       avisosPendientes.clear()

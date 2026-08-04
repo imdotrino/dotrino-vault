@@ -265,23 +265,23 @@ const closeMenu = () => { menuOpen.value = false }
 const toggleMenu = () => { menuOpen.value = !menuOpen.value }
 const onMenuKey = (e) => { if (e.key === 'Escape') closeMenu() }
 
-/* Ruta: la landing en `/` y la consola de dispositivos en `/dispositivos`, con `/d`
+/* Ruta: la landing en `/` y la página de dispositivos en `/devices`, con `/d`
    como atajo. El QR de `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta
    existe porque cada carácter del enlace son módulos del QR, y los módulos son filas
-   de terminal. La forma larga (`/dispositivos#vault=`) es la que la gente ya tiene y
-   sigue valiendo. En los dos casos la invitación viaja en el #fragment, que nunca
+   de terminal. `/dispositivos` fue la ruta canónica y sigue respondiendo: hay
+   invitaciones impresas y enlaces guardados con esa forma, y romperlos no arregla nada. En los dos casos la invitación viaja en el #fragment, que nunca
    llega al servidor. */
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
   const invitado = location.hash.includes('#vault=') || location.hash.includes('#v=')
-  view.value = (/\/(dispositivos|d)$/.test(p) || invitado) ? 'console' : 'home'
+  view.value = (/\/(devices|dispositivos|d)$/.test(p) || invitado) ? 'console' : 'home'
 }
 routeNow()
 function go (v, ev) {
   ev?.preventDefault()
   closeMenu()
-  history.pushState(null, '', v === 'console' ? '/dispositivos' : '/')
+  history.pushState(null, '', v === 'console' ? '/devices' : '/')
   routeNow()
 }
 window.addEventListener('popstate', routeNow)
@@ -301,7 +301,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onMenuKey))
         <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
         <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
         <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
-        <a href="/dispositivos" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
+        <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
         <a v-if="view !== 'home'" href="/" @click="go('home', $event)">{{ t.nav_home }}</a>
       </nav>
       <button
@@ -318,7 +318,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onMenuKey))
       <div v-if="menuOpen" class="mobile-nav-backdrop" data-testid="nav-menu-backdrop" @click="closeMenu"></div>
       <nav id="mobile-nav" class="mobile-nav" :class="{ open: menuOpen }" :aria-label="t.nav_menu_label" :aria-hidden="!menuOpen">
         <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
-        <a href="/dispositivos" data-testid="nav-mobile-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
+        <a href="/devices" data-testid="nav-mobile-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
         <template v-if="view === 'home'">
           <a href="#how" data-testid="nav-mobile-how" @click="closeMenu">{{ t.nav_how }}</a>
           <a href="#download" data-testid="nav-mobile-download" @click="closeMenu">{{ t.nav_download }}</a>
@@ -504,7 +504,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onMenuKey))
         </div>
 
         <p class="use-more">
-          <a href="/dispositivos" @click="go('console', $event)">{{ t.use_more }}</a>
+          <a href="/devices" @click="go('console', $event)">{{ t.use_more }}</a>
         </p>
 
         <details class="use-cmds">
