@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import Consola from './Console.vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
@@ -10,6 +10,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 const I18N = {
   es: {
     nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_home: 'Inicio',
+    nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
     hero_sub: 'Tus archivos, tus contactos, tus contraseñas y lo que guardan tus apps, todo junto en una bóveda que vive en tu propia computadora. No en la nube de una empresa: en tu máquina, bajo tu control. Sin anuncios, sin rastreo, sin que nadie venda tus datos.',
@@ -106,6 +107,7 @@ const I18N = {
   },
   en: {
     nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_home: 'Home',
+    nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
     hero_sub: 'Your files, your contacts, your passwords and whatever your apps save, all together in a vault that lives on your own computer. Not on a company’s cloud: on your machine, under your control. No ads, no tracking, nobody selling your data.',
@@ -258,6 +260,11 @@ function copy (text, key) {
   navigator.clipboard?.writeText(text).then(() => { copied.value = key; setTimeout(() => (copied.value = ''), 1400) })
 }
 
+const menuOpen = ref(false)
+const closeMenu = () => { menuOpen.value = false }
+const toggleMenu = () => { menuOpen.value = !menuOpen.value }
+const onMenuKey = (e) => { if (e.key === 'Escape') closeMenu() }
+
 /* Ruta: la landing en `/` y la consola de dispositivos en `/dispositivos`, con `/d`
    como atajo. El QR de `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta
    existe porque cada carácter del enlace son módulos del QR, y los módulos son filas
@@ -273,24 +280,50 @@ function routeNow () {
 routeNow()
 function go (v, ev) {
   ev?.preventDefault()
+  closeMenu()
   history.pushState(null, '', v === 'console' ? '/dispositivos' : '/')
   routeNow()
 }
 window.addEventListener('popstate', routeNow)
 
-onMounted(() => { document.documentElement.lang = lang.value })
+onMounted(() => {
+  document.documentElement.lang = lang.value
+  window.addEventListener('keydown', onMenuKey)
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', onMenuKey))
 </script>
 
 <template>
   <div class="page">
     <header class="topbar">
-      <a class="brand" href="/"><img src="/icon.svg" alt="" width="30" height="30" /><span>Dotrino&nbsp;Vault</span></a>
-      <nav class="navlinks">
+      <a class="brand" href="/" @click="closeMenu"><img src="/icon.svg" alt="" width="30" height="30" /><span>Dotrino&nbsp;Vault</span></a>
+      <nav class="navlinks" :aria-label="t.nav_menu_label">
         <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
         <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
         <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
-        <a href="/dispositivos" data-testid="nav-devices" @click="go('console', $event)">{{ t.nav_devices }}</a>
+        <a href="/dispositivos" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
         <a v-if="view !== 'home'" href="/" @click="go('home', $event)">{{ t.nav_home }}</a>
+      </nav>
+      <button
+        type="button"
+        class="menu-toggle"
+        data-testid="nav-menu-toggle"
+        :aria-expanded="menuOpen"
+        aria-controls="mobile-nav"
+        :aria-label="t.nav_menu"
+        @click="toggleMenu"
+      >
+        <span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
+      <div v-if="menuOpen" class="mobile-nav-backdrop" data-testid="nav-menu-backdrop" @click="closeMenu"></div>
+      <nav id="mobile-nav" class="mobile-nav" :class="{ open: menuOpen }" :aria-label="t.nav_menu_label" :aria-hidden="!menuOpen">
+        <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
+        <a href="/dispositivos" data-testid="nav-mobile-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
+        <template v-if="view === 'home'">
+          <a href="#how" data-testid="nav-mobile-how" @click="closeMenu">{{ t.nav_how }}</a>
+          <a href="#download" data-testid="nav-mobile-download" @click="closeMenu">{{ t.nav_download }}</a>
+          <a href="#use" data-testid="nav-mobile-use" @click="closeMenu">{{ t.nav_use }}</a>
+        </template>
       </nav>
       <div class="actions">
         <div class="lang-selector" role="group" aria-label="es / en">
