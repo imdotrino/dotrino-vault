@@ -1,7 +1,7 @@
 # Consola remota de la bóveda — plan de diseño
 
-> Estado: **F1–F3 IMPLEMENTADAS** (capacidad, operaciones remotas y avisos, con pruebas).
-> Faltan F4 (datos sensibles) y F5 (la interfaz). Complementa `acta-de-perfil.md` (el modelo) y
+> Estado: **F1–F3 y F5 IMPLEMENTADAS** (capacidad, operaciones remotas, avisos e
+> interfaz). Falta **F4** (datos sensibles) y el E2E en contenedores. Complementa `acta-de-perfil.md` (el modelo) y
 > `pairing-protocol.md` (el emparejamiento endurecido). Si hay conflicto, mandan esos dos.
 
 ## 1. Qué se quiere
@@ -133,6 +133,16 @@ Nota de alcance: esto es el **almacén**. Una app de contraseñas con su UI, gen
 autocompletado es otra cosa y no entra aquí.
 
 ## 7. F5 — La aplicación
+
+**La misma página de siempre, en `vault.dotrino.com/devices`** (ruta canónica desde
+2026-08-04; `/dispositivos` sigue respondiendo porque hay invitaciones impresas con esa
+forma). En el menú se llama **«Mis dispositivos»**. No hay app nueva ni subdominio nuevo:
+quien administra ya tiene la identidad en ese aparato, y el cert **es** la credencial —
+no hay login ni contraseña.
+
+La sección de administración **solo aparece si `canAdminVault()`**, que mira el scope del
+cert. Y eso es únicamente para saber qué pintar: la bóveda vuelve a comprobarlo en cada
+petición, porque una pantalla no es un control de seguridad.
 
 **Una vista más en `dotrino-vault/web`, no un repo nuevo.** `Console.vue` ya sabe pintar
 el acta, leer QR con `jsqr` y generar QR con `qrSvg`; lo que cambia es **con quién habla**:

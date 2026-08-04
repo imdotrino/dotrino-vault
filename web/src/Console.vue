@@ -84,6 +84,17 @@ const T = {
     self_pending: 'Un dispositivo quiere conectarse',
     self_code_ph: 'Los 6 dígitos que muestra',
     self_approve: 'Aprobar', self_reject: 'Rechazar',
+    // --- Administrar la bóveda desde aquí (consola remota) ---
+    adm_t: 'Administrar tu bóveda desde aquí',
+    adm_b: 'Este dispositivo puede conectar y quitar otros sin que vayas a la computadora donde vive tu bóveda.',
+    adm_no_t: 'Este dispositivo solo mira',
+    adm_no_b: 'Para que pueda conectar y quitar dispositivos, dale el permiso en la computadora de tu bóveda: dotrino-vault caps <ID> +administra',
+    adm_pair: 'Conectar un dispositivo',
+    adm_pending: 'Un dispositivo quiere conectarse',
+    adm_code_ph: 'Los 6 dígitos que muestra',
+    adm_approve: 'Aprobar', adm_reject: 'Rechazar',
+    adm_remove: 'Quitar',
+    adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
   },
   en: {
@@ -151,6 +162,16 @@ const T = {
     self_on: 'On', self_off: 'Off', self_start: 'Turn on', self_stop: 'Turn off',
     self_pair: 'Create a code to connect another one',
     self_pending: 'A device wants to connect',
+    adm_t: 'Manage your vault from here',
+    adm_b: 'This device can connect and remove others without you going to the computer where your vault lives.',
+    adm_no_t: 'This device can only look',
+    adm_no_b: 'To let it connect and remove devices, grant the permission on your vault computer: dotrino-vault caps <ID> +administra',
+    adm_pair: 'Connect a device',
+    adm_pending: 'A device wants to connect',
+    adm_code_ph: 'The 6 digits it shows',
+    adm_approve: 'Approve', adm_reject: 'Reject',
+    adm_remove: 'Remove',
+    adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
     back: 'Back'
@@ -213,6 +234,7 @@ onMounted(async () => {
   if (payload) { history.replaceState(null, '', location.pathname); announce(payload) }
   offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
   await refreshSelf()
+  await refreshAdmin()
 })
 
 let offVault = null
@@ -420,6 +442,7 @@ async function refreshSelf () {
 const selfToggle = () => run('self', async () => {
   await id.value.setSelfVault(!self.value.enabled)
   await refreshSelf()
+  await refreshAdmin()
 })
 const selfPair = () => run('selfpair', async () => {
   const r = await id.value.selfVaultPairing({})
@@ -437,7 +460,48 @@ const selfApprove = (deviceId) => run('sa-' + deviceId, async () => {
 const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
   await id.value.selfVaultReject(deviceId); await refreshSelf()
 })
-onBeforeUnmount(() => clearInterval(selfTimer))
+// ---------- administrar la bóveda REMOTA desde aquí (consola remota) ----------
+// docs/consola-remota.md. Lo que se puede hacer sale del cert de este aparato, no de
+// esta pantalla: la bóveda vuelve a comprobarlo en cada petición.
+
+const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
+const admDevices = ref([])       // dispositivos del perfil, según la bóveda
+const admPending = ref([])       // los que esperan aprobación
+const admQr = ref(null)
+const admCode = ref('')
+let admTimer = null
+
+async function refreshAdmin () {
+  try {
+    canAdmin.value = await id.value.canAdminVault()
+    if (!canAdmin.value) return
+    const [d, p] = await Promise.all([
+      id.value.listVaultDevices().catch(() => ({ devices: [] })),
+      id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
+    ])
+    admDevices.value = d.devices || []
+    admPending.value = p.pending || []
+  } catch (_) { canAdmin.value = false }
+}
+
+const admPair = () => run('admpair', async () => {
+  const r = await id.value.vaultAdmin('pair')
+  admQr.value = r?.qr ? qrSvg(inviteUrl(r.qr)) : null
+  clearInterval(admTimer)
+  admTimer = setInterval(refreshAdmin, 2000)
+})
+const admApprove = (deviceId) => run('aa-' + deviceId, async () => {
+  await id.value.vaultAdmin('approve', { deviceId, code: admCode.value.trim() })
+  admCode.value = ''; admQr.value = null; clearInterval(admTimer); await refreshAdmin()
+})
+const admReject = (deviceId) => run('ar-' + deviceId, async () => {
+  await id.value.vaultAdmin('reject', { deviceId }); await refreshAdmin()
+})
+const admRevoke = (d) => run('arv-' + d.nonce, async () => {
+  await id.value.vaultAdmin('revoke', { certNonce: d.nonce }); await refreshAdmin()
+})
+
+onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 </script>
 
 <template>
@@ -600,6 +664,27 @@ onBeforeUnmount(() => clearInterval(selfTimer))
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
       </div>
+
+      <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
+      <template v-if="canAdmin">
+        <h2>{{ t.adm_t }}</h2>
+        <p class="muted">{{ t.adm_b }}</p>
+        <div class="row">
+          <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
+        </div>
+        <div v-if="admQr" class="qrbox" v-html="admQr"></div>
+        <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
+          <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
+          <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
+          <button class="btn sm" data-testid="adm-approve" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
+          <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
+        </div>
+        <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
+        <div v-for="d in admDevices" :key="d.nonce" class="pending" data-testid="adm-device">
+          <span><code>{{ d.deviceId }}</code> {{ d.label }}</span>
+          <button class="btn ghost sm" data-testid="adm-revoke" @click="admRevoke(d)">{{ t.adm_remove }}</button>
+        </div>
+      </template>
     </template>
   </section>
 </template>
@@ -641,6 +726,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .two-accounts, .announce { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .banner.info { background: #10203a; color: #9cc4ff; }
 .banner.warn { background: #2a2310; color: #ffd98a; }
+/* Aviso junto al código de aprobación: es la única defensa contra que te lo dicten. */
+.muted.warn { color: #ffd98a; }
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .member { background: #0f1725; border: 1px solid #1e2a3d; border-radius: 12px; padding: 12px 14px; }
 .who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
