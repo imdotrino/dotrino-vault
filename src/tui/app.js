@@ -268,7 +268,6 @@ function meRows (st, t) {
     rows.push({ text: t.accent(' ▸ ' + titulo), sel: false })
     for (const x of lista) campo(x.type || x.label || '', x.value, x.visible === false)
   }
-  if (me.avatar) { rows.push({ text: '', sel: false }); rows.push({ text: t.muted(i.savePhotoHint), sel: false }) }
   return rows
 }
 
@@ -603,27 +602,11 @@ async function onKeyPairing (term, st, key) {
 }
 
 /**
- * Teclas del PERFIL: refrescar y guardar la foto. Nada de editar — el perfil se edita en
- * el dispositivo que usas, no en la máquina donde vive la bóveda.
+ * Teclas del PERFIL: solo refrescar. Nada de editar — el perfil se edita en el dispositivo
+ * que usas, no en la máquina donde vive la bóveda.
  */
 async function onKeyMe (term, st, key) {
-  const i = L(st)
-  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-  if (ch === 'r') {
-    await refreshMe(term, st)
-  } else if (ch === 'f' && st.me?.avatar) {
-    setInput(st, {
-      label: i.savePhotoLabel,
-      hint: i.savePhotoHintInput,
-      value: 'perfil.png',
-      onSubmit: async (valor) => {
-        const destino = String(valor || '').trim()
-        if (!destino) return
-        const r = await guard(term, st, i.savingPhoto, () => vc.saveAvatar(destino, activeId(st)))
-        if (r.ok && r.v) flash(st, i.photoSaved(r.v))
-      }
-    })
-  }
+  if (key.name === 'char' && key.ch.toLowerCase() === 'r') await refreshMe(term, st)
   return true
 }
 

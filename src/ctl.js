@@ -257,18 +257,14 @@ function cmdReject (deviceId) {
  * Distinto de `members` (quién es del perfil) y de `profile` (los perfiles del PC): esto
  * es el CONTENIDO, no la identidad.
  *
- * La foto no se imprime —es un data-URI de hasta ~90 KB— sino que se resume;
- * `me --foto <archivo>` la escribe en disco para poder mirarla.
+ * De la foto solo se dice que la hay, de qué tipo y cuánto pesa: es un data-URI de hasta
+ * ~90 KB y una terminal no es sitio para volcarlo.
  */
-async function cmdMe (args = []) {
-  const i = args.findIndex((a) => a === '--foto' || a === '--photo')
-  const avatarPath = i >= 0 ? args[i + 1] : null
-  if (i >= 0 && !avatarPath) { console.error('uso: dotrino-vault me --foto <archivo>'); process.exit(2) }
-
+async function cmdMe () {
   const s = requireDaemon()
   const meFile = path.join(dir, 'me.json')
   try { fs.rmSync(meFile, { force: true }) } catch (_) {}
-  writeReq('me-request.json', { ...(avatarPath ? { avatarPath: path.resolve(avatarPath) } : {}) })
+  writeReq('me-request.json', {})
   avisar(s.pid, 'SIGUSR2')
   let dump = null
   for (let n = 0; n < 50; n++) { await sleep(100); const d = readJson(meFile, null); if (d?.at) { dump = d; break } }
@@ -306,8 +302,6 @@ async function cmdMe (args = []) {
     for (const x of lista) console.log('    %s %s%s', (x.type || x.label || '').padEnd(12), x.value, x.visible === false ? '   (oculto)' : '')
   }
 
-  if (dump.avatarGuardada) console.log('\n  Foto escrita en: %s', dump.avatarGuardada)
-  else if (me.avatar) console.log('\n  Para verla:  dotrino-vault me --foto ~/perfil.png')
   console.log('')
 }
 
@@ -691,7 +685,7 @@ export async function runCtl (argv) {
     case 'approve': return cmdApprove(rest[0])
     case 'reject': return cmdReject(rest[0])
     case 'devices': return cmdDevices()
-    case 'me': return cmdMe(rest)
+    case 'me': return cmdMe()
     case 'members': return cmdMembers()
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])

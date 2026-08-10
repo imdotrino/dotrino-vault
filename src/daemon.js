@@ -257,7 +257,7 @@ export async function runDaemon () {
       // Solo se vuelca cuando se PIDE, no en cada señal: es contenido del usuario y no tiene
       // por qué quedar escrito en un archivo suelto cada vez que alguien mira los miembros.
       // La FOTO no entra en el volcado (son hasta ~90 KB de data-URI que nadie va a leer en
-      // una terminal): se resume, y si la quieres, `--foto <archivo>` la escribe donde digas.
+      // una terminal): solo se dice que la hay, de qué tipo y cuánto pesa.
       const meReq = readJsonSafe(meReqFile)
       if (meReq) {
         rm(meReqFile)
@@ -265,15 +265,7 @@ export async function runDaemon () {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
           const { me } = tm.vault.threads.methods.profileGet()
           const { avatar, ...resto } = me || {}
-          let guardada = null
-          if (meReq.avatarPath && typeof avatar === 'string') {
-            const m = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(avatar)
-            if (m) {
-              fs.writeFileSync(meReq.avatarPath, Buffer.from(m[2], 'base64'), { mode: 0o600 })
-              guardada = meReq.avatarPath
-            }
-          }
-          writeJson(meFile, { v: 1, at: Date.now(), profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null, avatarGuardada: guardada })
+          writeJson(meFile, { v: 1, at: Date.now(), profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
     } catch (e) {

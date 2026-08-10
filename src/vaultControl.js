@@ -234,17 +234,6 @@ export async function getMe (profile) {
   return d.me || null
 }
 
-/** Escribe la foto de perfil en `destino` (para poder mirarla) y devuelve la ruta. */
-export async function saveAvatar (destino, profile) {
-  requireAlive()
-  rm(F.me)
-  writeReq(F.meReq, { avatarPath: destino }, profile)
-  signalOrCleanup('SIGUSR2', [F.meReq])
-  const d = await waitFor(F.me)
-  rm(F.me)
-  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
-  return d.avatarGuardada || null
-}
 
 // ---------------------------------------------------------------------------
 // Secretos: scopes (namespaces) y variables (claves)
