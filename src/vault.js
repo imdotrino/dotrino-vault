@@ -246,8 +246,23 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
     const prev = (issued || []).find((x) => x.nonce === p.cert.nonce)
-    const { cert } = await identity.signDelegation(p.cert.sub, p.cert.scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
-    audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '' })
+    // EL SCOPE SALE DEL ACTA, no del cert viejo. El acta es la política (lo que el dueño
+    // decidió con `caps`); el cert es su reflejo, y solo dura 30 días para poder cambiar.
+    // Copiar `p.cert.scope` congelaba la política en el momento del emparejamiento: dar
+    // `administra` no llegaba nunca al cert (la consola remota no podía funcionar) y
+    // QUITARLO tampoco surtía efecto hasta que el cert caducara, hasta un mes después.
+    // Si el miembro ya no está en el acta, no se renueva nada: lo echaron.
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta
+    let scope = p.cert.scope
+    if (acta) {
+      scope = Acta.memberScopes(acta, p.cert.sub)
+      if (!scope.length) {
+        audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
+        return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
+      }
+    }
+    const { cert } = await identity.signDelegation(p.cert.sub, scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
+    audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope })
     log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} (30 days)`)
     reply(from, { type: MSG.RENEWED, cert })
   }
@@ -391,8 +406,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const body = { ev, ...info, ts: Date.now() }
       const { signature } = await identity.signData(body)
       const { issued } = await identity.listDelegations()
+      // UNO POR LLAVE, no uno por delegación: renovar emite una delegación nueva para la
+      // MISMA sub-clave, así que un aparato que lleve tiempo enrolado aparece varias veces
+      // y recibía el mismo aviso repetido —una vez por renovación acumulada—. Mismo
+      // cuidado que en `avisarCambio`.
+      const vistas = new Set()
       for (const d of issued || []) {
-        if (!d.sub) continue
+        if (!d.sub || vistas.has(d.sub)) continue
+        vistas.add(d.sub)
         try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {}
       }
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
@@ -405,10 +426,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     audit,
     notify: notifyMembers,
     readActivity,
-    verify: async ({ data, signature, cert }) => verifyChain({
-      data, signature, cert,
-      expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
-    })
+    // CERT ∩ ACTA, igual que los secretos con su CN. El cert dice qué se emitió; el acta,
+    // qué decidió el dueño AHORA. Sin el segundo, `caps <ID> -administra` no surtía efecto
+    // hasta que el cert caducara: quitarle la administración a un aparato que ya no es de
+    // fiar exigía revocarlo entero. Con el cruce, deja de administrar en el acto.
+    verify: async ({ data, signature, cert }) => {
+      const chk = await verifyChain({
+        data, signature, cert,
+        expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
+      })
+      if (!chk.ok) return chk
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta
+      if (acta && !Acta.memberCan(acta, chk.device, 'admin')) return { ok: false, reason: 'acta' }
+      return chk
+    }
   })
 
   async function handleAdmin (from, p) {

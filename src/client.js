@@ -132,6 +132,32 @@ export async function requestGet ({ masterPubkey, proxyUrl, device, cert, id = '
   } finally { client.close() }
 }
 
+/**
+ * RENUEVA el cert de este dispositivo (sigue siendo el mismo: no hay QR ni aprobación).
+ *
+ * No es solo estirar la fecha: el scope del cert nuevo lo decide **el acta**, así que
+ * renovar es también como llega a un dispositivo un permiso que el dueño le concedió
+ * después de emparejarlo —y como se le cae uno que le quitaron—. Un cert vencido o
+ * revocado no se renueva: ahí toca volver a emparejar.
+ */
+export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, dir } = {}) {
+  const client = await freshClient({ proxyUrl, dir })
+  try {
+    const data = { op: 'renew', publickey: device.publickey, ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+    const pending = waitFor(client, (p) => p.type === MSG.RENEWED || p.type === MSG.ERROR)
+    client.sendByPubkey(masterPubkey, { type: MSG.RENEW, data, signature, cert })
+    const res = await pending
+    if (res.type === MSG.ERROR) throw new Error(res.error)
+    // Se valida antes de devolverlo, igual que en el enrolamiento: un cert que no está
+    // firmado por la maestra que ya conocemos, o que no es para esta llave, no se guarda.
+    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey })
+    if (!v.ok) throw new Error('invalid cert: ' + v.reason)
+    if (res.cert.iss !== masterPubkey) throw new Error('cert signed by a master other than the pinned one')
+    return { cert: res.cert }
+  } finally { client.close() }
+}
+
 /** Llama un método del store de hilos/aperturas del vault (scope vault:store). */
 export async function requestStore ({ masterPubkey, proxyUrl, device, cert, method, args, dir } = {}) {
   const client = await freshClient({ proxyUrl, dir })

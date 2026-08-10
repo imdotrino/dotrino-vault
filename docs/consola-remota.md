@@ -1,7 +1,7 @@
 # Consola remota de la bóveda — plan de diseño
 
-> Estado: **F1–F5 IMPLEMENTADAS** (capacidad, operaciones remotas, avisos, datos
-> sensibles e interfaz). Falta el E2E en contenedores. Complementa `acta-de-perfil.md` (el modelo) y
+> Estado: **COMPLETA** — F1–F5 implementadas y probadas de punta a punta en contenedores
+> (`dotrino-test`, `npm run smoke:consola`). Complementa `acta-de-perfil.md` (el modelo) y
 > `pairing-protocol.md` (el emparejamiento endurecido). Si hay conflicto, mandan esos dos.
 
 ## 1. Qué se quiere
@@ -183,8 +183,14 @@ Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código lle
 - Datos sensibles (`test/secure-store.test.mjs`): listar no baja los valores; en el disco
   no se ve ni el valor ni el nombre; editar conserva id y fecha de creación; topes de
   tamaño y de número de fichas; `list`/`get` fuera del set de solo-lectura.
-- E2E en contenedores: bóveda + dispositivo-admin + dispositivo-nuevo; el admin empareja y
-  aprueba al nuevo **sin tocar el PC**, y el aviso llega a los tres.
+- E2E en contenedores (`dotrino-test`, `npm run smoke:consola`): bóveda + dispositivo-admin
+  + dispositivo-nuevo, cada uno en su caja, con la bóveda corriendo **como binario** y
+  manejada con su CLI real. El admin empareja y aprueba al nuevo **sin tocar el PC**, y el
+  aviso firmado llega a los demás. Cubre también: sin `admin` no se administra, conceder
+  `+administra` llega al cert al renovar, `pair` con scope prohibido, quitar `-administra`
+  corta en el acto, y F4 por el camino real.
+
+  **Ya sirvió, y de sobra.** Destapó que esto no funcionaba en absoluto (§11).
 - Navegador con Playwright: la consola remota, el QR y la pantalla de código.
 
 ## 9. Orden de trabajo
@@ -202,3 +208,32 @@ Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código lle
   detectable. Es el precio explícito de no tener que ir al PC.
 - El phishing por **dictado del código** sigue abierto, igual que hoy.
 - La bóveda sigue sin recuperación: perder la llave que sella es perder la cuenta.
+
+## 11. Lo que destapó el E2E (y no era poco)
+
+Con F1–F5 «implementadas» y 141 pruebas verdes, **la consola remota no funcionaba**. Nada
+de esto se veía sin levantar las tres máquinas de verdad; son tres fallos distintos que se
+tapaban entre sí.
+
+1. **El vault dependía de un `@dotrino/identity` anterior a la capacidad `admin`**
+   (`0.37.1`, mientras el pilar ya iba por `0.38.0`). `cleanCaps` filtra contra `CAPS`, así
+   que el acta **descartaba `admin` en silencio**: `caps <ID> +administra` decía «Listo» y
+   no cambiaba nada. Un pilar publicado no sirve de nada si quien lo consume no lo sube.
+2. **El scope del cert se copiaba del cert viejo al renovar.** Como la autorización mira el
+   **cert**, no el acta, un permiso concedido después del emparejamiento **no llegaba
+   nunca** — y uno retirado seguía valiendo hasta que el cert caducara, **hasta 30 días**.
+   Arreglado: el scope del cert nuevo sale de `Acta.memberScopes`, y si el miembro ya no
+   está en el acta, no se renueva.
+3. **Las operaciones de admin no cruzaban con el acta.** Los secretos ya lo hacían (con su
+   CN), pero `vault.admin` se conformaba con el cert. Ahora es **cert ∩ acta**, que es lo
+   que el propio `memberCan` decía que debía ser, y por eso quitar `administra` corta en el
+   acto en vez de esperar a la caducidad.
+
+De regalo, dos cosas menores: `handleStore` aceptaba como método cualquier miembro heredado
+de `Object` (`method: 'toString'` pasaba el filtro), y el aviso a los miembros se mandaba
+**una vez por delegación** en vez de una por llave, así que un aparato veterano recibía el
+mismo aviso repetido, una vez por renovación acumulada.
+
+**La lección, para la próxima pieza:** «implementado y con tests verdes» no es «funciona».
+Lo que faltaba era el escenario donde las piezas se hablan entre máquinas, que es el único
+sitio donde estos tres fallos existen.
