@@ -32,6 +32,7 @@ const F = {
   devices: 'devices.json',
   profilesList: 'profiles-list.json',
   secretsList: 'secrets-list.json',
+  me: 'me.json',
   // peticiones (las escribe el control; el daemon las consume y borra)
   pairReq: 'pair-request.json',
   approveReq: 'approve-request.json',
@@ -39,6 +40,7 @@ const F = {
   revokeReq: 'revoke-request.json',
   secretReq: 'secret-request.json',
   profileReq: 'profile-request.json',
+  meReq: 'me-request.json',
   dumpReq: 'dump-request.json'
 }
 
@@ -204,6 +206,44 @@ export async function revokeDevice (nonce, profile) {
   signalOrCleanup('SIGUSR2', [F.revokeReq])
   await sleep(300)
   return listDevices(profile)
+}
+
+// ---------------------------------------------------------------------------
+// Perfil del usuario (lo que sincronizan los dispositivos)
+// ---------------------------------------------------------------------------
+
+/**
+ * El PERFIL del usuario tal como lo tiene la bóveda: nombre, foto y datos. Es lo que se
+ * edita en cualquier dispositivo emparejado y se sincroniza aquí, así que sirve para
+ * comprobar que lo que cambiaste en el aparato llegó.
+ *
+ * No es lo mismo que `listProfiles` (las cuentas de ESTE PC) ni que el acta (quién es del
+ * perfil): esto es el CONTENIDO. La foto llega resumida (tipo y tamaño), no en bytes:
+ * nadie va a mirar un data-URI de 90 KB en una terminal.
+ *
+ * El volcado es contenido del usuario, así que se lee y se BORRA en el acto.
+ */
+export async function getMe (profile) {
+  requireAlive()
+  rm(F.me)
+  writeReq(F.meReq, {}, profile)
+  signalOrCleanup('SIGUSR2', [F.meReq])
+  const d = await waitFor(F.me)
+  rm(F.me)
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  return d.me || null
+}
+
+/** Escribe la foto de perfil en `destino` (para poder mirarla) y devuelve la ruta. */
+export async function saveAvatar (destino, profile) {
+  requireAlive()
+  rm(F.me)
+  writeReq(F.meReq, { avatarPath: destino }, profile)
+  signalOrCleanup('SIGUSR2', [F.meReq])
+  const d = await waitFor(F.me)
+  rm(F.me)
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  return d.avatarGuardada || null
 }
 
 // ---------------------------------------------------------------------------

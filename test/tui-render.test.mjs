@@ -24,6 +24,7 @@ function baseState (over = {}) {
   return {
     screen: 'profiles',
     sel: { profiles: 0, devices: 0, secrets: 0 },
+    me: null,
     scroll: {},
     profiles: { current: 'p1', profiles: [{ id: 'p1', name: 'Perfil 1', protected: false, locked: false, current: true, fingerprint: 'fp1' }] },
     devices: { issued: [], revoked: [] },
@@ -84,6 +85,9 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
     { screen: 'profiles', ...rich },
     { screen: 'devices', ...rich, pending: { deviceId: 'ZZ99-YY88' } },
     { screen: 'secrets', ...rich },
+    { screen: 'me', ...rich },
+    { screen: 'me', ...rich, me: null },
+    { screen: 'me', ...rich, me: undefined },
     { screen: 'secrets', ...rich, input: { label: 'Valor', value: 'topsecret', mask: true, hint: 'no se muestra' } },
     { screen: 'devices', ...rich, confirm: { text: '¿Revocar AB12-CD34?' } },
     { screen: 'profiles', ...rich, flash: { text: 'Guardado', kind: 'ok', at: Date.now() } },
@@ -276,4 +280,37 @@ test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => 
   V.render(term, baseState({ screen: 'profiles' }))
   assert.match(term.last[3], /Bóvedas/)
   assert.doesNotMatch(term.last[3], /cambiar/)
+})
+
+
+test('Perfil: muestra lo que sincronizó el aparato, y NUNCA los bytes de la foto', () => {
+  const t = makeTheme()
+  const me = {
+    nickname: 'Seyacat',
+    avatar: { type: 'image/jpeg', bytes: 8000 },
+    nombres: 'Santiago',
+    email: 'sandrade@dotrino.com',
+    telefono: '0999', telefonoVisible: false,
+    links: [{ id: '1', type: 'github', value: 'seyacat', visible: true }],
+    updatedAt: Date.now()
+  }
+  const texto = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
+  assert.match(texto, /Seyacat/)
+  assert.match(texto, /image\/jpeg/)
+  assert.match(texto, /7\.8 KB/, 'el tamaño en KB, no en bytes crudos')
+  assert.match(texto, /sandrade@dotrino\.com/)
+  assert.match(texto, /0999/)
+  assert.match(texto, /oculto/, 'lo que el usuario marcó como oculto se dice')
+  assert.match(texto, /github/)
+  assert.ok(!texto.includes('base64'), 'la foto se resume, no se vuelca')
+})
+
+test('Perfil vacío: lo dice y explica qué hacer, sin reventar', () => {
+  const t = makeTheme()
+  for (const me of [null, undefined]) {
+    const texto = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
+    assert.ok(texto.length > 0, 'siempre dibuja algo')
+  }
+  const vacio = V.meRows(baseState({ screen: 'me', me: null }), t).map((r) => r.text).join('\n')
+  assert.match(vacio, /perfil/i)
 })

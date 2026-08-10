@@ -231,6 +231,47 @@ function secretRows (st, t) {
   return rows
 }
 
+/**
+ * PERFIL del usuario: nombre, foto y datos, tal como los tiene la bóveda. Es lo que se
+ * edita en un dispositivo emparejado y se sincroniza aquí; esta pantalla sirve para
+ * comprobar que llegó.
+ *
+ * Solo lectura A PROPÓSITO: el perfil se edita donde lo usas (el aparato), no en el
+ * servidor donde vive la bóveda. Aquí se mira.
+ */
+function meRows (st, t) {
+  const i = L(st)
+  const me = st.me
+  if (me === undefined) return [{ text: t.muted(i.loading), sel: false }]
+  if (!me) return [{ text: t.muted(i.noProfile), sel: false }, { text: '', sel: false }, { text: t.muted(i.noProfileHint), sel: false }]
+
+  const rows = []
+  const campo = (etiqueta, valor, oculto) => rows.push({
+    text: `  ${t.muted(String(etiqueta).padEnd(12))} ${valor}${oculto ? t.muted(i.hidden) : ''}`, sel: false
+  })
+  rows.push({ text: t.muted(i.profileUpdated(me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—')), sel: false })
+  rows.push({ text: '', sel: false })
+  campo(i.fieldName, me.nickname ? t.bold(me.nickname) : t.muted(i.noName))
+  campo(i.fieldPhoto, me.avatar
+    ? `${me.avatar.type || '?'} · ${(me.avatar.bytes / 1024).toFixed(1)} KB`
+    : t.muted(i.no))
+
+  const STD = [['nombres', i.fieldFirstName], ['apellidos', i.fieldLastName], ['email', i.fieldEmail],
+    ['telefono', i.fieldPhone], ['direccion', i.fieldAddress]]
+  const puestos = STD.filter(([k]) => me[k])
+  if (puestos.length) rows.push({ text: '', sel: false })
+  for (const [k, etiqueta] of puestos) campo(etiqueta, me[k], me[k + 'Visible'] === false)
+
+  for (const [titulo, lista] of [[i.links, me.links], [i.otherData, me.fields]]) {
+    if (!Array.isArray(lista) || !lista.length) continue
+    rows.push({ text: '', sel: false })
+    rows.push({ text: t.accent(' ▸ ' + titulo), sel: false })
+    for (const x of lista) campo(x.type || x.label || '', x.value, x.visible === false)
+  }
+  if (me.avatar) { rows.push({ text: '', sel: false }); rows.push({ text: t.muted(i.savePhotoHint), sel: false }) }
+  return rows
+}
+
 // --------------------------------- entrada ---------------------------------
 
 function setInput (st, opts) {
@@ -265,6 +306,10 @@ async function refreshDevices (term, st) {
 async function refreshSecrets (term, st) {
   const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
   if (r.ok) st.secrets = r.v
+}
+async function refreshMe (term, st) {
+  const r = await guard(term, st, L(st).loadingProfile, () => vc.getMe(activeId(st)))
+  st.me = r.ok ? r.v : null
 }
 async function refreshProfiles (term, st) {
   const r = await guard(term, st, L(st).loadingVaults, () => vc.listProfiles())
@@ -557,6 +602,31 @@ async function onKeyPairing (term, st, key) {
   return true
 }
 
+/**
+ * Teclas del PERFIL: refrescar y guardar la foto. Nada de editar — el perfil se edita en
+ * el dispositivo que usas, no en la máquina donde vive la bóveda.
+ */
+async function onKeyMe (term, st, key) {
+  const i = L(st)
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (ch === 'r') {
+    await refreshMe(term, st)
+  } else if (ch === 'f' && st.me?.avatar) {
+    setInput(st, {
+      label: i.savePhotoLabel,
+      hint: i.savePhotoHintInput,
+      value: 'perfil.png',
+      onSubmit: async (valor) => {
+        const destino = String(valor || '').trim()
+        if (!destino) return
+        const r = await guard(term, st, i.savingPhoto, () => vc.saveAvatar(destino, activeId(st)))
+        if (r.ok && r.v) flash(st, i.photoSaved(r.v))
+      }
+    })
+  }
+  return true
+}
+
 async function onKeySecrets (term, st, key) {
   const i = L(st)
   const rows = secretRows(st, term.t)
@@ -659,15 +729,16 @@ async function onConfirmKey (st, key) {
 
 // Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
 // bóvedas (profiles) es el nivel de arriba (se entra con Enter, no es una pestaña).
-const INNER_TABS = ['devices', 'secrets']
-const tabLabel = (i, k) => (k === 'devices' ? i.tabDevices : i.tabSecrets)
+const INNER_TABS = ['devices', 'secrets', 'me']
+const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, me: i.tabMe })[k]
 
 const helpSegs = (i, screen) => ({
   profiles: i.helpProfiles,
   devices: i.helpDevices,
   secrets: i.helpSecrets,
   pairing: i.helpPairing,
-  pairmode: i.helpPairMode
+  pairmode: i.helpPairMode,
+  me: i.helpMe
 })[screen] || []
 
 const title = (i, screen) => ({
@@ -758,6 +829,7 @@ function render (term, st) {
   if (st.screen === 'profiles') body = renderList(profileRows(st, t), st.sel.profiles, contentH, cols, t, scrollRef)
   else if (st.screen === 'devices') body = renderList(deviceRows(st, t), st.sel.devices, contentH, cols, t, scrollRef)
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
+  else if (st.screen === 'me') body = renderList(meRows(st, t), -1, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
@@ -896,6 +968,9 @@ export async function runTui () {
       if ((key.name === 'left' || key.name === 'right') && INNER_TABS.includes(st.screen)) {
         const n = INNER_TABS.indexOf(st.screen)
         st.screen = INNER_TABS[(n + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length]
+        // El perfil se pide al ENTRAR en su pestaña, no al arrancar: es contenido del
+        // usuario y no hay por qué sacarlo del cifrado si nadie lo está mirando.
+        if (st.screen === 'me' && st.me === undefined) await refreshMe(term, st)
         continue
       }
       // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
@@ -907,6 +982,7 @@ export async function runTui () {
       if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
       else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
+      else if (st.screen === 'me') running = await onKeyMe(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
     }
@@ -916,4 +992,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }
+export const __test = { render, profileRows, deviceRows, secretRows, meRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }
