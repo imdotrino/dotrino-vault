@@ -234,16 +234,37 @@ pineada en el enrolamiento.
 
 `startDeviceVault(identity, { proxyUrl? }) → Promise<handle>`
 
-- `startPairing({ scope?, ttlMs?, label? }) → { qr, expiresInMs }`
+- `startPairing({ scope?, ttlMs?, label?, mode?, account? }) → { qr, expiresInMs }`
+- `stopPairing(token)`
 - `listPending() → [{ deviceId, label }]`
 - `approve(deviceId, code) → Promise<{ ok, deviceId }>`  (code = lo que muestra el dispositivo)
 - `reject(deviceId)`
 - `listMachines() → Promise<[{ sub, deviceId, label, scope, exp, nonce }]>`
 - `revoke(nonce) → Promise`
 - `getSelfCert() → Promise<cert>`  (self-cert `P ← P`, para actuar además de cliente)
-- `onPendingChange(fn)`, `close()`
+- `onPendingChange(fn)`, `onAdopted(fn)`, `close()`
 
 Cripto y firma: `@dotrino/identity`. Transporte: `@dotrino/proxy-client`. No reimplementa
 nada del ecosistema.
+
+### Qué atiende, y qué NO
+
+Esta bóveda **no es** el daemon del PC: comparte el núcleo de enrolamiento
+(`lib/src/enroll.js`, el mismo archivo), pero atiende menos mensajes del protocolo.
+
+Atiende: `vault.hello` (la llave que pide el QR corto), `vault.enroll` +
+`vault.acta.sealed` (enrolar y adoptar), `vault.renew` (**renovación automática** del
+cert de una máquina vigente: sin esto toda máquina enrolada caducaba a los 30 días) y
+`vault.devices` (lista + revocados, con re-emisión del `REVOKED` firmado).
+
+**No** atiende, y hoy solo existen contra el daemon `dotrino-vault`:
+
+| Falta | Qué implica |
+|---|---|
+| `vault.sign` | una máquina no puede pedirle a la maestra que firme por ella |
+| `vault.store` / `vault.get` | no hay store centralizado, ni edición de perfil, ni clave de contenido |
+| `vault.secrets` | `@dotrino/vault/config` (el reemplazo del `.env`) **no funciona** contra un dispositivo |
+| `vault.admin` | sin consola remota |
+| bitácora, cifrado en reposo, candado, multi-perfil | son del daemon; en el navegador dependen de `@dotrino/identity` |
 
 MIT · parte de [Dotrino](https://dotrino.com).
