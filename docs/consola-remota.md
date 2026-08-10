@@ -1,7 +1,7 @@
 # Consola remota de la bóveda — plan de diseño
 
-> Estado: **F1–F3 y F5 IMPLEMENTADAS** (capacidad, operaciones remotas, avisos e
-> interfaz). Falta **F4** (datos sensibles) y el E2E en contenedores. Complementa `acta-de-perfil.md` (el modelo) y
+> Estado: **F1–F5 IMPLEMENTADAS** (capacidad, operaciones remotas, avisos, datos
+> sensibles e interfaz). Falta el E2E en contenedores. Complementa `acta-de-perfil.md` (el modelo) y
 > `pairing-protocol.md` (el emparejamiento endurecido). Si hay conflicto, mandan esos dos.
 
 ## 1. Qué se quiere
@@ -121,9 +121,24 @@ como aviso.
 
 ## 6. F4 — Datos sensibles del usuario
 
-Van al **contenido del perfil** (`src/threadStore.js` + `src/store.js`), cifrados con la
-CEK de la cuenta y accesibles con `vault:store` — el mismo camino que hilos y perfil.
-Métodos nuevos: `secure.list` / `secure.put` / `secure.del` sobre un árbol propio.
+Van al **contenido del perfil** (`src/threadStore.js`), cifrados con la CEK de la cuenta
+y accesibles con `vault:store` — el mismo camino que hilos y perfil. Métodos:
+`secure.list` / `secure.get` / `secure.put` / `secure.del` sobre un árbol propio
+(`data.secure` en `threads.json`).
+
+**Dos sobres cerrados por ficha, y la bóveda no abre ninguno.** Cada ficha guarda `meta`
+(lo justo para pintar la lista: nombre, tipo, carpeta) y `enc` (el valor). Los sella el
+dispositivo con `identity.sealContent`; aquí solo se comprueba que sean cadenas y que no
+pasen de 64 KB — nunca qué dicen. Que sean **dos** y no uno es lo que permite listar sin
+bajar todas las contraseñas de golpe, y que el nombre («Banco») tampoco quede legible en
+la bóveda. Tope de 2000 fichas: un dispositivo con `vault:store` no llena el disco.
+
+`secure.get` no estaba en el plan original, pero sin él listar tendría que devolver los
+valores, que es justo lo que se quiere evitar.
+
+**Leer datos sensibles exige `vault:store`, no `vault:read`.** Aunque `list`/`get` sean
+lecturas, quedan **fuera** de `STORE_READ_METHODS`: a un dispositivo al que solo le diste
+«leer» no se le abren las contraseñas.
 
 **No se toca `secrets.json`**: ese es el cajón de los *servicios* (`proxy`, `geo`…),
 acotado por CN, y no es el sitio de las contraseñas de una persona. Son dos cosas con el
@@ -165,6 +180,9 @@ Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código lle
   `vault:secrets:*` → rechazado.
 - Acta: `admin` con `cn` → no valida. Un admin intentando `caps`/`handover` → no hay
   camino (no existe el mensaje) y el acta que lo intentara no sella.
+- Datos sensibles (`test/secure-store.test.mjs`): listar no baja los valores; en el disco
+  no se ve ni el valor ni el nombre; editar conserva id y fecha de creación; topes de
+  tamaño y de número de fichas; `list`/`get` fuera del set de solo-lectura.
 - E2E en contenedores: bóveda + dispositivo-admin + dispositivo-nuevo; el admin empareja y
   aprueba al nuevo **sin tocar el PC**, y el aviso llega a los tres.
 - Navegador con Playwright: la consola remota, el QR y la pantalla de código.

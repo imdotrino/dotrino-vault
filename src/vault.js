@@ -168,7 +168,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // aceptan vault:store o vault:read. Cada op va firmada por D + cert (cadena D←maestra).
   async function handleStore (from, p) {
     const d = p.data
-    if (!d || typeof d.method !== 'string' || !threads.methods[d.method]) {
+    // `Object.hasOwn` y no `threads.methods[d.method]`: con la comprobación laxa,
+    // `method: 'toString'` (o cualquier miembro heredado de Object) pasaba el filtro y
+    // se llamaba como si fuera del store.
+    if (!d || typeof d.method !== 'string' || !Object.hasOwn(threads.methods, d.method)) {
       return reply(from, { type: MSG.ERROR, error: 'store: invalid method' })
     }
     if (!isFresh(d)) return staleReply(from)
