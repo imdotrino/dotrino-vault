@@ -200,6 +200,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         args = JSON.parse(await identity.openContent(d.enc))
       }
       const result = await threads.methods[d.method](args)
+      // Que un aparato ESCRIBA en tu bóveda queda anotado. Antes solo se auditaba el
+      // rechazo, así que la bitácora contaba quién entró pero no qué hizo después.
+      // Solo la operación y el aparato: nunca el contenido (`activity` es un registro
+      // de seguridad, no una copia de lo que guardas).
+      if (!STORE_READ_METHODS.has(d.method)) {
+        audit('store', { device: await deviceIdOf(chk.device), method: d.method })
+      }
       if (cek) {
         const enc = await identity.sealContent(JSON.stringify(result ?? null))
         return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: { __enc: enc } })

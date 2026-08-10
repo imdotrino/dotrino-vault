@@ -250,6 +250,68 @@ function cmdReject (deviceId) {
 }
 
 /**
+ * `dotrino-vault me` — el PERFIL del usuario tal como lo tiene la bóveda: apodo, foto y
+ * datos. Es lo que editas en cualquier dispositivo emparejado y se sincroniza aquí, así
+ * que sirve para comprobar que lo que cambiaste en el aparato llegó de verdad.
+ *
+ * Distinto de `members` (quién es del perfil) y de `profile` (los perfiles del PC): esto
+ * es el CONTENIDO, no la identidad.
+ *
+ * La foto no se imprime —es un data-URI de hasta ~90 KB— sino que se resume;
+ * `me --foto <archivo>` la escribe en disco para poder mirarla.
+ */
+async function cmdMe (args = []) {
+  const i = args.findIndex((a) => a === '--foto' || a === '--photo')
+  const avatarPath = i >= 0 ? args[i + 1] : null
+  if (i >= 0 && !avatarPath) { console.error('uso: dotrino-vault me --foto <archivo>'); process.exit(2) }
+
+  const s = requireDaemon()
+  const meFile = path.join(dir, 'me.json')
+  try { fs.rmSync(meFile, { force: true }) } catch (_) {}
+  writeReq('me-request.json', { ...(avatarPath ? { avatarPath: path.resolve(avatarPath) } : {}) })
+  avisar(s.pid, 'SIGUSR2')
+  let dump = null
+  for (let n = 0; n < 50; n++) { await sleep(100); const d = readJson(meFile, null); if (d?.at) { dump = d; break } }
+  // El volcado es contenido del usuario: se lee y se BORRA, no se queda ahí suelto.
+  try { fs.rmSync(meFile, { force: true }) } catch (_) {}
+  if (!dump) { console.error('La bóveda no respondió. ¿Está corriendo?  dotrino-vault status'); process.exit(1) }
+
+  const me = dump.me
+  if (!me) {
+    console.log('\nTodavía no hay perfil en esta bóveda.')
+    console.log('Edita tu nombre o tu foto en un dispositivo emparejado y vuelve a mirar.\n')
+    return
+  }
+
+  const cuando = me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—'
+  console.log('\n%sPerfil%s · actualizado %s\n', B, Z, cuando)
+  console.log('  nombre      : %s', me.nickname || '(sin nombre)')
+  console.log('  foto        : %s', me.avatar
+    ? `sí · ${me.avatar.type || 'desconocido'} · ${(me.avatar.bytes / 1024).toFixed(1)} KB`
+    : 'no')
+
+  // Los campos estándar. `visible` es del usuario: teléfono y dirección nacen ocultos.
+  const STD = [['nombres', 'nombres'], ['apellidos', 'apellidos'], ['email', 'correo'],
+    ['telefono', 'teléfono'], ['direccion', 'dirección']]
+  const puestos = STD.filter(([k]) => me[k])
+  if (puestos.length) {
+    console.log('')
+    for (const [k, etiqueta] of puestos) {
+      console.log('  %s: %s%s', etiqueta.padEnd(12), me[k], me[k + 'Visible'] === false ? '   (oculto)' : '')
+    }
+  }
+  for (const [titulo, lista] of [['Enlaces', me.links], ['Otros datos', me.fields]]) {
+    if (!Array.isArray(lista) || !lista.length) continue
+    console.log('\n  %s:', titulo)
+    for (const x of lista) console.log('    %s %s%s', (x.type || x.label || '').padEnd(12), x.value, x.visible === false ? '   (oculto)' : '')
+  }
+
+  if (dump.avatarGuardada) console.log('\n  Foto escrita en: %s', dump.avatarGuardada)
+  else if (me.avatar) console.log('\n  Para verla:  dotrino-vault me --foto ~/perfil.png')
+  console.log('')
+}
+
+/**
  * `dotrino-vault members` — el ACTA del perfil: qué llaves son tuyas y qué puede hacer cada
  * una. Es la misma información que muestra la consola de vault.dotrino.com.
  */
@@ -584,6 +646,7 @@ function help () {
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
   devices             lista dispositivos enrolados / revocados
+  me                  tu perfil (nombre, foto, datos) tal como lo tiene la bóveda
   members             el acta del perfil: quién es tuyo y qué puede hacer
   caps <ID> ±permiso  cambia permisos (+firma -guarda +administra …)
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
@@ -628,6 +691,7 @@ export async function runCtl (argv) {
     case 'approve': return cmdApprove(rest[0])
     case 'reject': return cmdReject(rest[0])
     case 'devices': return cmdDevices()
+    case 'me': return cmdMe(rest)
     case 'members': return cmdMembers()
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])

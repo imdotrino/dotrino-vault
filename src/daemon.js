@@ -154,6 +154,16 @@ export async function runDaemon () {
   const secretsListFile = path.join(dir, 'secrets-list.json')
   const profileReqFile = path.join(dir, 'profile-request.json')
   const dumpReqFile = path.join(dir, 'dump-request.json')
+  const meReqFile = path.join(dir, 'me-request.json')
+  const meFile = path.join(dir, 'me.json')
+
+  /** Resumen de la foto de perfil: qué es y cuánto pesa, nunca los bytes. */
+  function avatarInfo (avatar) {
+    if (typeof avatar !== 'string' || !avatar) return null
+    const m = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(avatar)
+    if (!m) return { type: null, bytes: avatar.length }
+    return { type: m[1] || 'desconocido', bytes: Math.floor(m[2].length * 3 / 4) }
+  }
 
   /**
    * Órdenes de perfil (crear/renombrar/borrar/activar) y del candado
@@ -242,6 +252,30 @@ export async function runDaemon () {
       writeJson(devFile, { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.listDevices()) })
       // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
       try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+
+      // PERFIL del usuario (apodo, foto, datos) tal como lo tiene la bóveda: `dotrino-vault me`.
+      // Solo se vuelca cuando se PIDE, no en cada señal: es contenido del usuario y no tiene
+      // por qué quedar escrito en un archivo suelto cada vez que alguien mira los miembros.
+      // La FOTO no entra en el volcado (son hasta ~90 KB de data-URI que nadie va a leer en
+      // una terminal): se resume, y si la quieres, `--foto <archivo>` la escribe donde digas.
+      const meReq = readJsonSafe(meReqFile)
+      if (meReq) {
+        rm(meReqFile)
+        try {
+          const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
+          const { me } = tm.vault.threads.methods.profileGet()
+          const { avatar, ...resto } = me || {}
+          let guardada = null
+          if (meReq.avatarPath && typeof avatar === 'string') {
+            const m = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(avatar)
+            if (m) {
+              fs.writeFileSync(meReq.avatarPath, Buffer.from(m[2], 'base64'), { mode: 0o600 })
+              guardada = meReq.avatarPath
+            }
+          }
+          writeJson(meFile, { v: 1, at: Date.now(), profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null, avatarGuardada: guardada })
+        } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
+      }
     } catch (e) {
       console.error('[vault] error handling a control signal:', e.message)
     }
