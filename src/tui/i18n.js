@@ -175,12 +175,24 @@ const es = {
   // language/quit); lo único que se traduce es la palabra que las explica.
   // Segmentos, no una línea: el render recorta del medio si no caben.
   helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'u desbloq', 'k bloquear', 'l English', 'q salir'],
-  helpDevices: ['←→ pestaña', '↑↓', 'p emparejar', 'a aprobar', 'x rechazar', 'n renombrar', 'v revocar', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
+  // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
+  // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
+  // Anunciar teclas muertas confunde y además las quema para otros usos.
+  helpDevices: ({ pendiente, hayAparatos } = {}) => [
+    '←→ pestaña', '↑↓', 'p emparejar',
+    ...(pendiente ? ['a aprobar', 'x rechazar'] : []),
+    ...(hayAparatos ? ['n renombrar', 'v revocar'] : []),
+    'r refrescar', 'Esc bóvedas', 'l English', 'q salir'
+  ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
   renameDeviceHint: 'el nombre con el que lo reconoces (Esc cancela)',
   renaming: 'Renombrando…',
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
-  helpSecrets: ['←→ pestaña', '↑↓', 'n nueva variable', 'x quitar (variable/scope)', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
+  helpSecrets: ({ haySecretos } = {}) => [
+    '←→ pestaña', '↑↓', 'n nueva variable',
+    ...(haySecretos ? ['x quitar (variable/scope)'] : []),
+    'r refrescar', 'Esc bóvedas', 'l English', 'q salir'
+  ],
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
 
@@ -355,12 +367,21 @@ const en = {
   helpConfirm: 'y confirm · n/Esc cancel',
 
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
-  helpDevices: ['←→ tab', '↑↓', 'p pair', 'a approve', 'x reject', 'n rename', 'v revoke', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
+  helpDevices: ({ pendiente, hayAparatos } = {}) => [
+    '←→ tab', '↑↓', 'p pair',
+    ...(pendiente ? ['a approve', 'x reject'] : []),
+    ...(hayAparatos ? ['n rename', 'v revoke'] : []),
+    'r refresh', 'Esc vaults', 'l Español', 'q quit'
+  ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,
   renameDeviceHint: 'the name you recognise it by (Esc cancels)',
   renaming: 'Renaming…',
   deviceRenamed: (n) => `Now called "${n}"`,
-  helpSecrets: ['←→ tab', '↑↓', 'n new variable', 'x remove (variable/scope)', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
+  helpSecrets: ({ haySecretos } = {}) => [
+    '←→ tab', '↑↓', 'n new variable',
+    ...(haySecretos ? ['x remove (variable/scope)'] : []),
+    'r refresh', 'Esc vaults', 'l Español', 'q quit'
+  ],
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
 

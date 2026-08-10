@@ -62,8 +62,12 @@ test('LAS TECLAS SON LAS MISMAS EN LOS DOS IDIOMAS (mnemónico inglés)', () => 
   // La primera "palabra" de cada segmento es la tecla; solo debe cambiar el texto
   // que la explica. Si alguien traduce una tecla, este test lo caza.
   const keysOf = (segs) => segs.map((s) => s.split(' ')[0])
+  // Algunas barras son FUNCIÓN del estado (solo anuncian lo que se puede hacer ahora): se
+  // resuelven con todo disponible, que es el catálogo completo de esa pantalla.
+  const TODO = { pendiente: true, hayAparatos: true, haySecretos: true }
+  const segsOf = (d, screen) => (typeof d[screen] === 'function' ? d[screen](TODO) : d[screen])
   for (const screen of ['helpProfiles', 'helpDevices', 'helpSecrets', 'helpPairing', 'downHelp']) {
-    assert.deepEqual(keysOf(dict('en')[screen]), keysOf(dict('es')[screen]), `teclas distintas en ${screen}`)
+    assert.deepEqual(keysOf(segsOf(dict('en'), screen)), keysOf(segsOf(dict('es'), screen)), `teclas distintas en ${screen}`)
   }
   // Y son las inglesas: locK, pair, change-password, language… (el candado ya no es `l`).
   assert.ok(dict('es').helpProfiles.some((s) => s.startsWith('k ')), 'k = locK')
@@ -71,7 +75,7 @@ test('LAS TECLAS SON LAS MISMAS EN LOS DOS IDIOMAS (mnemónico inglés)', () => 
   // `p` = emparejar en las DOS pantallas: una tecla, un significado.
   for (const screen of ['helpProfiles', 'helpDevices']) {
     for (const lang of ['es', 'en']) {
-      const seg = dict(lang)[screen].find((s) => s.startsWith('p '))
+      const seg = segsOf(dict(lang), screen).find((s) => s.startsWith('p '))
       assert.ok(seg && /(emparejar|pair)/.test(seg), `p debería ser emparejar en ${screen}/${lang}: ${seg}`)
     }
   }
@@ -79,7 +83,7 @@ test('LAS TECLAS SON LAS MISMAS EN LOS DOS IDIOMAS (mnemónico inglés)', () => 
 
   // Ninguna tecla se repite dentro de la misma pantalla.
   for (const screen of ['helpProfiles', 'helpDevices', 'helpSecrets', 'helpPairing', 'downHelp']) {
-    const keys = keysOf(dict('en')[screen]).filter((k) => /^[a-zA-Z]$/.test(k)).map((k) => k.toLowerCase())
+    const keys = keysOf(segsOf(dict('en'), screen)).filter((k) => /^[a-zA-Z]$/.test(k)).map((k) => k.toLowerCase())
     assert.equal(new Set(keys).size, keys.length, `tecla repetida en ${screen}: ${keys}`)
   }
 })
@@ -158,4 +162,34 @@ test('la tecla `l` conmuta el idioma, lo recuerda y lo dice en el idioma nuevo',
     assert.equal(st.lang, 'es')
     assert.equal(st.flash.text, dict('es').langChanged)
   })
+})
+
+
+test('la barra solo anuncia lo que se puede hacer AHORA', () => {
+  // Por SEGMENTOS y no con una regex sobre la línea entera: la tecla es la primera
+  // palabra de cada segmento, y buscar `\ba ` en el texto casa con la «a» de «pestaña»
+  // (la ñ no es carácter de palabra) — es justo el falso positivo que me comí.
+  const teclas = (segs) => segs.map((x) => x.split(' ')[0])
+
+  for (const lang of ['es', 'en']) {
+    const d = dict(lang)
+    const vacio = teclas(d.helpDevices({ pendiente: false, hayAparatos: false }))
+    assert.ok(!vacio.includes('a'), 'sin nadie esperando no se ofrece aprobar: ' + vacio)
+    assert.ok(!vacio.includes('x'), 'ni rechazar: ' + vacio)
+    assert.ok(!vacio.includes('v'), 'sin aparatos no se ofrece revocar: ' + vacio)
+    assert.ok(!vacio.includes('n'), 'ni renombrar: ' + vacio)
+    assert.ok(vacio.includes('p'), 'emparejar SIEMPRE se puede')
+    assert.ok(vacio.includes('r') && vacio.includes('q'), 'refrescar y salir también')
+
+    const conPendiente = teclas(d.helpDevices({ pendiente: true, hayAparatos: false }))
+    assert.ok(conPendiente.includes('a') && conPendiente.includes('x'), 'con alguien esperando: aprobar y rechazar')
+    assert.ok(!conPendiente.includes('v'), 'pero seguir sin aparatos no habilita revocar')
+
+    const conAparatos = teclas(d.helpDevices({ pendiente: false, hayAparatos: true }))
+    assert.ok(conAparatos.includes('n') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
+    assert.ok(!conAparatos.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
+
+    assert.ok(!teclas(d.helpSecrets({ haySecretos: false })).includes('x'), 'sin secretos no se ofrece quitar')
+    assert.ok(teclas(d.helpSecrets({ haySecretos: true })).includes('x'), 'con secretos sí')
+  }
 })

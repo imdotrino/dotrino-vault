@@ -729,14 +729,27 @@ async function onConfirmKey (st, key) {
 const INNER_TABS = ['devices', 'secrets', 'me']
 const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, me: i.tabMe })[k]
 
-const helpSegs = (i, screen) => ({
-  profiles: i.helpProfiles,
-  devices: i.helpDevices,
-  secrets: i.helpSecrets,
-  pairing: i.helpPairing,
-  pairmode: i.helpPairMode,
-  me: i.helpMe
-})[screen] || []
+/**
+ * Las teclas que se pueden usar AHORA, no el catálogo entero. Aprobar/rechazar sin nadie
+ * esperando, o revocar sin un aparato seleccionado, no hacen nada: anunciarlas confunde
+ * («¿por qué no pasa nada?») y además quema esas letras para otros usos en la pantalla.
+ */
+const helpSegs = (i, screen, st = {}) => {
+  const segs = {
+    profiles: i.helpProfiles,
+    devices: i.helpDevices,
+    secrets: i.helpSecrets,
+    pairing: i.helpPairing,
+    pairmode: i.helpPairMode,
+    me: i.helpMe
+  }[screen] || []
+  if (typeof segs !== 'function') return segs
+  return segs({
+    pendiente: !!st.pending,
+    hayAparatos: (st.devices?.issued || []).length > 0,
+    haySecretos: Object.keys(st.secrets || {}).length > 0
+  })
+}
 
 const title = (i, screen) => ({
   profiles: i.titleProfiles,
@@ -851,7 +864,7 @@ function render (term, st) {
   } else lines[statusRow] = ''
 
   // barra de ayuda
-  let help = fitHelp(helpSegs(i, st.screen), cols)
+  let help = fitHelp(helpSegs(i, st.screen, st), cols)
   if (st.input) help = i.helpInput
   else if (st.confirm) help = i.helpConfirm
   lines[rows - 1] = t.bar(help, cols)
