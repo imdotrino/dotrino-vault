@@ -342,6 +342,40 @@ async function cmdMembers () {
   console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
 }
 
+/**
+ * `dotrino-vault label <ID> <nombre>` — renombra un dispositivo.
+ *
+ * El nombre lo pone el aparato al emparejarse (y si no le diste uno, entra con TU apodo de
+ * ese momento), así que se queda desfasado en cuanto te renombras. Esto lo arregla sin
+ * tener que revocar y volver a emparejar.
+ */
+async function cmdLabel (args = []) {
+  const [id, ...resto] = args
+  const nombre = resto.join(' ').trim()
+  if (!id || !nombre) {
+    console.error('uso: dotrino-vault label <ID> <nombre>   (p.ej. label AB12-CD34 "Teléfono de casa")')
+    process.exit(2)
+  }
+  const m = await buscarMiembro(id)
+  writeReq('label-request.json', { pub: m.pub, label: nombre })
+  avisar(requireDaemon().pid, 'SIGUSR2')
+  console.log('Listo: %s ahora se llama «%s». Compruébalo con: dotrino-vault members', m.id, nombre.slice(0, 60))
+}
+
+/** Busca un miembro del acta por su identificador (AB12-CD34) o se rinde con un mensaje claro. */
+async function buscarMiembro (id) {
+  const s = requireDaemon()
+  const actaFile = path.join(dataDir(), 'acta.json')
+  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
+  writeReq('dump-request.json', {})
+  avisar(s.pid, 'SIGUSR2')
+  let acta = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
+  const m = acta?.members?.find((x) => x.id === String(id).toUpperCase())
+  if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
+  return m
+}
+
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...cambios] = args
@@ -354,14 +388,7 @@ async function cmdCaps (args = []) {
     sign: 'sign', store: 'store', read: 'read', admin: 'admin'
   }
   const s = requireDaemon()
-  const actaFile = path.join(dataDir(), 'acta.json')
-  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
-  writeReq('dump-request.json', {})
-  avisar(s.pid, 'SIGUSR2')
-  let acta = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
-  const m = acta?.members?.find((x) => x.id === id.toUpperCase())
-  if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
+  const m = await buscarMiembro(id)
 
   const caps = new Set(m.caps)
   for (const c of cambios) {
@@ -642,6 +669,7 @@ function help () {
   devices             lista dispositivos enrolados / revocados
   me                  tu perfil (nombre, foto, datos) tal como lo tiene la bóveda
   members             el acta del perfil: quién es tuyo y qué puede hacer
+  label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
   caps <ID> ±permiso  cambia permisos (+firma -guarda +administra …)
   revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
@@ -687,6 +715,7 @@ export async function runCtl (argv) {
     case 'devices': return cmdDevices()
     case 'me': return cmdMe()
     case 'members': return cmdMembers()
+    case 'label': return cmdLabel(rest)
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)

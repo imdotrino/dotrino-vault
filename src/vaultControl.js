@@ -38,6 +38,7 @@ const F = {
   approveReq: 'approve-request.json',
   rejectReq: 'reject-request.json',
   revokeReq: 'revoke-request.json',
+  labelReq: 'label-request.json',
   secretReq: 'secret-request.json',
   profileReq: 'profile-request.json',
   meReq: 'me-request.json',
@@ -197,6 +198,18 @@ export async function listDevices (profile) {
     ...d, deviceId: d.sub ? await deviceIdOf(d.sub) : '????-????'
   })))
   return { issued: withIds, revoked: devices.revoked || [], profile: devices.profile || null }
+}
+
+/**
+ * Renombra un dispositivo. El nombre lo trae el aparato al emparejarse (o, si no le diste
+ * ninguno, el apodo que tuvieras ese día), así que se queda desfasado enseguida.
+ */
+export async function setDeviceLabel (pub, label, profile) {
+  requireAlive()
+  writeReq(F.labelReq, { pub, label }, profile)
+  signalOrCleanup('SIGUSR2', [F.labelReq])
+  await sleep(400)
+  return listDevices(profile)
 }
 
 /** Revoca un dispositivo por su `nonce` (le ordena autoborrarse) y revuelca. */

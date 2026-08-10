@@ -489,6 +489,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       await notifyMembers('caps', { deviceId: await deviceIdOf(pub).catch(() => null), caps })
       return r
     },
+    // Renombrar un dispositivo: es un nombre para el humano (no toca permisos ni llaves),
+    // pero pasa por el acta y se avisa, para que el cambio no sea invisible en el resto.
+    setLabel: async (pub, label) => {
+      const r = await identity.setLabel(pub, label)
+      const device = await deviceIdOf(pub).catch(() => null)
+      audit('label', { device, label: r?.label ?? label })
+      await notifyMembers('label', { deviceId: device, label: r?.label ?? label })
+      return r
+    },
     revokeDevice: async (nonce) => {
       const r = await desk.revoke(nonce)
       await notifyMembers('revoked', { certNonce: nonce, by: 'pc' })

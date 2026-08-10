@@ -205,6 +205,15 @@ export async function runDaemon () {
         rm(rejectReqFile)
       }
       // Cambio de permisos de un miembro del acta (`dotrino-vault caps`).
+      // Renombrar un dispositivo (`dotrino-vault label <ID> <nombre>`).
+      const labelReq = readJsonSafe(path.join(dir, 'label-request.json'))
+      if (labelReq?.pub && typeof labelReq.label === 'string') {
+        rm(path.join(dir, 'label-request.json'))
+        try {
+          await targetOf(labelReq)?.setLabel(labelReq.pub, labelReq.label)
+          console.log('[vault] device renamed: %s', labelReq.label || '(no name)')
+        } catch (e) { console.error('[vault] could not rename the device:', e.message) }
+      }
       const capsReq = readJsonSafe(path.join(dir, 'caps-request.json'))
       if (capsReq?.pub && Array.isArray(capsReq.caps)) {
         rm(path.join(dir, 'caps-request.json'))

@@ -498,6 +498,20 @@ async function onKeyDevices (term, st, key) {
       },
       onNo: () => { st.confirm = null }
     })
+  } else if (ch === 'n' && cur) {
+    // Renombrar: el nombre lo trae el aparato al emparejarse (y si no le diste uno, entra
+    // con TU apodo de ese momento), así que a la semana ya no dice nada.
+    setInput(st, {
+      label: i.renameDeviceLabel(cur.deviceId),
+      hint: i.renameDeviceHint,
+      value: cur.label || '',
+      onSubmit: async (valor) => {
+        const nombre = String(valor || '').trim()
+        if (!nombre) return
+        const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, nombre, activeId(st)))
+        if (r.ok) { st.devices = r.v; flash(st, i.deviceRenamed(nombre)) }
+      }
+    })
   } else if (ch === 'r') {
     await refreshDevices(term, st)
   }
