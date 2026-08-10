@@ -23,7 +23,7 @@ function fakeTerm (cols = 80, rows = 24) {
 function baseState (over = {}) {
   return {
     screen: 'profiles',
-    sel: { profiles: 0, devices: 0, secrets: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, caps: 0 },
     me: null,
     scroll: {},
     profiles: { current: 'p1', profiles: [{ id: 'p1', name: 'Perfil 1', protected: false, locked: false, current: true, fingerprint: 'fp1' }] },
@@ -86,6 +86,8 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
     { screen: 'devices', ...rich, pending: { deviceId: 'ZZ99-YY88' } },
     { screen: 'secrets', ...rich },
     { screen: 'me', ...rich },
+    { screen: 'caps', ...rich },
+    { screen: 'caps', ...rich, capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' }, members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign', 'read'] }] },
     { screen: 'me', ...rich, me: null },
     { screen: 'me', ...rich, me: undefined },
     { screen: 'secrets', ...rich, input: { label: 'Valor', value: 'topsecret', mask: true, hint: 'no se muestra' } },
@@ -313,4 +315,29 @@ test('Perfil vacío: lo dice y explica qué hacer, sin reventar', () => {
   }
   const vacio = V.meRows(baseState({ screen: 'me', me: null }), t).map((r) => r.text).join('\n')
   assert.match(vacio, /perfil/i)
+})
+
+
+test('Permisos: los cuatro, en cristiano, con su marca — y admin destacado', () => {
+  const t = makeTheme()
+  const st = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign', 'read'] }]
+  })
+  const texto = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(texto, /AB12-CD34/)
+  assert.match(texto, /\[x\].*Firmar/, 'lo que tiene va marcado')
+  assert.match(texto, /\[ \].*Administrar/, 'lo que no tiene, sin marcar')
+  assert.match(texto, /sin venir aquí/, 'y se explica qué implica administrar')
+  // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
+  assert.ok(!/vault:|scope|cert/i.test(texto), 'sin jerga: ' + texto)
+  // Se puede elegir cada permiso.
+  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 4)
+})
+
+test('Permisos de un aparato que ya no está en el acta: lo dice y no revienta', () => {
+  const t = makeTheme()
+  const st = baseState({ screen: 'caps', capsFor: { pub: 'FUERA', deviceId: 'ZZ99-YY88' }, members: [] })
+  assert.ok(V.capsRows(st, t).map((r) => r.text).join('').length > 0)
 })

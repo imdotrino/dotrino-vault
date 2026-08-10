@@ -33,12 +33,14 @@ const F = {
   profilesList: 'profiles-list.json',
   secretsList: 'secrets-list.json',
   me: 'me.json',
+  acta: 'acta.json',
   // peticiones (las escribe el control; el daemon las consume y borra)
   pairReq: 'pair-request.json',
   approveReq: 'approve-request.json',
   rejectReq: 'reject-request.json',
   revokeReq: 'revoke-request.json',
   labelReq: 'label-request.json',
+  capsReq: 'caps-request.json',
   secretReq: 'secret-request.json',
   profileReq: 'profile-request.json',
   meReq: 'me-request.json',
@@ -209,6 +211,37 @@ export async function setDeviceLabel (pub, label, profile) {
   writeReq(F.labelReq, { pub, label }, profile)
   signalOrCleanup('SIGUSR2', [F.labelReq])
   await sleep(400)
+  return listDevices(profile)
+}
+
+/**
+ * El ACTA del perfil: quién es miembro y qué puede hacer cada uno. Es lo que manda para los
+ * permisos — la lista de dispositivos enseña el SCOPE DEL CERT, que es su reflejo y puede
+ * ir por detrás hasta que el aparato renueve.
+ */
+export async function listMembers (profile) {
+  requireAlive()
+  rm(F.acta)
+  writeReq(F.dumpReq, {}, profile)
+  signalOrCleanup('SIGUSR2', [F.dumpReq])
+  const d = await waitFor(F.acta)
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  return d.members || []
+}
+
+/**
+ * Cambia lo que PUEDE hacer un dispositivo. La lista es completa (no un delta): lo que no
+ * venga, se le quita.
+ *
+ * `admin` (administrar el perfil a distancia) se concede AQUÍ, en la máquina de la bóveda,
+ * y nunca al emparejar: así el QR que circula no puede otorgarla nunca, y darla es un
+ * gesto deliberado del dueño que queda escrito en el acta.
+ */
+export async function setDeviceCaps (pub, caps, profile) {
+  requireAlive()
+  writeReq(F.capsReq, { pub, caps }, profile)
+  signalOrCleanup('SIGUSR2', [F.capsReq])
+  await sleep(600)
   return listDevices(profile)
 }
 

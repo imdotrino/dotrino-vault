@@ -124,7 +124,13 @@ export function makeTheme () {
 
 // --------------------------------- teclado ----------------------------------
 
-function parseChunk (s, push) {
+/**
+ * Decodifica un trozo de stdin en teclas. Exportado SOLO para poder probarlo: vivía
+ * encerrado en `createTerm`, así que las secuencias de escape (flechas, F5, supr) no las
+ * comprobaba nadie — y una tabla mal escrita ahí no falla, simplemente la tecla no hace
+ * nada, que es la avería más difícil de ver.
+ */
+export function parseChunk (s, push) {
   let i = 0
   const arrow = { A: 'up', B: 'down', C: 'right', D: 'left', H: 'home', F: 'end' }
   while (i < s.length) {
@@ -138,7 +144,9 @@ function parseChunk (s, push) {
           let j = i + 2; let num = ''
           while (j < s.length && /[0-9;]/.test(s[j])) { num += s[j]; j++ }
           const fin = s[j]
-          const seq = { 3: 'delete', 5: 'pageup', 6: 'pagedown', 1: 'home', 4: 'end' }
+          // F5 = refrescar. Es tecla de función y no consume un mnemónico: así `r` queda
+          // libre para renombrar, que es lo que significa en el resto de la TUI.
+          const seq = { 3: 'delete', 5: 'pageup', 6: 'pagedown', 1: 'home', 4: 'end', 15: 'f5' }
           if (fin === '~' && seq[num]) { push({ name: seq[num] }); i = j + 1; continue }
           i = (fin ? j + 1 : s.length); continue
         }

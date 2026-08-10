@@ -213,6 +213,37 @@ function pairModeRows (st, t) {
   return rows
 }
 
+/**
+ * PERMISOS de un dispositivo. Los cuatro que existen, con lo que significan en cristiano y
+ * una marca de si los tiene. El de administrar va aparte y avisado: es el único que deja
+ * a ese aparato meter y sacar dispositivos sin venir aquí.
+ */
+const CAPS_ORDEN = ['sign', 'store', 'read', 'admin']
+
+function capsRows (st, t) {
+  const i = L(st)
+  const objetivo = st.capsFor
+  if (!objetivo) return [{ text: t.muted(i.loading), sel: false }]
+  const miembro = (st.members || []).find((m) => m.pub === objetivo.pub)
+  if (!miembro) return [{ text: t.muted(i.capsNoMember), sel: false }]
+
+  const tiene = new Set(miembro.caps || [])
+  const rows = [
+    { text: ' ' + t.bold(i.capsFor(objetivo.deviceId, miembro.label || '')), sel: false },
+    { text: '', sel: false }
+  ]
+  for (const cap of CAPS_ORDEN) {
+    const marca = tiene.has(cap) ? '[x]' : '[ ]'
+    const nombre = i.capName[cap]
+    const linea = ` ${marca}  ${cap === 'admin' ? t.bold(nombre) : nombre}`
+    rows.push({ text: linea, sel: true, meta: { cap } })
+    rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
+  }
+  rows.push({ text: '', sel: false })
+  rows.push({ text: t.muted(' ' + i.capsApplyHint), sel: false })
+  return rows
+}
+
 function secretRows (st, t) {
   const i = L(st)
   const ns = st.secrets || {}
@@ -305,6 +336,10 @@ async function refreshDevices (term, st) {
 async function refreshSecrets (term, st) {
   const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
   if (r.ok) st.secrets = r.v
+}
+async function refreshMembers (term, st) {
+  const r = await guard(term, st, L(st).loadingMembers, () => vc.listMembers(activeId(st)))
+  if (r.ok) st.members = r.v
 }
 async function refreshMe (term, st) {
   const r = await guard(term, st, L(st).loadingProfile, () => vc.getMe(activeId(st)))
@@ -498,9 +533,10 @@ async function onKeyDevices (term, st, key) {
       },
       onNo: () => { st.confirm = null }
     })
-  } else if (ch === 'n' && cur) {
+  } else if (ch === 'r' && cur) {
     // Renombrar: el nombre lo trae el aparato al emparejarse (y si no le diste uno, entra
-    // con TU apodo de ese momento), así que a la semana ya no dice nada.
+    // con TU apodo de ese momento), así que a la semana ya no dice nada. `r` es renombrar
+    // también en Bóvedas: una tecla, un significado.
     setInput(st, {
       label: i.renameDeviceLabel(cur.deviceId),
       hint: i.renameDeviceHint,
@@ -512,7 +548,12 @@ async function onKeyDevices (term, st, key) {
         if (r.ok) { st.devices = r.v; flash(st, i.deviceRenamed(nombre)) }
       }
     })
-  } else if (ch === 'r') {
+  } else if (ch === 'c' && cur?.sub) {
+    st.capsFor = { pub: cur.sub, deviceId: cur.deviceId }
+    st.sel.caps = 0
+    await refreshMembers(term, st)
+    st.screen = 'caps'
+  } else if (key.name === 'f5') {
     await refreshDevices(term, st)
   }
   return true
@@ -523,6 +564,47 @@ async function beginPairing (term, st, profile) {
   const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile }))
   if (r.ok) { st.pairing = r.v; st.pending = null; st.scroll.pairing = { value: 0 }; st.screen = 'pairing' }
   return r.ok
+}
+
+/**
+ * Enter marca o desmarca un permiso y lo aplica en el acto. Sin botón de «guardar»: cada
+ * cambio se sella en el acta y se avisa a los demás aparatos, así que acumularlos en
+ * pantalla solo serviría para que el acta y lo que ves dijeran cosas distintas.
+ */
+async function onKeyCaps (term, st, key) {
+  const i = L(st)
+  const rows = capsRows(st, term.t)
+  const sels = rows.filter((r) => r.sel).map((r) => r.meta)
+  moveSel(st, key, 'caps', sels.length)
+  const cur = sels[Math.min(st.sel.caps || 0, sels.length - 1)]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+
+  if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.capsFor = null; return true }
+  if (key.name === 'f5') { await refreshMembers(term, st); return true }
+  if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
+
+  const miembro = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
+  if (!miembro) return true
+  const caps = new Set(miembro.caps || [])
+  const dando = !caps.has(cur.cap)
+  if (dando) caps.add(cur.cap); else caps.delete(cur.cap)
+
+  const aplicar = async () => {
+    const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(miembro.pub, [...caps], activeId(st)))
+    if (!r.ok) return
+    st.devices = r.v
+    await refreshMembers(term, st)
+    flash(st, dando ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
+  }
+
+  // Administrar se PREGUNTA: es el permiso que deja a ese aparato admitir y expulsar
+  // dispositivos sin pasar por aquí. Los otros tres se marcan y ya.
+  if (cur.cap === 'admin' && dando) {
+    setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: aplicar })
+    return true
+  }
+  await aplicar()
+  return true
 }
 
 async function onKeyPairMode (term, st, key) {
@@ -620,7 +702,7 @@ async function onKeyPairing (term, st, key) {
  * que usas, no en la máquina donde vive la bóveda.
  */
 async function onKeyMe (term, st, key) {
-  if (key.name === 'char' && key.ch.toLowerCase() === 'r') await refreshMe(term, st)
+  if (key.name === 'f5') await refreshMe(term, st)
   return true
 }
 
@@ -657,7 +739,7 @@ async function onKeySecrets (term, st, key) {
         onNo: () => { st.confirm = null }
       })
     }
-  } else if (ch === 'r') {
+  } else if (key.name === 'f5') {
     await refreshSecrets(term, st)
   }
   return true
@@ -741,7 +823,8 @@ const helpSegs = (i, screen, st = {}) => {
     secrets: i.helpSecrets,
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
-    me: i.helpMe
+    me: i.helpMe,
+    caps: i.helpCaps
   }[screen] || []
   if (typeof segs !== 'function') return segs
   return segs({
@@ -754,7 +837,8 @@ const helpSegs = (i, screen, st = {}) => {
 const title = (i, screen) => ({
   profiles: i.titleProfiles,
   pairing: i.titlePairing,
-  pairmode: i.titlePairMode
+  pairmode: i.titlePairMode,
+  caps: i.titleCaps
 })[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
@@ -840,6 +924,7 @@ function render (term, st) {
   else if (st.screen === 'devices') body = renderList(deviceRows(st, t), st.sel.devices, contentH, cols, t, scrollRef)
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
   else if (st.screen === 'me') body = renderList(meRows(st, t), -1, contentH, cols, t, scrollRef)
+  else if (st.screen === 'caps') body = renderList(capsRows(st, t), st.sel.caps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
@@ -993,6 +1078,7 @@ export async function runTui () {
       else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
       else if (st.screen === 'me') running = await onKeyMe(term, st, key)
+      else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
     }
@@ -1002,4 +1088,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, meRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }
+export const __test = { render, profileRows, deviceRows, secretRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }

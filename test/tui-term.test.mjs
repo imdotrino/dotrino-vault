@@ -5,7 +5,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stripAnsi, widthOf, trunc, padEnd } from '../src/tui/term.js'
+import { stripAnsi, widthOf, trunc, padEnd, parseChunk } from '../src/tui/term.js'
 
 const RED = '\x1b[31m'
 const RESET = '\x1b[0m'
@@ -44,4 +44,18 @@ test('padEnd rellena al ancho visible', () => {
   assert.equal(widthOf(padEnd(`${RED}ab${RESET}`, 5)), 5)
   // si ya excede, recorta
   assert.equal(widthOf(padEnd('abcdef', 3)), 3)
+})
+
+
+test('teclas: flechas, F5 y las de edición se decodifican', () => {
+  const leer = (s) => { const out = []; parseChunk(s, (k) => out.push(k)); return out }
+  assert.deepEqual(leer('\x1b[A').map((k) => k.name), ['up'])
+  assert.deepEqual(leer('\x1b[D\x1b[C').map((k) => k.name), ['left', 'right'])
+  // F5 = refrescar. Sin esta entrada la tecla no hace NADA y no hay error que lo delate.
+  assert.deepEqual(leer('\x1b[15~').map((k) => k.name), ['f5'])
+  assert.deepEqual(leer('\x1b[3~').map((k) => k.name), ['delete'])
+  assert.deepEqual(leer('\x1b').map((k) => k.name), ['escape'])
+  assert.deepEqual(leer('r').map((k) => [k.name, k.ch]), [['char', 'r']])
+  // Un pegado con varias teclas sale en orden y sin perder ninguna.
+  assert.deepEqual(leer('ab\x1b[15~c').map((k) => k.name), ['char', 'char', 'f5', 'char'])
 })

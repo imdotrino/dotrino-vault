@@ -177,19 +177,35 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
     assert.ok(!vacio.includes('a'), 'sin nadie esperando no se ofrece aprobar: ' + vacio)
     assert.ok(!vacio.includes('x'), 'ni rechazar: ' + vacio)
     assert.ok(!vacio.includes('v'), 'sin aparatos no se ofrece revocar: ' + vacio)
-    assert.ok(!vacio.includes('n'), 'ni renombrar: ' + vacio)
+    assert.ok(!vacio.includes('r'), 'ni renombrar: ' + vacio)
     assert.ok(vacio.includes('p'), 'emparejar SIEMPRE se puede')
-    assert.ok(vacio.includes('r') && vacio.includes('q'), 'refrescar y salir también')
+    assert.ok(vacio.includes('F5') && vacio.includes('q'), 'refrescar y salir también')
 
     const conPendiente = teclas(d.helpDevices({ pendiente: true, hayAparatos: false }))
     assert.ok(conPendiente.includes('a') && conPendiente.includes('x'), 'con alguien esperando: aprobar y rechazar')
     assert.ok(!conPendiente.includes('v'), 'pero seguir sin aparatos no habilita revocar')
 
     const conAparatos = teclas(d.helpDevices({ pendiente: false, hayAparatos: true }))
-    assert.ok(conAparatos.includes('n') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
+    assert.ok(conAparatos.includes('r') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
     assert.ok(!conAparatos.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
 
     assert.ok(!teclas(d.helpSecrets({ haySecretos: false })).includes('x'), 'sin secretos no se ofrece quitar')
     assert.ok(teclas(d.helpSecrets({ haySecretos: true })).includes('x'), 'con secretos sí')
+  }
+})
+
+
+test('`r` significa RENOMBRAR en toda la TUI (una tecla, un significado)', () => {
+  for (const lang of ['es', 'en']) {
+    const d = dict(lang)
+    const enDispositivos = d.helpDevices({ hayAparatos: true }).find((x) => x.startsWith('r '))
+    const enBovedas = d.helpProfiles.find((x) => x.startsWith('r '))
+    assert.ok(/(renombrar|rename)/.test(enDispositivos), 'r = renombrar en Dispositivos: ' + enDispositivos)
+    assert.ok(/(renombrar|rename)/.test(enBovedas), 'r = renombrar en Bóvedas: ' + enBovedas)
+    // Y refrescar deja de comerse una letra: es F5, como en todas partes.
+    for (const segs of [d.helpDevices({ hayAparatos: true }), d.helpSecrets({ haySecretos: true }), d.helpMe]) {
+      const refrescar = segs.find((x) => /(refrescar|refresh)/.test(x))
+      assert.ok(refrescar.startsWith('F5 '), 'refrescar es F5: ' + refrescar)
+    }
   }
 })

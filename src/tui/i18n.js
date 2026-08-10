@@ -35,11 +35,34 @@ const es = {
   tabDevices: 'Dispositivos',
   tabSecrets: 'Scopes y variables',
   tabMe: 'Perfil',
+  // PERMISOS de un dispositivo (§9.1: se dice el beneficio, no el scope del cert).
+  titleCaps: 'Permisos del dispositivo',
+  capsFor: (id, nombre) => `Permisos de ${id}${nombre ? ' · ' + nombre : ''}`,
+  capsNoMember: '  (este dispositivo ya no está en el acta)',
+  capsApplyHint: 'Enter marca o desmarca. Cada cambio se aplica y se avisa a tus otros aparatos.',
+  capName: {
+    sign: 'Firmar como tú',
+    store: 'Guardar tus datos',
+    read: 'Leer tus datos',
+    admin: 'Administrar el perfil'
+  },
+  capHint: {
+    sign: 'usar tu identidad en las apps del ecosistema',
+    store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
+    read: 'ver lo que guardaste',
+    admin: 'conectar y quitar dispositivos desde ese aparato, sin venir aquí'
+  },
+  confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
+  capGiven: (n) => `Concedido: ${n}`,
+  capTaken: (n) => `Quitado: ${n}`,
+  applyingCaps: 'Aplicando…',
+  loadingMembers: 'Cargando el acta…',
+  helpCaps: ['↑↓', 'Enter marcar', 'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'],
   // Perfil del usuario (lo que sincronizan los dispositivos). Solo lectura: se edita en
   // el aparato, no en la máquina donde vive la bóveda.
   loadingProfile: 'Cargando el perfil…',
   noProfile: '  (esta bóveda todavía no tiene perfil)',
-  noProfileHint: '  Edita tu nombre o tu foto en un dispositivo emparejado y pulsa R.',
+  noProfileHint: '  Edita tu nombre o tu foto en un dispositivo emparejado y pulsa F5.',
   profileUpdated: (cuando) => `  actualizado ${cuando}`,
   fieldName: 'nombre',
   fieldPhoto: 'foto',
@@ -53,7 +76,7 @@ const es = {
   hidden: '   (oculto)',
   noName: '(sin nombre)',
   no: 'no',
-  helpMe: ['←→ pestaña', 'r refrescar', 'Esc bóvedas', 'l English', 'q salir'],
+  helpMe: ['←→ pestaña', 'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'],
   tabsHint: '   (←→ cambiar)',
   titleProfiles: 'Bóvedas',
   titlePairing: 'Emparejar un dispositivo',
@@ -181,8 +204,8 @@ const es = {
   helpDevices: ({ pendiente, hayAparatos } = {}) => [
     '←→ pestaña', '↑↓', 'p emparejar',
     ...(pendiente ? ['a aprobar', 'x rechazar'] : []),
-    ...(hayAparatos ? ['n renombrar', 'v revocar'] : []),
-    'r refrescar', 'Esc bóvedas', 'l English', 'q salir'
+    ...(hayAparatos ? ['r renombrar', 'c permisos', 'v revocar'] : []),
+    'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
   renameDeviceHint: 'el nombre con el que lo reconoces (Esc cancela)',
@@ -191,7 +214,7 @@ const es = {
   helpSecrets: ({ haySecretos } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable',
     ...(haySecretos ? ['x quitar (variable/scope)'] : []),
-    'r refrescar', 'Esc bóvedas', 'l English', 'q salir'
+    'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
@@ -240,9 +263,31 @@ const en = {
   tabDevices: 'Devices',
   tabSecrets: 'Scopes & variables',
   tabMe: 'Profile',
+  titleCaps: 'Device permissions',
+  capsFor: (id, nombre) => `Permissions for ${id}${nombre ? ' · ' + nombre : ''}`,
+  capsNoMember: '  (this device is no longer in the record)',
+  capsApplyHint: 'Enter ticks or unticks. Each change applies and your other devices are told.',
+  capName: {
+    sign: 'Sign as you',
+    store: 'Save your data',
+    read: 'Read your data',
+    admin: 'Manage the profile'
+  },
+  capHint: {
+    sign: 'use your identity across the ecosystem apps',
+    store: 'write to your vault (profile, content, sensitive data)',
+    read: 'see what you saved',
+    admin: 'connect and remove devices from that device, without coming here'
+  },
+  confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
+  capGiven: (n) => `Granted: ${n}`,
+  capTaken: (n) => `Removed: ${n}`,
+  applyingCaps: 'Applying…',
+  loadingMembers: 'Loading the record…',
+  helpCaps: ['↑↓', 'Enter tick', 'F5 refresh', 'Esc devices', 'l Español', 'q quit'],
   loadingProfile: 'Loading profile…',
   noProfile: '  (this vault has no profile yet)',
-  noProfileHint: '  Edit your name or photo on a paired device and press R.',
+  noProfileHint: '  Edit your name or photo on a paired device and press F5.',
   profileUpdated: (cuando) => `  updated ${cuando}`,
   fieldName: 'name',
   fieldPhoto: 'photo',
@@ -256,7 +301,7 @@ const en = {
   hidden: '   (hidden)',
   noName: '(no name)',
   no: 'no',
-  helpMe: ['←→ tab', 'r refresh', 'Esc vaults', 'l Español', 'q quit'],
+  helpMe: ['←→ tab', 'F5 refresh', 'Esc vaults', 'l Español', 'q quit'],
   tabsHint: '   (←→ switch)',
   titleProfiles: 'Vaults',
   titlePairing: 'Pair a device',
@@ -370,8 +415,8 @@ const en = {
   helpDevices: ({ pendiente, hayAparatos } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(pendiente ? ['a approve', 'x reject'] : []),
-    ...(hayAparatos ? ['n rename', 'v revoke'] : []),
-    'r refresh', 'Esc vaults', 'l Español', 'q quit'
+    ...(hayAparatos ? ['r rename', 'c permissions', 'v revoke'] : []),
+    'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,
   renameDeviceHint: 'the name you recognise it by (Esc cancels)',
@@ -380,7 +425,7 @@ const en = {
   helpSecrets: ({ haySecretos } = {}) => [
     '←→ tab', '↑↓', 'n new variable',
     ...(haySecretos ? ['x remove (variable/scope)'] : []),
-    'r refresh', 'Esc vaults', 'l Español', 'q quit'
+    'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
