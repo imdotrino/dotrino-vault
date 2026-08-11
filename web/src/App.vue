@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, markRaw, onMounted } from 'vue'
-import Consola from './Console.vue'
+import Console from './Console.vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
@@ -269,8 +269,13 @@ function copy (text, key) {
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
-  const invitado = location.hash.includes('#vault=') || location.hash.includes('#v=')
-  view.value = (/\/(devices|dispositivos|d)$/.test(p) || invitado) ? 'console' : 'home'
+  const invited = location.hash.includes('#vault=') || location.hash.includes('#v=')
+  // `/d` es SOLO emparejar (es la dirección corta del QR) y `/devices` SOLO administrar:
+  // una pantalla es informativa o administrativa, y emparejar es un proceso con su propia
+  // pantalla. Una invitación en la URL manda: llegues por donde llegues, se empareja.
+  if (/\/d$/.test(p) || invited) view.value = 'pair'
+  else if (/\/(devices|dispositivos)$/.test(p)) view.value = 'console'
+  else view.value = 'home'
 }
 routeNow()
 /**
@@ -338,7 +343,7 @@ onMounted(async () => {
     </dotrino-topbar>
 
     <main>
-      <Consola v-if="view === 'console'" :lang="lang" />
+      <Console v-if="view === 'console' || view === 'pair'" :lang="lang" :mode="view === 'pair' ? 'pair' : 'console'" />
       <template v-else>
       <!-- HERO -->
       <section class="hero">

@@ -14,7 +14,21 @@ import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
-const props = defineProps({ lang: { type: String, default: 'es' } })
+/**
+ * `mode`:
+ *   · `console` (`/devices`) — la pantalla ADMINISTRATIVA: el acta, los miembros, los
+ *     permisos, la bóveda de este aparato. Ignora cualquier invitación que venga en la
+ *     URL: aquí no se empareja.
+ *   · `pair` (`/d`)          — SOLO emparejar. Es la dirección corta a la que apunta el
+ *     QR, y lo que hace es una cosa y nada más. Mezclarla con la consola era lo que
+ *     hacía que llegar por un QR te dejara delante de una pantalla llena de botones sin
+ *     saber en cuál estabas.
+ */
+const props = defineProps({
+  lang: { type: String, default: 'es' },
+  mode: { type: String, default: 'console' }
+})
+const pairOnly = computed(() => props.mode === 'pair')
 
 const T = {
   es: {
@@ -290,7 +304,7 @@ onMounted(async () => {
   // nueva toma el control y RECARGA la página sola, justo encima del código de seis
   // dígitos. Conservando el #fragment la recarga es recuperable: al volver se
   // reanuncia y sale un código nuevo.
-  const payload = extractPayload(location.hash)
+  const payload = pairOnly.value ? extractPayload(location.hash) : null
   if (payload) announce(payload)
   offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
   await refreshSelf()
@@ -351,7 +365,13 @@ const pairFlow = computed(() => {
   return null
 })
 /** Sale del proceso y devuelve la consola completa. */
-const closeFlow = () => { pairError.value = ''; justPaired.value = false }
+const closeFlow = () => {
+  pairError.value = ''; justPaired.value = false
+  // Emparejar termina donde empieza administrar: en `/devices`. `/d` no lista nada.
+  // Se conserva la query: `?vault=` apunta al iframe de identidad y perderlo aquí
+  // mandaría la página al de producción a mitad de camino.
+  if (pairOnly.value) location.href = '/devices' + location.search
+}
 
 /**
  * Invitación legible: compacta (`iss`+`token`) o corta (`conn`), siempre con `sn`.
@@ -424,7 +444,10 @@ async function connect (qr, mode = 'join') {
     off?.(); pairing.value = false; pairCode.value = ''
     // La invitación ya se usó (o se agotó el intento): fuera de la barra, para que
     // volver a abrir la página no dispare otro emparejamiento con un código muerto.
-    if (location.hash) { try { history.replaceState(null, '', location.pathname) } catch (_) {} }
+    // `pathname + search`: quitar solo el #fragment. Con `pathname` a secas se iba
+    // también la query, y ahí viaja `?vault=` (el iframe de identidad contra el que
+    // corre en local y en las pruebas): la página se quedaba apuntando al de producción.
+    if (location.hash) { try { history.replaceState(null, '', location.pathname + location.search) } catch (_) {} }
   }
 }
 
@@ -661,6 +684,30 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         </div>
       </div>
     </div>
+
+    <!-- `/d` es SOLO emparejar: aquí abajo empieza lo administrativo, y eso vive en
+         `/devices`. Sin invitación en la URL, lo único que se ofrece es la entrada al
+         proceso (escanear / abrir / pegar). -->
+    <template v-else-if="pairOnly">
+      <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
+      <h2>{{ t.pair_t }}</h2>
+      <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
+      <div class="row">
+        <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
+        <button class="btn ghost" :disabled="pairing" @click="fileInput.click()">{{ t.pair_file }}</button>
+      </div>
+      <input ref="fileInput" type="file" accept="image/*,.dpair,.json,text/plain" hidden @change="onFile" />
+      <div ref="scanHost" class="scanbox" v-show="scanning">
+        <video playsinline muted></video>
+        <button class="btn ghost sm" @click="scanStop && scanStop()">{{ t.cancel }}</button>
+      </div>
+      <details>
+        <summary>{{ t.pair_paste }}</summary>
+        <textarea v-model="pasted" rows="3" data-testid="pair-paste"
+                  placeholder="cAgKy9m6jD310-TFoQuRirKOoh5EUSYOfjGi9BPEe-GX9sZT…"></textarea>
+        <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
+      </details>
+    </template>
 
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
