@@ -15,8 +15,14 @@ DIST="$ROOT/dist"
 VER="$(node -p "require('$ROOT/package.json').version")"
 
 # 1. binario autosuficiente (Node embebido) — lo produce build.sh
-if [ ! -f "$DIST/dotrino-vaultd" ]; then
-  echo "==> binario no encontrado, construyéndolo (build.sh)…"
+#
+# Y se reconstruye si el que hay en dist/ NO es de esta versión. Antes bastaba con que
+# el archivo EXISTIERA: se empaquetó un .deb con el número nuevo y el binario viejo
+# dentro, se instaló, y `status` seguía enseñando la versión anterior — un paquete que
+# dice una cosa y hace otra, que es la peor forma de fallar (parece desplegado).
+BUILT="$(cat "$DIST/.built-version" 2>/dev/null || echo '')"
+if [ ! -f "$DIST/dotrino-vaultd" ] || [ "$BUILT" != "$VER" ]; then
+  echo "==> el binario de dist/ es «${BUILT:-ninguno}» y toca «$VER»: reconstruyéndolo (build.sh)…"
   bash "$ROOT/packaging/build.sh"
 fi
 

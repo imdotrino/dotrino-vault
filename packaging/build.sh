@@ -76,6 +76,10 @@ chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh"
 TARBALL="$DIST/dotrino-vault-$VER-linux-x64.tar.gz"
 tar -C "$WORK" -czf "$TARBALL" "dotrino-vault-$VER-linux-x64"
 
+# Deja constancia de QUÉ versión es el binario que quedó en dist/. Sin esto no hay
+# forma de saberlo mirando el archivo, y empaquetar lo daba por bueno (ver build-deb.sh).
+echo "$VER" > "$DIST/.built-version"
+
 echo
 echo "OK:"
 echo "  binario  $DIST/dotrino-vaultd   ($(du -h "$DIST/dotrino-vaultd" | cut -f1))"
