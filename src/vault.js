@@ -217,10 +217,40 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   // Lista (solo lectura) de dispositivos enrolados, para un panel en el navegador.
   // Cualquier cert válido tuyo puede verla; REVOCAR sigue siendo solo desde el PC.
+  /**
+   * Un aparato REVOCADO que vuelve a aparecer: se le reemite el `vault.revoked` FIRMADO
+   * para que se entere y se auto-borre.
+   *
+   * Un «unauthorized: revoked» suelto no basta y no debe bastar: no va firmado, así que
+   * el dispositivo tiene prohibido borrar nada con él (si no, cualquiera destruiría datos
+   * ajenos con un mensaje). Lo único que puede borrar es un aviso firmado por la maestra
+   * — y hasta ahora el daemon no lo reemitía nunca. Si el aparato estaba apagado cuando lo
+   * quitaste, no se enteraba jamás: seguía enseñando el perfil como si nada.
+   */
+  async function avisarSiRevocado (pubkey) {
+    if (typeof pubkey !== 'string') return
+    try {
+      // OJO con dónde se buscan: desde identity 0.42 `issued` es «lo que HOY sirve para
+      // entrar», así que los retirados NO están ahí — viven en `revokedCerts`. Buscarlos
+      // en `issued` no daba error, daba una lista vacía y ningún aviso.
+      const dele = await identity.listDelegations()
+      const revocados = await revocationSet()
+      const candidatos = [...(dele.revokedCerts || []), ...(dele.issued || [])]
+      const suyas = candidatos.filter((x) => x.sub === pubkey && (x.revokedAt || revocados.has(x.nonce)))
+      if (suyas.length) {
+        await desk.emitRevoke(pubkey, suyas[0].nonce)
+        audit('revoke.notified', { device: await deviceIdOf(pubkey).catch(() => null) })
+      }
+    } catch (e) { log('[vault] could not re-emit the revocation:', e.message) }
+  }
+
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
+    if (!chk.ok) {
+      if (chk.reason === 'revoked') await avisarSiRevocado(p.data?.publickey)
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
+    }
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.

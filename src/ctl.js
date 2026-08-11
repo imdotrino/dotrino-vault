@@ -440,12 +440,29 @@ async function cmdDevices () {
   console.log('\nPara revocar uno (y ordenarle autoborrarse):  dotrino-vault revoke <nonce>')
 }
 
-function cmdRevoke (nonce) {
-  if (!nonce) { console.error('uso: dotrino-vault revoke <nonce>'); process.exit(2) }
+/**
+ * `dotrino-vault revoke <ID|nonce>` — quita un dispositivo.
+ *
+ * Con el IDENTIFICADOR del aparato (`AB12-CD34`) se le retiran TODOS sus certificados,
+ * que es lo que la gente quiere decir con «quitar este dispositivo»: renovar emite uno
+ * nuevo cada 30 días, así que quitar solo el último dejaba vivos los anteriores hasta que
+ * caducaran — quitarlo sin quitarlo. Con un `nonce` suelto se retira ese y solo ese, que
+ * sigue siendo útil para casos finos.
+ */
+async function cmdRevoke (arg) {
+  if (!arg) { console.error('uso: dotrino-vault revoke <ID|nonce>   (el ID quita el aparato entero)'); process.exit(2) }
+  const esId = /^[0-9a-f]{4}-?[0-9a-f]{4}$/i.test(arg)
   const s = requireDaemon()
-  writeReq('revoke-request.json', { nonce })
+  if (esId) {
+    const m = await buscarMiembro(arg.toUpperCase().includes('-') ? arg.toUpperCase() : arg.toUpperCase().replace(/(.{4})(.{4})/, '$1-$2'))
+    writeReq('revoke-request.json', { sub: m.pub })
+    avisar(s.pid, 'SIGUSR2')
+    console.log('Quitado %s (todos sus certificados). Se autoborrará al reconectar. Verifica: dotrino-vault devices', m.id)
+    return
+  }
+  writeReq('revoke-request.json', { nonce: arg })
   avisar(s.pid, 'SIGUSR2')
-  console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', nonce)
+  console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', arg)
 }
 
 /**
@@ -685,7 +702,7 @@ function help () {
   members             el acta del perfil: quién es tuyo y qué puede hacer
   label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
   caps <ID> ±permiso  cambia permisos (+firma -guarda +administra …)
-  revoke <nonce>      revoca un dispositivo (le ordena autoborrarse)
+  revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio
   version             muestra la versión instalada
