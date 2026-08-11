@@ -196,10 +196,36 @@ export async function listDevices (profile) {
   const { devices } = await snapshot(profile)
   if (!devices) throw coded('the daemon did not reply', 'NO_REPLY')
   const issued = devices.issued || devices.active || devices.delegations || []
+  const revoked = devices.revoked || []
   const withIds = await Promise.all(issued.map(async (d) => ({
     ...d, deviceId: d.sub ? await deviceIdOf(d.sub) : '????-????'
   })))
-  return { issued: withIds, revoked: devices.revoked || [], profile: devices.profile || null }
+  return { issued: agruparPorAparato(withIds, revoked), revoked, profile: devices.profile || null }
+}
+
+/**
+ * UN APARATO, UNA FILA — y sin los certificados retirados.
+ *
+ * El daemon lleva la cuenta por CERTIFICADO, que es lo correcto para él: revocar es
+ * revocar un papel. Pero al dueño le sobra ese detalle — renovar emite uno nuevo cada 30
+ * días, así que un aparato de un año saldría doce veces, y los revocados seguían contando
+ * como «enrolados». Se agrupa por llave, se queda el más nuevo y se guardan TODOS sus
+ * nonces, que es lo que hace falta para retirarlo entero.
+ */
+export function agruparPorAparato (lista, revoked = []) {
+  const fuera = new Set(revoked.map((r) => r?.nonce || r))
+  const porLlave = new Map()
+  for (const d of lista) {
+    if (d.revokedAt || fuera.has(d.nonce)) continue
+    const clave = d.sub || d.nonce
+    const y = porLlave.get(clave)
+    if (!y) porLlave.set(clave, { ...d, nonces: [d.nonce] })
+    else {
+      y.nonces.push(d.nonce)
+      if ((d.exp || 0) > (y.exp || 0)) Object.assign(y, { ...d, nonces: y.nonces })
+    }
+  }
+  return [...porLlave.values()]
 }
 
 /**

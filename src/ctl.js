@@ -410,13 +410,27 @@ async function cmdDevices () {
   let snap = null
   for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
   if (!snap) { console.error('El daemon no respondió.'); process.exit(1) }
-  const active = snap.issued || snap.active || snap.delegations || []
   const revoked = snap.revoked || []
+  const fuera = new Set(revoked.map((r) => r?.nonce || r))
+  // UN APARATO, UNA LÍNEA. El daemon lleva la cuenta por CERTIFICADO —correcto para él,
+  // porque revocar es revocar un papel—, pero renovar emite uno nuevo cada 30 días: un
+  // aparato de un año salía doce veces, y los ya retirados seguían contando como
+  // enrolados. Se agrupa por llave y se dice cuántos certificados tiene.
+  const porLlave = new Map()
+  for (const d of (snap.issued || snap.active || snap.delegations || [])) {
+    if (d.revokedAt || fuera.has(d.nonce)) continue
+    const clave = d.sub || d.nonce
+    const y = porLlave.get(clave)
+    if (!y) porLlave.set(clave, { ...d, certs: 1 })
+    else { y.certs++; if ((d.exp || 0) > (y.exp || 0)) Object.assign(y, { ...d, certs: y.certs }) }
+  }
+  const active = [...porLlave.values()]
   console.log('Dispositivos enrolados: %d', active.length)
   for (const d of active) {
     const did = d.sub ? await deviceIdOf(d.sub) : '????-????'
-    console.log('  · %s  %s%s%s', did, d.label || '(sin etiqueta)',
-      d.exp ? '  exp=' + new Date(d.exp).toISOString() : '',
+    console.log('  · %s  %s%s%s%s', did, d.label || '(sin etiqueta)',
+      d.exp ? '  vence=' + new Date(d.exp).toISOString().slice(0, 10) : '',
+      d.certs > 1 ? '  (' + d.certs + ' certificados)' : '',
       d.nonce ? '  nonce=' + d.nonce : '')
   }
   if (revoked.length) {
