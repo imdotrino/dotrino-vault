@@ -273,6 +273,25 @@ function routeNow () {
   view.value = (/\/(devices|dispositivos|d)$/.test(p) || invitado) ? 'console' : 'home'
 }
 routeNow()
+/**
+ * Baja a una sección SIN tocar el hash.
+ *
+ * Un `href="#how"` normal cambia el hash, y eso dispara `popstate`. La capa de «volver»
+ * del topbar (el pilar de navegación, que es lo que hace funcionar el botón físico de
+ * Android y el gesto de iOS) lo lee como «el usuario pulsó atrás» y se va a `home` — que
+ * aquí acababa en `about:blank`. O sea: en el menú, «Cómo funciona» te sacaba de la
+ * página. Con el header hecho a mano no pasaba porque no había capa de volver.
+ *
+ * El `href` se queda por accesibilidad y para poder abrir en pestaña nueva; el
+ * desplazamiento lo hacemos nosotros.
+ */
+function irA (id, ev) {
+  const destino = document.getElementById(id)
+  if (!destino) return
+  ev?.preventDefault()
+  destino.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function go (v, ev) {
   ev?.preventDefault()
   history.pushState(null, '', v === 'console' ? '/devices' : '/')
@@ -311,9 +330,9 @@ onMounted(async () => {
       :lang="lang"
       @dotrino-lang="onTopbarLang"
     >
-      <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
-      <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
-      <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
+      <a v-if="view === 'home'" href="#how" @click="irA('how', $event)">{{ t.nav_how }}</a>
+      <a v-if="view === 'home'" href="#download" @click="irA('download', $event)">{{ t.nav_download }}</a>
+      <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="irA('use', $event)">{{ t.nav_use }}</a>
       <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
