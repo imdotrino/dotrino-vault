@@ -28,12 +28,14 @@ const T = {
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     caps_none: 'sin permisos',
+    info_label: 'Qué es esto',
     sync_err_t: 'No se pudo hablar con tu bóveda',
     sync_err_b: 'Lo de abajo es la última copia que tiene este dispositivo, puede estar desfasada. ¿Está encendida la bóveda?',
     solo_warn_t: 'Solo tienes este dispositivo',
     solo_warn_b: 'Si lo pierdes, pierdes el perfil: no hay forma de recuperarlo. Conecta al menos otro dispositivo o tu bóveda.',
     not_master_t: 'Este dispositivo no es el Master',
     not_master_b: 'Los cambios (conectar, quitar o cambiar permisos) se hacen desde el Master.',
+    not_master_admin_b: 'Pero puede administrar: conectar y quitar dispositivos desde aquí. Cambiar permisos y pasar el Master a otro siguen siendo cosa del Master.',
     act_add: 'Conectar un dispositivo', act_remove: 'Quitar', act_handover: 'Que mande este',
     act_renounce: 'Que este dispositivo deje de firmar por su cuenta', act_renounced: 'Ya no firma',
     confirm_remove: '¿Quitar este dispositivo del perfil?',
@@ -110,12 +112,14 @@ const T = {
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     caps_none: 'no permissions',
+    info_label: 'What is this',
     sync_err_t: 'Could not reach your vault',
     sync_err_b: 'What you see below is the last copy this device has, and it may be out of date. Is the vault running?',
     solo_warn_t: 'You only have this device',
     solo_warn_b: 'If you lose it, you lose the profile: there is no way to recover it. Connect at least one more device or your vault.',
     not_master_t: 'This device is not the Master',
     not_master_b: 'Changes (connecting, removing or changing permissions) are made from the Master.',
+    not_master_admin_b: 'But it can manage: connect and remove devices from here. Changing permissions and passing the Master on are still the Master\u2019s job.',
     act_add: 'Connect a device', act_remove: 'Remove', act_handover: 'Make this one the Master',
     act_renounce: 'Stop this device signing on its own', act_renounced: 'No longer signs',
     confirm_remove: 'Remove this device from the profile?',
@@ -238,6 +242,16 @@ async function calcularPerfilId () {
 
 /** Falla al hablar con la bóveda: se ENSEÑA, no se traga (ver `syncError`). */
 const syncError = ref('')
+
+/**
+ * BOTÓN (i): las explicaciones no se leen, estorban.
+ *
+ * Esta página es de ADMINISTRACIÓN, no de divulgación —para eso está el home—, así que lo
+ * que se ve por defecto son los aparatos y los botones. El porqué de cada sección vive
+ * detrás de una (i) y se abre cuando alguien lo busca. Una sola abierta a la vez.
+ */
+const info = ref('')
+const toggleInfo = (k) => { info.value = info.value === k ? '' : k }
 
 async function refresh () {
   // Si este aparato vive en una bóveda, lo PRIMERO es traerse su acta. Lo que se ve aquí
@@ -525,7 +539,22 @@ async function refreshAdmin () {
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
     const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
-    admDevices.value = d?.devices || []
+    // UN APARATO, UNA FILA. La bóveda devuelve una entrada por CERTIFICADO, y renovar
+    // emite uno nuevo cada vez: un aparato con tiempo salía repetido (el dueño vio
+    // «pc-local» dos veces). Se agrupa por llave y se guardan TODOS sus nonces, porque
+    // revocar solo el último dejaría vivos los certificados viejos, que aún no han
+    // caducado — o sea, quitar un aparato sin quitarlo.
+    const porLlave = new Map()
+    for (const x of (d?.devices || [])) {
+      if (!x.sub) continue
+      const y = porLlave.get(x.sub)
+      if (!y) porLlave.set(x.sub, { ...x, nonces: [x.nonce] })
+      else {
+        y.nonces.push(x.nonce)
+        if ((x.exp || 0) > (y.exp || 0)) Object.assign(y, { ...x, nonces: y.nonces })
+      }
+    }
+    admDevices.value = [...porLlave.values()]
     admPending.value = p.pending || []
   } catch (_) { canAdmin.value = false }
 }
@@ -543,8 +572,13 @@ const admApprove = (deviceId) => run('aa-' + deviceId, async () => {
 const admReject = (deviceId) => run('ar-' + deviceId, async () => {
   await id.value.vaultAdmin('reject', { deviceId }); await refreshAdmin()
 })
-const admRevoke = (d) => run('arv-' + d.nonce, async () => {
-  await id.value.vaultAdmin('revoke', { certNonce: d.nonce }); await refreshAdmin()
+const admRevoke = (d) => run('arv-' + d.sub, async () => {
+  // TODOS sus certificados, no solo el último: los anteriores siguen siendo válidos
+  // hasta que caduquen, así que dejar uno vivo es no haber quitado nada.
+  for (const nonce of (d.nonces || [d.nonce])) {
+    await id.value.vaultAdmin('revoke', { certNonce: nonce })
+  }
+  await refreshAdmin()
 })
 
 onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
@@ -552,8 +586,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
 <template>
   <section class="console">
-    <h1>{{ pairFlow ? t.flow_t : t.title }}</h1>
-    <p class="lead">{{ pairFlow ? t.flow_b : t.lead }}</p>
+    <h1>
+      {{ pairFlow ? t.flow_t : t.title }}
+      <button v-if="!pairFlow" type="button" class="i" data-testid="info-page"
+              :aria-expanded="info === 'page'" :aria-label="t.info_label" @click="toggleInfo('page')">i</button>
+    </h1>
+    <p v-if="pairFlow" class="lead">{{ t.flow_b }}</p>
+    <p v-else-if="info === 'page'" class="lead info-panel">{{ t.lead }}</p>
 
     <p v-if="loading" class="muted">{{ t.loading }}</p>
     <div v-else-if="fatal" class="banner bad">{{ fatal }}</div>
@@ -633,7 +672,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <strong>{{ t.solo_warn_t }}</strong> — {{ t.solo_warn_b }}
       </div>
       <div v-else-if="!isMaster" class="banner info">
-        <strong>{{ t.not_master_t }}</strong> — {{ t.not_master_b }}
+        <strong>{{ t.not_master_t }}</strong> — {{ canAdmin ? t.not_master_admin_b : t.not_master_b }}
       </div>
 
       <!-- Resumen del acta -->
@@ -685,8 +724,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
            proceso (escanear / abrir archivo / pegar); en cuanto hay una invitación,
            la pantalla del proceso se lo lleva todo (ver `pairFlow`). -->
       <template v-if="!yaEnBoveda">
-      <h2>{{ t.pair_t }}</h2>
-      <p class="muted">{{ t.pair_b }}</p>
+      <h2>
+        {{ t.pair_t }}
+        <button type="button" class="i" data-testid="info-pair" :aria-expanded="info === 'pair'"
+                :aria-label="t.info_label" @click="toggleInfo('pair')">i</button>
+      </h2>
+      <p v-if="info === 'pair'" class="muted info-panel">{{ t.pair_b }}</p>
       <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
       <div class="row">
         <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
@@ -705,8 +748,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       </details>
 
       <!-- Este dispositivo como bóveda -->
-      <h2>{{ t.self_t }}</h2>
-      <p class="muted">{{ t.self_b }}</p>
+      <h2>
+        {{ t.self_t }}
+        <button type="button" class="i" data-testid="info-self" :aria-expanded="info === 'self'"
+                :aria-label="t.info_label" @click="toggleInfo('self')">i</button>
+      </h2>
+      <p v-if="info === 'self'" class="muted info-panel">{{ t.self_b }}</p>
       <div class="row">
         <span class="tag" :class="{ master: self.running }">{{ self.running ? t.self_on : t.self_off }}</span>
         <button class="btn ghost" data-testid="self-toggle" @click="selfToggle">{{ self.enabled ? t.self_stop : t.self_start }}</button>
@@ -723,8 +770,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
       <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
       <template v-if="canAdmin">
-        <h2>{{ t.adm_t }}</h2>
-        <p class="muted">{{ t.adm_b }}</p>
+        <h2>
+          {{ t.adm_t }}
+          <button type="button" class="i" data-testid="info-adm" :aria-expanded="info === 'adm'"
+                  :aria-label="t.info_label" @click="toggleInfo('adm')">i</button>
+        </h2>
+        <p v-if="info === 'adm'" class="muted info-panel">{{ t.adm_b }}</p>
         <div class="row">
           <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
         </div>
@@ -736,7 +787,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
         </div>
         <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
-        <div v-for="d in admDevices" :key="d.nonce" class="pending" data-testid="adm-device">
+        <div v-for="d in admDevices" :key="d.sub" class="pending" data-testid="adm-device">
           <span><code>{{ d.deviceId }}</code> {{ d.label }}</span>
           <button class="btn ghost sm" data-testid="adm-revoke" @click="admRevoke(d)">{{ t.adm_remove }}</button>
         </div>
@@ -746,6 +797,15 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 </template>
 
 <style scoped>
+/* Botón (i): pequeño, al lado del título, sin robarle protagonismo a lo que se administra. */
+.i {
+  border: 1px solid currentColor; background: none; color: inherit; opacity: .5;
+  border-radius: 50%; width: 1.25em; height: 1.25em; line-height: 1; font-size: .7em;
+  font-style: italic; font-weight: 700; cursor: pointer; vertical-align: middle; margin-left: .5em;
+  padding: 0;
+}
+.i:hover, .i[aria-expanded="true"] { opacity: 1; }
+.info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }
 h2 { font-size: 18px; margin: 32px 0 8px; }
