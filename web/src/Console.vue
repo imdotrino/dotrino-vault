@@ -282,8 +282,16 @@ onMounted(async () => {
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
   // (que nunca llega al servidor). Si viene, arrancamos la conexión sola.
+  // La invitación se queda en la barra MIENTRAS dura el emparejamiento; se limpia al
+  // terminar (`connect`). Antes se borraba aquí mismo, nada más entrar, y eso hacía
+  // que cualquier recarga durante el proceso cayera en la lista de dispositivos con
+  // la invitación ya perdida — «de la nada me sacó a /devices». Y recargas hay: el
+  // service worker está en `autoUpdate`, así que cuando se despliega una versión
+  // nueva toma el control y RECARGA la página sola, justo encima del código de seis
+  // dígitos. Conservando el #fragment la recarga es recuperable: al volver se
+  // reanuncia y sale un código nuevo.
   const payload = extractPayload(location.hash)
-  if (payload) { history.replaceState(null, '', location.pathname); announce(payload) }
+  if (payload) announce(payload)
   offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
   await refreshSelf()
   await refreshAdmin()
@@ -412,7 +420,12 @@ async function connect (qr, mode = 'join') {
     // El error se queda DENTRO del proceso: si se soltara a la consola entera, el
     // dueño acabaría en una pantalla llena de botones sin saber qué salió mal.
     pairError.value = t.value.pair_fail + (e?.message || e)
-  } finally { off?.(); pairing.value = false; pairCode.value = '' }
+  } finally {
+    off?.(); pairing.value = false; pairCode.value = ''
+    // La invitación ya se usó (o se agotó el intento): fuera de la barra, para que
+    // volver a abrir la página no dispare otro emparejamiento con un código muerto.
+    if (location.hash) { try { history.replaceState(null, '', location.pathname) } catch (_) {} }
+  }
 }
 
 const connectPasted = () => announce(extractPayload(pasted.value))
