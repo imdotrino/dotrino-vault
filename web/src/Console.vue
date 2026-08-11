@@ -43,8 +43,6 @@ const T = {
     confirm_renounce: 'Este dispositivo dejará de firmar con su propia llave: a partir de ahora le pedirá cada firma a tu bóveda. Podrás devolvérselo desde el Master. ¿Seguir?',
     yes: 'Sí, hazlo', cancel: 'Cancelar',
     // --- Pantalla del PROCESO de conectar (se lleva la página entera) ---
-    flow_t: 'Conectar este dispositivo',
-    flow_b: 'Lo único que falta es que lo apruebes en tu bóveda.',
     flow_connecting: 'Hablando con tu bóveda…',
     flow_connecting_b: 'Un momento. En cuanto responda te daremos un código de seis dígitos.',
     flow_waiting: 'Esperando a que lo apruebes…',
@@ -127,8 +125,6 @@ const T = {
     confirm_renounce: 'This device will stop signing with its own key: from now on it will ask your vault for every signature. You can give it back from the Master. Continue?',
     yes: 'Yes, do it', cancel: 'Cancel',
     // --- The pairing PROCESS screen (takes over the whole page) ---
-    flow_t: 'Connect this device',
-    flow_b: 'The only thing left is to approve it in your vault.',
     flow_connecting: 'Talking to your vault…',
     flow_connecting_b: 'One moment. As soon as it answers we will give you a six-digit code.',
     flow_waiting: 'Waiting for you to approve it…',
@@ -586,14 +582,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
 <template>
   <section class="console">
-    <!-- Sin título ni presentación: esto es la pantalla donde se ADMINISTRA, y empieza
-         por lo que se administra. El nombre de la página ya lo dice el menú de arriba, y
-         el qué-es-esto vive en el home. Durante el emparejamiento sí hay título, porque
-         ahí estás en medio de un proceso y hay que decirte dónde. -->
-    <template v-if="pairFlow">
-      <h1>{{ t.flow_t }}</h1>
-      <p class="lead">{{ t.flow_b }}</p>
-    </template>
+    <!-- SIN título ni presentación, tampoco durante el emparejamiento. Una pantalla es
+         administrativa o informativa, no las dos: aquí se opera, y lo que hay que hacer
+         lo dice cada paso. El qué-es-esto vive en el home. -->
 
     <p v-if="loading" class="muted">{{ t.loading }}</p>
     <div v-else-if="fatal" class="banner bad">{{ fatal }}</div>
