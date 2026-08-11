@@ -52,7 +52,10 @@ const T = {
     not_master_admin_b: 'Pero puede administrar: conectar y quitar dispositivos desde aquí. Cambiar permisos y pasar el Master a otro siguen siendo cosa del Master.',
     act_add: 'Conectar un dispositivo', act_remove: 'Quitar', act_handover: 'Que mande este',
     act_renounce: 'Que este dispositivo deje de firmar por su cuenta', act_renounced: 'Ya no firma',
-    confirm_remove: '¿Quitar este dispositivo del perfil? Dejará de entrar y no podrá abrir lo que guardes a partir de ahora.',
+    // Se dice lo que PASA, incluido el límite: a un aparato apagado no le llega nada. Lo
+    // único que le borra la cuenta es el aviso firmado, y ese necesita que se conecte.
+    // Callarlo hacía creer que quitar borra al instante en el otro lado, y no.
+    confirm_remove: '¿Quitar este dispositivo del perfil? Dejará de entrar y no podrá abrir lo que guardes a partir de ahora. Si está apagado, lo suyo sigue ahí hasta que se conecte: es entonces cuando se le borra.',
     // Quitarse a UNO MISMO no es lo mismo y no puede preguntarse igual: aquí se acaba la
     // cuenta en este aparato, y eso hay que decirlo antes, no descubrirlo después.
     confirm_remove_me: 'Vas a quitar ESTE dispositivo. Aquí se cierra la cuenta: dejará de firmar, de leer y de guardar, y lo que tenga guardado se borra. Para volver a usarla habría que conectarlo otra vez desde tu bóveda.',
@@ -147,7 +150,7 @@ const T = {
     not_master_admin_b: 'But it can manage: connect and remove devices from here. Changing permissions and passing the Master on are still the Master\u2019s job.',
     act_add: 'Connect a device', act_remove: 'Remove', act_handover: 'Make this one the Master',
     act_renounce: 'Stop this device signing on its own', act_renounced: 'No longer signs',
-    confirm_remove: 'Remove this device from the profile? It will no longer get in, and it will not be able to open anything you save from now on.',
+    confirm_remove: 'Remove this device from the profile? It will no longer get in, and it will not be able to open anything you save from now on. If it is switched off, what it has stays there until it connects: that is when it is erased.',
     confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
     dev_until: (d) => 'connected until ' + d,
     dev_nocert: 'no access',
