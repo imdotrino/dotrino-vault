@@ -336,6 +336,57 @@ test('Permisos: los cuatro, en cristiano, con su marca — y admin destacado', (
   assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 4)
 })
 
+/**
+ * EL DISPOSITIVO FANTASMA, en la pantalla del PC.
+ *
+ * La lista sale del ACTA, no de los certificados. Un miembro al que le retiraron el papel
+ * pero no lo sacaron del acta no aparecía aquí —solo en la del navegador—, así que desde el
+ * PC no se veía que existiera y no había forma de quitarlo salvo adivinar su ID para el
+ * `revoke` de la línea de comandos.
+ */
+test('Dispositivos: un miembro SIN certificado sale igual, marcado, y se puede quitar', () => {
+  const t = makeTheme()
+  const members = [
+    { pub: 'PUB-MASTER', id: '6729-403E', label: '', isMaster: true, caps: ['sign'] },
+    { pub: 'PUB-GHOST', id: '9E32-02BC', label: 'Mac1', caps: ['sign', 'read'] },
+    { pub: 'PUB-OK', id: 'C8AA-7DCF', label: 'Mac1', caps: ['sign', 'read'] }
+  ]
+  const st = baseState({
+    screen: 'devices',
+    members,
+    devices: {
+      issued: [{ sub: 'PUB-OK', deviceId: 'C8AA-7DCF', label: 'Mac1', scope: ['vault:sign'], exp: Date.now() + 8.64e7, nonce: 'n1' }],
+      revoked: [{ nonce: 'n0' }]
+    }
+  })
+  const rows = V.deviceRows(st, t)
+  const texto = rows.map((r) => r.text).join('\n')
+
+  assert.match(texto, /9E32-02BC/, 'el fantasma se ve')
+  assert.match(texto, /SIN ACCESO/, 'y se dice que no puede entrar')
+  assert.match(texto, /C8AA-7DCF/, 'el que sí tiene papel también')
+
+  // Y se puede seleccionar para quitarlo: sin `sub` la tecla de quitar no hace nada.
+  const ghost = rows.find((r) => r.sel && r.meta?.deviceId === '9E32-02BC')
+  assert.ok(ghost, 'la fila es seleccionable')
+  assert.equal(ghost.meta.sub, 'PUB-GHOST', 'y lleva la llave, que es por lo que se quita')
+
+  // El master es la bóveda: ni «sin acceso» (no necesita papel) ni quitable.
+  const master = rows.find((r) => r.meta?.deviceId === '6729-403E')
+  assert.equal(master.meta.noAccess, false)
+  assert.equal(master.meta.isMaster, true)
+})
+
+test('Dispositivos: sin acta todavía, se cae a los certificados y no se queda en blanco', () => {
+  const t = makeTheme()
+  const st = baseState({
+    screen: 'devices',
+    members: [],
+    devices: { issued: [{ sub: 'PUB-OK', deviceId: 'C8AA-7DCF', label: 'Mac1', scope: ['vault:sign'], exp: null, nonce: 'n1' }], revoked: [] }
+  })
+  assert.match(V.deviceRows(st, t).map((r) => r.text).join('\n'), /C8AA-7DCF/)
+})
+
 test('Permisos de un aparato que ya no está en el acta: lo dice y no revienta', () => {
   const t = makeTheme()
   const st = baseState({ screen: 'caps', capsFor: { pub: 'FUERA', deviceId: 'ZZ99-YY88' }, members: [] })

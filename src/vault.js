@@ -17,6 +17,7 @@ import { verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
 import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
 import { createAdminDesk } from '../lib/src/admin.js'
+import { shouldNotifyRevoked } from '../lib/src/revocation.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
@@ -145,7 +146,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) { audit('rejected', { what: 'sign', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
+    if (!chk.ok) return denyChain(from, chk, p, 'sign')
     const toSign = p.data?.payload
     if (toSign == null) return reply(from, { type: MSG.ERROR, error: 'data.payload required' })
     const { signature, publickey } = await identity.signData(toSign)
@@ -159,7 +160,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
+    if (!chk.ok) return denyChain(from, chk, p, 'get')
     const id = p.data?.id || 'root'
     reply(from, { type: MSG.DATA, id, node: store.getNode(id) })
   }
@@ -187,7 +188,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
       chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
     }
-    if (!chk.ok) return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
+    if (!chk.ok) return denyChain(from, chk, p, 'store')
     try {
       // CIFRADO de punta a punta con la clave de contenido del perfil: el proxy transporta
       // pero no ve nada de lo que el usuario guarda. Si el dispositivo mandó `enc`, se abre
@@ -227,41 +228,55 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * — y hasta ahora el daemon no lo reemitía nunca. Si el aparato estaba apagado cuando lo
    * quitaste, no se enteraba jamás: seguía enseñando el perfil como si nada.
    */
-  async function notifyIfRevoked (pubkey, nonce = null) {
+  async function notifyIfRevoked (pubkey, nonce = null, certIss = null, reason = 'revoked') {
     if (typeof pubkey !== 'string') return
     try {
-      // PRIMERO: ¿sigue siendo del perfil? Un certificado retirado NO significa «estás
-      // fuera». Renovar retira el anterior, y cambiar permisos obliga a renovar, así que
-      // un aparato que llega con un papel viejo es de casa y solo tiene que renovar. Si
-      // aquí se le manda el aviso de expulsión, el aparato se borra solo: dabas
-      // «administra» y el dispositivo desaparecía como si lo hubieran echado. El aviso es
-      // para quien YA NO ESTÁ en el acta.
       const record = (await identity.profileActa?.().catch(() => null))?.acta || null
-      if (record && (record.members || []).some((m) => m.pub === pubkey)) return
-
-      // OJO con dónde se buscan: desde identity 0.42 `issued` es «lo que HOY sirve para
-      // entrar», así que los retirados NO están ahí — viven en `revokedCerts`. Buscarlos
-      // en `issued` no daba error, daba una lista vacía y ningún aviso.
-      const delegations = await identity.listDelegations()
-      const revoked = await revocationSet()
-      const candidates = [...(delegations.revokedCerts || []), ...(delegations.issued || [])]
-      const theirs = candidates.filter((x) => x.sub === pubkey && (x.revokedAt || revoked.has(x.nonce)))
-      if (theirs.length) {
-        // El aviso nombra el certificado que el aparato ACABA de presentar: es el que
-        // tiene en la mano, y es contra ese contra el que comprueba antes de borrarse.
-        await desk.emitRevoke(pubkey, nonce || theirs[0].nonce)
-        audit('revoke.notified', { device: await deviceIdOf(pubkey).catch(() => null) })
+      // Sin acta (bóveda anterior al acta) hay que mirar las delegaciones, que es lo único
+      // que queda. OJO con dónde se buscan: desde identity 0.42 `issued` es «lo que HOY
+      // sirve para entrar», así que los retirados NO están ahí — viven en `revokedCerts`.
+      let knownRevoked = false
+      let fallbackNonce = null
+      if (!record) {
+        const delegations = await identity.listDelegations()
+        const revoked = await revocationSet()
+        const candidates = [...(delegations.revokedCerts || []), ...(delegations.issued || [])]
+        const theirs = candidates.filter((x) => x.sub === pubkey && (x.revokedAt || revoked.has(x.nonce)))
+        knownRevoked = theirs.length > 0
+        fallbackNonce = theirs[0]?.nonce || null
       }
+      if (!shouldNotifyRevoked({ reason, pubkey, master, certIss, members: record?.members || null, knownRevoked })) return
+      // El aviso nombra el certificado que el aparato ACABA de presentar: es el que tiene
+      // en la mano, y es contra ese contra el que comprueba antes de borrarse.
+      await desk.emitRevoke(pubkey, nonce || fallbackNonce)
+      audit('revoke.notified', { device: await deviceIdOf(pubkey).catch(() => null), reason })
     } catch (e) { log('[vault] could not re-emit the revocation:', e.message) }
+  }
+
+  /**
+   * Rechaza una petición y, si el aparato ya no es del perfil, SE LO DICE con el aviso
+   * firmado — sea cual sea la operación que estuviera intentando.
+   *
+   * Un dispositivo que fue tuyo tiene que poder llegar hasta aquí precisamente para que se
+   * le pueda mandar a paseo: es el único mensaje que le borra la cuenta, porque es el único
+   * que va firmado por la maestra (un «unauthorized» suelto no borra nada y no debe: sería
+   * destruir datos ajenos con un mensaje, el wipe-DoS de `docs/pairing-protocol.md §2.3`).
+   *
+   * Antes esto solo pasaba en `devices` —la pantalla de dispositivos— y solo si el papel
+   * estaba REVOCADO. Un aparato quitado que estuviera guardando notas nunca preguntaba por
+   * ahí, y uno al que simplemente se le venció el certificado no entraba en el caso: los
+   * dos se quedaban enseñando la cuenta indefinidamente.
+   */
+  async function denyChain (from, chk, p, what) {
+    await notifyIfRevoked(p.data?.publickey, p.cert?.nonce || null, p.cert?.iss || null, chk.reason)
+    if (what) audit('rejected', { what, reason: chk.reason })
+    return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
   }
 
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) {
-      if (chk.reason === 'revoked') await notifyIfRevoked(p.data?.publickey, p.cert?.nonce || null)
-      return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
-    }
+    if (!chk.ok) return denyChain(from, chk, p, null)
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -297,7 +312,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleRenew (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
-    if (!chk.ok) { audit('rejected', { what: 'renew', reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
+    if (!chk.ok) return denyChain(from, chk, p, 'renew')
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
     const prev = (issued || []).find((x) => x.nonce === p.cert.nonce)
@@ -338,7 +353,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       data: p.data, signature: p.signature, cert: p.cert,
       expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
     })
-    if (!chk.ok) { audit('rejected', { what: 'secrets', ns, reason: chk.reason }); return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason }) }
+    if (!chk.ok) return denyChain(from, chk, p, 'secrets')
     // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
     // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
     // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
@@ -491,7 +506,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         data, signature, cert,
         expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
       })
-      if (!chk.ok) return chk
+      // Quitarse a UNO MISMO desde la consola remota entra por aquí: la segunda petición
+      // que mande el aparato ya llega con el certificado retirado. Que se entere con el
+      // aviso firmado, en vez de con un error suelto que no puede borrar nada.
+      if (!chk.ok) {
+        await notifyIfRevoked(data?.publickey, cert?.nonce || null, cert?.iss || null, chk.reason)
+        return chk
+      }
       const acta = (await identity.profileActa?.().catch(() => null))?.acta
       if (acta && !Acta.memberCan(acta, chk.device, 'admin')) return { ok: false, reason: 'acta' }
       return chk

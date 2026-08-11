@@ -52,7 +52,21 @@ const T = {
     not_master_admin_b: 'Pero puede administrar: conectar y quitar dispositivos desde aquí. Cambiar permisos y pasar el Master a otro siguen siendo cosa del Master.',
     act_add: 'Conectar un dispositivo', act_remove: 'Quitar', act_handover: 'Que mande este',
     act_renounce: 'Que este dispositivo deje de firmar por su cuenta', act_renounced: 'Ya no firma',
-    confirm_remove: '¿Quitar este dispositivo del perfil?',
+    confirm_remove: '¿Quitar este dispositivo del perfil? Dejará de entrar y no podrá abrir lo que guardes a partir de ahora.',
+    // Quitarse a UNO MISMO no es lo mismo y no puede preguntarse igual: aquí se acaba la
+    // cuenta en este aparato, y eso hay que decirlo antes, no descubrirlo después.
+    confirm_remove_me: 'Vas a quitar ESTE dispositivo. Aquí se cierra la cuenta: dejará de firmar, de leer y de guardar, y lo que tenga guardado se borra. Para volver a usarla habría que conectarlo otra vez desde tu bóveda.',
+    // Estado de cada aparato: no es documentación, es el dato que hace falta para decidir.
+    dev_until: (d) => 'conectado hasta el ' + d,
+    dev_nocert: 'sin acceso',
+    dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
+    // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
+    gone_t: 'Este dispositivo ya no está en el perfil',
+    gone_b: 'Se quitó del perfil y aquí se cerró la cuenta: lo que tenía guardado se borró. Puedes conectarlo otra vez desde tu bóveda, o usar otra cuenta de este aparato.',
+    gone_go: 'Conectar este dispositivo',
+    // La bóveda nos rechaza pero SIN aviso firmado: se cuenta, no se borra nada.
+    rejected_t: 'Tu bóveda está rechazando a este dispositivo',
+    rejected_b: 'Puede que lo hayan quitado del perfil. Aquí no se borra nada por un mensaje suelto: enciende tu bóveda y vuelve a abrir esta página para saberlo con certeza.',
     confirm_handover: 'A partir de ahora mandará ese dispositivo y este dejará de poder cambiar el acta. ¿Seguir?',
     confirm_renounce: 'Este dispositivo dejará de firmar con su propia llave: a partir de ahora le pedirá cada firma a tu bóveda. Podrás devolvérselo desde el Master. ¿Seguir?',
     yes: 'Sí, hazlo', cancel: 'Cancelar',
@@ -109,7 +123,6 @@ const T = {
     adm_pending: 'Un dispositivo quiere conectarse',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
-    adm_remove: 'Quitar',
     adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
   },
@@ -134,7 +147,16 @@ const T = {
     not_master_admin_b: 'But it can manage: connect and remove devices from here. Changing permissions and passing the Master on are still the Master\u2019s job.',
     act_add: 'Connect a device', act_remove: 'Remove', act_handover: 'Make this one the Master',
     act_renounce: 'Stop this device signing on its own', act_renounced: 'No longer signs',
-    confirm_remove: 'Remove this device from the profile?',
+    confirm_remove: 'Remove this device from the profile? It will no longer get in, and it will not be able to open anything you save from now on.',
+    confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
+    dev_until: (d) => 'connected until ' + d,
+    dev_nocert: 'no access',
+    dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
+    gone_t: 'This device is no longer in the profile',
+    gone_b: 'It was removed from the profile and the account was closed here: whatever it had saved was erased. You can connect it again from your vault, or use another account on this device.',
+    gone_go: 'Connect this device',
+    rejected_t: 'Your vault is turning this device away',
+    rejected_b: 'It may have been removed from the profile. Nothing is erased here on the strength of a bare message: turn your vault on and open this page again to know for sure.',
     confirm_handover: 'From now on that device becomes the Master and this one will no longer be able to change the record. Continue?',
     confirm_renounce: 'This device will stop signing with its own key: from now on it will ask your vault for every signature. You can give it back from the Master. Continue?',
     yes: 'Yes, do it', cancel: 'Cancel',
@@ -188,7 +210,6 @@ const T = {
     adm_pending: 'A device wants to connect',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
-    adm_remove: 'Remove',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
@@ -263,13 +284,36 @@ const syncError = ref('')
 const info = ref('')
 const toggleInfo = (k) => { info.value = info.value === k ? '' : k }
 
+/**
+ * Los CERTIFICADOS que la bóveda tiene emitidos, agrupados por llave (`sub`).
+ *
+ * No es otra lista de dispositivos —esa es una sola, el acta— sino el ESTADO de cada uno:
+ * hasta cuándo puede entrar. Que estuviera pintado aparte, en su propia sección y con su
+ * propio botón «Quitar», es lo que hacía que el mismo aparato saliera dos veces diciendo
+ * cosas distintas: arriba como miembro, abajo como papel.
+ */
+const certBySub = ref(new Map())
+
+function groupCerts (devices) {
+  const m = new Map()
+  for (const x of (devices || [])) {
+    if (!x.sub) continue
+    const y = m.get(x.sub)
+    if (!y || (x.exp || 0) > (y.exp || 0)) m.set(x.sub, x)
+  }
+  return m
+}
+
 async function refresh () {
   // Si este aparato vive en una bóveda, lo PRIMERO es traerse su acta. Lo que se ve aquí
   // es lo que decidió el dueño en la bóveda —permisos, nombres, quién entró—, no la copia
   // del día que emparejamos. Sin esto la pantalla se quedaba congelada en ese día: el
   // dispositivo renombrado seguía con el nombre viejo y los permisos nuevos no salían.
-  try { await id.value.listVaultDevices(); syncError.value = '' }
-  catch (e) {
+  try {
+    const r = await id.value.listVaultDevices()
+    certBySub.value = groupCerts(r?.devices)
+    syncError.value = ''
+  } catch (e) {
     // «No emparejado con ninguna bóveda» no es un fallo: es un aparato que todavía no
     // entró en ninguna (o que ES la bóveda). Cualquier otra cosa sí se cuenta.
     const m = e?.message || String(e)
@@ -285,6 +329,45 @@ async function refresh () {
   calcularPerfilId()
   mine.value = mi
 }
+
+/**
+ * LA lista de dispositivos, que es UNA: el acta, con el estado de cada uno pegado.
+ *
+ * Antes había dos —los miembros del acta arriba y los certificados abajo— y no coincidían:
+ * quitar desde abajo retiraba los papeles pero dejaba al miembro dentro, así que el aparato
+ * seguía apareciendo arriba para siempre. Eso es el «dispositivo fantasma»: la fila de
+ * abajo desaparecía, la de arriba no.
+ */
+const devices = computed(() => members.value.map((m) => {
+  const cert = certBySub.value.get(m.pub) || null
+  return {
+    ...m,
+    exp: cert?.exp || null,
+    // Un servicio y el master no tienen (ni necesitan) certificado emitido por la bóveda:
+    // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
+    noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size
+  }
+}))
+
+/** ¿Puede esta pantalla quitar a ese miembro? El master siempre; un admin, a distancia. */
+const canRemove = (m) => !m.isMaster && (isMaster.value || canAdmin.value)
+
+const shortDate = (ms) => {
+  try { return new Date(ms).toLocaleDateString(props.lang === 'en' ? 'en-US' : 'es-ES', { day: 'numeric', month: 'long' }) }
+  catch (_) { return '' }
+}
+
+/**
+ * ESTE dispositivo salió del perfil. Lo dispara el aviso FIRMADO por la maestra (phase
+ * 'revoked', que además borra el enlace y el acta) o el haberse quitado uno mismo desde
+ * aquí. Sin esto la pantalla seguía enseñando el perfil, los miembros y los permisos de una
+ * cuenta que ya no existía en este aparato, hasta que a alguien se le ocurriera recargar.
+ */
+const expelled = ref(false)
+/** La bóveda nos rechaza pero sin aviso firmado: se avisa, no se borra (wipe-DoS). */
+const rejected = ref('')
+/** Volver a emparejar conserva la query (`?vault=` apunta al iframe con el que corre). */
+const pairHref = computed(() => '/d' + location.search)
 
 onMounted(async () => {
   // `markRaw`: la identidad NO puede volverse reactiva. Vue envuelve en un Proxy lo
@@ -306,7 +389,13 @@ onMounted(async () => {
   // reanuncia y sale un código nuevo.
   const payload = pairOnly.value ? extractPayload(location.hash) : null
   if (payload) announce(payload)
-  offVault = id.value.onVault?.((e) => { if (e?.phase === 'acta' || e?.phase === 'renounced') refresh() })
+  offVault = id.value.onVault?.((e) => {
+    if (e?.phase === 'acta' || e?.phase === 'renounced') refresh()
+    // Nos echaron, y va FIRMADO por la maestra: el enlace y el acta ya se borraron solos.
+    // La pantalla tiene que decirlo, no seguir pintando la cuenta que acaba de irse.
+    else if (e?.phase === 'revoked') { expelled.value = true; confirming.value = null }
+    else if (e?.phase === 'rejected') rejected.value = e.reason || '1'
+  })
   await refreshSelf()
   await refreshAdmin()
 })
@@ -329,7 +418,29 @@ const toggleCap = (m, cap) => run('caps-' + m.pub, () => {
   const caps = m.caps.includes(cap) ? m.caps.filter((c) => c !== cap) : [...m.caps, cap]
   return id.value.setCaps(m.pub, caps)
 })
-const removeMember = (m) => run('rm-' + m.pub, () => id.value.removeMember(m.pub))
+/**
+ * QUITAR UN DISPOSITIVO — una sola operación, se sea el master o se administre a distancia.
+ *
+ * Va SIEMPRE por la llave del aparato (`pub`/`sub`), nunca por un certificado suelto. Las
+ * dos caras van juntas: fuera del acta (deja de ser miembro y de figurar en la lista) y
+ * fuera los papeles (ningún certificado suyo vuelve a servir). Retirar solo el papel —que
+ * es lo que hacía esta pantalla— dejaba al miembro dentro del acta sin poder entrar: un
+ * fantasma que nadie podía quitar desde aquí, y al que la bóveda además NO le mandaba el
+ * aviso firmado de expulsión (mientras siga en el acta, un papel retirado significa
+ * «renueva», no «estás fuera»), así que el aparato se quedaba enseñando la cuenta para
+ * siempre.
+ */
+const removeMember = (m) => run('rm-' + m.pub, async () => {
+  const isSelf = !!m.isMe
+  if (isMaster.value) await id.value.removeMember(m.pub)
+  else await id.value.vaultAdmin('revoke', { sub: m.pub })
+  if (!isSelf) return
+  // Me quité a mí mismo: aquí se acabó la cuenta. Se dice ya (la bóveda acaba de sacarnos
+  // del acta, eso es un hecho) y se fuerza un contacto para recoger el aviso FIRMADO, que
+  // es lo único que puede borrar el enlace y el acta de este aparato.
+  expelled.value = true
+  try { await id.value.listVaultDevices() } catch (_) {}
+})
 const handover = (m) => run('ho-' + m.pub, () => id.value.handoverMaster(m.pub))
 const renounceSign = () => run('renounce', () => id.value.renounceCaps(['sign']))
 
@@ -553,12 +664,17 @@ const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
 // esta pantalla: la bóveda vuelve a comprobarlo en cada petición.
 
 const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
-const admDevices = ref([])       // dispositivos del perfil, según la bóveda
 const admPending = ref([])       // los que esperan aprobación
 const admQr = ref(null)
 const admCode = ref('')
 let admTimer = null
 
+/**
+ * Esta sección NO lista dispositivos: la lista es una sola y está arriba (`devices`). Aquí
+ * solo queda lo que de verdad es administrar a distancia: dejar entrar a alguien nuevo.
+ * Quitar se hace en la fila del aparato, junto a su nombre y su estado, que es donde se ve
+ * a quién estás quitando.
+ */
 async function refreshAdmin () {
   try {
     // PUNTO MUERTO que esto arregla: preguntar primero por el cert dejaba la consola
@@ -566,27 +682,10 @@ async function refreshAdmin () {
     // única cosa que trae el acta de la bóveda es `listVaultDevices`… que estaba detrás
     // del `if`. Así que un permiso concedido en la bóveda no llegaba nunca: el acta no se
     // refrescaba porque no se administraba, y no se administraba porque el acta no se
-    // refrescaba. Primero se sincroniza, y luego se decide.
-    const d = await id.value.listVaultDevices().catch(() => null)
+    // refrescaba. Primero se sincroniza (`refresh`), y luego se decide.
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
     const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
-    // UN APARATO, UNA FILA. La bóveda devuelve una entrada por CERTIFICADO, y renovar
-    // emite uno nuevo cada vez: un aparato con tiempo salía repetido (el dueño vio
-    // «pc-local» dos veces). Se agrupa por llave y se guardan TODOS sus nonces, porque
-    // revocar solo el último dejaría vivos los certificados viejos, que aún no han
-    // caducado — o sea, quitar un aparato sin quitarlo.
-    const porLlave = new Map()
-    for (const x of (d?.devices || [])) {
-      if (!x.sub) continue
-      const y = porLlave.get(x.sub)
-      if (!y) porLlave.set(x.sub, { ...x, nonces: [x.nonce] })
-      else {
-        y.nonces.push(x.nonce)
-        if ((x.exp || 0) > (y.exp || 0)) Object.assign(y, { ...x, nonces: y.nonces })
-      }
-    }
-    admDevices.value = [...porLlave.values()]
     admPending.value = p.pending || []
   } catch (_) { canAdmin.value = false }
 }
@@ -604,14 +703,6 @@ const admApprove = (deviceId) => run('aa-' + deviceId, async () => {
 const admReject = (deviceId) => run('ar-' + deviceId, async () => {
   await id.value.vaultAdmin('reject', { deviceId }); await refreshAdmin()
 })
-const admRevoke = (d) => run('arv-' + d.sub, async () => {
-  // TODOS sus certificados, no solo el último: los anteriores siguen siendo válidos
-  // hasta que caduquen, así que dejar uno vivo es no haber quitado nada.
-  for (const nonce of (d.nonces || [d.nonce])) {
-    await id.value.vaultAdmin('revoke', { certNonce: nonce })
-  }
-  await refreshAdmin()
-})
 
 onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 </script>
@@ -624,6 +715,20 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
     <p v-if="loading" class="muted">{{ t.loading }}</p>
     <div v-else-if="fatal" class="banner bad">{{ fatal }}</div>
+
+    <!-- ═══ Este dispositivo salió del perfil ═══
+         Se lleva la pantalla entera, como el emparejamiento: seguir pintando la lista de
+         miembros y los botones de una cuenta que aquí ya no existe era lo que hacía que
+         quitarse a uno mismo pareciera no haber hecho nada. -->
+    <div v-else-if="expelled" class="flow" data-testid="expelled">
+      <div class="card bad">
+        <strong>{{ t.gone_t }}</strong>
+        <p>{{ t.gone_b }}</p>
+        <div class="row">
+          <a class="btn" data-testid="expelled-pair" :href="pairHref">{{ t.gone_go }}</a>
+        </div>
+      </div>
+    </div>
 
     <!-- ═══ Conectando este dispositivo: la página es SOLO esto mientras dura ═══
          Tres pasos, uno visible a la vez. Nada de acta, ni lista de dispositivos,
@@ -720,6 +825,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <code class="mid">{{ syncError }}</code>
       </div>
 
+      <!-- La bóveda nos rechaza, pero el mensaje NO va firmado: no borra nada (sería un
+           wipe-DoS). Lo que sí se puede hacer es contarlo, en vez de callarlo. -->
+      <div v-if="rejected" class="banner warn" data-testid="rejected">
+        <strong>{{ t.rejected_t }}</strong> — {{ t.rejected_b }}
+      </div>
+
       <div v-if="soloMember" class="banner warn" data-testid="solo-warning">
         <strong>{{ t.solo_warn_t }}</strong> — {{ t.solo_warn_b }}
       </div>
@@ -732,17 +843,24 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
       </ul>
 
-      <!-- Miembros -->
+      <!-- LOS DISPOSITIVOS — una sola lista, la del acta, con el estado de cada uno.
+           Lo que se pueda hacer con cada fila sale de lo que puede ESTE aparato: el
+           master lo puede todo; uno con «administra» puede conectar y quitar. -->
       <h2>{{ t.members }}</h2>
       <ul class="members" data-testid="members">
-        <li v-for="m in members" :key="m.pub" class="member" :data-member="m.id">
+        <li v-for="m in devices" :key="m.pub" class="member" :data-member="m.id">
           <div class="who">
             <strong>{{ m.label || m.id }}</strong>
             <span class="tag" v-if="m.isMe">{{ t.me }}</span>
             <span class="tag master" v-if="m.isMaster">{{ t.is_master }}</span>
             <span class="tag svc" v-if="m.cn">{{ t.service }} «{{ m.cn }}»</span>
+            <!-- Está en el acta pero no puede entrar. Es un AVISO, no una explicación:
+                 sin él, la fila parece un aparato normal y nadie la quita nunca. -->
+            <span class="tag out" v-if="m.noAccess" :data-testid="'noaccess-' + m.id">{{ t.dev_nocert }}</span>
+            <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
             <code class="mid">{{ m.id }}</code>
           </div>
+          <p v-if="m.noAccess" class="muted svc-note">{{ t.dev_nocert_b }}</p>
           <div class="caps">
             <button v-for="c in (m.cn ? ['secrets'] : ['sign','store','read','admin'])" :key="c"
                     class="cap" :class="{ on: m.caps.includes(c) }"
@@ -755,16 +873,18 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
                     data-testid="renounce" @click="confirming = { kind: 'renounce', pub: m.pub }">{{ t.act_renounce }}</button>
-            <template v-if="isMaster && !m.isMaster">
-              <button class="btn ghost sm" :data-testid="'handover-' + m.id"
-                      @click="confirming = { kind: 'handover', pub: m.pub }">{{ t.act_handover }}</button>
-              <button class="btn danger sm" :data-testid="'remove-' + m.id"
-                      @click="confirming = { kind: 'remove', pub: m.pub }">{{ t.act_remove }}</button>
-            </template>
+            <button v-if="isMaster && !m.isMaster" class="btn ghost sm" :data-testid="'handover-' + m.id"
+                    @click="confirming = { kind: 'handover', pub: m.pub }">{{ t.act_handover }}</button>
+            <!-- Quitar vive AQUÍ, en la fila del aparato, y en ningún otro sitio: es donde
+                 se ve a quién se está quitando. El botón suelto de la sección de abajo
+                 quitaba «C8AA-7DCF» sin decir que ese eras tú, y sin preguntar. -->
+            <button v-if="canRemove(m)" class="btn danger sm" :data-testid="'remove-' + m.id"
+                    @click="confirming = { kind: 'remove', pub: m.pub }">{{ t.act_remove }}</button>
           </div>
           <div v-if="confirming && confirming.pub === m.pub" class="confirm">
-            <span>{{ confirming.kind === 'remove' ? t.confirm_remove : confirming.kind === 'handover' ? t.confirm_handover : t.confirm_renounce }}</span>
-            <button class="btn danger sm" data-testid="confirm-yes" @click="confirming.kind === 'remove' ? removeMember(m) : confirming.kind === 'handover' ? handover(m) : renounceSign()">{{ t.yes }}</button>
+            <span>{{ confirming.kind === 'remove' ? (m.isMe ? t.confirm_remove_me : t.confirm_remove) : confirming.kind === 'handover' ? t.confirm_handover : t.confirm_renounce }}</span>
+            <button class="btn danger sm" data-testid="confirm-yes" :disabled="!!busy"
+                    @click="confirming.kind === 'remove' ? removeMember(m) : confirming.kind === 'handover' ? handover(m) : renounceSign()">{{ t.yes }}</button>
             <button class="btn ghost sm" @click="confirming = null">{{ t.cancel }}</button>
           </div>
         </li>
@@ -837,10 +957,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
         </div>
         <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
-        <div v-for="d in admDevices" :key="d.sub" class="pending" data-testid="adm-device">
-          <span><code>{{ d.deviceId }}</code> {{ d.label }}</span>
-          <button class="btn ghost sm" data-testid="adm-revoke" @click="admRevoke(d)">{{ t.adm_remove }}</button>
-        </div>
       </template>
     </template>
   </section>
@@ -900,6 +1016,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .tag { font-size: 11px; background: #1b2536; color: #9fb0c9; border-radius: 999px; padding: 2px 8px; }
 .tag.master { background: #1d3350; color: #9cc4ff; }
 .tag.svc { background: #2a2310; color: #ffd98a; }
+/* «Sin acceso»: está en el acta pero no puede entrar. Es un aviso, y se ve como tal. */
+.tag.out { background: #2a1113; color: #ff9aa2; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }

@@ -21,7 +21,8 @@ function fakeDesk () {
     startPairing: async (o) => { calls.push(['startPairing', o]); return { qr: 'cAAAA', expiresInMs: 300000 } },
     approve: async (code, o) => { calls.push(['approve', code, o]); return { deviceId: o?.deviceId || null } },
     reject: (id) => { calls.push(['reject', id]) },
-    revoke: async (n) => { calls.push(['revoke', n]); return { ok: true, nonce: n } }
+    revoke: async (n) => { calls.push(['revoke', n]); return { ok: true, nonce: n } },
+    revokeDevice: async (sub) => { calls.push(['revokeDevice', sub]); return { ok: true, nonces: ['n1', 'n2'], seq: 24 } }
   }
 }
 
@@ -118,6 +119,35 @@ test('admitir y expulsar avisan a todos los miembros', async () => {
   assert.deepEqual(notices.map(([ev]) => ev), ['enrolled', 'revoked'])
   assert.equal(notices[0][1].by, 'AD01-AD01', 'el aviso dice QUIÉN lo hizo')
   assert.equal(notices[1][1].certNonce, 'n-42')
+})
+
+/**
+ * EL FANTASMA. Quitar un aparato es sacarlo del acta Y retirarle los papeles, y eso solo
+ * pasa por `sub`. La consola web mandaba `certNonce` (uno por certificado), que retira el
+ * papel y deja al miembro dentro: desaparecía de la lista de abajo, seguía en la de arriba
+ * para siempre, y la bóveda ya nunca le mandaba el aviso de expulsión —porque mientras
+ * sigas en el acta, un papel retirado significa «renueva», no «estás fuera»—, así que el
+ * aparato se quedaba enseñando la cuenta como si nada.
+ */
+test('quitar un dispositivo va por su LLAVE, y el aviso dice a quién quitaron', async () => {
+  const { admin, desk, notices, audits } = mount()
+
+  const r = await admin.handle({ op: 'revoke', sub: 'DPUB-MAC1', nonce: nonce('r') })
+
+  assert.equal(r.ok, true)
+  assert.deepEqual(desk.calls, [['revokeDevice', 'DPUB-MAC1']], 'una sola llamada, por llave')
+  assert.equal(r.result.seq, 24, 'y el acta avanzó: el miembro salió de verdad')
+  assert.equal(notices[0][1].deviceId, 'AD01-AD01', 'el aviso nombra al aparato quitado')
+  assert.ok(audits.some(([op, i]) => op === 'admin.revoke-device' && i.certs === 2),
+    'quedan anotados los DOS certificados retirados, no solo el último')
+})
+
+test('`certNonce` retira un papel y NO toca el acta (no es «quitar»)', async () => {
+  const { admin, desk } = mount()
+
+  await admin.handle({ op: 'revoke', certNonce: 'n-42', nonce: nonce('s') })
+
+  assert.deepEqual(desk.calls, [['revoke', 'n-42']], 'sigue existiendo, pero es otra cosa')
 })
 
 test('la bitácora se lee acotada y con el actor en cada acción', async () => {

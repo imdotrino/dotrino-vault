@@ -88,6 +88,36 @@ function groupByDevice (issued) {
   return [...by.values()]
 }
 
+/**
+ * LA lista de dispositivos: el acta, con el certificado de cada uno pegado.
+ *
+ * El acta es quien dice de quién es el perfil; los certificados son el reflejo de esa
+ * decisión y pueden faltar (retirados, vencidos). Un miembro sin certificado sale igual,
+ * marcado como «sin acceso», porque es exactamente el que hay que poder quitar.
+ *
+ * Si todavía no hay acta (bóveda anterior al acta, o sin volcar), se cae a los
+ * certificados: peor lista, pero lista.
+ */
+function mergeMembersAndCerts (members, issued) {
+  const certs = new Map()
+  for (const d of groupByDevice(issued)) certs.set(d.sub || d.deviceId || d.nonce, d)
+  if (!Array.isArray(members) || !members.length) return [...certs.values()]
+  return members.map((m) => {
+    const cert = certs.get(m.pub)
+    return {
+      ...(cert || {}),
+      sub: m.pub,
+      deviceId: m.id || cert?.deviceId || '????-????',
+      label: m.label || cert?.label || '',
+      isMaster: !!m.isMaster,
+      cn: m.cn || null,
+      // El master es la propia bóveda: no tiene (ni necesita) certificado. Un servicio
+      // tampoco lleva uno de dispositivo. Marcarlos «sin acceso» sería una alarma falsa.
+      noAccess: !cert && !m.isMaster && !m.cn
+    }
+  })
+}
+
 function activeProfile (st) {
   const list = st.profiles?.profiles || []
   return list.find((p) => p.current) || list[0] || null
@@ -193,15 +223,27 @@ function deviceRows (st, t) {
   // UNA FILA POR APARATO, no por certificado. Antes se pintaba `issued` tal cual y un
   // aparato con dos certs (el viejo + el de la renovación) salía dos veces: parecían dos
   // máquinas. Se agrupa por llave y se muestra el cert vigente más largo.
-  const issued = groupByDevice(st.devices?.issued || [])
-  if (!issued.length) {
+  //
+  // Y la lista sale del ACTA, no de los certificados: el acta dice quién es del perfil, y
+  // los certificados son su reflejo. Un miembro sin certificado vigente —porque le
+  // retiraron el papel pero no lo sacaron del acta, o porque se le venció— no salía en
+  // ninguna pantalla del PC: invisible aquí, presente en la del navegador, y sin forma de
+  // quitarlo más que adivinando su ID para el `revoke` de la línea de comandos.
+  const devices = mergeMembersAndCerts(st.members, st.devices?.issued || [])
+  if (!devices.length) {
     rows.push({ text: t.muted(i.noDevices), sel: false })
   }
-  for (const d of issued) {
+  for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
     const extra = d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : ''
-    const line = ` ${t.bold(d.deviceId)}  ${label}  ${t.muted('scope:' + shortScope(d.scope))}  ${t.muted('exp:' + fmtExp(d.exp))}${extra}`
-    rows.push({ text: line, sel: true, meta: d })
+    // SIN ACCESO: está en el acta y no puede entrar. Es un aviso, no un adorno, así que va
+    // en el color de aviso y en el sitio donde estaría su vencimiento.
+    const estado = d.noAccess
+      ? t.warn(i.deviceNoAccess)
+      : d.isMaster
+        ? t.muted(i.thisVault)
+        : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp))
+    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}  ${estado}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -342,9 +384,12 @@ async function guard (term, st, msg, fn) {
 async function refreshAll (term, st) {
   const r = await guard(term, st, L(st).loading, () => vc.snapshot(activeId(st)))
   if (!r.ok) return
-  const { devices, secrets, profiles } = r.v
+  const { devices, secrets, profiles, acta } = r.v
   if (profiles) st.profiles = profiles
   if (secrets) st.secrets = secrets.ns || {}
+  // El ACTA entra en el volcado normal: es de donde sale la lista de dispositivos (ver
+  // `mergeMembersAndCerts`). Antes solo se pedía al abrir la pantalla de permisos.
+  if (acta) st.members = acta.members || []
   if (devices) {
     const issued = (devices.issued || devices.active || devices.delegations || [])
     st.devices = { issued: await Promise.all(issued.map(async (d) => ({ ...d, deviceId: d.sub ? await vc.deviceIdOf(d.sub) : '????-????' }))), revoked: devices.revoked || [] }
@@ -353,7 +398,11 @@ async function refreshAll (term, st) {
 
 async function refreshDevices (term, st) {
   const r = await guard(term, st, L(st).loadingDevices, () => vc.listDevices(activeId(st)))
-  if (r.ok) st.devices = r.v
+  if (!r.ok) return
+  st.devices = r.v
+  // La lista se pinta desde el acta; traerla aparte dejaba la pantalla con los miembros de
+  // hace dos operaciones (quitar uno no lo quitaba de la vista).
+  if (Array.isArray(r.v.members)) st.members = r.v.members
 }
 async function refreshSecrets (term, st) {
   const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
@@ -545,6 +594,10 @@ async function onKeyDevices (term, st, key) {
     if (!st.pending) { flash(st, i.noPendingToReject, 'warn'); return true }
     const r = await guard(term, st, i.rejecting, () => vc.rejectPending(st.pending.deviceId, activeId(st)))
     if (r.ok) { flash(st, i.deviceRejected); st.pending = null }
+  } else if ((ch === 'v' || key.name === 'delete') && cur?.isMaster) {
+    // La bóveda no se echa a sí misma: el acta la necesita para poder sellarse. Se dice
+    // en vez de mandar la orden y enseñar el error del daemon, que no explica nada.
+    flash(st, i.cantRemoveMaster, 'warn')
   } else if ((ch === 'v' || key.name === 'delete') && (cur?.sub || cur?.nonce != null)) { // quitar el aparato seleccionado
     setConfirm(st, {
       text: i.revokeConfirm(cur.deviceId),
@@ -1111,4 +1164,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang }
+export const __test = { render, profileRows, deviceRows, secretRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }

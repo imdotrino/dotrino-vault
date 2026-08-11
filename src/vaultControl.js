@@ -179,13 +179,17 @@ export const removeProfilePassword = (profile) => profileOp('password-rm', { pro
  */
 export async function snapshot (profile) {
   requireAlive()
-  rm(F.devices); rm(F.secretsList); rm(F.profilesList)
+  rm(F.devices); rm(F.secretsList); rm(F.profilesList); rm(F.acta)
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.dumpReq])
-  const [devices, secrets, profiles] = await Promise.all([
-    waitFor(F.devices), waitFor(F.secretsList), waitFor(F.profilesList)
+  // El ACTA entra en el volcado normal: es la lista de dispositivos de verdad, y las
+  // delegaciones son su reflejo. Sin ella, un miembro sin certificados (revocado a medias,
+  // o con el papel caducado) no salía en ninguna pantalla del PC — invisible y, por lo
+  // tanto, imposible de quitar desde aquí.
+  const [devices, secrets, profiles, acta] = await Promise.all([
+    waitFor(F.devices), waitFor(F.secretsList), waitFor(F.profilesList), waitFor(F.acta)
   ])
-  return { devices, secrets, profiles }
+  return { devices, secrets, profiles, acta }
 }
 
 /**
@@ -193,14 +197,22 @@ export async function snapshot (profile) {
  * `issued` viene de identity.listDelegations(); el deviceId se deriva del `sub`.
  */
 export async function listDevices (profile) {
-  const { devices } = await snapshot(profile)
+  const { devices, acta } = await snapshot(profile)
   if (!devices) throw coded('the daemon did not reply', 'NO_REPLY')
   const issued = devices.issued || devices.active || devices.delegations || []
   const revoked = devices.revoked || []
   const withIds = await Promise.all(issued.map(async (d) => ({
     ...d, deviceId: d.sub ? await deviceIdOf(d.sub) : '????-????'
   })))
-  return { issued: agruparPorAparato(withIds, revoked), revoked, profile: devices.profile || null }
+  // Los MIEMBROS viajan con la lista: quién es del perfil lo dice el acta, y los
+  // certificados son su reflejo. Quien pinte la lista los necesita a la vez, o acaba
+  // enseñando solo a los que tienen papel — y el que hay que quitar es justo el que no.
+  return {
+    issued: agruparPorAparato(withIds, revoked),
+    revoked,
+    members: acta?.members || [],
+    profile: devices.profile || null
+  }
 }
 
 /**
