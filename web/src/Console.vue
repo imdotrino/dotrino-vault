@@ -24,7 +24,7 @@ const T = {
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Manda',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'manda',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     caps_none: 'sin permisos',
@@ -104,7 +104,7 @@ const T = {
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'In charge',
     members: 'Devices', me: 'this device', is_master: 'in charge',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     caps_none: 'no permissions',
@@ -215,7 +215,22 @@ const isMaster = computed(() => !!mine.value?.isMaster)
  */
 const yaEnBoveda = computed(() => !!acta.value && !isMaster.value)
 const soloMember = computed(() => members.value.length <= 1)
+/**
+ * El identificador del perfil es una **pubkey JWK**, no un id corto: recortarla a 8
+ * caracteres no la hace legible, la deja pareciendo un error (`{"key_op`). Se enseña su
+ * huella, que es la misma que ves al emparejar, en la lista de miembros y en el CLI.
+ */
 const shortId = (s) => (s || '').slice(0, 8)
+const perfilId = ref('')
+async function calcularPerfilId () {
+  const pub = acta.value?.profileId
+  if (!pub) { perfilId.value = ''; return }
+  try {
+    const { pubkeyId } = await import('@dotrino/identity/capabilities')
+    const h = (await pubkeyId(pub)).slice(0, 8).toUpperCase()
+    perfilId.value = h.slice(0, 4) + '-' + h.slice(4)
+  } catch (_) { perfilId.value = shortId(pub) }
+}
 
 async function refresh () {
   const [a, m, mi] = await Promise.all([
@@ -225,6 +240,7 @@ async function refresh () {
   ])
   acta.value = a?.acta || null
   members.value = m.members || []
+  calcularPerfilId()
   mine.value = mi
 }
 
@@ -481,13 +497,18 @@ let admTimer = null
 
 async function refreshAdmin () {
   try {
+    // PUNTO MUERTO que esto arregla: preguntar primero por el cert dejaba la consola
+    // escondida para siempre. `canAdminVault` mira el acta que hay GUARDADA aquí, y la
+    // única cosa que trae el acta de la bóveda es `listVaultDevices`… que estaba detrás
+    // del `if`. Así que un permiso concedido en la bóveda no llegaba nunca: el acta no se
+    // refrescaba porque no se administraba, y no se administraba porque el acta no se
+    // refrescaba. Primero se sincroniza, y luego se decide.
+    const d = await id.value.listVaultDevices().catch(() => null)
+    if (d) await refresh()   // el acta pudo cambiar (permisos nuevos, miembros nuevos)
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
-    const [d, p] = await Promise.all([
-      id.value.listVaultDevices().catch(() => ({ devices: [] })),
-      id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
-    ])
-    admDevices.value = d.devices || []
+    const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
+    admDevices.value = d?.devices || []
     admPending.value = p.pending || []
   } catch (_) { canAdmin.value = false }
 }
@@ -592,7 +613,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
       <!-- Resumen del acta -->
       <ul class="facts" v-if="acta">
-        <li>{{ t.profile }} <code>{{ shortId(acta.profileId) }}</code></li>
+        <li>{{ t.profile }} <code data-testid="profile-id">{{ perfilId || '—' }}</code></li>
         <li>{{ t.version }} <code>#{{ acta.seq }}</code></li>
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
       </ul>
@@ -609,7 +630,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <code class="mid">{{ m.id }}</code>
           </div>
           <div class="caps">
-            <button v-for="c in (m.cn ? ['secrets'] : ['sign','store','read'])" :key="c"
+            <button v-for="c in (m.cn ? ['secrets'] : ['sign','store','read','admin'])" :key="c"
                     class="cap" :class="{ on: m.caps.includes(c) }"
                     :disabled="!isMaster || busy === 'caps-' + m.pub"
                     :data-testid="'cap-' + c + '-' + m.id"
