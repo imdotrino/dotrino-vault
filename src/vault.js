@@ -227,9 +227,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * — y hasta ahora el daemon no lo reemitía nunca. Si el aparato estaba apagado cuando lo
    * quitaste, no se enteraba jamás: seguía enseñando el perfil como si nada.
    */
-  async function avisarSiRevocado (pubkey) {
+  async function avisarSiRevocado (pubkey, nonce = null) {
     if (typeof pubkey !== 'string') return
     try {
+      // PRIMERO: ¿sigue siendo del perfil? Un certificado retirado NO significa «estás
+      // fuera». Renovar retira el anterior, y cambiar permisos obliga a renovar, así que
+      // un aparato que llega con un papel viejo es de casa y solo tiene que renovar. Si
+      // aquí se le manda el aviso de expulsión, el aparato se borra solo: dabas
+      // «administra» y el dispositivo desaparecía como si lo hubieran echado. El aviso es
+      // para quien YA NO ESTÁ en el acta.
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+      if (acta && (acta.members || []).some((m) => m.pub === pubkey)) return
+
       // OJO con dónde se buscan: desde identity 0.42 `issued` es «lo que HOY sirve para
       // entrar», así que los retirados NO están ahí — viven en `revokedCerts`. Buscarlos
       // en `issued` no daba error, daba una lista vacía y ningún aviso.
@@ -238,7 +247,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const candidatos = [...(dele.revokedCerts || []), ...(dele.issued || [])]
       const suyas = candidatos.filter((x) => x.sub === pubkey && (x.revokedAt || revocados.has(x.nonce)))
       if (suyas.length) {
-        await desk.emitRevoke(pubkey, suyas[0].nonce)
+        // El aviso nombra el certificado que el aparato ACABA de presentar: es el que
+        // tiene en la mano, y es contra ese contra el que comprueba antes de borrarse.
+        await desk.emitRevoke(pubkey, nonce || suyas[0].nonce)
         audit('revoke.notified', { device: await deviceIdOf(pubkey).catch(() => null) })
       }
     } catch (e) { log('[vault] could not re-emit the revocation:', e.message) }
@@ -248,7 +259,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
     if (!chk.ok) {
-      if (chk.reason === 'revoked') await avisarSiRevocado(p.data?.publickey)
+      if (chk.reason === 'revoked') await avisarSiRevocado(p.data?.publickey, p.cert?.nonce || null)
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
     }
     const { issued, revoked } = await identity.listDelegations()
