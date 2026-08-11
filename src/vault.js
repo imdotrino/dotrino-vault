@@ -331,6 +331,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
       if (payload.type === MSG.SECRETS) return await handleSecrets(from, payload)
       if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
+      if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -455,6 +456,34 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return chk
     }
   })
+
+  /**
+   * RENUNCIA: un miembro se quita capacidades a sí mismo y la bóveda la SELLA en el acta.
+   *
+   * NO se pide certificado, y es a propósito: el registro va firmado por el propio miembro
+   * y solo puede QUITAR, así que honrarlo no puede hacer daño — y exigir un cert válido
+   * dejaría fuera justo el caso que la justifica (un aparato que ya no es de fiar, o cuyo
+   * cert caducó). Sin esto la renuncia se quedaba en el dispositivo: la bóveda seguía
+   * teniendo escrito que podía firmar y le seguía aceptando peticiones.
+   */
+  async function handleRenounce (from, p) {
+    const record = p?.data?.record || p?.record
+    if (!record || typeof record !== 'object') return reply(from, { type: MSG.ERROR, error: 'renounce: record required' })
+    if (!(await Acta.verifyRenounce(record).catch(() => false))) {
+      audit('rejected', { what: 'renounce', reason: 'signature' })
+      return reply(from, { type: MSG.ERROR, error: 'renounce: the signature is not the member own' })
+    }
+    try {
+      const r = await identity.absorbRenounce(record)
+      const device = await deviceIdOf(record.member).catch(() => null)
+      audit('renounce', { device, caps: record.caps })
+      log(`[vault] ${device} renounced: ${(record.caps || []).join(', ')}`)
+      await notifyMembers('renounce', { deviceId: device, caps: record.caps })
+      reply(from, { type: MSG.RENOUNCE_RESULT, ok: true, seq: r?.seq ?? null })
+    } catch (e) {
+      reply(from, { type: MSG.ERROR, error: 'renounce: ' + e.message })
+    }
+  }
 
   async function handleAdmin (from, p) {
     // La frescura se comprueba aquí (es del transporte, igual que en el resto de
