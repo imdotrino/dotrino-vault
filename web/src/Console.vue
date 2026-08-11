@@ -66,10 +66,9 @@ const T = {
     // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
     gone_t: 'Este dispositivo ya no está en el perfil',
     gone_b: 'Se quitó del perfil y la cuenta se borró de este aparato con lo que tenía guardado.',
-    // Qué quedó puesto en su lugar: el aparato nunca se queda sin cuenta.
-    gone_switched: 'Ahora estás usando otra de tus cuentas de este dispositivo.',
-    gone_created: 'Era la única que había, así que se estrenó una cuenta nueva y vacía.',
-    gone_reload: 'Recarga para empezar a usarla.',
+    // Qué queda al recargar lo decide el arranque (otra cuenta tuya, o una nueva si esa
+    // era la única), así que aquí no se promete cuál: se dice que recargues.
+    gone_reload: 'Recarga y seguirás con otra de tus cuentas; si esa era la única, se estrenará una nueva.',
     gone_reload_go: 'Recargar',
     gone_stuck: 'La cuenta no se pudo borrar de este aparato:',
     gone_go: 'Conectar este dispositivo',
@@ -167,9 +166,7 @@ const T = {
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
     gone_t: 'This device is no longer in the profile',
     gone_b: 'It was removed from the profile and the account was erased from this device, along with whatever it had saved.',
-    gone_switched: 'You are now using another of your accounts on this device.',
-    gone_created: 'It was the only one, so a new, empty account was created.',
-    gone_reload: 'Reload to start using it.',
+    gone_reload: 'Reload and you will carry on with another of your accounts; if that was the only one, a new one is created.',
     gone_reload_go: 'Reload',
     gone_stuck: 'The account could not be erased from this device:',
     gone_go: 'Connect this device',
@@ -385,12 +382,11 @@ const shortDate = (ms) => {
  */
 const expelled = ref(false)
 /**
- * Qué pasó con la CUENTA de este aparato al ser expulsado: se borró y quedó otra puesta
- * (una que ya tenías, o una nueva si esa era la única). Lo manda el pilar de identidad,
- * que es quien lo hace; aquí solo se cuenta, porque si no el aparato se queda mirando una
- * pantalla que no dice con qué cuenta se quedó.
+ * La CUENTA de este aparato se borró al ser expulsado. Lo hace el pilar de identidad y lo
+ * avisa; aquí solo se cuenta, porque si no el aparato se queda mirando una pantalla que no
+ * dice qué pasó con su cuenta. Con cuál sigue lo decide el arranque al recargar.
  */
-const accountGone = ref(null) // { created:boolean, error?:string }
+const accountGone = ref(null) // { error?:string }
 /** La bóveda nos rechaza pero sin aviso firmado: se avisa, no se borra (wipe-DoS). */
 const rejected = ref('')
 /**
@@ -451,7 +447,7 @@ onMounted(async () => {
     // Nos echaron, y va FIRMADO por la maestra: el enlace y el acta ya se borraron solos.
     // La pantalla tiene que decirlo, no seguir pintando la cuenta que acaba de irse.
     else if (e?.phase === 'revoked') { expelled.value = true; confirming.value = null }
-    else if (e?.phase === 'account-removed') { expelled.value = true; accountGone.value = { created: !!e.created, error: e.error || '' } }
+    else if (e?.phase === 'account-removed') { expelled.value = true; accountGone.value = { error: e.error || '' } }
     else if (e?.phase === 'rejected') rejected.value = e.reason || '1'
   })
   await refreshSelf()
@@ -794,11 +790,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <div class="card bad">
         <strong>{{ t.gone_t }}</strong>
         <p>{{ t.gone_b }}</p>
-        <template v-if="accountGone && !accountGone.error">
-          <p data-testid="expelled-account">
-            {{ accountGone.created ? t.gone_created : t.gone_switched }} {{ t.gone_reload }}
-          </p>
-        </template>
+        <p v-if="accountGone && !accountGone.error" data-testid="expelled-account">{{ t.gone_reload }}</p>
         <p v-else-if="accountGone" class="muted" data-testid="expelled-stuck">
           {{ t.gone_stuck }} <code class="mid">{{ accountGone.error }}</code>
         </p>
