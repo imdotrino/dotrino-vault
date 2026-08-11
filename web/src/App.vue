@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, markRaw, onMounted } from 'vue'
 import Consola from './Console.vue'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
@@ -260,11 +260,6 @@ function copy (text, key) {
   navigator.clipboard?.writeText(text).then(() => { copied.value = key; setTimeout(() => (copied.value = ''), 1400) })
 }
 
-const menuOpen = ref(false)
-const closeMenu = () => { menuOpen.value = false }
-const toggleMenu = () => { menuOpen.value = !menuOpen.value }
-const onMenuKey = (e) => { if (e.key === 'Escape') closeMenu() }
-
 /* Ruta: la landing en `/` y la página de dispositivos en `/devices`, con `/d`
    como atajo. El QR de `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta
    existe porque cada carácter del enlace son módulos del QR, y los módulos son filas
@@ -280,60 +275,48 @@ function routeNow () {
 routeNow()
 function go (v, ev) {
   ev?.preventDefault()
-  closeMenu()
   history.pushState(null, '', v === 'console' ? '/devices' : '/')
   routeNow()
 }
 window.addEventListener('popstate', routeNow)
 
-onMounted(() => {
+/**
+ * El topbar es el DUEÑO del modal de perfil (§6.1): se le pasa la identidad y él abre
+ * `<dotrino-profile mode="self">` con el avatar del perfil activo. Va `markRaw`: un `ref`
+ * de Vue envuelve el objeto en un Proxy reactivo y entonces el `postMessage` al iframe
+ * de identidad falla con «could not be cloned».
+ */
+const topbar = ref(null)
+const onTopbarLang = (e) => { if (e.detail?.lang) lang.value = e.detail.lang }
+
+onMounted(async () => {
   document.documentElement.lang = lang.value
-  window.addEventListener('keydown', onMenuKey)
+  try {
+    const { Identity } = await import('@dotrino/identity')
+    if (topbar.value) topbar.value.identity = markRaw(await Identity.connect())
+  } catch (_) { /* sin identidad el botón sigue estando: abre y ofrece crearla */ }
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', onMenuKey))
 </script>
 
 <template>
   <div class="page">
-    <header class="topbar">
-      <a class="brand" href="/" @click="closeMenu"><img src="/icon.svg" alt="" width="30" height="30" /><span>Dotrino&nbsp;Vault</span></a>
-      <nav class="navlinks" :aria-label="t.nav_menu_label">
-        <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
-        <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
-        <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
-        <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
-        <a v-if="view !== 'home'" href="/" @click="go('home', $event)">{{ t.nav_home }}</a>
-      </nav>
-      <button
-        type="button"
-        class="menu-toggle"
-        data-testid="nav-menu-toggle"
-        :aria-expanded="menuOpen"
-        aria-controls="mobile-nav"
-        :aria-label="t.nav_menu"
-        @click="toggleMenu"
-      >
-        <span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
-      </button>
-      <div v-if="menuOpen" class="mobile-nav-backdrop" data-testid="nav-menu-backdrop" @click="closeMenu"></div>
-      <nav id="mobile-nav" class="mobile-nav" :class="{ open: menuOpen }" :aria-label="t.nav_menu_label" :aria-hidden="!menuOpen">
-        <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
-        <a href="/devices" data-testid="nav-mobile-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
-        <template v-if="view === 'home'">
-          <a href="#how" data-testid="nav-mobile-how" @click="closeMenu">{{ t.nav_how }}</a>
-          <a href="#download" data-testid="nav-mobile-download" @click="closeMenu">{{ t.nav_download }}</a>
-          <a href="#use" data-testid="nav-mobile-use" @click="closeMenu">{{ t.nav_use }}</a>
-        </template>
-      </nav>
-      <div class="actions">
-        <div class="lang-selector" role="group" aria-label="es / en">
-          <button :class="{ on: lang === 'es' }" @click="setLang('es')">ES</button>
-          <button :class="{ on: lang === 'en' }" @click="setLang('en')">EN</button>
-        </div>
-        <dotrino-install :lang="lang"></dotrino-install>
-        <dotrino-support href="https://ko-fi.com/dotrino" repo="imdotrino/dotrino-vault" :discord="DISCORD" :lang="lang"></dotrino-support>
-      </div>
-    </header>
+    <dotrino-topbar
+      ref="topbar"
+      brand="Dotrino Vault"
+      icon="/icon.svg"
+      brand-href="/"
+      profile
+      support-repo="imdotrino/dotrino-vault"
+      support-discord="https://discord.gg/D648uq7cth"
+      :lang="lang"
+      @dotrino-lang="onTopbarLang"
+    >
+      <a v-if="view === 'home'" href="#how">{{ t.nav_how }}</a>
+      <a v-if="view === 'home'" href="#download">{{ t.nav_download }}</a>
+      <a v-if="view === 'home'" href="#use" data-testid="nav-use">{{ t.nav_use }}</a>
+      <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
+      <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
+    </dotrino-topbar>
 
     <main>
       <Consola v-if="view === 'console'" :lang="lang" />

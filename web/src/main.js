@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { registerSW } from 'virtual:pwa-register'
 import '@dotrino/support'
+import '@dotrino/topbar'
 import '@dotrino/install'
 import App from './App.vue'
 import './style.css'

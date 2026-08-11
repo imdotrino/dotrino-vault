@@ -10,12 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dotrino/identity": "0.39.0",
+    "@dotrino/identity": "0.40.0",
     "@dotrino/install": "0.2.3",
     "@dotrino/support": "0.8.0",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4",
-    "vue": "3.5.13"
+    "vue": "3.5.13",
+    "@dotrino/topbar": "0.8.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "5.2.1",

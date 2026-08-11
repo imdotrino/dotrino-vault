@@ -206,6 +206,14 @@ const msg = ref(null) // { kind:'ok'|'bad'|'info', text }
 const busy = ref('')
 
 const isMaster = computed(() => !!mine.value?.isMaster)
+/**
+ * ¿Este aparato YA vive en una bóveda? Si el que sella el acta es OTRO miembro, la cuenta
+ * ya tiene su bóveda y este dispositivo es uno de sus invitados. Entonces no se le ofrece
+ * ni «conectarse a una bóveda» (ya lo está) ni «ser la bóveda» (el mando lo tiene otro y
+ * traspasarlo no es una casilla): eran dos pasos de alta que se quedaban a la vista para
+ * siempre, invitando a hacer algo que no procede.
+ */
+const yaEnBoveda = computed(() => !!acta.value && !isMaster.value)
 const soloMember = computed(() => members.value.length <= 1)
 const shortId = (s) => (s || '').slice(0, 8)
 
@@ -630,6 +638,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <!-- Conectar este dispositivo a una bóveda. Aquí solo está la ENTRADA al
            proceso (escanear / abrir archivo / pegar); en cuanto hay una invitación,
            la pantalla del proceso se lo lleva todo (ver `pairFlow`). -->
+      <template v-if="!yaEnBoveda">
       <h2>{{ t.pair_t }}</h2>
       <p class="muted">{{ t.pair_b }}</p>
       <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
@@ -658,6 +667,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button v-if="self.running" class="btn" data-testid="self-pair" @click="selfPair">{{ t.self_pair }}</button>
       </div>
       <div v-if="selfQr" class="qrbox" v-html="selfQr"></div>
+      </template>
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
         <span>{{ t.self_pending }}: <code>{{ p.deviceId }}</code></span>
         <input v-model="selfCode" :placeholder="t.self_code_ph" inputmode="numeric" data-testid="self-code" />

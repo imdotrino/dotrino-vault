@@ -77,7 +77,7 @@ const spaFallback = {
 export default defineConfig({
   base: '/',
   plugins: [
-    vue(),
+    vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('dotrino-') } } }),
     identityVaultDev,
     commitMeta,
     spaFallback,
