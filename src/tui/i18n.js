@@ -242,7 +242,7 @@ const es = {
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
   errPairFailed: 'El daemon no inició el emparejamiento.',
-  errMasterWithMembers: 'Esta cuenta la manda esta bóveda y tiene otros dispositivos: pásale primero el mando a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
+  errMasterWithMembers: 'Esta bóveda es el Master de esta cuenta y hay otros dispositivos: pásale primero el Master a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
 }
 
 // ---------------------------------- inglés ----------------------------------
@@ -451,7 +451,7 @@ const en = {
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
-  errMasterWithMembers: 'This vault is in charge of this account and it has other devices: hand the lead over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
+  errMasterWithMembers: 'This vault is the Master of this account and it has other devices: hand the Master over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 
 // --------------------------- selección y persistencia -----------------------

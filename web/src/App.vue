@@ -167,7 +167,7 @@ const I18N = {
       ['Connect a phone or a laptop',
        'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.'],
       ['See who is connected',
-       'Your devices page lists every device, what each one can do and which one is in charge. From there you take permissions away or remove one entirely.'],
+       'Your devices page lists every device, what each one can do and which one is the Master. From there you take permissions away or remove one entirely.'],
       ['If you lose a device',
        'You disconnect it and it stops working: the vault will not sign for it again and, next time it turns on, it wipes what it had of your account.'],
       ['Keep several accounts',

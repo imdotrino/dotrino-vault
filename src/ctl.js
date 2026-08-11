@@ -329,7 +329,7 @@ async function cmdMembers () {
   for (const m of acta.members) {
     const quien = m.label || m.id
     const marcas = [
-      m.isMaster ? `${B}manda${Z}` : null,
+      m.isMaster ? `${B}Master${Z}` : null,
       m.isMe ? 'este dispositivo' : null,
       m.cn ? `servicio «${m.cn}»` : null
     ].filter(Boolean)
