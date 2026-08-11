@@ -28,6 +28,8 @@ const T = {
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     caps_none: 'sin permisos',
+    sync_err_t: 'No se pudo hablar con tu bóveda',
+    sync_err_b: 'Lo de abajo es la última copia que tiene este dispositivo, puede estar desfasada. ¿Está encendida la bóveda?',
     solo_warn_t: 'Solo tienes este dispositivo',
     solo_warn_b: 'Si lo pierdes, pierdes el perfil: no hay forma de recuperarlo. Conecta al menos otro dispositivo o tu bóveda.',
     not_master_t: 'Este dispositivo no manda',
@@ -108,6 +110,8 @@ const T = {
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     caps_none: 'no permissions',
+    sync_err_t: 'Could not reach your vault',
+    sync_err_b: 'What you see below is the last copy this device has, and it may be out of date. Is the vault running?',
     solo_warn_t: 'You only have this device',
     solo_warn_b: 'If you lose it, you lose the profile: there is no way to recover it. Connect at least one more device or your vault.',
     not_master_t: 'This device is not in charge',
@@ -232,7 +236,21 @@ async function calcularPerfilId () {
   } catch (_) { perfilId.value = shortId(pub) }
 }
 
+/** Falla al hablar con la bóveda: se ENSEÑA, no se traga (ver `syncError`). */
+const syncError = ref('')
+
 async function refresh () {
+  // Si este aparato vive en una bóveda, lo PRIMERO es traerse su acta. Lo que se ve aquí
+  // es lo que decidió el dueño en la bóveda —permisos, nombres, quién entró—, no la copia
+  // del día que emparejamos. Sin esto la pantalla se quedaba congelada en ese día: el
+  // dispositivo renombrado seguía con el nombre viejo y los permisos nuevos no salían.
+  try { await id.value.listVaultDevices(); syncError.value = '' }
+  catch (e) {
+    // «No emparejado con ninguna bóveda» no es un fallo: es un aparato que todavía no
+    // entró en ninguna (o que ES la bóveda). Cualquier otra cosa sí se cuenta.
+    const m = e?.message || String(e)
+    syncError.value = /not paired with a vault/i.test(m) ? '' : m
+  }
   const [a, m, mi] = await Promise.all([
     id.value.profileActa().catch(() => null),
     id.value.profileMembers().catch(() => ({ members: [] })),
@@ -504,7 +522,6 @@ async function refreshAdmin () {
     // refrescaba porque no se administraba, y no se administraba porque el acta no se
     // refrescaba. Primero se sincroniza, y luego se decide.
     const d = await id.value.listVaultDevices().catch(() => null)
-    if (d) await refresh()   // el acta pudo cambiar (permisos nuevos, miembros nuevos)
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
     const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
@@ -603,6 +620,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
+
+      <!-- Sin esto, un fallo de sincronía era INVISIBLE: la pantalla enseñaba tan
+           tranquila la copia del acta del día que emparejaste, y no había forma de saber
+           que llevaba semanas sin hablar con la bóveda. -->
+      <div v-if="syncError" class="banner bad" data-testid="sync-error">
+        <strong>{{ t.sync_err_t }}</strong> — {{ t.sync_err_b }}
+        <code class="mid">{{ syncError }}</code>
+      </div>
 
       <div v-if="soloMember" class="banner warn" data-testid="solo-warning">
         <strong>{{ t.solo_warn_t }}</strong> — {{ t.solo_warn_b }}
