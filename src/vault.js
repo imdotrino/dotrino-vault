@@ -229,9 +229,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // que falta (ventana de retención, §1.3) para que compruebe el encadenamiento en vez
     // de tragarse un salto a ciegas. Si se salió de la ventana, llega vacía y toca
     // re-emparejar — que es justo lo que debe pasar.
-    const chain = typeof p.data?.sinceSeq === 'number'
-      ? (await identity.actaHistory({ sinceSeq: p.data.sinceSeq }).catch(() => null))?.chain || null
-      : null
+    // El `.catch()` de antes NO protegía de nada: si `actaHistory` no existe, el
+    // TypeError es SÍNCRONO y salta antes de que haya promesa que encadenar. Pasó: el
+    // método vivía en el núcleo pero no en el envoltorio de Node, así que esta línea
+    // tiraba toda la respuesta y ningún navegador ya emparejado —que manda `sinceSeq`
+    // siempre— volvía a sincronizar su acta. Un try/catch de verdad, y opcional.
+    let chain = null
+    if (typeof p.data?.sinceSeq === 'number') {
+      try { chain = (await identity.actaHistory?.({ sinceSeq: p.data.sinceSeq }))?.chain || null }
+      catch (e) { log('[vault] could not build the record chain:', e.message) }
+    }
     // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
     // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
     // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
