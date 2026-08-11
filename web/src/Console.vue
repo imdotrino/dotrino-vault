@@ -65,7 +65,13 @@ const T = {
     dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
     // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
     gone_t: 'Este dispositivo ya no está en el perfil',
-    gone_b: 'Se quitó del perfil y aquí se cerró la cuenta: lo que tenía guardado se borró. Puedes conectarlo otra vez desde tu bóveda, o usar otra cuenta de este aparato.',
+    gone_b: 'Se quitó del perfil y la cuenta se borró de este aparato con lo que tenía guardado.',
+    // Qué quedó puesto en su lugar: el aparato nunca se queda sin cuenta.
+    gone_switched: 'Ahora estás usando otra de tus cuentas de este dispositivo.',
+    gone_created: 'Era la única que había, así que se estrenó una cuenta nueva y vacía.',
+    gone_reload: 'Recarga para empezar a usarla.',
+    gone_reload_go: 'Recargar',
+    gone_stuck: 'La cuenta no se pudo borrar de este aparato:',
     gone_go: 'Conectar este dispositivo',
     // La bóveda nos rechaza pero SIN aviso firmado: se cuenta, no se borra nada.
     rejected_t: 'Tu bóveda está rechazando a este dispositivo',
@@ -123,6 +129,10 @@ const T = {
     adm_no_t: 'Este dispositivo solo mira',
     adm_no_b: 'Para que pueda conectar y quitar dispositivos, dale el permiso en la computadora de tu bóveda: dotrino-vault caps <ID> +administra',
     adm_pair: 'Conectar un dispositivo',
+    // El QR solo sirve si el otro aparato tiene cámara y está delante. El enlace sirve
+    // siempre, y es lo mismo: la misma invitación, escrita.
+    invite_url: 'O pásale este enlace:',
+    invite_copy: 'Copiar enlace', invite_copied: 'Copiado',
     adm_pending: 'Un dispositivo quiere conectarse',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
@@ -156,7 +166,12 @@ const T = {
     dev_nocert: 'no access',
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
     gone_t: 'This device is no longer in the profile',
-    gone_b: 'It was removed from the profile and the account was closed here: whatever it had saved was erased. You can connect it again from your vault, or use another account on this device.',
+    gone_b: 'It was removed from the profile and the account was erased from this device, along with whatever it had saved.',
+    gone_switched: 'You are now using another of your accounts on this device.',
+    gone_created: 'It was the only one, so a new, empty account was created.',
+    gone_reload: 'Reload to start using it.',
+    gone_reload_go: 'Reload',
+    gone_stuck: 'The account could not be erased from this device:',
     gone_go: 'Connect this device',
     rejected_t: 'Your vault is turning this device away',
     rejected_b: 'It may have been removed from the profile. Nothing is erased here on the strength of a bare message: turn your vault on and open this page again to know for sure.',
@@ -210,6 +225,8 @@ const T = {
     adm_no_t: 'This device can only look',
     adm_no_b: 'To let it connect and remove devices, grant the permission on your vault computer: dotrino-vault caps <ID> +administra',
     adm_pair: 'Connect a device',
+    invite_url: 'Or send it this link:',
+    invite_copy: 'Copy link', invite_copied: 'Copied',
     adm_pending: 'A device wants to connect',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
@@ -367,8 +384,45 @@ const shortDate = (ms) => {
  * cuenta que ya no existía en este aparato, hasta que a alguien se le ocurriera recargar.
  */
 const expelled = ref(false)
+/**
+ * Qué pasó con la CUENTA de este aparato al ser expulsado: se borró y quedó otra puesta
+ * (una que ya tenías, o una nueva si esa era la única). Lo manda el pilar de identidad,
+ * que es quien lo hace; aquí solo se cuenta, porque si no el aparato se queda mirando una
+ * pantalla que no dice con qué cuenta se quedó.
+ */
+const accountGone = ref(null) // { created:boolean, error?:string }
 /** La bóveda nos rechaza pero sin aviso firmado: se avisa, no se borra (wipe-DoS). */
 const rejected = ref('')
+/**
+ * COPIAR el enlace de la invitación. `navigator.clipboard` no existe fuera de un sitio
+ * seguro (y en algún navegador viejo tampoco), así que hay respaldo: se selecciona el
+ * texto y se copia a la vieja usanza. Si ni eso, el enlace sigue a la vista para copiarlo
+ * a mano — que es lo único que hacía falta y no había.
+ */
+const copied = ref('')
+async function copyInvite (url, key) {
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+  } catch (_) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove()
+    } catch (__) { return }
+  }
+  copied.value = key
+  setTimeout(() => { if (copied.value === key) copied.value = '' }, 2000)
+}
+
+/**
+ * Cambiar de cuenta NO es reactivo (por diseño: las pestañas abiertas conservan la suya),
+ * así que estrenar la que quedó puesta pasa por recargar. Se ofrece el botón en vez de
+ * recargar solo: recargar debajo de los pies a alguien al que acaban de echar es justo lo
+ * que hace que no se entienda qué pasó.
+ */
+const reloadNow = () => { location.href = '/devices' + location.search }
+
 /** Volver a emparejar conserva la query (`?vault=` apunta al iframe con el que corre). */
 const pairHref = computed(() => '/d' + location.search)
 
@@ -397,6 +451,7 @@ onMounted(async () => {
     // Nos echaron, y va FIRMADO por la maestra: el enlace y el acta ya se borraron solos.
     // La pantalla tiene que decirlo, no seguir pintando la cuenta que acaba de irse.
     else if (e?.phase === 'revoked') { expelled.value = true; confirming.value = null }
+    else if (e?.phase === 'account-removed') { expelled.value = true; accountGone.value = { created: !!e.created, error: e.error || '' } }
     else if (e?.phase === 'rejected') rejected.value = e.reason || '1'
   })
   await refreshSelf()
@@ -631,6 +686,15 @@ async function scan () {
 
 const self = ref({ enabled: false, running: false })
 const selfQr = ref(null)
+/**
+ * La MISMA invitación que pinta el QR, en texto.
+ *
+ * El QR sirve cuando el otro aparato tiene cámara y está delante. Si no —un PC, un
+ * teléfono que no enfoca, o alguien que quiere mandársela a otra pantalla suya— no había
+ * nada que hacer: la dirección existía y no se enseñaba. Es la misma cadena que codifica
+ * el QR, así que las dos formas llevan exactamente al mismo sitio.
+ */
+const selfUrl = ref('')
 const selfPending = ref([])
 const selfCode = ref('')
 let selfTimer = null
@@ -651,13 +715,14 @@ const selfPair = () => run('selfpair', async () => {
   // El QR lleva el ENLACE compacto, no el JSON: así el otro aparato lo escanea con
   // la cámara y se le abre esta misma consola, en vez de quedarse con un texto que
   // hay que pegar a mano. Y de paso cabe: el JSON daba un QR de 69 módulos.
-  selfQr.value = r?.qr ? qrSvg(inviteUrl(r.qr)) : null
+  selfUrl.value = r?.qr ? inviteUrl(r.qr) : ''
+  selfQr.value = selfUrl.value ? qrSvg(selfUrl.value) : null
   clearInterval(selfTimer)
   selfTimer = setInterval(refreshSelf, 2000)
 })
 const selfApprove = (deviceId) => run('sa-' + deviceId, async () => {
   await id.value.selfVaultApprove(deviceId, selfCode.value.trim())
-  selfCode.value = ''; selfQr.value = null; clearInterval(selfTimer); await refreshSelf()
+  selfCode.value = ''; selfQr.value = null; selfUrl.value = ''; clearInterval(selfTimer); await refreshSelf()
 })
 const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
   await id.value.selfVaultReject(deviceId); await refreshSelf()
@@ -669,6 +734,7 @@ const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
 const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
 const admPending = ref([])       // los que esperan aprobación
 const admQr = ref(null)
+const admUrl = ref('')
 const admCode = ref('')
 let admTimer = null
 
@@ -695,13 +761,14 @@ async function refreshAdmin () {
 
 const admPair = () => run('admpair', async () => {
   const r = await id.value.vaultAdmin('pair')
-  admQr.value = r?.qr ? qrSvg(inviteUrl(r.qr)) : null
+  admUrl.value = r?.qr ? inviteUrl(r.qr) : ''
+  admQr.value = admUrl.value ? qrSvg(admUrl.value) : null
   clearInterval(admTimer)
   admTimer = setInterval(refreshAdmin, 2000)
 })
 const admApprove = (deviceId) => run('aa-' + deviceId, async () => {
   await id.value.vaultAdmin('approve', { deviceId, code: admCode.value.trim() })
-  admCode.value = ''; admQr.value = null; clearInterval(admTimer); await refreshAdmin()
+  admCode.value = ''; admQr.value = null; admUrl.value = ''; clearInterval(admTimer); await refreshAdmin()
 })
 const admReject = (deviceId) => run('ar-' + deviceId, async () => {
   await id.value.vaultAdmin('reject', { deviceId }); await refreshAdmin()
@@ -727,8 +794,18 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <div class="card bad">
         <strong>{{ t.gone_t }}</strong>
         <p>{{ t.gone_b }}</p>
+        <template v-if="accountGone && !accountGone.error">
+          <p data-testid="expelled-account">
+            {{ accountGone.created ? t.gone_created : t.gone_switched }} {{ t.gone_reload }}
+          </p>
+        </template>
+        <p v-else-if="accountGone" class="muted" data-testid="expelled-stuck">
+          {{ t.gone_stuck }} <code class="mid">{{ accountGone.error }}</code>
+        </p>
         <div class="row">
-          <a class="btn" data-testid="expelled-pair" :href="pairHref">{{ t.gone_go }}</a>
+          <button v-if="accountGone && !accountGone.error" class="btn" data-testid="expelled-reload"
+                  @click="reloadNow">{{ t.gone_reload_go }}</button>
+          <a class="btn ghost" data-testid="expelled-pair" :href="pairHref">{{ t.gone_go }}</a>
         </div>
       </div>
     </div>
@@ -933,6 +1010,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button v-if="self.running" class="btn" data-testid="self-pair" @click="selfPair">{{ t.self_pair }}</button>
       </div>
       <div v-if="selfQr" class="qrbox" v-html="selfQr"></div>
+      <div v-if="selfUrl" class="invite" data-testid="self-invite">
+        <span class="muted">{{ t.invite_url }}</span>
+        <code class="url">{{ selfUrl }}</code>
+        <button class="btn ghost sm" data-testid="self-copy" @click="copyInvite(selfUrl, 'self')">
+          {{ copied === 'self' ? t.invite_copied : t.invite_copy }}
+        </button>
+      </div>
       </template>
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
         <span>{{ t.self_pending }}: <code>{{ p.deviceId }}</code></span>
@@ -953,6 +1037,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
         </div>
         <div v-if="admQr" class="qrbox" v-html="admQr"></div>
+        <div v-if="admUrl" class="invite" data-testid="adm-invite">
+          <span class="muted">{{ t.invite_url }}</span>
+          <code class="url">{{ admUrl }}</code>
+          <button class="btn ghost sm" data-testid="adm-copy" @click="copyInvite(admUrl, 'adm')">
+            {{ copied === 'adm' ? t.invite_copied : t.invite_copy }}
+          </button>
+        </div>
         <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
           <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
           <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
@@ -1039,6 +1130,15 @@ textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #
 .digits { font-size: clamp(38px, 12vw, 56px); letter-spacing: .18em; font-family: ui-monospace, monospace; color: #bfe0ff; margin: 6px 0; }
 .qrbox { background: #fff; padding: 12px; border-radius: 12px; width: max-content; margin: 12px 0; }
 .qrbox :deep(svg) { width: 220px; height: 220px; display: block; }
+/* El enlace de la invitación: largo, así que se parte en vez de desbordar, y el botón
+   de copiar no se encoge nunca. */
+.invite { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.invite .url {
+  background: #131c2b; border-radius: 6px; padding: 6px 8px; font-size: 12px;
+  font-family: ui-monospace, monospace; color: #bfe0ff; overflow-wrap: anywhere;
+  max-width: 100%; flex: 1 1 260px;
+}
+.invite .btn { flex: 0 0 auto; }
 .scanbox { margin: 10px 0; }
 .scanbox video { width: 100%; max-width: 360px; border-radius: 12px; background: #000; }
 .pending { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #10203a; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
