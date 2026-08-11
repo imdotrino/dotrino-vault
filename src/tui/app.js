@@ -70,6 +70,24 @@ const shortScope = (scope) => {
   return arr.map((s) => String(s).replace(/^vault:/, '')).join(',') || '—'
 }
 
+/**
+ * Un aparato = una llave (`sub`), aunque tenga varios certificados vigentes. Se queda con
+ * el de vencimiento más lejano (el último emitido) y suma los alcances de todos, para que
+ * la fila no prometa menos de lo que el aparato puede hacer de verdad.
+ */
+function groupByDevice (issued) {
+  const by = new Map()
+  for (const d of issued) {
+    const key = d.sub || d.deviceId || d.nonce
+    const prev = by.get(key)
+    if (!prev) { by.set(key, { ...d, certCount: 1, scope: [...(Array.isArray(d.scope) ? d.scope : [d.scope])] }); continue }
+    prev.certCount++
+    for (const s of (Array.isArray(d.scope) ? d.scope : [d.scope])) if (!prev.scope.includes(s)) prev.scope.push(s)
+    if ((d.exp || 0) > (prev.exp || 0)) { prev.exp = d.exp; prev.nonce = d.nonce; prev.label = d.label || prev.label }
+  }
+  return [...by.values()]
+}
+
 function activeProfile (st) {
   const list = st.profiles?.profiles || []
   return list.find((p) => p.current) || list[0] || null
@@ -172,13 +190,17 @@ function deviceRows (st, t) {
     rows.push({ text: t.warn(i.pendingDevice(pend.deviceId)) + t.muted(i.pendingHint), sel: false })
     rows.push({ text: '', sel: false })
   }
-  const issued = st.devices?.issued || []
+  // UNA FILA POR APARATO, no por certificado. Antes se pintaba `issued` tal cual y un
+  // aparato con dos certs (el viejo + el de la renovación) salía dos veces: parecían dos
+  // máquinas. Se agrupa por llave y se muestra el cert vigente más largo.
+  const issued = groupByDevice(st.devices?.issued || [])
   if (!issued.length) {
     rows.push({ text: t.muted(i.noDevices), sel: false })
   }
   for (const d of issued) {
     const label = d.label || t.muted(i.noLabel)
-    const line = ` ${t.bold(d.deviceId)}  ${label}  ${t.muted('scope:' + shortScope(d.scope))}  ${t.muted('exp:' + fmtExp(d.exp))}  ${t.muted('nonce:' + (d.nonce ?? '—'))}`
+    const extra = d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : ''
+    const line = ` ${t.bold(d.deviceId)}  ${label}  ${t.muted('scope:' + shortScope(d.scope))}  ${t.muted('exp:' + fmtExp(d.exp))}${extra}`
     rows.push({ text: line, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
@@ -523,12 +545,13 @@ async function onKeyDevices (term, st, key) {
     if (!st.pending) { flash(st, i.noPendingToReject, 'warn'); return true }
     const r = await guard(term, st, i.rejecting, () => vc.rejectPending(st.pending.deviceId, activeId(st)))
     if (r.ok) { flash(st, i.deviceRejected); st.pending = null }
-  } else if ((ch === 'v' || key.name === 'delete') && cur?.nonce != null) { // revocar el enrolado seleccionado
+  } else if ((ch === 'v' || key.name === 'delete') && (cur?.sub || cur?.nonce != null)) { // quitar el aparato seleccionado
     setConfirm(st, {
       text: i.revokeConfirm(cur.deviceId),
       onYes: async () => {
         st.confirm = null
-        const r = await guard(term, st, i.revoking, () => vc.revokeDevice(cur.nonce, activeId(st)))
+        // Por `sub`: se le retiran TODOS los certificados, no solo el de esta fila.
+        const r = await guard(term, st, i.revoking, () => vc.revokeDevice({ sub: cur.sub, nonce: cur.nonce }, activeId(st)))
         if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); st.devices = r.v; st.sel.devices = 0 }
       },
       onNo: () => { st.confirm = null }

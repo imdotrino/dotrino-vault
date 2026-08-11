@@ -586,13 +586,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
 <template>
   <section class="console">
-    <h1>
-      {{ pairFlow ? t.flow_t : t.title }}
-      <button v-if="!pairFlow" type="button" class="i" data-testid="info-page"
-              :aria-expanded="info === 'page'" :aria-label="t.info_label" @click="toggleInfo('page')">i</button>
-    </h1>
-    <p v-if="pairFlow" class="lead">{{ t.flow_b }}</p>
-    <p v-else-if="info === 'page'" class="lead info-panel">{{ t.lead }}</p>
+    <!-- Sin título ni presentación: esto es la pantalla donde se ADMINISTRA, y empieza
+         por lo que se administra. El nombre de la página ya lo dice el menú de arriba, y
+         el qué-es-esto vive en el home. Durante el emparejamiento sí hay título, porque
+         ahí estás en medio de un proceso y hay que decirte dónde. -->
+    <template v-if="pairFlow">
+      <h1>{{ t.flow_t }}</h1>
+      <p class="lead">{{ t.flow_b }}</p>
+    </template>
 
     <p v-if="loading" class="muted">{{ t.loading }}</p>
     <div v-else-if="fatal" class="banner bad">{{ fatal }}</div>
@@ -671,11 +672,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <div v-if="soloMember" class="banner warn" data-testid="solo-warning">
         <strong>{{ t.solo_warn_t }}</strong> — {{ t.solo_warn_b }}
       </div>
-      <div v-else-if="!isMaster" class="banner info">
-        <strong>{{ t.not_master_t }}</strong> — {{ canAdmin ? t.not_master_admin_b : t.not_master_b }}
-      </div>
 
-      <!-- Resumen del acta -->
+      <!-- Ficha del acta: qué cuenta es, por qué versión va y quién es el Master. Es
+           DATO, no explicación, y por eso se queda a la vista. -->
       <ul class="facts" v-if="acta">
         <li>{{ t.profile }} <code data-testid="profile-id">{{ perfilId || '—' }}</code></li>
         <li>{{ t.version }} <code>#{{ acta.seq }}</code></li>

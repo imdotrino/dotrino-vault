@@ -534,9 +534,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       await notifyMembers('label', { deviceId: device, label: r?.label ?? label })
       return r
     },
-    revokeDevice: async (nonce) => {
-      const r = await desk.revoke(nonce)
-      await notifyMembers('revoked', { certNonce: nonce, by: 'pc' })
+    // QUITAR EL DISPOSITIVO. Se identifica por su llave (`sub`), no por un `nonce`: un
+    // aparato puede tener varios certificados y retirar uno no lo echaba de la bóveda.
+    // Se sigue aceptando `{ nonce }` para no romper una consola vieja en vuelo.
+    revokeDevice: async (target) => {
+      const sub = typeof target === 'object' && target ? target.sub : null
+      if (!sub) {
+        const nonce = typeof target === 'string' ? target : target?.nonce
+        const r = await desk.revoke(nonce)
+        await notifyMembers('revoked', { certNonce: nonce, by: 'pc' })
+        return r
+      }
+      const r = await desk.revokeDevice(sub)
+      audit('revoke-device', { device: await deviceIdOf(sub).catch(() => null), certs: r?.nonces?.length ?? null })
+      await notifyMembers('revoked', { deviceId: await deviceIdOf(sub).catch(() => null), by: 'pc' })
       return r
     },
     close () {

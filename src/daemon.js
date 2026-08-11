@@ -222,10 +222,14 @@ export async function runDaemon () {
           console.log('[vault] permissions updated: %s', capsReq.caps.join(', ') || '(ninguno)')
         } catch (e) { console.error('[vault] could not change permissions:', e.message) }
       }
+      // Quitar un dispositivo: se pide por `sub` (la llave del aparato). `nonce` sigue
+      // aceptado para una consola vieja, pero retira UN certificado, no el aparato.
       const req = readJsonSafe(revokeReqFile)
-      if (req?.nonce) {
-        try { await targetOf(req)?.revokeDevice(req.nonce); console.log('[vault] revoked nonce=%s', req.nonce) }
-        catch (e) { console.error('[vault] revocation failed:', e.message) }
+      if (req?.sub || req?.nonce) {
+        try {
+          await targetOf(req)?.revokeDevice(req.sub ? { sub: req.sub } : { nonce: req.nonce })
+          console.log(req.sub ? '[vault] device removed' : '[vault] revoked nonce=%s', req.nonce || '')
+        } catch (e) { console.error('[vault] revocation failed:', e.message) }
         rm(revokeReqFile)
       }
       // Secretos de servicios: `secret set/rm` del CLI. El archivo con el valor

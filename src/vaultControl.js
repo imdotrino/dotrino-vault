@@ -245,10 +245,15 @@ export async function setDeviceCaps (pub, caps, profile) {
   return listDevices(profile)
 }
 
-/** Revoca un dispositivo por su `nonce` (le ordena autoborrarse) y revuelca. */
-export async function revokeDevice (nonce, profile) {
+/**
+ * Quita un dispositivo por su llave `sub` (le ordena autoborrarse) y revuelca.
+ * Se acepta un `nonce` suelto por compatibilidad, pero eso retira UN certificado:
+ * un aparato puede tener varios y seguiría entrando con el otro.
+ */
+export async function revokeDevice (target, profile) {
   requireAlive()
-  writeReq(F.revokeReq, { nonce }, profile)
+  const req = typeof target === 'string' ? { nonce: target } : { sub: target?.sub, nonce: target?.nonce }
+  writeReq(F.revokeReq, req, profile)
   signalOrCleanup('SIGUSR2', [F.revokeReq])
   await sleep(300)
   return listDevices(profile)
