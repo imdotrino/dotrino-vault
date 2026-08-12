@@ -268,6 +268,8 @@ const es = {
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
   errPairFailed: 'El daemon no inició el emparejamiento.',
   errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
+  errWrongPassword: (n) => `Contraseña incorrecta${n ? ` — van ${n} intentos fallidos` : ''}`,
+  errTooManyTries: (s) => `Demasiados intentos: espera ${s || '?'} s antes de volver a probar`,
   errMasterWithMembers: 'Esta bóveda es el Master de esta cuenta y hay otros dispositivos: pásale primero el Master a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
 }
 
@@ -501,6 +503,8 @@ const en = {
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
   errProfileLocked: 'Vault locked: open it with its password',
+  errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,
+  errTooManyTries: (s) => `Too many attempts: wait ${s || '?'} s before trying again`,
   errMasterWithMembers: 'This vault is the Master of this account and it has other devices: hand the Master over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 

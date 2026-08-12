@@ -194,12 +194,18 @@ export function openProfiles (root = dataDir()) {
       const tries = p.tries || { n: 0, at: 0 }
       const waitMs = tries.n >= 5 ? Math.min(2 ** (tries.n - 4) * 1000, 5 * 60 * 1000) : 0
       const left = tries.at + waitMs - Date.now()
-      if (left > 0) throw new Error(`demasiados intentos: espera ${Math.ceil(left / 1000)} s`)
+      // Con CÓDIGO: la TUI es bilingüe y lo traduce, y la CLI puede decirlo con sus
+      // palabras. Sin código, el rechazo llegaba como un texto suelto del daemon y era
+      // indistinguible de «se volvió a pedir la contraseña porque sí».
+      if (left > 0) {
+        throw Object.assign(new Error(`demasiados intentos: espera ${Math.ceil(left / 1000)} s`),
+          { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
+      }
       const proof = await derivePwd(password, p.pwd.salt, p.pwd.iter)
       if (proof !== p.pwd.verifier) {
         p.tries = { n: tries.n + 1, at: Date.now() }
         save()
-        throw new Error('wrong password')
+        throw Object.assign(new Error('wrong password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
       }
       delete p.tries
       save()

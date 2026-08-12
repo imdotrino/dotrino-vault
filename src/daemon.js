@@ -279,7 +279,12 @@ export async function runDaemon () {
         try { extra = await handleProfileRequest(preq) }
         // `code`: la TUI es bilingüe y traduce por código (un freno como el D12 tiene
         // que leerse en el idioma de quien lo lee, no en el del daemon).
-        catch (e) { extra = { error: e.message, ...(e.code ? { code: e.code } : {}) }; console.error('[vault] profile: %s', e.message) }
+        catch (e) {
+          // `waitSec`/`tries` viajan con el error: quien lo enseña necesita el dato, no
+          // solo el motivo («espera 32 s» y «van 9 intentos» son lo que cambia la conducta).
+          extra = { error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.waitSec ? { waitSec: e.waitSec } : {}), ...(e.tries ? { tries: e.tries } : {}) }
+          console.error('[vault] profile: %s', e.message)
+        }
         dumpProfiles(extra)
       } else {
         dumpProfiles()

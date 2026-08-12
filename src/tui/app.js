@@ -53,6 +53,10 @@ const L = (st) => dict(st?.lang)
  */
 function humanErr (e, st) {
   const t = L(st)
+  // Con dato: «contraseña incorrecta (van 9 intentos)» y «espera 32 s» son lo que hace
+  // falta para saber qué está pasando; «error» a secas parece que la pantalla se colgó.
+  if (e?.code === 'WRONG_PASSWORD') return t.errWrongPassword(e.tries)
+  if (e?.code === 'TOO_MANY_TRIES') return t.errTooManyTries(e.waitSec)
   const byCode = {
     DAEMON_DOWN: t.errDaemonDown,
     NO_REPLY: t.errNoReply,
@@ -493,17 +497,22 @@ async function refreshProfiles (term, st) {
  * que dura la sesión, no hasta que alguien reinicie el servicio. Lo que ya estaba abierto
  * antes de entrar no se toca — no lo abrió esta pantalla, no le toca cerrarlo.
  */
-async function ensureUnlocked (term, st, p, thenFn) {
+async function ensureUnlocked (term, st, p, thenFn, motivo = null) {
   if (!p.protected || !p.locked) return thenFn()
   const i = L(st)
   setInput(st, {
     label: i.passwordOf(p.name || p.id),
     mask: true,
-    hint: i.passwordToEdit,
+    // Si la anterior fue rechazada, el motivo se queda AQUÍ, pegado al campo, en vez de
+    // irse en un aviso de cuatro segundos que se lleva el siguiente redibujado. Eso era lo
+    // que hacía que un rechazo pareciera «me la vuelve a pedir porque sí».
+    hint: motivo || i.passwordToEdit,
     onSubmit: async (pwd) => {
       st.input = null
       const r = await guard(term, st, i.unlocking, () => vc.unlockProfile(p.id, pwd))
-      if (!r.ok) return
+      // Rechazada: se vuelve a pedir en el acto, diciendo por qué. Cerrar el campo obligaba
+      // a adivinar qué había pasado y a empezar de nuevo.
+      if (!r.ok) return ensureUnlocked(term, st, p, thenFn, humanErr(r.e, st))
       st.unlockedHere?.add(p.id)
       await refreshProfiles(term, st)
       const fresh = (st.profiles.profiles || []).find((x) => x.id === p.id) || p

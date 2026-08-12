@@ -166,7 +166,9 @@ async function profileOp (op, { profile, name, password } = {}) {
   signalOrCleanup('SIGUSR2', [F.profileReq])
   const d = await waitFor(F.profilesList)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
-  if (d.error) throw coded(d.error, d.code) // p.ej. MASTER_WITH_MEMBERS (freno D12)
+  // p.ej. MASTER_WITH_MEMBERS (freno D12) o WRONG_PASSWORD. Los datos del error viajan
+  // pegados (cuánto hay que esperar, cuántos intentos van): quien lo pinta los necesita.
+  if (d.error) throw Object.assign(coded(d.error, d.code), { waitSec: d.waitSec, tries: d.tries })
   return d // { profiles:[{id,name,protected,locked,current,fingerprint,iss,createdAt}], current, done? }
 }
 

@@ -699,7 +699,14 @@ async function profileRequest (op, extra = {}) {
 }
 
 function reportProfiles (d) {
-  if (d.error) { console.error('%s', d.error); process.exit(1) }
+  if (d.error) {
+    // Los dos rechazos del candado se dicen con palabras y con el dato que hace falta; el
+    // resto se reenvía tal cual (son diagnósticos del servicio).
+    if (d.code === 'WRONG_PASSWORD') console.error('Contraseña incorrecta%s.', d.tries ? ` — van ${d.tries} intentos fallidos` : '')
+    else if (d.code === 'TOO_MANY_TRIES') console.error('Demasiados intentos: espera %s s antes de volver a probar.', d.waitSec || '?')
+    else console.error('%s', d.error)
+    process.exit(1)
+  }
   if (d.done) console.log('%s', d.done)
   return d
 }
