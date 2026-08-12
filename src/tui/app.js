@@ -487,7 +487,12 @@ async function refreshProfiles (term, st) {
   if (r.ok) st.profiles = r.v
 }
 
-/** Asegura la bóveda desbloqueada antes de EDITARLA (rename/rm/password). */
+/**
+ * Pide la contraseña si hace falta y sigue. Lo que se abre aquí queda anotado en
+ * `st.unlockedHere` para volver a cerrarlo AL SALIR (ver `runTui`): la contraseña dura lo
+ * que dura la sesión, no hasta que alguien reinicie el servicio. Lo que ya estaba abierto
+ * antes de entrar no se toca — no lo abrió esta pantalla, no le toca cerrarlo.
+ */
 async function ensureUnlocked (term, st, p, thenFn) {
   if (!p.protected || !p.locked) return thenFn()
   const i = L(st)
@@ -499,6 +504,7 @@ async function ensureUnlocked (term, st, p, thenFn) {
       st.input = null
       const r = await guard(term, st, i.unlocking, () => vc.unlockProfile(p.id, pwd))
       if (!r.ok) return
+      st.unlockedHere?.add(p.id)
       await refreshProfiles(term, st)
       const fresh = (st.profiles.profiles || []).find((x) => x.id === p.id) || p
       await thenFn(fresh)
@@ -1274,6 +1280,8 @@ export async function runTui () {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
     sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0 },
+    // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
+    unlockedHere: new Set(),
     scroll: {},
     profiles: null,
     devices: null,
@@ -1347,6 +1355,12 @@ export async function runTui () {
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
     }
   } finally {
+    // AL SALIR SE VUELVE A CERRAR lo que se abrió aquí. Sin esto, teclear la contraseña una
+    // vez dejaba la bóveda abierta para todo el que pasara por esta máquina hasta el
+    // siguiente reinicio del servicio — un candado que solo se cierra reiniciando no es un
+    // candado. (Si la TUI muere de un tirón —kill, ventana cerrada— no hay quien lo haga:
+    // ahí el cierre lo pone el reinicio, como antes.)
+    for (const id of st.unlockedHere) { try { await vc.lockProfile(id) } catch (_) {} }
     term.close()
   }
 }
