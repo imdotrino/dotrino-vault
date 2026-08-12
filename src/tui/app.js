@@ -425,7 +425,26 @@ async function guard (term, st, msg, fn) {
   try { const v = await fn(); st.busy = null; return { ok: true, v } } catch (e) { st.busy = null; flash(st, humanErr(e, st), 'danger'); return { ok: false, e } }
 }
 
+/**
+ * ¿La bóveda ACTIVA está cerrada? El candado es POR BÓVEDA, no del vault: que una esté
+ * cerrada no puede dejarte sin la lista ni sin poder entrar a otra.
+ */
+const activeLocked = (st) => { const p = activeProfile(st); return !!(p?.protected && p.locked) }
+
 async function refreshAll (term, st) {
+  // LA LISTA DE BÓVEDAS VA PRIMERO Y APARTE. Antes esto pedía el volcado de la bóveda
+  // activa y, si esa era la cerrada, se salía sin llegar a guardar la lista: la TUI abría
+  // en blanco, sin bóvedas y con un error rojo. O sea que la contraseña de UNA bóveda te
+  // dejaba fuera del vault entero, que es exactamente lo que un candado por perfil no debe
+  // hacer.
+  const p = await guard(term, st, L(st).loadingVaults, () => vc.listProfiles())
+  if (p.ok) st.profiles = p.v
+  // Cerrada: no se pide su contenido, y tampoco se enseña un error por mirarla desde
+  // fuera. Lo que hubiera cargado se suelta, para no dejar en pantalla lo de antes.
+  if (activeLocked(st)) {
+    st.devices = null; st.secrets = null; st.members = []; st.me = undefined
+    return
+  }
   const r = await guard(term, st, L(st).loading, () => vc.snapshot(activeId(st)))
   if (!r.ok) return
   const { devices, secrets, profiles, acta } = r.v
@@ -1331,4 +1350,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, activeLocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }

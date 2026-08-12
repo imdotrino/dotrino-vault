@@ -333,6 +333,40 @@ test('la lista de dispositivos avisa cuántas variables propias tiene cada uno',
   assert.match(term.last.join('\n'), /vars:2/)
 })
 
+test('una bóveda CERRADA no te deja fuera del vault: la lista se sigue viendo', () => {
+  // El candado es POR BÓVEDA. Que la activa esté cerrada no puede vaciar la pantalla de
+  // entrada: si no, una contraseña te deja fuera del vault entero y sin forma de entrar a
+  // las otras. (Era exactamente el fallo: se pedía el volcado de la activa ANTES que la
+  // lista, y al fallar se salía sin llegar a guardarla.)
+  const term = fakeTerm(90, 24)
+  const st = baseState({
+    screen: 'profiles',
+    profiles: {
+      current: 'p1',
+      profiles: [
+        { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' },
+        { id: 'p2', name: 'Trabajo', protected: false, locked: false, current: false, fingerprint: 'fp2' }
+      ]
+    },
+    devices: null,
+    secrets: null,
+    members: []
+  })
+
+  assert.equal(V.activeLocked(st), true, 'se sabe que la activa está cerrada…')
+  V.render(term, st)
+  const out = term.last.join('\n')
+  assert.match(out, /Dotrino/, '…y aun así sale en la lista')
+  assert.match(out, /Trabajo/, 'y las demás también, para poder entrar a ellas')
+  assert.match(out, /🔒/, 'con su candado a la vista')
+
+  // Sin contraseña, o abierta, no hay candado que valga.
+  st.profiles.profiles[0].locked = false
+  assert.equal(V.activeLocked(st), false)
+  st.profiles.profiles[0].protected = false
+  assert.equal(V.activeLocked(st), false)
+})
+
 test('Perfil: muestra lo que sincronizó el aparato, y NUNCA los bytes de la foto', () => {
   const t = makeTheme()
   const me = {
