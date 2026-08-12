@@ -87,7 +87,7 @@ const es = {
   locked: '🔒 bloqueada',
   unlocked: '🔓 abierta',
   passwordOf: (name) => `Contraseña de "${name}"`,
-  passwordToEdit: 'necesaria para editar la bóveda',
+  passwordToEdit: 'necesaria para abrir la bóveda: sin ella no se ve ni se toca',
   unlocking: 'Desbloqueando…',
   loading: 'Cargando…',
   loadingDevices: 'Cargando dispositivos…',
@@ -267,6 +267,7 @@ const es = {
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
   errPairFailed: 'El daemon no inició el emparejamiento.',
+  errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
   errMasterWithMembers: 'Esta bóveda es el Master de esta cuenta y hay otros dispositivos: pásale primero el Master a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
 }
 
@@ -336,7 +337,7 @@ const en = {
   locked: '🔒 locked',
   unlocked: '🔓 unlocked',
   passwordOf: (name) => `Password for "${name}"`,
-  passwordToEdit: 'needed to edit this vault',
+  passwordToEdit: 'needed to open this vault: without it, nothing is shown or touched',
   unlocking: 'Unlocking…',
   loading: 'Loading…',
   loadingDevices: 'Loading devices…',
@@ -499,6 +500,7 @@ const en = {
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
+  errProfileLocked: 'Vault locked: open it with its password',
   errMasterWithMembers: 'This vault is the Master of this account and it has other devices: hand the Master over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 

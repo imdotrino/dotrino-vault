@@ -59,7 +59,8 @@ function humanErr (e, st) {
     NOT_APPLIED: t.errNotApplied,
     NOT_DELETED: t.errNotDeleted,
     PAIR_FAILED: t.errPairFailed,
-    MASTER_WITH_MEMBERS: t.errMasterWithMembers
+    MASTER_WITH_MEMBERS: t.errMasterWithMembers,
+    PROFILE_LOCKED: t.errProfileLocked
   }
   return byCode[e?.code] || e?.message || String(e)
 }
@@ -518,27 +519,34 @@ async function onKeyProfiles (term, st, key) {
   if (key.name === 'enter' && cur) {
     // Entrar a la bóveda: la activa (si no lo estaba ya) y pasa a sus pestañas
     // (Dispositivos/Scopes) — así siempre es explícito de qué bóveda son los ítems.
-    if (!cur.current) {
-      const r = await guard(term, st, i.switchingVault, () => vc.useProfile(cur.id))
-      if (!r.ok) return true
-      flash(st, i.vaultNowActive(cur.name || cur.id))
-      await refreshAll(term, st)
-    }
-    st.screen = 'devices'
-    await refreshDevices(term, st)
+    //
+    // Y si tiene candado, se pide la contraseña AQUÍ, antes de enseñar nada: dentro se ven
+    // los aparatos, las variables y tus datos, que es justo lo que la contraseña tapa.
+    await ensureUnlocked(term, st, cur, async (p = cur) => {
+      if (!p.current) {
+        const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
+        if (!r.ok) return
+        flash(st, i.vaultNowActive(p.name || p.id))
+        await refreshAll(term, st)
+      }
+      st.screen = 'devices'
+      await refreshDevices(term, st)
+    })
   } else if (ch === 'p' && cur) {
     // Emparejar SIN tener que entrar antes: `p` significa lo mismo aquí que en la
     // pestaña Dispositivos. Se activa la bóveda elegida (el QR sale de UNA, y las
     // acciones siguientes —aprobar, revocar— miran a la activa) y se abre la
     // pregunta de a qué cuenta entra el dispositivo.
-    if (!cur.current) {
-      const r = await guard(term, st, i.switchingVault, () => vc.useProfile(cur.id))
-      if (!r.ok) return true
-      await refreshAll(term, st)
-    }
-    st.sel.pairmode = 0
-    st.scroll.pairmode = { value: 0 }
-    st.screen = 'pairmode'
+    await ensureUnlocked(term, st, cur, async (p = cur) => {
+      if (!p.current) {
+        const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
+        if (!r.ok) return
+        await refreshAll(term, st)
+      }
+      st.sel.pairmode = 0
+      st.scroll.pairmode = { value: 0 }
+      st.screen = 'pairmode'
+    })
   } else if (ch === 'n') {
     setInput(st, {
       label: i.newVaultLabel,

@@ -126,6 +126,17 @@ function signalOrCleanup (sig, reqFiles) {
   try { signal(sig) } catch (e) { for (const f of reqFiles) rm(f); throw e }
 }
 
+/**
+ * EL CANDADO, del lado de quien pregunta. El daemon contesta los volcados de un perfil
+ * bloqueado con `locked: true` y sin contenido; aquí eso se convierte en un error con
+ * código para que la CLI y la TUI digan lo mismo: hay que desbloquearlo, y no es que la
+ * bóveda esté vacía o rota.
+ */
+function assertOpen (d) {
+  if (d?.locked) throw coded('profile locked: unlock it with your password (dotrino-vault unlock)', 'PROFILE_LOCKED')
+  return d
+}
+
 /** Espera a que reaparezca un archivo de respuesta (con `.at`) tras borrarlo. */
 async function waitFor (name, { tries = 60, interval = 100 } = {}) {
   for (let i = 0; i < tries; i++) {
@@ -189,6 +200,7 @@ export async function snapshot (profile) {
   const [devices, secrets, profiles, acta] = await Promise.all([
     waitFor(F.devices), waitFor(F.secretsList), waitFor(F.profilesList), waitFor(F.acta)
   ])
+  assertOpen(devices); assertOpen(secrets); assertOpen(acta)
   return { devices, secrets, profiles, acta }
 }
 
@@ -264,6 +276,7 @@ export async function listMembers (profile) {
   signalOrCleanup('SIGUSR2', [F.dumpReq])
   const d = await waitFor(F.acta)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  assertOpen(d)
   return d.members || []
 }
 
@@ -320,6 +333,7 @@ export async function getMe (profile) {
   const d = await waitFor(F.me)
   rm(F.me)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  assertOpen(d)
   return d.me || null
 }
 
@@ -363,6 +377,7 @@ async function secretOp (req, profile, check) {
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  assertOpen(d)
   const out = shapeSecrets(d)
   check(out)
   return out
@@ -471,6 +486,7 @@ export async function startPairing ({ profile, service } = {}) {
   for (let i = 0; i < 50; i++) {
     await sleep(100)
     const pr = read(F.pair, null)
+    assertOpen(pr)
     if (pr?.expiresAt > Date.now()) {
       const { url, payload, code } = pairUrl(pr.qr)
       // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault

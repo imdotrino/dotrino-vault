@@ -402,19 +402,27 @@ Si ya usabas el vault antes de esto, tu identidad de siempre se convierte sola e
 primer perfil («Perfil 1»): la misma llave, los mismos dispositivos, nada que volver
 a emparejar.
 
-### Contraseña del perfil (opcional)
+### Contraseña del perfil (opcional) — el candado es de ESTA CONSOLA
 
-Cada perfil puede llevar contraseña. **Solo se pide para EDITAR el perfil** (cambiar
-tu nombre, avatar o datos): tus dispositivos siguen firmando, leyendo y guardando
-aunque el perfil esté bloqueado — así un reinicio del PC nunca deja tus apps muertas
-esperando a que alguien teclee algo.
+Cada perfil puede llevar contraseña. Con el perfil **bloqueado**, desde la máquina de la
+bóveda no se puede **ver ni tocar nada suyo**: ni sus dispositivos, ni sus variables, ni
+el acta, ni tus datos, ni la bitácora — y tampoco emparejar, aprobar, quitar o guardar
+una variable. La CLI y la TUI contestan «bóveda bloqueada» hasta que alguien teclee la
+contraseña.
+
+Lo que **no** cambia es el servicio: **tus dispositivos ya emparejados siguen firmando,
+leyendo y guardando** aunque esté bloqueado. Eso viaja por el proxy, no por esta consola,
+y así un reinicio del PC nunca deja tus apps muertas esperando a que alguien teclee algo.
 
 ```sh
 dotrino-vault profile password     # pone o cambia la contraseña (te la pregunta)
 dotrino-vault profile password rm  # la quita
-dotrino-vault unlock               # desbloquea para poder editar
-dotrino-vault lock                 # vuelve a bloquear
+dotrino-vault unlock               # abre la bóveda en esta consola
+dotrino-vault lock                 # vuelve a cerrarla
 ```
+
+Lo único que se sigue viendo con el candado puesto es que **existe** y que está cerrada
+(`status`, `profile ls`): si no, no habría forma de saber qué abrir.
 
 El perfil se vuelve a bloquear al reiniciar el servicio. La contraseña **no se
 guarda**: solo un verificador con sal (PBKDF2), igual que el candado del navegador.
@@ -422,15 +430,17 @@ Tiene un mínimo de 4 caracteres y, tras 5 intentos fallidos, cada intento nuevo
 espera cada vez más (hasta 5 minutos); la cuenta de fallos se guarda, así que
 reiniciar no la borra.
 
-Con el perfil bloqueado, la CLI **no** te pide la contraseña sobre la marcha:
-`profile rename`, `profile rm` y `profile password` fallan con «perfil bloqueado» y
-hay que correr `dotrino-vault unlock` antes. (La TUI sí la pide sola cuando hace
-falta.)
+Con el perfil bloqueado, la CLI **no** te pide la contraseña sobre la marcha: cualquier
+comando que mire o toque esa bóveda falla con «perfil bloqueado» y hay que correr
+`dotrino-vault unlock` antes. La TUI sí la pide sola: al **entrar** a una bóveda cerrada
+(y antes de enseñar nada) te pregunta la contraseña.
 
-Para que quede claro qué protege y qué no: evita que otro que se siente en tu máquina
-—o un dispositivo tuyo comprometido— te reescriba el perfil; **no** cifra la llave en
-el disco (de eso se encarga el cifrado en reposo, más abajo, que hoy tampoco usa la
-contraseña).
+Para que quede claro qué protege y qué no. **Protege la consola**: que otro que se siente
+en tu máquina vea o toque lo que hay en esa bóveda. **No** cifra la llave en el disco —de
+eso se encarga el cifrado en reposo, más abajo, que hoy no usa la contraseña—, así que
+alguien con acceso a esta máquina como tu usuario o como root sigue pudiendo leer los
+archivos por su cuenta. Es un candado de la puerta por la que se administra, no una
+imposibilidad criptográfica.
 
 ## Emparejar un aparato
 
@@ -511,8 +521,8 @@ La excepción, dicha sin adornos: la sincronización del **perfil**
 (`profileSet`/`profileGet`) todavía viaja **sin cifrar**, y una operación que llegue
 en claro se guarda en claro. Es deuda, no diseño.
 
-El candado de contraseña solo bloquea **editar el perfil**: guardar y leer contenido
-siguen funcionando con el perfil bloqueado.
+El candado de contraseña cierra **esta consola** (ver arriba): guardar y leer contenido
+desde tus dispositivos siguen funcionando con el perfil bloqueado.
 
 (El otro store, el «árbol de contenidos» de `vault.json`, es hoy un esqueleto: se
 puede leer con `vault.get`, pero ningún mensaje del protocolo escribe nodos.)

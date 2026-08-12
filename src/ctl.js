@@ -138,6 +138,20 @@ function showChallenge (pe) {
   console.log('  Si no reconoces este dispositivo:  dotrino-vault reject %s\n', pe.deviceId)
 }
 
+/**
+ * EL CANDADO. Un perfil con contraseña y bloqueado no se ve ni se toca desde esta consola:
+ * el daemon contesta `locked` y sin contenido, y aquí se corta con un mensaje que dice qué
+ * hacer. Los aparatos ya emparejados siguen atendidos — lo que está cerrado es esta
+ * pantalla, no la bóveda.
+ */
+function assertOpen (d) {
+  if (d?.locked) {
+    console.error('Perfil bloqueado. Ábrelo con:  dotrino-vault unlock')
+    process.exit(1)
+  }
+  return d
+}
+
 async function cmdPair (args = []) {
   const s = requireDaemon()
   try { fs.rmSync(pairFile, { force: true }) } catch (_) {}
@@ -187,7 +201,12 @@ async function cmdPair (args = []) {
   avisar(s.pid, 'SIGUSR1')
 
   let pair = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const p = readJson(pairFile, null); if (p?.expiresAt > Date.now()) { pair = p; break } }
+  for (let i = 0; i < 50; i++) {
+    await sleep(100)
+    const p = readJson(pairFile, null)
+    assertOpen(p) // el candado se contesta por el mismo archivo, para no dejar esperando
+    if (p?.expiresAt > Date.now()) { pair = p; break }
+  }
   if (!pair) { console.error('No se recibió respuesta del daemon para el emparejamiento.'); process.exit(1) }
 
   // Una sola forma para las dos cosas: la invitación compacta (base64url de ~100
@@ -271,6 +290,7 @@ async function cmdMe () {
   // El volcado es contenido del usuario: se lee y se BORRA, no se queda ahí suelto.
   try { fs.rmSync(meFile, { force: true }) } catch (_) {}
   if (!dump) { console.error('La bóveda no respondió. ¿Está corriendo?  dotrino-vault status'); process.exit(1) }
+  assertOpen(dump)
 
   const me = dump.me
   if (!me) {
@@ -318,6 +338,7 @@ async function cmdMembers () {
   let acta = null
   for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
   if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
+  assertOpen(acta)
   if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
   const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}` }
@@ -371,6 +392,7 @@ async function buscarMiembro (id) {
   avisar(s.pid, 'SIGUSR2')
   let acta = null
   for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
+  assertOpen(acta)
   const m = acta?.members?.find((x) => x.id === String(id).toUpperCase())
   if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
   return m
@@ -410,6 +432,7 @@ async function cmdDevices () {
   let snap = null
   for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
   if (!snap) { console.error('El daemon no respondió.'); process.exit(1) }
+  assertOpen(snap)
   const revoked = snap.revoked || []
   const fuera = new Set(revoked.map((r) => r?.nonce || r))
   // UN APARATO, UNA LÍNEA. El daemon lleva la cuenta por CERTIFICADO —correcto para él,
@@ -478,6 +501,10 @@ function profileDir () {
     ? list.find((x) => x.id === PROFILE || (x.name || '').toLowerCase() === ref)
     : (list.find((x) => x.current) || list[0])
   if (!p) { console.error('el perfil no existe: %s', PROFILE); process.exit(1) }
+  // El candado también aquí: esto es la única puerta que lee el directorio del perfil sin
+  // pasar por el daemon (la bitácora), y sin esta línea `activity` seguía contando quién
+  // firmó y cuándo con la bóveda cerrada.
+  assertOpen(p)
   return path.join(dir, 'p', p.id)
 }
 
@@ -524,7 +551,7 @@ async function cmdSecret (rest) {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
     writeReq('dump-request.json', {}) // de qué perfil son los secretos
     avisar(s.pid, 'SIGUSR2')
-    for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
+    for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return assertOpen(d) }
     console.error('El daemon no respondió.'); process.exit(1)
   }
   const USAGE = [

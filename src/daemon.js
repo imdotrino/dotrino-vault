@@ -86,14 +86,29 @@ export async function runDaemon () {
     console.log(`perfil ${p.current ? '*' : ' '} ${p.name || '(sin nombre)'} · ${p.id} · ${p.fingerprint}${p.protected ? (p.locked ? ' · 🔒 bloqueado' : ' · 🔓 desbloqueado') : ''}`)
   }
 
-  /** Perfil destino de una petición de la CLI (o el activo si no lo dice). */
+  /**
+   * Perfil destino de una petición de la CLI (o el activo si no lo dice), con su CANDADO.
+   *
+   * EL CANDADO ES DE ESTA CONSOLA. Un perfil con contraseña y bloqueado no se puede ver ni
+   * tocar desde la máquina de la bóveda —ni la lista de aparatos, ni las variables, ni tus
+   * datos, ni emparejar o quitar nada— hasta que alguien teclee la contraseña
+   * (`dotrino-vault unlock`). Lo que NO cambia es el servicio: los aparatos ya emparejados
+   * siguen firmando, leyendo y guardando, porque la bóveda es de ellos tanto como de esta
+   * pantalla. Lo que se protege es la consola, que es donde se administra y donde se mira.
+   */
   const resolveTarget = (req) => {
     try {
       const id = req?.profile ? mgr.resolve(req.profile) : mgr.currentId()
-      return { id, vault: mgr.get(id) }
+      return { id, vault: mgr.get(id), locked: mgr.profiles.isLocked(id) }
     } catch (e) { console.error('[vault] invalid profile in the request:', e.message); return null }
   }
-  const targetOf = (req) => resolveTarget(req)?.vault || null
+  /** La bóveda destino, o `null` si el perfil está bloqueado (la petición no se atiende). */
+  const targetOf = (req) => {
+    const t = resolveTarget(req)
+    if (!t) return null
+    if (t.locked) { console.error('[vault] profile %s is locked: request refused (unlock it to use this console)', t.id); return null }
+    return t.vault
+  }
 
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
@@ -111,6 +126,13 @@ export async function runDaemon () {
       // vault:secrets:<ns> — para enrolar un SERVICIO (proxy, geo…) que lee sus
       // secretos, sin poder firmar como el usuario ni leer sus datos.
       const pairReq = readJsonSafe(pairReqFile); rm(pairReqFile)
+      const bloqueado = resolveTarget(pairReq)
+      if (bloqueado?.locked) {
+        // Se responde por el MISMO archivo que espera quien pidió el QR: si no, se queda
+        // mirando una pantalla vacía hasta que se agote el tiempo, sin saber por qué.
+        writeJson(pairFile, { v: 2, at: Date.now(), profile: bloqueado.id, locked: true })
+        return console.error('[vault] profile %s is locked: pairing refused', bloqueado.id)
+      }
       const vault = targetOf(pairReq)
       if (!vault) return
       const profileId = pairReq?.profile ? mgr.resolve(pairReq.profile) : mgr.currentId()
@@ -265,7 +287,19 @@ export async function runDaemon () {
       // Volcados que lee la CLI (`devices`, `secret list`). A QUÉ perfil miran lo
       // dice dump-request.json; sin él, al activo.
       const dumpReq = readJsonSafe(dumpReqFile); rm(dumpReqFile)
-      const t = resolveTarget(dumpReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current() }
+      const t = resolveTarget(dumpReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current(), locked: false }
+      if (t.locked) {
+        // BLOQUEADO: se contesta que lo está, y nada más. Los volcados se escriben igual
+        // (quien pregunta espera una respuesta, no un plantón) pero VACÍOS: ni aparatos, ni
+        // nombres de variables, ni acta. Antes el candado no tapaba ninguna de las tres.
+        const cerrado = { v: 1, at: Date.now(), profile: t.id, locked: true }
+        writeJson(secretsListFile, { ...cerrado, ns: {}, dev: [] })
+        writeJson(devFile, { ...cerrado, issued: [], revoked: [] })
+        writeJson(path.join(dir, 'acta.json'), { ...cerrado, members: [] })
+        rm(meReqFile)
+        writeJson(meFile, { ...cerrado, me: null })
+        return
+      }
       // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
       // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
       writeJson(secretsListFile, {

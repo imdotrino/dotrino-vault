@@ -44,6 +44,7 @@ function resetModel () {
   pcount = 1; nonce = 0; paircount = 0
 }
 const find = (id) => model.profiles.find((p) => p.id === id)
+const isLocked = (id) => { const p = find(id); return !!(p?.protected && p.locked) }
 function resolveTarget (req) {
   const ref = req?.profile
   if (!ref) return model.current
@@ -123,6 +124,15 @@ function onUsr2 () {
   dumpProfiles(extra)
   const dreq = readReq('dump-request.json')
   const t = resolveTarget(dreq || appr || rej || rv || sec || {})
+  // EL CANDADO es de esta consola: un perfil bloqueado contesta que lo está y NADA de lo
+  // suyo (ni aparatos, ni variables, ni acta), igual que el daemon de verdad.
+  if (isLocked(t)) {
+    writeAtomic('secrets-list.json', { profile: t, locked: true, ns: {}, dev: [] })
+    writeAtomic('devices.json', { profile: t, locked: true, issued: [], revoked: [] })
+    writeAtomic('acta.json', { profile: t, locked: true, members: [] })
+    writeAtomic('me.json', { profile: t, locked: true, me: null })
+    return
+  }
   writeAtomic('secrets-list.json', { profile: t, ns: listSecretsOf(t), dev: listDevSecretsOf(t) })
   writeAtomic('devices.json', { profile: t, issued: model.devices[t]?.issued || [], revoked: model.devices[t]?.revoked || [] })
 }
@@ -270,6 +280,37 @@ test('visibilidad: se marca al crear, se cambia sin tocar el valor, y no se cont
   assert.equal(row.keys.find((x) => x.key === 'PORT').public, true)
   out = await vc.setDeviceSecretVisibility(pub, 'PORT', false, 'p1')
   assert.equal(out.dev.find((x) => x.pub === pub).keys.find((x) => x.key === 'PORT').public, false)
+})
+
+test('EL CANDADO: bloqueada no se ve ni se toca desde esta consola', async () => {
+  // Lo que la contraseña protege es la CONSOLA de la máquina de la bóveda: con el perfil
+  // bloqueado no se enseñan sus aparatos, ni sus variables, ni sus datos, y no se puede
+  // operar sobre él. (A los aparatos ya emparejados la bóveda les sigue respondiendo: eso
+  // pasa por el proxy, no por aquí.)
+  await vc.setProfilePassword('p1', 'secret')
+  await vc.lockProfile('p1')
+
+  for (const [que, fn] of [
+    ['los aparatos', () => vc.listDevices('p1')],
+    ['el acta', () => vc.listMembers('p1')],
+    ['las variables', () => vc.listSecrets('p1')],
+    ['tus datos', () => vc.getMe('p1')],
+    ['guardar una variable', () => vc.setSecret('proxy', 'K', 'v', 'p1')],
+    ['quitar un aparato', () => vc.revokeDevice({ sub: 'PUB' }, 'p1')]
+  ]) {
+    await assert.rejects(fn, (e) => e.code === 'PROFILE_LOCKED', `debería negarse: ${que}`)
+  }
+
+  // La LISTA de bóvedas sí se ve: hay que poder saber que existe y que está cerrada.
+  const d = await vc.listProfiles()
+  const p1 = d.profiles.find((p) => p.id === 'p1')
+  assert.equal(p1.locked, true)
+
+  // Y con la contraseña se abre y vuelve todo.
+  await vc.unlockProfile('p1', 'secret')
+  const dev = await vc.listDevices('p1')
+  assert.ok(Array.isArray(dev.issued))
+  await vc.removeProfilePassword('p1')
 })
 
 test('dispositivos: pair / pending / approve / revoke', async () => {
