@@ -333,6 +333,47 @@ test('la lista de dispositivos avisa cuántas variables propias tiene cada uno',
   assert.match(term.last.join('\n'), /vars:2/)
 })
 
+test('arrancar con la bóveda activa CERRADA: se carga la lista y no se pide su contenido', async () => {
+  // La regresión, en la función donde ocurrió. Antes se pedía el volcado de la activa
+  // ANTES que la lista: la petición fallaba con «bloqueada», se salía por el error, y
+  // `st.profiles` se quedaba en null → pantalla de entrada vacía.
+  const bovedas = {
+    current: 'p1',
+    profiles: [
+      { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' },
+      { id: 'p2', name: 'Trabajo', protected: false, locked: false, current: false, fingerprint: 'fp2' }
+    ]
+  }
+  let pidioContenido = false
+  const api = {
+    listProfiles: async () => bovedas,
+    snapshot: async () => { pidioContenido = true; throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' }) },
+    deviceIdOf: async () => 'AB12-CD34'
+  }
+  const st = baseState({ profiles: null, devices: { issued: [{ deviceId: 'VIEJO' }], revoked: [] }, secrets: { ns: { viejo: [] }, dev: [] } })
+
+  await V.refreshAll(fakeTerm(80, 24), st, api)
+
+  assert.deepEqual(st.profiles, bovedas, 'la lista de bóvedas se carga igual')
+  assert.equal(pidioContenido, false, 'y ni se pide lo de la cerrada')
+  assert.equal(st.devices, null, 'lo que hubiera cargado se suelta, no se queda en pantalla')
+  assert.equal(st.secrets, null)
+  assert.equal(st.flash, null, 'mirar una bóveda cerrada desde fuera no es un error')
+
+  // Abierta, todo lo demás sigue igual que siempre.
+  bovedas.profiles[0].locked = false
+  api.snapshot = async () => ({
+    profiles: bovedas,
+    devices: { issued: [{ sub: 'PUB1', nonce: 'n1' }], revoked: [] },
+    secrets: { ns: { proxy: [{ key: 'K', public: false }] }, dev: [] },
+    acta: { members: [{ pub: 'PUB1', id: 'AB12-CD34', caps: ['sign'] }] }
+  })
+  await V.refreshAll(fakeTerm(80, 24), st, api)
+  assert.equal(st.devices.issued.length, 1)
+  assert.deepEqual(st.secrets.ns.proxy, [{ key: 'K', public: false }])
+  assert.equal(st.members.length, 1)
+})
+
 test('una bóveda CERRADA no te deja fuera del vault: la lista se sigue viendo', () => {
   // El candado es POR BÓVEDA. Que la activa esté cerrada no puede vaciar la pantalla de
   // entrada: si no, una contraseña te deja fuera del vault entero y sin forma de entrar a

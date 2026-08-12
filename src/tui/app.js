@@ -431,13 +431,15 @@ async function guard (term, st, msg, fn) {
  */
 const activeLocked = (st) => { const p = activeProfile(st); return !!(p?.protected && p.locked) }
 
-async function refreshAll (term, st) {
+// `api` es `vaultControl` — se recibe para poder probar ESTA función (la que se rompió)
+// sin un daemon detrás, que es donde vive la regla de qué se pide y en qué orden.
+async function refreshAll (term, st, api = vc) {
   // LA LISTA DE BÓVEDAS VA PRIMERO Y APARTE. Antes esto pedía el volcado de la bóveda
   // activa y, si esa era la cerrada, se salía sin llegar a guardar la lista: la TUI abría
   // en blanco, sin bóvedas y con un error rojo. O sea que la contraseña de UNA bóveda te
   // dejaba fuera del vault entero, que es exactamente lo que un candado por perfil no debe
   // hacer.
-  const p = await guard(term, st, L(st).loadingVaults, () => vc.listProfiles())
+  const p = await guard(term, st, L(st).loadingVaults, () => api.listProfiles())
   if (p.ok) st.profiles = p.v
   // Cerrada: no se pide su contenido, y tampoco se enseña un error por mirarla desde
   // fuera. Lo que hubiera cargado se suelta, para no dejar en pantalla lo de antes.
@@ -445,7 +447,7 @@ async function refreshAll (term, st) {
     st.devices = null; st.secrets = null; st.members = []; st.me = undefined
     return
   }
-  const r = await guard(term, st, L(st).loading, () => vc.snapshot(activeId(st)))
+  const r = await guard(term, st, L(st).loading, () => api.snapshot(activeId(st)))
   if (!r.ok) return
   const { devices, secrets, profiles, acta } = r.v
   if (profiles) st.profiles = profiles
@@ -456,7 +458,7 @@ async function refreshAll (term, st) {
   if (acta) st.members = acta.members || []
   if (devices) {
     const issued = (devices.issued || devices.active || devices.delegations || [])
-    st.devices = { issued: await Promise.all(issued.map(async (d) => ({ ...d, deviceId: d.sub ? await vc.deviceIdOf(d.sub) : '????-????' }))), revoked: devices.revoked || [] }
+    st.devices = { issued: await Promise.all(issued.map(async (d) => ({ ...d, deviceId: d.sub ? await api.deviceIdOf(d.sub) : '????-????' }))), revoked: devices.revoked || [] }
   }
 }
 
@@ -1350,4 +1352,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, activeLocked, refreshAll, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
