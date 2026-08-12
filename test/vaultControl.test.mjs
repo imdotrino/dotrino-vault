@@ -37,6 +37,8 @@ function resetModel () {
     current: 'p1',
     profiles: [{ id: 'p1', name: 'Perfil 1', protected: false, locked: false, createdAt: 1, fingerprint: 'fp-p1' }],
     secrets: { p1: {} },
+    // El segundo cajón: variables de UN aparato (pub → KEY → valor).
+    devSecrets: { p1: {} },
     devices: { p1: { issued: [], revoked: [] } }
   }
   pcount = 1; nonce = 0; paircount = 0
@@ -54,6 +56,10 @@ const listSecretsOf = (t) => {
   for (const ns of Object.keys(s)) out[ns] = Object.keys(s[ns])
   return out
 }
+// Volcado del cajón por aparato, con la forma que arma el daemon de verdad
+// (`vault.listDeviceSecrets()`): una fila por llave, con sus claves y sin valores.
+const listDevSecretsOf = (t) => Object.entries(model.devSecrets[t] || {})
+  .map(([pub, vars]) => ({ pub, id: 'ID-' + pub, label: '', cn: 'proxy', keys: Object.keys(vars), orphan: false }))
 function dumpProfiles (extra = {}) {
   writeAtomic('profiles-list.json', {
     current: model.current,
@@ -65,8 +71,8 @@ function handleProfile (req) {
   const t = resolveTarget(req)
   switch (req.op) {
     case 'list': return {}
-    case 'add': { const id = 'p' + (++pcount); model.profiles.push({ id, name: req.name || '', protected: false, locked: false, createdAt: Date.now(), fingerprint: 'fp-' + id }); model.secrets[id] = {}; model.devices[id] = { issued: [], revoked: [] }; return { done: 'perfil creado: ' + (req.name || id) } }
-    case 'rm': { if (model.profiles.length <= 1) throw new Error('no se puede borrar el único perfil'); const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); model.profiles = model.profiles.filter((x) => x.id !== t); delete model.secrets[t]; delete model.devices[t]; if (model.current === t) model.current = model.profiles[0].id; return { done: 'perfil borrado: ' + (p.name || t) } }
+    case 'add': { const id = 'p' + (++pcount); model.profiles.push({ id, name: req.name || '', protected: false, locked: false, createdAt: Date.now(), fingerprint: 'fp-' + id }); model.secrets[id] = {}; model.devSecrets[id] = {}; model.devices[id] = { issued: [], revoked: [] }; return { done: 'perfil creado: ' + (req.name || id) } }
+    case 'rm': { if (model.profiles.length <= 1) throw new Error('no se puede borrar el único perfil'); const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); model.profiles = model.profiles.filter((x) => x.id !== t); delete model.secrets[t]; delete model.devSecrets[t]; delete model.devices[t]; if (model.current === t) model.current = model.profiles[0].id; return { done: 'perfil borrado: ' + (p.name || t) } }
     case 'rename': { const p = find(t); if (p.protected && p.locked) throw new Error('profile locked'); p.name = req.name; return { done: 'renombrado' } }
     case 'use': { model.current = t; return { done: 'activo' } }
     case 'unlock': { const p = find(t); if (p.protected) { if (req.password !== 'secret') throw new Error('wrong password'); p.locked = false } return { done: 'desbloqueado' } }
@@ -93,14 +99,20 @@ function onUsr2 () {
   // vaultControl detecta que la clave no quedó guardada → lanza).
   const NS_OK = (ns) => /^[a-z0-9-]{1,32}$/.test(ns || '')
   const KEY_OK = (k) => /^[A-Z0-9_]{1,64}$/.test(k || '')
-  if (sec?.op) { const t = resolveTarget(sec); model.secrets[t] ??= {}; if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { (model.secrets[t][sec.ns] ??= {})[sec.key] = sec.value } else if (sec.op === 'rm' && NS_OK(sec.ns)) { if (model.secrets[t][sec.ns]) { delete model.secrets[t][sec.ns][sec.key]; if (!Object.keys(model.secrets[t][sec.ns]).length) delete model.secrets[t][sec.ns] } } }
+  if (sec?.op) {
+    const t = resolveTarget(sec); model.secrets[t] ??= {}; model.devSecrets[t] ??= {}
+    if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { (model.secrets[t][sec.ns] ??= {})[sec.key] = sec.value }
+    else if (sec.op === 'rm' && NS_OK(sec.ns)) { if (model.secrets[t][sec.ns]) { delete model.secrets[t][sec.ns][sec.key]; if (!Object.keys(model.secrets[t][sec.ns]).length) delete model.secrets[t][sec.ns] } }
+    else if (sec.op === 'dev-set' && sec.pub && KEY_OK(sec.key) && sec.value) { (model.devSecrets[t][sec.pub] ??= {})[sec.key] = sec.value }
+    else if (sec.op === 'dev-rm' && sec.pub) { if (model.devSecrets[t][sec.pub]) { delete model.devSecrets[t][sec.pub][sec.key]; if (!Object.keys(model.devSecrets[t][sec.pub]).length) delete model.devSecrets[t][sec.pub] } }
+  }
   const preq = readReq('profile-request.json')
   let extra = {}
   if (preq?.op) { try { extra = handleProfile(preq) } catch (e) { extra = { error: e.message } } }
   dumpProfiles(extra)
   const dreq = readReq('dump-request.json')
   const t = resolveTarget(dreq || appr || rej || rv || sec || {})
-  writeAtomic('secrets-list.json', { profile: t, ns: listSecretsOf(t) })
+  writeAtomic('secrets-list.json', { profile: t, ns: listSecretsOf(t), dev: listDevSecretsOf(t) })
   writeAtomic('devices.json', { profile: t, issued: model.devices[t]?.issued || [], revoked: model.devices[t]?.revoked || [] })
 }
 function onUsr1 () {
@@ -175,23 +187,47 @@ test('candado: unlock exige la contraseña; rename bloqueado falla', async () =>
   assert.equal(d.profiles[0].protected, false)
 })
 
-test('secretos: set / list / delete variable / delete scope', async () => {
+test('por scope: set / list / delete variable / delete scope', async () => {
   await vc.setSecret('proxy', 'TURN_KEY_ID', 'abc123', 'p1')
   await vc.setSecret('proxy', 'TURN_SECRET', 'shhh', 'p1')
   await vc.setSecret('geo', 'API_TOKEN', 'zzz', 'p1')
 
-  let ns = await vc.listSecrets('p1')
-  assert.deepEqual(ns.proxy.sort(), ['TURN_KEY_ID', 'TURN_SECRET'])
-  assert.deepEqual(ns.geo, ['API_TOKEN'])
+  let out = await vc.listSecrets('p1')
+  assert.deepEqual(out.ns.proxy.sort(), ['TURN_KEY_ID', 'TURN_SECRET'])
+  assert.deepEqual(out.ns.geo, ['API_TOKEN'])
+  assert.deepEqual(out.dev, [], 'el cajón por aparato viaja siempre, aunque esté vacío')
 
-  ns = await vc.deleteSecret('proxy', 'TURN_KEY_ID', 'p1')
-  assert.deepEqual(ns.proxy, ['TURN_SECRET'])
+  out = await vc.deleteSecret('proxy', 'TURN_KEY_ID', 'p1')
+  assert.deepEqual(out.ns.proxy, ['TURN_SECRET'])
 
-  ns = await vc.deleteScope('proxy', 'p1')
-  assert.equal(ns.proxy, undefined)
-  assert.ok(ns.geo) // el otro scope sigue
+  out = await vc.deleteScope('proxy', 'p1')
+  assert.equal(out.ns.proxy, undefined)
+  assert.ok(out.ns.geo) // el otro scope sigue
 
   await assert.rejects(() => vc.setSecret('BAD NS', 'K', 'v', 'p1').catch((e) => { throw e }))
+})
+
+test('por aparato: son OTRO cajón, no tocan el del scope', async () => {
+  const pub = 'PUB-DEL-PROXY-1'
+  await vc.setSecret('proxy', 'TURN_KEY_ID', 'compartida', 'p1')
+  await vc.setDeviceSecret(pub, 'PORT', '8443', 'p1')
+  await vc.setDeviceSecret(pub, 'PUBLIC_URL', 'https://uno.example', 'p1')
+
+  let out = await vc.listSecrets('p1')
+  assert.deepEqual(out.ns.proxy, ['TURN_KEY_ID'], 'lo del scope sigue donde estaba')
+  const fila = out.dev.find((x) => x.pub === pub)
+  assert.deepEqual(fila.keys.sort(), ['PORT', 'PUBLIC_URL'])
+  assert.equal(fila.cn, 'proxy')
+
+  out = await vc.deleteDeviceSecret(pub, 'PORT', 'p1')
+  assert.deepEqual(out.dev.find((x) => x.pub === pub).keys, ['PUBLIC_URL'])
+
+  // Quitarlas todas hace desaparecer al aparato de la lista, no lo deja vacío.
+  out = await vc.deleteDeviceVars(pub, 'p1')
+  assert.equal(out.dev.find((x) => x.pub === pub), undefined)
+  assert.deepEqual(out.ns.proxy, ['TURN_KEY_ID'], 'y el scope ni se entera')
+
+  await assert.rejects(() => vc.setDeviceSecret(pub, 'minusculas', 'v', 'p1').catch((e) => { throw e }))
 })
 
 test('dispositivos: pair / pending / approve / revoke', async () => {

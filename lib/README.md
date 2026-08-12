@@ -50,7 +50,7 @@ si la máquina se compromete, revocas el cert y no había nada que robar.
 ```bash
 # en el VAULT (tu PC): abres el emparejamiento del servicio y cargas sus secretos
 dotrino-vault pair --service miapp          # invitación con scope SOLO vault:secrets:miapp
-dotrino-vault secret set miapp API_KEY  sk-…
+dotrino-vault secret set miapp API_KEY  sk-…   # la comparten TODAS las máquinas del ns
 
 # en el PROYECTO/servidor: enrola esta máquina (pega la invitación)
 npx dotrino-env enroll --ns miapp
@@ -59,6 +59,17 @@ npx dotrino-env enroll --ns miapp
 # de vuelta en el VAULT: lo tipeas leyéndolo de esa pantalla
 dotrino-vault approve 7K3F-92Q1
 ```
+
+Si la misma app corre en **varias máquinas**, lo que cambia de una a otra (el puerto,
+la URL pública) va en el cajón **por aparato**, sin partir el `ns`:
+
+```bash
+dotrino-vault devices                                   # el ID del aparato: AB12-CD34
+dotrino-vault secret device set AB12-CD34 PORT 8443     # solo la lee ESA máquina
+```
+
+Llegan **mezcladas en el mismo bundle** —y por lo tanto en el mismo `process.env`—:
+las del scope, con las del aparato **encima** si se llaman igual.
 
 El código lo **genera el servicio** y **no viaja** por la red: el vault solo puede
 echarlo de vuelta si un humano lo tipeó. Así, un vault falso no puede enrolarte y

@@ -232,8 +232,9 @@ export async function runDaemon () {
         } catch (e) { console.error('[vault] revocation failed:', e.message) }
         rm(revokeReqFile)
       }
-      // Secretos de servicios: `secret set/rm` del CLI. El archivo con el valor
-      // vive un instante en el mismo dir 0700 del vault y se borra al consumir.
+      // Secretos: `secret set/rm` (por SCOPE) y `secret device set/rm` (por APARATO),
+      // del CLI o de la TUI. El archivo con el valor vive un instante en el mismo dir
+      // 0700 del vault y se borra al consumir.
       const sec = readJsonSafe(secretReqFile)
       if (sec?.op) {
         rm(secretReqFile)
@@ -241,6 +242,8 @@ export async function runDaemon () {
           const vault = targetOf(sec)
           if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value); console.log('[vault] device secret saved: %s', sec.key) }
+          else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
         } catch (e) { console.error('[vault] secret failed:', e.message) }
       }
       // Perfiles / candado.
@@ -260,8 +263,13 @@ export async function runDaemon () {
       // dice dump-request.json; sin él, al activo.
       const dumpReq = readJsonSafe(dumpReqFile); rm(dumpReqFile)
       const t = resolveTarget(dumpReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current() }
-      // Nombres de secretos, nunca valores.
-      writeJson(secretsListFile, { v: 1, at: Date.now(), profile: t.id, ns: t.vault.listSecrets() })
+      // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
+      // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
+      writeJson(secretsListFile, {
+        v: 2, at: Date.now(), profile: t.id,
+        ns: t.vault.listSecrets(),
+        dev: await t.vault.listDeviceSecrets()
+      })
       writeJson(devFile, { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.listDevices()) })
       // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
       try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}

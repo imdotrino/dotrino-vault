@@ -23,12 +23,12 @@ function fakeTerm (cols = 80, rows = 24) {
 function baseState (over = {}) {
   return {
     screen: 'profiles',
-    sel: { profiles: 0, devices: 0, secrets: 0, caps: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, caps: 0, devvars: 0 },
     me: null,
     scroll: {},
     profiles: { current: 'p1', profiles: [{ id: 'p1', name: 'Perfil 1', protected: false, locked: false, current: true, fingerprint: 'fp1' }] },
     devices: { issued: [], revoked: [] },
-    secrets: {},
+    secrets: { ns: {}, dev: [] },
     pending: null,
     pairing: null,
     state: { version: 'test' },
@@ -79,7 +79,10 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
       ],
       revoked: [{ nonce: 'n0' }]
     },
-    secrets: { proxy: ['TURN_KEY_ID', 'TURN_SECRET'], geo: ['API_TOKEN'] }
+    secrets: {
+      ns: { proxy: ['TURN_KEY_ID', 'TURN_SECRET'], geo: ['API_TOKEN'] },
+      dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT', 'PUBLIC_URL'], orphan: false }]
+    }
   }
   const modes = [
     { screen: 'profiles', ...rich },
@@ -88,6 +91,10 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
     { screen: 'me', ...rich },
     { screen: 'caps', ...rich },
     { screen: 'caps', ...rich, capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' }, members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign', 'read'] }] },
+    // Variables de UN aparato: con ellas, sin ellas, y sin aparato elegido.
+    { screen: 'devvars', ...rich, varsFor: { pub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', cn: 'proxy' } },
+    { screen: 'devvars', ...rich, varsFor: { pub: 'PUB-SIN-VARS', deviceId: 'AB12-CD34', label: '', cn: 'geo' } },
+    { screen: 'devvars', ...rich },
     { screen: 'me', ...rich, me: null },
     { screen: 'me', ...rich, me: undefined },
     { screen: 'secrets', ...rich, input: { label: 'Valor', value: 'topsecret', mask: true, hint: 'no se muestra' } },
@@ -284,6 +291,44 @@ test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => 
   assert.doesNotMatch(term.last[3], /cambiar/)
 })
 
+
+test('DOS SITIOS: el scope en su pestaña, el aparato en la suya (y una apunta a la otra)', () => {
+  const term = fakeTerm(100, 24)
+  const secrets = {
+    ns: { proxy: ['TURN_KEY_ID'] },
+    dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT'], orphan: false }]
+  }
+
+  // La pestaña de scopes lista lo COMPARTIDO y no repite lo del aparato: dice dónde está.
+  V.render(term, baseState({ screen: 'secrets', secrets }))
+  const scopes = term.last.join('\n')
+  assert.match(scopes, /TURN_KEY_ID/)
+  assert.doesNotMatch(scopes, /PORT/, 'lo del aparato no se duplica aquí')
+  assert.match(scopes, /Dispositivos \(tecla e\)/, 'y se dice dónde se pone')
+
+  // La del aparato lista lo suyo, con el servicio que es (dato, no explicación).
+  V.render(term, baseState({
+    screen: 'devvars',
+    secrets,
+    varsFor: { pub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', cn: 'proxy' }
+  }))
+  const vars = term.last.join('\n')
+  assert.match(vars, /EF56-7890/)
+  assert.match(vars, /PORT/)
+  assert.match(vars, /proxy/)
+  assert.doesNotMatch(vars, /TURN_KEY_ID/, 'ni la de scope se cuela aquí')
+})
+
+test('la lista de dispositivos avisa cuántas variables propias tiene cada uno', () => {
+  const term = fakeTerm(110, 24)
+  V.render(term, baseState({
+    screen: 'devices',
+    members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: ['secrets'], cn: 'proxy' }],
+    devices: { issued: [{ sub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', scope: ['vault:secrets:proxy'], exp: Date.now() + 8.64e7, nonce: 'n2' }], revoked: [] },
+    secrets: { ns: {}, dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT', 'PUBLIC_URL'], orphan: false }] }
+  }))
+  assert.match(term.last.join('\n'), /vars:2/)
+})
 
 test('Perfil: muestra lo que sincronizó el aparato, y NUNCA los bytes de la foto', () => {
   const t = makeTheme()

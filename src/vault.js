@@ -129,6 +129,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       catch (_) { return null }
     },
     onAdopted: (info) => { try { onAdopted?.(info) } catch (_) {} },
+    // Se va el aparato, se van SUS variables. Guardarlas sería configuración de una llave
+    // que ya no entra, y volvería a la vida sola el día que se enrole otro aparato con esa
+    // misma llave. Va aquí porque a quitar se entra por dos puertas (el PC y la consola
+    // remota) y las dos pasan por `desk.revokeDevice`.
+    onDeviceRemoved: (sub) => {
+      try {
+        const n = secrets.forgetDevice(sub)
+        if (n) log(`[vault] dropped ${n} variable(s) of the removed device`)
+      } catch (e) { log('[vault] could not drop the device variables:', e.message) }
+    },
     defaultScope: [SCOPE.READ],
     onChallenge ({ deviceId, scope }) {
       log(`\n[vault] Un dispositivo quiere conectarse:`)
@@ -338,7 +348,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   // SECRETOS de servicios: un servicio enrolado (cert `vault:secrets:<ns>`)
-  // pide el bundle de su namespace. La respuesta va SELLADA a la llave ECDH
+  // pide el bundle de su namespace — el del SCOPE (que comparten todos los
+  // aparatos que sirven ese ns) con el SUYO PROPIO encima (`secretsStore.js`).
+  // Lo suyo se indexa por la llave que firma esta misma petición, así que no hay
+  // manera de pedir lo de otro aparato. La respuesta va SELLADA a la llave ECDH
   // efímera `ek` que vino en el sobre firmado (el proxy transporta pero no
   // puede leer los valores) y el cuerpo va FIRMADO por la maestra (el
   // servicio verifica contra su iss pineada — un relay no puede inyectar
@@ -364,7 +377,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     let enc
     try {
-      enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns) } })
+      enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns, chk.device) } })
     } catch (e) {
       return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
     }
@@ -408,14 +421,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // AGRUPADO a propósito: cargar cinco valores seguidos con `secret set` son cinco
   // escrituras, pero un solo cambio de configuración. Sin esta ventana serían cinco
   // reinicios en cadena, y el agente se pasaría la carga entera reiniciándose.
-  const AVISO_AGRUPA_MS = Number(process.env.DOTRINO_VAULT_AVISO_MS) || 3000
-  const avisosPendientes = new Map()   // ns → timer
+  // La variable de entorno va en inglés (CONVENCIONES §8.1); nadie la tenía puesta.
+  const NOTICE_GROUP_MS = Number(process.env.DOTRINO_VAULT_NOTICE_MS) || 3000
+  const pendingNotices = new Map()   // clave (ns | 'dev:'+pub) → timer
 
-  async function avisarCambio (ns) {
-    let destinos = []
+  async function notifyNsChange (ns) {
+    let targets = []
     try {
       const { issued } = await identity.listDelegations()
-      const revocados = await revocationSet()
+      const revokedNonces = await revocationSet()
       const scope = secretsScope(ns)
       // Los agentes de ESE ns y nadie más: el aviso dice qué namespace cambió, así
       // que mandárselo a otro sería filtrarle que existe.
@@ -423,33 +437,62 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Y UNO POR LLAVE, no uno por delegación: renovar el cert emite una
       // delegación nueva para la MISMA sub-clave, así que un agente que lleve
       // tiempo enrolado aparece varias veces y recibiría el aviso repetido.
-      const vistas = new Set()
-      destinos = (issued || []).filter((x) => {
-        if (!x.sub || revocados.has(x.nonce) || !(x.scope || []).includes(scope)) return false
-        if (vistas.has(x.sub)) return false
-        vistas.add(x.sub)
+      const seen = new Set()
+      targets = (issued || []).filter((x) => {
+        if (!x.sub || revokedNonces.has(x.nonce) || !(x.scope || []).includes(scope)) return false
+        if (seen.has(x.sub)) return false
+        seen.add(x.sub)
         return true
       })
     } catch (e) { return log('[vault] could not list who to notify:', e.message) }
-    if (!destinos.length) return
+    if (!targets.length) return
 
     const body = { op: 'secrets.changed', ns, ts: Date.now() }
     const { signature } = await identity.signData(body)
-    for (const d of destinos) {
+    for (const d of targets) {
       try { client.sendByPubkey(d.sub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
     }
-    audit('secrets.changed', { ns, avisados: destinos.length })
-    log(`[vault] config for "${ns}" changed: notified ${destinos.length} agent(s)`)
+    audit('secrets.changed', { ns, notified: targets.length })
+    log(`[vault] config for "${ns}" changed: notified ${targets.length} agent(s)`)
   }
 
-  function programarAviso (ns) {
-    clearTimeout(avisosPendientes.get(ns))
+  /**
+   * Cambió una variable de UN aparato: el aviso va solo a ese aparato. El mensaje dice
+   * qué NAMESPACE cambió (es lo que el agente sabe leer), así que hace falta su `cn`; un
+   * miembro sin `cn` no es un servicio y no lee variables, de modo que no hay a quién
+   * avisar y no se manda nada.
+   */
+  async function notifyDeviceChange (pub) {
+    let cn = null
+    try {
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta
+      cn = (acta?.members || []).find((m) => m.pub === pub)?.cn || null
+    } catch (e) { return log('[vault] could not look up who to notify:', e.message) }
+    if (!cn) return
+    const body = { op: 'secrets.changed', ns: cn, ts: Date.now() }
+    const { signature } = await identity.signData(body)
+    try { client.sendByPubkey(pub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
+    const device = await deviceIdOf(pub).catch(() => null)
+    audit('secrets.changed', { ns: cn, device, notified: 1 })
+    log(`[vault] config for device ${device} ("${cn}") changed: notified it`)
+  }
+
+  /**
+   * Un cambio de configuración, un aviso: escrituras seguidas se agrupan en la misma
+   * ventana. La CLAVE distingue los dos cajones (`<ns>` y `dev:<pub>`) para que tocar
+   * lo de un aparato no cancele el aviso pendiente de todo su namespace.
+   */
+  function scheduleNotice (ns) { schedule(ns, () => notifyNsChange(ns)) }
+  function scheduleDeviceNotice (pub) { schedule('dev:' + pub, () => notifyDeviceChange(pub)) }
+
+  function schedule (key, fn) {
+    clearTimeout(pendingNotices.get(key))
     const t = setTimeout(() => {
-      avisosPendientes.delete(ns)
-      avisarCambio(ns).catch((e) => log('[vault] change notice failed:', e.message))
-    }, AVISO_AGRUPA_MS)
+      pendingNotices.delete(key)
+      fn().catch((e) => log('[vault] change notice failed:', e.message))
+    }, NOTICE_GROUP_MS)
     t.unref?.()
-    avisosPendientes.set(ns, t)
+    pendingNotices.set(key, t)
   }
 
   // --- CONSOLA REMOTA (docs/consola-remota.md) ---------------------------------
@@ -480,11 +523,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // UNO POR LLAVE, no uno por delegación: renovar emite una delegación nueva para la
       // MISMA sub-clave, así que un aparato que lleve tiempo enrolado aparece varias veces
       // y recibía el mismo aviso repetido —una vez por renovación acumulada—. Mismo
-      // cuidado que en `avisarCambio`.
-      const vistas = new Set()
+      // cuidado que en `notifyNsChange`.
+      const seen = new Set()
       for (const d of issued || []) {
-        if (!d.sub || vistas.has(d.sub)) continue
-        vistas.add(d.sub)
+        if (!d.sub || seen.has(d.sub)) continue
+        seen.add(d.sub)
         try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {}
       }
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
@@ -557,9 +600,73 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   // API local de secretos (solo CLI/UI del dueño; audita cada cambio).
-  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }); programarAviso(ns) }
-  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); programarAviso(ns) } return ok }
+  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }); scheduleNotice(ns) }
+  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
   function listSecrets () { return secrets.list() }
+
+  /** El miembro del acta con esa llave, o `null` (también si la bóveda todavía no tiene acta). */
+  async function memberOf (pub) {
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!acta) return null
+    return (acta.members || []).find((m) => m.pub === pub) || null
+  }
+
+  /**
+   * Variables de UN aparato. Se exige que sea un SERVICIO del acta (miembro con `cn`) porque
+   * es el único que las lee: guardárselas a un teléfono sería configuración muerta, escrita
+   * donde nadie la va a buscar el día que no funcione. Si la bóveda es anterior al acta no
+   * hay contra qué comprobarlo y se acepta.
+   */
+  async function requireService (pub) {
+    const m = await memberOf(pub)
+    if (!m) {
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta
+      if (acta) throw new Error('device: it is not a member of this profile')
+      return null
+    }
+    if (!m.cn) throw new Error('device: it is not a service (only services read variables); pair it with `pair --service <ns>`')
+    return m
+  }
+
+  async function setDeviceSecret (pub, key, value) {
+    const m = await requireService(pub)
+    secrets.setDevice(pub, key, value)
+    audit('secret.set', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
+    scheduleDeviceNotice(pub)
+  }
+
+  async function deleteDeviceSecret (pub, key) {
+    const m = await memberOf(pub)
+    const ok = secrets.deleteDevice(pub, key)
+    if (ok) {
+      audit('secret.rm', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
+      scheduleDeviceNotice(pub)
+    }
+    return ok
+  }
+
+  /**
+   * Nombres (nunca valores) de las variables por aparato, con quién es cada aparato pegado:
+   * una llave suelta no se puede administrar. `orphan` marca las que quedaron de una llave
+   * que ya no está en el acta.
+   */
+  async function listDeviceSecrets () {
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta
+    const members = acta?.members || []
+    const out = []
+    for (const [pub, keys] of Object.entries(secrets.listDevices())) {
+      const m = members.find((x) => x.pub === pub) || null
+      out.push({
+        pub,
+        id: m?.id || await deviceIdOf(pub).catch(() => null),
+        label: m?.label || '',
+        cn: m?.cn || null,
+        keys,
+        orphan: !!members.length && !m
+      })
+    }
+    return out
+  }
 
   return {
     identity, client, store, threads, secrets, master, fingerprint: fp,
@@ -575,6 +682,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     },
     rejectDevice: (deviceId) => desk.reject(deviceId),
     setSecret, deleteSecret, listSecrets,
+    setDeviceSecret, deleteDeviceSecret, listDeviceSecrets,
     listDevices: () => identity.listDelegations(),
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.
@@ -613,8 +721,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return r
     },
     close () {
-      for (const t of avisosPendientes.values()) clearTimeout(t)
-      avisosPendientes.clear()
+      for (const t of pendingNotices.values()) clearTimeout(t)
+      pendingNotices.clear()
       try { client.close() } catch (_) {} identity.destroy()
     }
   }

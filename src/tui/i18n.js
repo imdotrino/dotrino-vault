@@ -170,6 +170,16 @@ const es = {
   savingVar: 'Guardando variable…',
   varSaved: (ns, key) => `Guardado ${ns}/${key}`,
 
+  // variables de UN aparato (Dispositivos → tecla e). Las del scope las comparten todos
+  // los aparatos que sirven ese namespace; estas las lee solo él, y le ganan.
+  titleDevVars: 'Variables del dispositivo',
+  devVarsFor: (id, name) => `Variables de ${id}${name ? ' · ' + name : ''}`,
+  devVarsService: (cn) => `servicio «${cn}» — solo las lee este aparato, y pisan a las del scope`,
+  noDevVars: '(sin variables propias — pulsa N para agregar la primera)',
+  devVarsOnlyServices: 'Solo un servicio lee variables, y este aparato no lo es',
+  devVarsElsewhere: 'Las variables de UN aparato se ponen en Dispositivos (tecla e).',
+  removeDevVarConfirm: (id, key) => `¿Quitar la variable ${key} de ${id}?`,
+
   // emparejamiento — la PREGUNTA es del vault, que es quien lo inicia
   pairModeIntro: 'Un dispositivo puede entrar a una cuenta que ya vive aquí, o estrenar una.',
   pairModeHere: (name) => `Entrar a esta cuenta: ${name}`,
@@ -205,20 +215,25 @@ const es = {
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
-  helpDevices: ({ pendiente, hayAparatos } = {}) => [
+  helpDevices: ({ pending, hasDevices } = {}) => [
     '←→ pestaña', '↑↓', 'p emparejar',
-    ...(pendiente ? ['a aprobar', 'x rechazar'] : []),
-    ...(hayAparatos ? ['r renombrar', 'c permisos', 'v revocar'] : []),
+    ...(pending ? ['a aprobar', 'x rechazar'] : []),
+    ...(hasDevices ? ['r renombrar', 'c permisos', 'e variables', 'v revocar'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
   renameDeviceHint: 'el nombre con el que lo reconoces (Esc cancela)',
   renaming: 'Renombrando…',
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
-  helpSecrets: ({ haySecretos } = {}) => [
+  helpSecrets: ({ hasSecrets } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable',
-    ...(haySecretos ? ['x quitar (variable/scope)'] : []),
+    ...(hasSecrets ? ['x quitar (variable/scope)'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
+  ],
+  helpDevVars: ({ hasVars } = {}) => [
+    '↑↓', 'n nueva variable',
+    ...(hasVars ? ['x quitar'] : []),
+    'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'
   ],
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
@@ -395,6 +410,15 @@ const en = {
   savingVar: 'Saving variable…',
   varSaved: (ns, key) => `Saved ${ns}/${key}`,
 
+  // variables de UN aparato (Dispositivos → tecla e)
+  titleDevVars: 'Device variables',
+  devVarsFor: (id, name) => `Variables of ${id}${name ? ' · ' + name : ''}`,
+  devVarsService: (cn) => `“${cn}” service — only this device reads them, and they override the scope ones`,
+  noDevVars: '(no variables of its own — press N to add the first one)',
+  devVarsOnlyServices: 'Only a service reads variables, and this device is not one',
+  devVarsElsewhere: 'Variables for ONE device are set in Devices (key e).',
+  removeDevVarConfirm: (id, key) => `Remove variable ${key} from ${id}?`,
+
   pairModeIntro: 'A device can join an account that already lives here, or start a new one.',
   pairModeHere: (name) => `Join this account: ${name}`,
   pairModeHereHint: 'the device gets to see and sign for this account',
@@ -419,20 +443,25 @@ const en = {
   helpConfirm: 'y confirm · n/Esc cancel',
 
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
-  helpDevices: ({ pendiente, hayAparatos } = {}) => [
+  helpDevices: ({ pending, hasDevices } = {}) => [
     '←→ tab', '↑↓', 'p pair',
-    ...(pendiente ? ['a approve', 'x reject'] : []),
-    ...(hayAparatos ? ['r rename', 'c permissions', 'v revoke'] : []),
+    ...(pending ? ['a approve', 'x reject'] : []),
+    ...(hasDevices ? ['r rename', 'c permissions', 'e variables', 'v revoke'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,
   renameDeviceHint: 'the name you recognise it by (Esc cancels)',
   renaming: 'Renaming…',
   deviceRenamed: (n) => `Now called "${n}"`,
-  helpSecrets: ({ haySecretos } = {}) => [
+  helpSecrets: ({ hasSecrets } = {}) => [
     '←→ tab', '↑↓', 'n new variable',
-    ...(haySecretos ? ['x remove (variable/scope)'] : []),
+    ...(hasSecrets ? ['x remove (variable/scope)'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
+  ],
+  helpDevVars: ({ hasVars } = {}) => [
+    '↑↓', 'n new variable',
+    ...(hasVars ? ['x remove'] : []),
+    'F5 refresh', 'Esc devices', 'l Español', 'q quit'
   ],
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],

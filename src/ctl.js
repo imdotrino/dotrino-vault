@@ -500,10 +500,15 @@ function cmdActivity (n = 30) {
   }
 }
 
-// Secretos de servicios: se cargan aquí (el dueño, en el PC del vault) y los
-// leen los SERVICIOS enrolados con `pair --service <ns>`. Nunca se listan valores.
+// Variables de entorno de los servicios: se cargan aquí (el dueño, en el PC del vault) y
+// las leen los SERVICIOS enrolados con `pair --service <ns>`. Nunca se listan valores.
+//
+// DOS CAJONES: las del SCOPE (`secret set <ns> …`) las comparten todos los aparatos que
+// sirven ese namespace; las del APARATO (`secret device set <ID> …`) las lee solo ese
+// aparato y PISAN a las del scope con el mismo nombre. Ahí va lo que cambia de máquina a
+// máquina (el puerto, la URL pública) sin tener que partir el ns en uno por servidor.
 async function cmdSecret (rest) {
-  const [sub, ns, key, ...valueParts] = rest
+  const [sub, ...args] = rest
   const s = requireDaemon()
   const secretsListFile = path.join(dir, 'secrets-list.json')
   const signalAndWaitList = async () => {
@@ -513,22 +518,62 @@ async function cmdSecret (rest) {
     for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
     console.error('El daemon no respondió.'); process.exit(1)
   }
+  const USAGE = 'uso: dotrino-vault secret set <ns> <CLAVE> <valor>        (la comparten todos los aparatos)\n' +
+              '     dotrino-vault secret rm  <ns> <CLAVE>\n' +
+              '     dotrino-vault secret device set <ID> <CLAVE> <valor> (solo la lee ese aparato)\n' +
+              '     dotrino-vault secret device rm  <ID> <CLAVE>\n' +
+              '     dotrino-vault secret list'
+
   if (sub === 'list') {
     const d = await signalAndWaitList()
     const names = d.ns || {}
     const nss = Object.keys(names)
-    if (!nss.length) { console.log('No hay secretos guardados. Agrega uno:  dotrino-vault secret set <ns> <CLAVE> <valor>'); return }
+    const dev = Array.isArray(d.dev) ? d.dev : []
+    if (!nss.length && !dev.length) {
+      console.log('No hay variables guardadas. Agrega una:  dotrino-vault secret set <ns> <CLAVE> <valor>')
+      return
+    }
+    if (nss.length) console.log('\n%sPor scope%s (las comparten todos los aparatos del perfil)\n', B, Z)
     for (const n of nss) {
       console.log('%s%s%s  (scope vault:secrets:%s)', B, n, Z, n)
       for (const k of names[n]) console.log('  · %s', k)
     }
+    if (dev.length) console.log('\n%sPor aparato%s (solo las lee ese aparato; pisan a las del scope)\n', B, Z)
+    for (const x of dev) {
+      const who = [x.label, x.cn ? `servicio «${x.cn}»` : null, x.orphan ? 'YA NO ESTÁ EN EL ACTA' : null].filter(Boolean).join(' · ')
+      console.log('%s%s%s%s', B, x.id, Z, quien ? '  ' + quien : '')
+      for (const k of x.keys) console.log('  · %s', k)
+    }
+    console.log('')
     return
   }
-  if (sub === 'set' || sub === 'rm') {
+
+  // Por APARATO: `secret device set|rm <ID> <CLAVE> [valor]`.
+  if (sub === 'device') {
+    const [op, id, key, ...valueParts] = args
     const value = valueParts.join(' ')
-    if (!ns || !key || (sub === 'set' && !value)) {
-      console.error('uso: dotrino-vault secret set <ns> <CLAVE> <valor>\n     dotrino-vault secret rm <ns> <CLAVE>'); process.exit(2)
+    if ((op !== 'set' && op !== 'rm') || !id || !key || (op === 'set' && !value)) { console.error(USAGE); process.exit(2) }
+    const m = await buscarMiembro(id)
+    // Se avisa aquí, con nombre y apellido, en vez de dejar que el daemon lo rechace y la
+    // CLI diga «no aplicó el cambio»: quien escribe esto quiere saber POR QUÉ no vale.
+    if (!m.cn) {
+      console.error('%s no es un servicio, y solo los servicios leen variables.', m.id)
+      console.error('Empareja el servicio con:  dotrino-vault pair --service <ns>')
+      process.exit(1)
     }
+    writeReq('secret-request.json', op === 'set' ? { op: 'dev-set', pub: m.pub, key, value } : { op: 'dev-rm', pub: m.pub, key })
+    const d = await signalAndWaitList()
+    const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
+    const ok = op === 'set' ? keys.includes(key) : !keys.includes(key)
+    if (ok) console.log(op === 'set' ? 'Variable guardada: %s/%s' : 'Variable borrada: %s/%s', m.id, key)
+    else { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    return
+  }
+
+  if (sub === 'set' || sub === 'rm') {
+    const [ns, key, ...valueParts] = args
+    const value = valueParts.join(' ')
+    if (!ns || !key || (sub === 'set' && !value)) { console.error(USAGE); process.exit(2) }
     writeReq('secret-request.json', sub === 'set' ? { op: 'set', ns, key, value } : { op: 'rm', ns, key })
     const d = await signalAndWaitList()
     const ok = sub === 'set' ? (d.ns?.[ns] || []).includes(key) : !(d.ns?.[ns] || []).includes(key)
@@ -536,7 +581,7 @@ async function cmdSecret (rest) {
     else { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
     return
   }
-  console.error('uso: dotrino-vault secret {set|rm|list}'); process.exit(2)
+  console.error(USAGE); process.exit(2)
 }
 
 /**
@@ -691,9 +736,14 @@ function help () {
                       estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
-  secret set <ns> <CLAVE> <valor>   guarda un secreto para el servicio <ns>
-  secret rm <ns> <CLAVE>            borra un secreto
-  secret list                       lista nombres de secretos (nunca valores)
+  secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
+                                    aparatos del perfil que sirven ese namespace
+  secret rm <ns> <CLAVE>            borra una variable del scope
+  secret device set <ID> <CLAVE> <valor>
+                                    variable de UN aparato: solo la lee él, y pisa a la
+                                    del scope que se llame igual (puerto, URL pública…)
+  secret device rm <ID> <CLAVE>     borra una variable de ese aparato
+  secret list                       lista los dos cajones, por nombre (nunca valores)
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente

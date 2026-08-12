@@ -8,6 +8,13 @@
  *   · Dispositivos (pares): ver · emparejar · aprobar/rechazar · revocar
  *   · Scopes y variables (secretos): ver · agregar · quitar
  *
+ * LAS VARIABLES DE ENTORNO SE PONEN EN DOS SITIOS, y cada uno está donde se elige lo
+ * que las distingue: las del SCOPE, que comparten todos los aparatos del perfil que
+ * sirven ese namespace, en su pestaña; las de UN APARATO, que solo lee él y pisan a
+ * las del scope, dentro de Dispositivos (tecla `e`), que es donde ya elegiste el
+ * aparato. No se repiten en las dos pantallas a propósito: la de scopes enlaza a la
+ * otra en vez de duplicarla.
+ *
  * Cada "bóveda" es un PERFIL (maestra propia, dir propio, dispositivos y secretos
  * propios). Las acciones operan sobre la bóveda ACTIVA; para operar otra, cámbiala
  * en la pantalla de bóvedas.
@@ -235,7 +242,9 @@ function deviceRows (st, t) {
   }
   for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
-    const extra = d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : ''
+    const vars = devVarsOf(st, d.sub).length
+    const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
+      (vars ? t.muted(`  vars:${vars}`) : '')
     // SIN ACCESO: está en el acta y no puede entrar. Es un aviso, no un adorno, así que va
     // en el color de aviso y en el sitio donde estaría su vencimiento.
     const estado = d.noAccess
@@ -286,21 +295,21 @@ const CAPS_ORDEN = ['sign', 'store', 'read', 'admin']
 
 function capsRows (st, t) {
   const i = L(st)
-  const objetivo = st.capsFor
-  if (!objetivo) return [{ text: t.muted(i.loading), sel: false }]
-  const miembro = (st.members || []).find((m) => m.pub === objetivo.pub)
-  if (!miembro) return [{ text: t.muted(i.capsNoMember), sel: false }]
+  const target = st.capsFor
+  if (!target) return [{ text: t.muted(i.loading), sel: false }]
+  const member = (st.members || []).find((m) => m.pub === target.pub)
+  if (!member) return [{ text: t.muted(i.capsNoMember), sel: false }]
 
-  const tiene = new Set(miembro.caps || [])
+  const has = new Set(member.caps || [])
   const rows = [
-    { text: ' ' + t.bold(i.capsFor(objetivo.deviceId, miembro.label || '')), sel: false },
+    { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
     { text: '', sel: false }
   ]
   for (const cap of CAPS_ORDEN) {
-    const marca = tiene.has(cap) ? '[x]' : '[ ]'
-    const nombre = i.capName[cap]
-    const linea = ` ${marca}  ${cap === 'admin' ? t.bold(nombre) : nombre}`
-    rows.push({ text: linea, sel: true, meta: { cap } })
+    const mark = has.has(cap) ? '[x]' : '[ ]'
+    const name = i.capName[cap]
+    const line = ` ${mark}  ${cap === 'admin' ? t.bold(name) : name}`
+    rows.push({ text: line, sel: true, meta: { cap } })
     rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
   }
   rows.push({ text: '', sel: false })
@@ -308,21 +317,46 @@ function capsRows (st, t) {
   return rows
 }
 
+/** Las variables por SCOPE: las que comparten todos los aparatos que sirven ese ns. */
 function secretRows (st, t) {
   const i = L(st)
-  const ns = st.secrets || {}
+  const ns = st.secrets?.ns || {}
   const names = Object.keys(ns).sort()
   const rows = []
-  if (!names.length) {
-    rows.push({ text: t.muted(i.noScopes), sel: false })
-    return rows
-  }
+  // El puntero a la otra pantalla va SIEMPRE, con scopes y sin ellos: es la mitad de la
+  // función y quien la busca no tiene por qué adivinar que vive en Dispositivos.
+  const footer = [{ text: '', sel: false }, { text: t.muted(' ' + i.devVarsElsewhere), sel: false }]
+  if (!names.length) return [{ text: t.muted(i.noScopes), sel: false }, ...footer]
   for (const n of names) {
     rows.push({ text: t.accent(` ▸ ${n}`) + t.muted(i.scopeOf(n)), sel: true, meta: { ns: n, key: null } })
     for (const k of ns[n].slice().sort()) {
       rows.push({ text: `      ${k}   ${t.muted('••••••')}`, sel: true, meta: { ns: n, key: k } })
     }
   }
+  return [...rows, ...footer]
+}
+
+/** Las claves guardadas para UN aparato (`pub`), o `[]`. */
+const devVarsOf = (st, pub) => (st.secrets?.dev || []).find((x) => x.pub === pub)?.keys || []
+
+/**
+ * Las variables de UN aparato. Se entra desde Dispositivos con `e`, ya con el aparato
+ * elegido: por eso aquí no se vuelve a elegir, solo se agrega y se quita.
+ */
+function devVarRows (st, t) {
+  const i = L(st)
+  const target = st.varsFor
+  if (!target) return [{ text: t.muted(i.loading), sel: false }]
+  const keys = devVarsOf(st, target.pub).slice().sort()
+  const rows = [
+    { text: ' ' + t.bold(i.devVarsFor(target.deviceId, target.label || '')), sel: false },
+    // Dato, no explicación: qué servicio es este aparato es lo que decide qué namespace
+    // lee, y por lo tanto a qué variables del scope le ganan estas.
+    { text: t.muted(' ' + i.devVarsService(target.cn)), sel: false },
+    { text: '', sel: false }
+  ]
+  if (!keys.length) rows.push({ text: t.muted(' ' + i.noDevVars), sel: false })
+  for (const k of keys) rows.push({ text: `   ${k}   ${t.muted('••••••')}`, sel: true, meta: { key: k } })
   return rows
 }
 
@@ -386,7 +420,8 @@ async function refreshAll (term, st) {
   if (!r.ok) return
   const { devices, secrets, profiles, acta } = r.v
   if (profiles) st.profiles = profiles
-  if (secrets) st.secrets = secrets.ns || {}
+  // Los DOS cajones de variables viajan juntos: `ns` (por scope) y `dev` (por aparato).
+  if (secrets) st.secrets = { ns: secrets.ns || {}, dev: Array.isArray(secrets.dev) ? secrets.dev : [] }
   // El ACTA entra en el volcado normal: es de donde sale la lista de dispositivos (ver
   // `mergeMembersAndCerts`). Antes solo se pedía al abrir la pantalla de permisos.
   if (acta) st.members = acta.members || []
@@ -445,7 +480,7 @@ async function ensureUnlocked (term, st, p, thenFn) {
 
 function moveSel (st, key, screen, count) {
   if (count <= 0) { st.sel[screen] = 0; return }
-  // Clampa el índice guardado ANTES de aplicar el delta: si la lista encogió, la
+  // Clampa el índice guardado ANTES de apply el delta: si la lista encogió, la
   // primera flecha debe moverse desde la posición visible, no desde un índice viejo.
   st.sel[screen] = Math.max(0, Math.min(st.sel[screen], count - 1))
   if (key.name === 'up') st.sel[screen] = Math.max(0, st.sel[screen] - 1)
@@ -617,11 +652,11 @@ async function onKeyDevices (term, st, key) {
       label: i.renameDeviceLabel(cur.deviceId),
       hint: i.renameDeviceHint,
       value: cur.label || '',
-      onSubmit: async (valor) => {
-        const nombre = String(valor || '').trim()
-        if (!nombre) return
-        const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, nombre, activeId(st)))
-        if (r.ok) { st.devices = r.v; flash(st, i.deviceRenamed(nombre)) }
+      onSubmit: async (raw) => {
+        const name = String(raw || '').trim()
+        if (!name) return
+        const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, name, activeId(st)))
+        if (r.ok) { st.devices = r.v; flash(st, i.deviceRenamed(name)) }
       }
     })
   } else if (ch === 'c' && cur?.sub) {
@@ -629,6 +664,15 @@ async function onKeyDevices (term, st, key) {
     st.sel.caps = 0
     await refreshMembers(term, st)
     st.screen = 'caps'
+  } else if (ch === 'e' && cur?.sub) {
+    // Variables de ESTE aparato. Solo un servicio las lee (es el único que pide su
+    // bundle), así que a un teléfono se le dice que no y por qué, en vez de dejarle
+    // guardar configuración que no va a leer nadie.
+    if (!cur.cn) { flash(st, i.devVarsOnlyServices, 'warn'); return true }
+    st.varsFor = { pub: cur.sub, deviceId: cur.deviceId, label: cur.label || '', cn: cur.cn }
+    st.sel.devvars = 0
+    await refreshSecrets(term, st)
+    st.screen = 'devvars'
   } else if (key.name === 'f5') {
     await refreshDevices(term, st)
   }
@@ -659,27 +703,27 @@ async function onKeyCaps (term, st, key) {
   if (key.name === 'f5') { await refreshMembers(term, st); return true }
   if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
 
-  const miembro = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
-  if (!miembro) return true
-  const caps = new Set(miembro.caps || [])
-  const dando = !caps.has(cur.cap)
-  if (dando) caps.add(cur.cap); else caps.delete(cur.cap)
+  const member = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
+  if (!member) return true
+  const caps = new Set(member.caps || [])
+  const giving = !caps.has(cur.cap)
+  if (giving) caps.add(cur.cap); else caps.delete(cur.cap)
 
-  const aplicar = async () => {
-    const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(miembro.pub, [...caps], activeId(st)))
+  const apply = async () => {
+    const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...caps], activeId(st)))
     if (!r.ok) return
     st.devices = r.v
     await refreshMembers(term, st)
-    flash(st, dando ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
+    flash(st, giving ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
   }
 
   // Administrar se PREGUNTA: es el permiso que deja a ese aparato admitir y expulsar
   // dispositivos sin pasar por aquí. Los otros tres se marcan y ya.
-  if (cur.cap === 'admin' && dando) {
-    setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: aplicar })
+  if (cur.cap === 'admin' && giving) {
+    setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: apply })
     return true
   }
-  await aplicar()
+  await apply()
   return true
 }
 
@@ -701,19 +745,19 @@ async function onKeyPairMode (term, st, key) {
   setInput(st, {
     label: i.newAccountLabel,
     hint: i.newAccountHint,
-    onSubmit: async (name) => {
+    onSubmit: async (raw) => {
       st.input = null
-      const nombre = name.trim()
-      if (!nombre) { flash(st, i.nameEmpty, 'danger'); return }
-      const r = await guard(term, st, i.creatingVault, () => vc.addProfile(nombre))
+      const name = raw.trim()
+      if (!name) { flash(st, i.nameEmpty, 'danger'); return }
+      const r = await guard(term, st, i.creatingVault, () => vc.addProfile(name))
       if (!r.ok) return
-      const nuevo = r.v?.id || (r.v?.profiles || []).find((p) => p.name === nombre)?.id
-      if (!nuevo) { flash(st, i.errNoReply, 'danger'); return }
-      const u = await guard(term, st, i.switchingVault, () => vc.useProfile(nuevo))
+      const created = r.v?.id || (r.v?.profiles || []).find((p) => p.name === name)?.id
+      if (!created) { flash(st, i.errNoReply, 'danger'); return }
+      const u = await guard(term, st, i.switchingVault, () => vc.useProfile(created))
       if (!u.ok) return
       await refreshAll(term, st)
-      flash(st, i.accountCreated(nombre))
-      await beginPairing(term, st, nuevo)
+      flash(st, i.accountCreated(name))
+      await beginPairing(term, st, created)
     },
     onCancel: () => { st.input = null }
   })
@@ -804,7 +848,7 @@ async function onKeySecrets (term, st, key) {
         onNo: () => { st.confirm = null }
       })
     } else {
-      const count = (st.secrets?.[cur.ns] || []).length
+      const count = (st.secrets?.ns?.[cur.ns] || []).length
       setConfirm(st, {
         text: i.removeScopeConfirm(cur.ns, count),
         onYes: async () => {
@@ -821,9 +865,71 @@ async function onKeySecrets (term, st, key) {
   return true
 }
 
+/**
+ * Teclas de las variables de UN aparato: agregar y quitar. Nada más — el aparato ya se
+ * eligió en Dispositivos, y de ahí se vuelve con Esc.
+ */
+async function onKeyDevVars (term, st, key) {
+  const i = L(st)
+  const rows = devVarRows(st, term.t)
+  const sels = rows.filter((r) => r.sel).map((r) => r.meta)
+  moveSel(st, key, 'devvars', sels.length)
+  const cur = sels[Math.min(st.sel.devvars || 0, sels.length - 1)]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  const target = st.varsFor
+
+  if (key.name === 'escape' || ch === 'b') {
+    st.screen = 'devices'; st.varsFor = null
+    await refreshDevices(term, st)
+    return true
+  }
+  if (key.name === 'f5') { await refreshSecrets(term, st); return true }
+  if (ch === 'n') { promptNewDeviceVariable(term, st); return true }
+  if ((ch === 'x' || key.name === 'delete') && cur && target) {
+    setConfirm(st, {
+      text: i.removeDevVarConfirm(target.deviceId, cur.key),
+      onYes: async () => {
+        st.confirm = null
+        const r = await guard(term, st, i.removingVar, () => vc.deleteDeviceSecret(target.pub, cur.key, activeId(st)))
+        if (r.ok) { flash(st, i.varRemoved); st.secrets = r.v; st.sel.devvars = Math.max(0, st.sel.devvars - 1) }
+      },
+      onNo: () => { st.confirm = null }
+    })
+  }
+  return true
+}
+
+function promptNewDeviceVariable (term, st) {
+  const i = L(st)
+  const target = st.varsFor
+  if (!target) return
+  setInput(st, {
+    label: i.keyLabel(target.deviceId),
+    hint: i.keyHint,
+    onSubmit: (key) => {
+      const kv = key.trim()
+      if (!KEY_RE.test(kv)) { flash(st, i.keyInvalid, 'danger'); return }
+      st.input = null
+      setInput(st, {
+        label: i.valueLabel(target.deviceId, kv),
+        mask: true,
+        hint: i.valueHint,
+        onSubmit: async (value) => {
+          st.input = null
+          if (!value) { flash(st, i.valueEmpty, 'danger'); return }
+          const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st)))
+          if (r.ok) { flash(st, i.varSaved(target.deviceId, kv)); st.secrets = r.v }
+        },
+        onCancel: () => { st.input = null }
+      })
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
 function promptNewVariable (term, st) {
   const i = L(st)
-  const existing = Object.keys(st.secrets || {})
+  const existing = Object.keys(st.secrets?.ns || {})
   setInput(st, {
     label: i.nsLabel,
     hint: existing.length ? i.nsHintExisting(existing.join(', ')) : i.nsHint,
@@ -900,13 +1006,15 @@ const helpSegs = (i, screen, st = {}) => {
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
     me: i.helpMe,
-    caps: i.helpCaps
+    caps: i.helpCaps,
+    devvars: i.helpDevVars
   }[screen] || []
   if (typeof segs !== 'function') return segs
   return segs({
-    pendiente: !!st.pending,
-    hayAparatos: (st.devices?.issued || []).length > 0,
-    haySecretos: Object.keys(st.secrets || {}).length > 0
+    pending: !!st.pending,
+    hasDevices: (st.devices?.issued || []).length > 0,
+    hasSecrets: Object.keys(st.secrets?.ns || {}).length > 0,
+    hasVars: devVarsOf(st, st.varsFor?.pub).length > 0
   })
 }
 
@@ -914,7 +1022,8 @@ const title = (i, screen) => ({
   profiles: i.titleProfiles,
   pairing: i.titlePairing,
   pairmode: i.titlePairMode,
-  caps: i.titleCaps
+  caps: i.titleCaps,
+  devvars: i.titleDevVars
 })[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
@@ -1001,6 +1110,7 @@ function render (term, st) {
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
   else if (st.screen === 'me') body = renderList(meRows(st, t), -1, contentH, cols, t, scrollRef)
   else if (st.screen === 'caps') body = renderList(capsRows(st, t), st.sel.caps || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'devvars') body = renderList(devVarRows(st, t), st.sel.devvars || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
@@ -1086,7 +1196,7 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0 },
     scroll: {},
     profiles: null,
     devices: null,
@@ -1155,6 +1265,7 @@ export async function runTui () {
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
       else if (st.screen === 'me') running = await onKeyMe(term, st, key)
       else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
+      else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
     }
@@ -1164,4 +1275,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, profileRows, deviceRows, secretRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }

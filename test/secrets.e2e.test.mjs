@@ -264,6 +264,85 @@ async function esperarA (fn, que, timeoutMs = 8000) {
   throw new Error('se agotó la espera de ' + que)
 }
 
+test('por aparato: se SUMAN a las del scope y le ganan al coincidir', async () => {
+  // El caso real: dos máquinas sirviendo el mismo namespace. La llave de la API es una
+  // sola (va en el scope) y el puerto es de cada una (va en el aparato). Si se llaman
+  // igual, manda la del aparato: lo específico gana, como un `.env` de máquina sobre el
+  // general.
+  const { readServiceIdentity } = await import('../lib/src/service.js')
+  const me = readServiceIdentity(svcDir).device.publickey
+
+  await vault.setDeviceSecret(me, 'PORT', '8443')
+  await vault.setDeviceSecret(me, 'TURN_KEY_ID', 'la-de-esta-maquina')
+
+  const secrets = await fetchSecretsFrom(svcDir)
+  assert.equal(secrets.PORT, '8443', 'lo suyo llega')
+  assert.equal(secrets.TURN_KEY_ID, 'la-de-esta-maquina', 'y le gana a la del scope')
+  assert.equal(secrets.TURN_KEY_API_TOKEN, 'rotada-2', 'lo demás del scope sigue llegando')
+
+  // La lista da NOMBRES y quién es cada aparato; valores, ninguno.
+  const dev = await vault.listDeviceSecrets()
+  const row = dev.find((x) => x.pub === me)
+  assert.deepEqual(row.keys.sort(), ['PORT', 'TURN_KEY_ID'])
+  assert.equal(row.cn, 'proxy', 'se dice de qué servicio es, que es lo que decide qué ns lee')
+  assert.ok(!JSON.stringify(dev).includes('la-de-esta-maquina'), 'nunca viajan los valores')
+
+  // Y quitarla devuelve la del scope: el cajón de abajo nunca se tocó.
+  await vault.deleteDeviceSecret(me, 'TURN_KEY_ID')
+  assert.equal((await fetchSecretsFrom(svcDir)).TURN_KEY_ID, 'rotada-1')
+})
+
+test('las variables de un aparato solo se le ponen a un SERVICIO', async () => {
+  // A un teléfono no se le pueden poner: no existe forma de que las lea (no pide bundle),
+  // así que aceptarlas sería guardar configuración muerta donde nadie la va a buscar.
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const forastero = await makeDeviceKey({ label: 'ajeno' })
+  await assert.rejects(
+    vault.setDeviceSecret(forastero.publickey, 'PORT', '1'),
+    /not a member/
+  )
+  await assert.rejects(
+    vault.setDeviceSecret(vault.identity.me.publickey, 'PORT', '1'),
+    /not a service/
+  )
+})
+
+test('la bóveda avisa a ESE aparato cuando cambia una variable suya', async () => {
+  const { watchSecretsChanges, readServiceIdentity } = await import('../lib/src/service.js')
+  const me = readServiceIdentity(svcDir).device.publickey
+  const avisos = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
+    onChange: (i) => avisos.push(i)
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 4000)) // dejar pasar avisos en vuelo de otras pruebas
+    avisos.length = 0
+    await vault.setDeviceSecret(me, 'PORT', '9443')
+    await esperarA(() => avisos.length > 0, 'el aviso de cambio del aparato')
+    assert.equal(avisos[0].ns, 'proxy', 'el aviso dice el namespace, que es lo que el agente sabe releer')
+  } finally { w.stop() }
+})
+
+test('quitar el aparato se lleva sus variables', async () => {
+  // Si se quedaran, serían configuración de una llave que ya no entra — y volverían a la
+  // vida el día que se enrole otro aparato con esa misma llave.
+  const { enrollService, readServiceIdentity } = await import('../lib/src/service.js')
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  const dir = tmp('svc-fugaz-')
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:fugaz'], label: 'servicio:fugaz', ttlMs: 60000 })
+  await enrollService({
+    qr: encodeInvite(qr), ns: 'fugaz', dir,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+  const pub = readServiceIdentity(dir).device.publickey
+  await vault.setDeviceSecret(pub, 'PORT', '1234')
+  assert.ok((await vault.listDeviceSecrets()).some((x) => x.pub === pub))
+
+  await vault.revokeDevice({ sub: pub })
+  assert.ok(!(await vault.listDeviceSecrets()).some((x) => x.pub === pub), 'se fueron con él')
+})
+
 test('el scope corta el acceso a otro namespace', async () => {
   vault.setSecret('geo', 'DB_PASSWORD', 'nope')
   await assert.rejects(

@@ -239,9 +239,12 @@ dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
-dotrino-vault secret set <ns> <CLAVE> <valor>   # guarda un secreto para ese servicio
-dotrino-vault secret rm  <ns> <CLAVE>           # borra un secreto
-dotrino-vault secret list                       # nombres de secretos (nunca valores)
+dotrino-vault secret set <ns> <CLAVE> <valor>   # variable del SCOPE: la comparten todos los
+                                                # aparatos que sirven ese namespace
+dotrino-vault secret rm  <ns> <CLAVE>           # borra una variable del scope
+dotrino-vault secret device set <ID> <CLAVE> <valor>   # variable de UN aparato: solo la lee él
+dotrino-vault secret device rm  <ID> <CLAVE>           # borra una variable de ese aparato
+dotrino-vault secret list                       # los dos cajones, por nombre (nunca valores)
 dotrino-vault logs                 # últimas 40 líneas del servicio (journalctl; solo donde hay systemd)
 dotrino-vault version              # versión instalada (status avisa si el daemon quedó viejo)
 ```
@@ -252,6 +255,23 @@ su compromiso— y lo aprende cuando lo tecleas. El que sí recibe `deviceId` es
 
 El `ns` de un secreto va en minúsculas (`[a-z0-9-]`, hasta 32), la clave en
 MAYÚSCULAS_CON_GUION_BAJO (hasta 64) y el valor es texto de hasta 8 KB.
+
+#### Las variables de entorno se ponen en DOS SITIOS
+
+| Dónde | Quién la lee | Para qué |
+|---|---|---|
+| **Por scope** — `secret set <ns> …` | todos los aparatos del perfil que sirven ese namespace | lo que es igual lo corra quien lo corra: la llave de la API, la URL de la base |
+| **Por aparato** — `secret device set <ID> …` | solo ese aparato | lo que cambia de máquina a máquina: el puerto, la URL pública, el nombre del nodo |
+
+Al servicio se le entrega **un solo bundle**: el del scope con el suyo **encima**. Si
+una variable está en los dos, **manda la del aparato** — lo específico gana, igual que
+un `.env` de máquina sobre el general. Así dos servidores sirven el mismo `ns` sin
+tener que partirlo en `proxy-1` y `proxy-2` para cambiar un puerto.
+
+Lo del aparato se indexa por su llave, que es la misma que firma la petición: no hay
+forma de pedir lo de otro. Solo se le pueden poner a un **servicio** (un miembro con
+nombre de servicio en el acta): un teléfono no pide bundles, así que guardárselas sería
+configuración muerta. Y **al quitar el aparato se van con él**.
 
 ### Interfaz de terminal (TUI)
 
@@ -285,7 +305,13 @@ dispositivos/variables que estás viendo:
      código que muestra el dispositivo, **rechazar** y **revocar**.
    - **Scopes y variables (secretos):** ver los scopes y sus variables (nunca los
      valores), **agregar** una variable (con su scope) y **quitar** una variable o un
-     scope entero.
+     scope entero. Son las **compartidas**: las de UN aparato se ponen en la otra
+     pestaña, y esta lo dice en vez de repetirlas.
+
+   Y dentro de **Dispositivos**, con `e` sobre un servicio, sus **variables propias**:
+   las que lee solo él y le ganan a las del scope que se llamen igual. Cada cajón se
+   administra donde ya elegiste lo que lo distingue — el namespace en su pestaña, el
+   aparato en la lista de aparatos.
 
 Al emparejar, la bóveda **pregunta primero a qué cuenta entra el dispositivo** y
 recién después muestra el QR, que además dice de qué cuenta salió. La pregunta ofrece

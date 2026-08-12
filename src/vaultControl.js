@@ -325,49 +325,91 @@ export async function getMe (profile) {
 
 
 // ---------------------------------------------------------------------------
-// Secretos: scopes (namespaces) y variables (claves)
+// Variables de entorno: DOS CAJONES
+//
+//   · por SCOPE   (`ns`)  — las comparten todos los aparatos del perfil que sirven
+//                           ese namespace.
+//   · por APARATO (`dev`) — solo las lee ese aparato, y PISAN a las del scope.
+//
+// Las dos listas viajan juntas en el mismo volcado (`secrets-list.json`), así que
+// todas estas funciones devuelven lo mismo: `{ ns, dev }`. Nunca hay valores en
+// ninguna de las dos: el daemon no los expone.
 // ---------------------------------------------------------------------------
 
-/** Scopes→[claves] del perfil (NUNCA los valores; el daemon no los expone). */
+/** Da forma al volcado: `{ ns: {scope:[claves]}, dev: [{pub,id,label,cn,keys,orphan}] }`. */
+const shapeSecrets = (d) => ({ ns: d?.ns || {}, dev: Array.isArray(d?.dev) ? d.dev : [] })
+
+/** Los dos cajones del perfil (NUNCA los valores). */
 export async function listSecrets (profile) {
   const { secrets } = await snapshot(profile)
   if (!secrets) throw coded('the daemon did not reply', 'NO_REPLY')
-  return secrets.ns || {}
+  return shapeSecrets(secrets)
 }
 
-/** Guarda/actualiza una variable. ns: [a-z0-9-]{1,32}. clave: [A-Z0-9_]{1,64}. */
-export async function setSecret (ns, key, value, profile) {
+/**
+ * Manda una orden de secreto y espera el volcado, comprobando que se aplicó de verdad:
+ * el daemon puede rechazarla (clave inválida, aparato que no es un servicio) y quedarse
+ * callado, y un «guardado» que no guardó nada es la peor forma de fallar en esto.
+ */
+async function secretOp (req, profile, check) {
   requireAlive() // el VALOR es secreto: no escribirlo si el daemon está caído
   rm(F.secretsList)
-  writeReq(F.secretReq, { op: 'set', ns, key, value }, profile)
+  writeReq(F.secretReq, req, profile)
   writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
-  if (!(d.ns?.[ns] || []).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
-  return d.ns
+  const out = shapeSecrets(d)
+  check(out)
+  return out
 }
 
-/** Borra una variable. Si era la última del scope, el scope desaparece. */
-export async function deleteSecret (ns, key, profile) {
-  requireAlive()
-  rm(F.secretsList)
-  writeReq(F.secretReq, { op: 'rm', ns, key }, profile)
-  writeReq(F.dumpReq, {}, profile)
-  signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
-  const d = await waitFor(F.secretsList)
-  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
-  if ((d.ns?.[ns] || []).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
-  return d.ns
+const keysOf = (out, pub) => (out.dev.find((x) => x.pub === pub)?.keys) || []
+
+/** Guarda/actualiza una variable de SCOPE. ns: [a-z0-9-]{1,32}. clave: [A-Z0-9_]{1,64}. */
+export function setSecret (ns, key, value, profile) {
+  return secretOp({ op: 'set', ns, key, value }, profile, (out) => {
+    if (!(out.ns[ns] || []).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+  })
+}
+
+/** Borra una variable de SCOPE. Si era la última, el scope desaparece. */
+export function deleteSecret (ns, key, profile) {
+  return secretOp({ op: 'rm', ns, key }, profile, (out) => {
+    if ((out.ns[ns] || []).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
+  })
 }
 
 /** Borra un scope entero (todas sus variables, una por una). */
 export async function deleteScope (ns, profile) {
-  const all = await listSecrets(profile)
-  const keys = all[ns] || []
-  let ns2 = all
-  for (const k of keys) ns2 = await deleteSecret(ns, k, profile)
-  return ns2
+  let out = await listSecrets(profile)
+  for (const k of out.ns[ns] || []) out = await deleteSecret(ns, k, profile)
+  return out
+}
+
+/**
+ * Guarda/actualiza una variable de UN APARATO, identificado por su llave (`pub`, la
+ * misma que trae el acta). Solo la lee ese aparato, y le gana a la del scope con el
+ * mismo nombre.
+ */
+export function setDeviceSecret (pub, key, value, profile) {
+  return secretOp({ op: 'dev-set', pub, key, value }, profile, (out) => {
+    if (!keysOf(out, pub).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+  })
+}
+
+/** Borra una variable de un aparato. */
+export function deleteDeviceSecret (pub, key, profile) {
+  return secretOp({ op: 'dev-rm', pub, key }, profile, (out) => {
+    if (keysOf(out, pub).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
+  })
+}
+
+/** Borra TODAS las variables de un aparato (una por una). */
+export async function deleteDeviceVars (pub, profile) {
+  let out = await listSecrets(profile)
+  for (const k of keysOf(out, pub)) out = await deleteDeviceSecret(pub, k, profile)
+  return out
 }
 
 // ---------------------------------------------------------------------------

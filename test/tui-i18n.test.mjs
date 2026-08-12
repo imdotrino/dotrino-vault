@@ -64,7 +64,7 @@ test('LAS TECLAS SON LAS MISMAS EN LOS DOS IDIOMAS (mnemónico inglés)', () => 
   const keysOf = (segs) => segs.map((s) => s.split(' ')[0])
   // Algunas barras son FUNCIÓN del estado (solo anuncian lo que se puede hacer ahora): se
   // resuelven con todo disponible, que es el catálogo completo de esa pantalla.
-  const TODO = { pendiente: true, hayAparatos: true, haySecretos: true }
+  const TODO = { pending: true, hasDevices: true, hasSecrets: true }
   const segsOf = (d, screen) => (typeof d[screen] === 'function' ? d[screen](TODO) : d[screen])
   for (const screen of ['helpProfiles', 'helpDevices', 'helpSecrets', 'helpPairing', 'downHelp']) {
     assert.deepEqual(keysOf(segsOf(dict('en'), screen)), keysOf(segsOf(dict('es'), screen)), `teclas distintas en ${screen}`)
@@ -173,7 +173,7 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
 
   for (const lang of ['es', 'en']) {
     const d = dict(lang)
-    const vacio = teclas(d.helpDevices({ pendiente: false, hayAparatos: false }))
+    const vacio = teclas(d.helpDevices({ pending: false, hasDevices: false }))
     assert.ok(!vacio.includes('a'), 'sin nadie esperando no se ofrece aprobar: ' + vacio)
     assert.ok(!vacio.includes('x'), 'ni rechazar: ' + vacio)
     assert.ok(!vacio.includes('v'), 'sin aparatos no se ofrece revocar: ' + vacio)
@@ -181,16 +181,16 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
     assert.ok(vacio.includes('p'), 'emparejar SIEMPRE se puede')
     assert.ok(vacio.includes('F5') && vacio.includes('q'), 'refrescar y salir también')
 
-    const conPendiente = teclas(d.helpDevices({ pendiente: true, hayAparatos: false }))
+    const conPendiente = teclas(d.helpDevices({ pending: true, hasDevices: false }))
     assert.ok(conPendiente.includes('a') && conPendiente.includes('x'), 'con alguien esperando: aprobar y rechazar')
     assert.ok(!conPendiente.includes('v'), 'pero seguir sin aparatos no habilita revocar')
 
-    const conAparatos = teclas(d.helpDevices({ pendiente: false, hayAparatos: true }))
+    const conAparatos = teclas(d.helpDevices({ pending: false, hasDevices: true }))
     assert.ok(conAparatos.includes('r') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
     assert.ok(!conAparatos.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
 
-    assert.ok(!teclas(d.helpSecrets({ haySecretos: false })).includes('x'), 'sin secretos no se ofrece quitar')
-    assert.ok(teclas(d.helpSecrets({ haySecretos: true })).includes('x'), 'con secretos sí')
+    assert.ok(!teclas(d.helpSecrets({ hasSecrets: false })).includes('x'), 'sin secretos no se ofrece quitar')
+    assert.ok(teclas(d.helpSecrets({ hasSecrets: true })).includes('x'), 'con secretos sí')
   }
 })
 
@@ -198,12 +198,12 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
 test('`r` significa RENOMBRAR en toda la TUI (una tecla, un significado)', () => {
   for (const lang of ['es', 'en']) {
     const d = dict(lang)
-    const enDispositivos = d.helpDevices({ hayAparatos: true }).find((x) => x.startsWith('r '))
+    const enDispositivos = d.helpDevices({ hasDevices: true }).find((x) => x.startsWith('r '))
     const enBovedas = d.helpProfiles.find((x) => x.startsWith('r '))
     assert.ok(/(renombrar|rename)/.test(enDispositivos), 'r = renombrar en Dispositivos: ' + enDispositivos)
     assert.ok(/(renombrar|rename)/.test(enBovedas), 'r = renombrar en Bóvedas: ' + enBovedas)
     // Y refrescar deja de comerse una letra: es F5, como en todas partes.
-    for (const segs of [d.helpDevices({ hayAparatos: true }), d.helpSecrets({ haySecretos: true }), d.helpMe]) {
+    for (const segs of [d.helpDevices({ hasDevices: true }), d.helpSecrets({ hasSecrets: true }), d.helpMe]) {
       const refrescar = segs.find((x) => /(refrescar|refresh)/.test(x))
       assert.ok(refrescar.startsWith('F5 '), 'refrescar es F5: ' + refrescar)
     }
