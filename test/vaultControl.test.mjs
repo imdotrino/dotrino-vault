@@ -53,13 +53,16 @@ function resolveTarget (req) {
 }
 const listSecretsOf = (t) => {
   const out = {}; const s = model.secrets[t] || {}
-  for (const ns of Object.keys(s)) out[ns] = Object.keys(s[ns])
+  for (const ns of Object.keys(s)) out[ns] = Object.entries(s[ns]).map(([key, e]) => ({ key, public: !!e.pub }))
   return out
 }
 // Volcado del cajón por aparato, con la forma que arma el daemon de verdad
 // (`vault.listDeviceSecrets()`): una fila por llave, con sus claves y sin valores.
 const listDevSecretsOf = (t) => Object.entries(model.devSecrets[t] || {})
-  .map(([pub, vars]) => ({ pub, id: 'ID-' + pub, label: '', cn: 'proxy', keys: Object.keys(vars), orphan: false }))
+  .map(([pub, vars]) => ({
+    pub, id: 'ID-' + pub, label: '', cn: 'proxy', orphan: false,
+    keys: Object.entries(vars).map(([key, e]) => ({ key, public: !!e.pub }))
+  }))
 function dumpProfiles (extra = {}) {
   writeAtomic('profiles-list.json', {
     current: model.current,
@@ -101,10 +104,18 @@ function onUsr2 () {
   const KEY_OK = (k) => /^[A-Z0-9_]{1,64}$/.test(k || '')
   if (sec?.op) {
     const t = resolveTarget(sec); model.secrets[t] ??= {}; model.devSecrets[t] ??= {}
-    if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { (model.secrets[t][sec.ns] ??= {})[sec.key] = sec.value }
+    // Como el store real: una variable guardada es { v, pub }, y sin decir nada conserva
+    // su visibilidad (o nace privada).
+    const put = (bag, k, key, value, isPublic) => {
+      const before = (bag[k] ??= {})[key]
+      bag[k][key] = { v: value, pub: isPublic === undefined ? !!before?.pub : !!isPublic }
+    }
+    if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { put(model.secrets[t], sec.ns, sec.key, sec.value, sec.public) }
     else if (sec.op === 'rm' && NS_OK(sec.ns)) { if (model.secrets[t][sec.ns]) { delete model.secrets[t][sec.ns][sec.key]; if (!Object.keys(model.secrets[t][sec.ns]).length) delete model.secrets[t][sec.ns] } }
-    else if (sec.op === 'dev-set' && sec.pub && KEY_OK(sec.key) && sec.value) { (model.devSecrets[t][sec.pub] ??= {})[sec.key] = sec.value }
+    else if (sec.op === 'dev-set' && sec.pub && KEY_OK(sec.key) && sec.value) { put(model.devSecrets[t], sec.pub, sec.key, sec.value, sec.public) }
     else if (sec.op === 'dev-rm' && sec.pub) { if (model.devSecrets[t][sec.pub]) { delete model.devSecrets[t][sec.pub][sec.key]; if (!Object.keys(model.devSecrets[t][sec.pub]).length) delete model.devSecrets[t][sec.pub] } }
+    else if (sec.op === 'vis' && NS_OK(sec.ns)) { const e = model.secrets[t][sec.ns]?.[sec.key]; if (e) e.pub = !!sec.public }
+    else if (sec.op === 'dev-vis' && sec.pub) { const e = model.devSecrets[t][sec.pub]?.[sec.key]; if (e) e.pub = !!sec.public }
   }
   const preq = readReq('profile-request.json')
   let extra = {}
@@ -187,18 +198,22 @@ test('candado: unlock exige la contraseña; rename bloqueado falla', async () =>
   assert.equal(d.profiles[0].protected, false)
 })
 
+/** Nombres de una lista de variables (que viaja como `{key, public}`), ordenados. */
+const keyNames = (list) => (list || []).map((x) => x.key).sort()
+
 test('por scope: set / list / delete variable / delete scope', async () => {
   await vc.setSecret('proxy', 'TURN_KEY_ID', 'abc123', 'p1')
   await vc.setSecret('proxy', 'TURN_SECRET', 'shhh', 'p1')
   await vc.setSecret('geo', 'API_TOKEN', 'zzz', 'p1')
 
   let out = await vc.listSecrets('p1')
-  assert.deepEqual(out.ns.proxy.sort(), ['TURN_KEY_ID', 'TURN_SECRET'])
-  assert.deepEqual(out.ns.geo, ['API_TOKEN'])
+  assert.deepEqual(keyNames(out.ns.proxy), ['TURN_KEY_ID', 'TURN_SECRET'])
+  assert.deepEqual(keyNames(out.ns.geo), ['API_TOKEN'])
+  assert.ok(out.ns.geo.every((v) => v.public === false), 'nacen privadas')
   assert.deepEqual(out.dev, [], 'el cajón por aparato viaja siempre, aunque esté vacío')
 
   out = await vc.deleteSecret('proxy', 'TURN_KEY_ID', 'p1')
-  assert.deepEqual(out.ns.proxy, ['TURN_SECRET'])
+  assert.deepEqual(keyNames(out.ns.proxy), ['TURN_SECRET'])
 
   out = await vc.deleteScope('proxy', 'p1')
   assert.equal(out.ns.proxy, undefined)
@@ -214,20 +229,47 @@ test('por aparato: son OTRO cajón, no tocan el del scope', async () => {
   await vc.setDeviceSecret(pub, 'PUBLIC_URL', 'https://uno.example', 'p1')
 
   let out = await vc.listSecrets('p1')
-  assert.deepEqual(out.ns.proxy, ['TURN_KEY_ID'], 'lo del scope sigue donde estaba')
-  const fila = out.dev.find((x) => x.pub === pub)
-  assert.deepEqual(fila.keys.sort(), ['PORT', 'PUBLIC_URL'])
-  assert.equal(fila.cn, 'proxy')
+  assert.deepEqual(keyNames(out.ns.proxy), ['TURN_KEY_ID'], 'lo del scope sigue donde estaba')
+  const row = out.dev.find((x) => x.pub === pub)
+  assert.deepEqual(keyNames(row.keys), ['PORT', 'PUBLIC_URL'])
+  assert.equal(row.cn, 'proxy')
 
   out = await vc.deleteDeviceSecret(pub, 'PORT', 'p1')
-  assert.deepEqual(out.dev.find((x) => x.pub === pub).keys, ['PUBLIC_URL'])
+  assert.deepEqual(keyNames(out.dev.find((x) => x.pub === pub).keys), ['PUBLIC_URL'])
 
   // Quitarlas todas hace desaparecer al aparato de la lista, no lo deja vacío.
   out = await vc.deleteDeviceVars(pub, 'p1')
   assert.equal(out.dev.find((x) => x.pub === pub), undefined)
-  assert.deepEqual(out.ns.proxy, ['TURN_KEY_ID'], 'y el scope ni se entera')
+  assert.deepEqual(keyNames(out.ns.proxy), ['TURN_KEY_ID'], 'y el scope ni se entera')
 
   await assert.rejects(() => vc.setDeviceSecret(pub, 'minusculas', 'v', 'p1').catch((e) => { throw e }))
+})
+
+test('visibilidad: se marca al crear, se cambia sin tocar el valor, y no se contagia', async () => {
+  // Pública o privada dice si el VALOR puede salir de la máquina de la bóveda hacia la
+  // consola remota. Nada de esto viaja en las listas: solo la marca.
+  const pub = 'PUB-DEL-PROXY-2'
+  await vc.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', 'p1', true)
+  await vc.setSecret('web', 'API_KEY', 'sk-secreta', 'p1')
+
+  let out = await vc.listSecrets('p1')
+  const varOf = (ns, key) => out.ns[ns].find((x) => x.key === key)
+  assert.equal(varOf('web', 'PUBLIC_URL').public, true)
+  assert.equal(varOf('web', 'API_KEY').public, false, 'sin decir nada, privada')
+
+  // Rotar el valor NO cambia quién puede verlo (o rotar una llave la expondría sin querer).
+  out = await vc.setSecret('web', 'PUBLIC_URL', 'https://otro.com', 'p1')
+  assert.equal(varOf('web', 'PUBLIC_URL').public, true)
+
+  out = await vc.setSecretVisibility('web', 'PUBLIC_URL', false, 'p1')
+  assert.equal(varOf('web', 'PUBLIC_URL').public, false)
+
+  await vc.setDeviceSecret(pub, 'PORT', '8443', 'p1', true)
+  out = await vc.listSecrets('p1')
+  const row = out.dev.find((x) => x.pub === pub)
+  assert.equal(row.keys.find((x) => x.key === 'PORT').public, true)
+  out = await vc.setDeviceSecretVisibility(pub, 'PORT', false, 'p1')
+  assert.equal(out.dev.find((x) => x.pub === pub).keys.find((x) => x.key === 'PORT').public, false)
 })
 
 test('dispositivos: pair / pending / approve / revoke', async () => {

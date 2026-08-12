@@ -31,10 +31,46 @@ y con esta división:
 | iniciar un emparejamiento (mostrar el QR) | traspasar el mando (`handover`) |
 | **aprobar** / rechazar un emparejamiento | conceder o quitar `admin` |
 | **revocar** un miembro | borrar un perfil · candado (`lock`/`unlock`) |
-| — | secretos de servicio (`secret set/get/list`) |
+| **variables de entorno**: crearlas, darles valor, y ver el valor de las **públicas** | **el valor de una variable privada** · **borrar** variables |
 
 La regla que ordena la tabla: **un admin puede admitir y expulsar, pero no puede
-reescribir quién manda ni ascender a nadie.** Con eso, un teléfono robado y con `admin`
+reescribir quién manda ni ascender a nadie.**
+
+### Las variables de entorno, y por qué esta fila existe (2026-08-12)
+
+La versión original de este documento decía que **nada** de `secrets.json` cruzaba, y lo
+razonaba así: *«sacarlos hacia un navegador es mover el dominio de confianza entero»*. La
+objeción sigue siendo correcta —por eso la respuesta no fue abrir el archivo, sino
+**partir las variables en dos**:
+
+| | **Pública** | **Privada** (lo que se nace) |
+|---|---|---|
+| La lee el servicio dueño | sí | sí |
+| Su VALOR sale de la máquina de la bóveda | sí, hacia la consola | **nunca** |
+| Se le puede poner un valor nuevo desde la consola | sí | sí, **a ciegas** |
+
+Lo que cruza, entonces, no es «los secretos»: es lo que su dueño **marcó** como mostrable,
+una variable a la vez y con la marca puesta a mano en la máquina de la bóveda (o al
+crearla desde la consola). El resto se puede **rotar sin verse**, que es justo lo que hace
+falta cuando estás lejos y hay que cambiar una llave.
+
+Tres cosas sostienen la fila:
+
+1. **Se nace privada.** Actualizar el binario no vuelve visible nada de lo que ya había
+   (`secretsStore.js`, migración v2→v3), y rotar un valor **conserva** la visibilidad: si
+   no, exponer un secreto sería un descuido de un `set` en vez de una decisión.
+2. **Lo que sale, sale cifrado.** La lista entera —valores, nombres y qué servicios corres—
+   viaja sellada con la clave de contenido del perfil, la misma del `store`: el proxy
+   transporta y no ve nada. Y el valor que se manda a guardar viaja igual; un `var.set`
+   con el valor en claro se **rechaza**, no se «arregla».
+3. **Borrar no se delega.** Un aparato robado con `admin` puede escribir configuración
+   —daño acotado y reversible, se le revoca— pero no puede dejar a tus servicios sin
+   ninguna. Escribir, además, **avisa a todos los miembros** (§5).
+
+El riesgo que sí se acepta, dicho en voz alta: un admin comprometido puede **envenenar**
+la configuración de un servicio (apuntar una URL a otro sitio, meter una llave inservible).
+Se detecta por el aviso firmado y por la bitácora —cada `var.set` queda con el aparato que
+lo pidió—, y se corta revocando ese aparato. Con eso, un teléfono robado y con `admin`
 hace daño acotado y **reversible desde el PC** (se le revoca); sin esa frontera, podría
 traspasarse el mando y dejarte fuera de tu propia cuenta, que es irreversible por diseño
 (no hay recuperación ni frase de respaldo).
@@ -87,6 +123,8 @@ ventana de frescura ±5 min. Responde `vault.admin.result`.
 | `reject` | `{ deviceId, ts, nonce }` | `desk.reject(deviceId)` |
 | `revoke` | `{ certNonce, ts, nonce }` | `desk.revoke(certNonce)` |
 | `audit` | `{ limit?, ts, nonce }` | últimas N entradas de la bitácora (tope 500) |
+| `vars` | `{ ts, nonce }` | los dos cajones de variables **sellados**: nombres y visibilidad de todas, y el **valor solo de las públicas** |
+| `var.set` | `{ ns \| pub, key, enc, public?, ts, nonce }` | crea o cambia una variable. `enc` es el valor **sellado** con la clave de contenido del perfil; sin él se rechaza. Exactamente un destino: un scope (`ns`) o un aparato (`pub`) |
 
 Tres cosas que **no** son opcionales:
 
@@ -102,10 +140,10 @@ Tres cosas que **no** son opcionales:
    no distingue quién aprobó porque solo podía ser el PC.
 
 Lo que **no** se expone, y conviene dejarlo escrito para que nadie lo agregue «por
-simetría»: `caps`, `handover`, borrado de perfil, `lock`/`unlock` y **cualquier cosa de
-`secrets.json`**. Ese archivo son tokens de producción cifrados en reposo con clave ligada
-a la máquina (`src/secretsStore.js`): sacarlos hacia un navegador es mover el dominio de
-confianza entero.
+simetría»: `caps`, `handover`, borrado de perfil, `lock`/`unlock`, **el valor de una
+variable privada** y **borrar** variables. `secrets.json` son tokens de producción cifrados
+en reposo con clave ligada a la máquina (`src/secretsStore.js`); lo único que sale de ahí
+es el valor de las marcadas como públicas, y sellado (§2).
 
 ## 5. F3 — Avisar a todo el mundo (esto es parte del plan, no un extra)
 

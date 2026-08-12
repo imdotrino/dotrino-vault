@@ -169,6 +169,12 @@ const es = {
   valueEmpty: 'El valor no puede estar vacío',
   savingVar: 'Guardando variable…',
   varSaved: (ns, key) => `Guardado ${ns}/${key}`,
+  varPublic: 'pública',
+  newVarPublicAsk: '¿Que su valor se pueda VER desde la consola remota? (las demás no salen de esta máquina)',
+  makePublicConfirm: '¿Dejar que su valor se vea desde la consola remota?',
+  changingVisibility: 'Cambiando visibilidad…',
+  nowPublic: 'Ahora su valor se puede ver desde la consola remota',
+  nowPrivate: 'Ahora su valor no sale de esta máquina',
 
   // variables de UN aparato (Dispositivos → tecla e). Las del scope las comparten todos
   // los aparatos que sirven ese namespace; estas las lee solo él, y le ganan.
@@ -227,12 +233,12 @@ const es = {
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable',
-    ...(hasSecrets ? ['x quitar (variable/scope)'] : []),
+    ...(hasSecrets ? ['t pública/privada', 'x quitar (variable/scope)'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   helpDevVars: ({ hasVars } = {}) => [
     '↑↓', 'n nueva variable',
-    ...(hasVars ? ['x quitar'] : []),
+    ...(hasVars ? ['t pública/privada', 'x quitar'] : []),
     'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'
   ],
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
@@ -409,6 +415,12 @@ const en = {
   valueEmpty: 'The value cannot be empty',
   savingVar: 'Saving variable…',
   varSaved: (ns, key) => `Saved ${ns}/${key}`,
+  varPublic: 'public',
+  newVarPublicAsk: 'Let its value be SEEN from the remote console? (the rest never leave this machine)',
+  makePublicConfirm: 'Let its value be seen from the remote console?',
+  changingVisibility: 'Changing visibility…',
+  nowPublic: 'Its value can now be seen from the remote console',
+  nowPrivate: 'Its value no longer leaves this machine',
 
   // variables de UN aparato (Dispositivos → tecla e)
   titleDevVars: 'Device variables',
@@ -455,12 +467,12 @@ const en = {
   deviceRenamed: (n) => `Now called "${n}"`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ tab', '↑↓', 'n new variable',
-    ...(hasSecrets ? ['x remove (variable/scope)'] : []),
+    ...(hasSecrets ? ['t public/private', 'x remove (variable/scope)'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   helpDevVars: ({ hasVars } = {}) => [
     '↑↓', 'n new variable',
-    ...(hasVars ? ['x remove'] : []),
+    ...(hasVars ? ['t public/private', 'x remove'] : []),
     'F5 refresh', 'Esc devices', 'l Español', 'q quit'
   ],
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],

@@ -329,15 +329,24 @@ function secretRows (st, t) {
   if (!names.length) return [{ text: t.muted(i.noScopes), sel: false }, ...footer]
   for (const n of names) {
     rows.push({ text: t.accent(` ▸ ${n}`) + t.muted(i.scopeOf(n)), sel: true, meta: { ns: n, key: null } })
-    for (const k of ns[n].slice().sort()) {
-      rows.push({ text: `      ${k}   ${t.muted('••••••')}`, sel: true, meta: { ns: n, key: k } })
+    for (const k of sortByKey(ns[n])) {
+      rows.push({ text: varLine(k, t, i), sel: true, meta: { ns: n, key: k.key, public: k.public } })
     }
   }
   return [...rows, ...footer]
 }
 
-/** Las claves guardadas para UN aparato (`pub`), o `[]`. */
+/** Las claves guardadas para UN aparato (`pub`), o `[]`. Cada una es `{key, public}`. */
 const devVarsOf = (st, pub) => (st.secrets?.dev || []).find((x) => x.pub === pub)?.keys || []
+
+const sortByKey = (list) => (list || []).slice().sort((a, b) => a.key.localeCompare(b.key))
+
+/**
+ * Una variable: su nombre, el valor tapado y —si es pública— el aviso de que ese valor
+ * SALE de esta máquina cuando la consola remota lo pide. Es un dato operativo, no un
+ * adorno: es la diferencia entre un secreto que solo vive aquí y uno que viaja.
+ */
+const varLine = (v, t, i) => `      ${v.key}   ${t.muted('••••••')}${v.public ? '   ' + t.warn(i.varPublic) : ''}`
 
 /**
  * Las variables de UN aparato. Se entra desde Dispositivos con `e`, ya con el aparato
@@ -347,7 +356,7 @@ function devVarRows (st, t) {
   const i = L(st)
   const target = st.varsFor
   if (!target) return [{ text: t.muted(i.loading), sel: false }]
-  const keys = devVarsOf(st, target.pub).slice().sort()
+  const keys = sortByKey(devVarsOf(st, target.pub))
   const rows = [
     { text: ' ' + t.bold(i.devVarsFor(target.deviceId, target.label || '')), sel: false },
     // Dato, no explicación: qué servicio es este aparato es lo que decide qué namespace
@@ -356,7 +365,7 @@ function devVarRows (st, t) {
     { text: '', sel: false }
   ]
   if (!keys.length) rows.push({ text: t.muted(' ' + i.noDevVars), sel: false })
-  for (const k of keys) rows.push({ text: `   ${k}   ${t.muted('••••••')}`, sel: true, meta: { key: k } })
+  for (const k of keys) rows.push({ text: varLine(k, t, i), sel: true, meta: { key: k.key, public: k.public } })
   return rows
 }
 
@@ -859,10 +868,26 @@ async function onKeySecrets (term, st, key) {
         onNo: () => { st.confirm = null }
       })
     }
+  } else if (ch === 't' && cur?.key) {
+    await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st)))
   } else if (key.name === 'f5') {
     await refreshSecrets(term, st)
   }
   return true
+}
+
+/**
+ * Hacer pública una variable es dejar que su valor SALGA de esta máquina, así que se
+ * pregunta; volverla privada no expone nada y se aplica directo.
+ */
+async function toggleVisibility (term, st, wasPublic, apply) {
+  const i = L(st)
+  const run = async () => {
+    const r = await guard(term, st, i.changingVisibility, apply)
+    if (r.ok) { flash(st, wasPublic ? i.nowPrivate : i.nowPublic); st.secrets = r.v }
+  }
+  if (wasPublic) return run()
+  setConfirm(st, { text: i.makePublicConfirm, onYes: run, onNo: () => { st.confirm = null } })
 }
 
 /**
@@ -885,6 +910,10 @@ async function onKeyDevVars (term, st, key) {
   }
   if (key.name === 'f5') { await refreshSecrets(term, st); return true }
   if (ch === 'n') { promptNewDeviceVariable(term, st); return true }
+  if (ch === 't' && cur && target) {
+    await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st)))
+    return true
+  }
   if ((ch === 'x' || key.name === 'delete') && cur && target) {
     setConfirm(st, {
       text: i.removeDevVarConfirm(target.deviceId, cur.key),
@@ -897,6 +926,21 @@ async function onKeyDevVars (term, st, key) {
     })
   }
   return true
+}
+
+/**
+ * Al crear una variable se PREGUNTA si su valor puede salir de esta máquina. Se pregunta
+ * al crearla, y no después, porque es cuando quien la escribe sabe qué es: un puerto se
+ * puede enseñar, una llave de producción no. La respuesta por defecto —Enter, o `n`— es
+ * la privada.
+ */
+function askVisibility (term, st, done) {
+  const i = L(st)
+  setConfirm(st, {
+    text: i.newVarPublicAsk,
+    onYes: () => { st.confirm = null; done(true) },
+    onNo: () => { st.confirm = null; done(false) }
+  })
 }
 
 function promptNewDeviceVariable (term, st) {
@@ -917,8 +961,10 @@ function promptNewDeviceVariable (term, st) {
         onSubmit: async (value) => {
           st.input = null
           if (!value) { flash(st, i.valueEmpty, 'danger'); return }
-          const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st)))
-          if (r.ok) { flash(st, i.varSaved(target.deviceId, kv)); st.secrets = r.v }
+          askVisibility(term, st, async (isPublic) => {
+            const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st), isPublic))
+            if (r.ok) { flash(st, i.varSaved(target.deviceId, kv)); st.secrets = r.v }
+          })
         },
         onCancel: () => { st.input = null }
       })
@@ -951,8 +997,10 @@ function promptNewVariable (term, st) {
             onSubmit: async (value) => {
               st.input = null
               if (!value) { flash(st, i.valueEmpty, 'danger'); return }
-              const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsv, kv, value, activeId(st)))
-              if (r.ok) { flash(st, i.varSaved(nsv, kv)); st.secrets = r.v }
+              askVisibility(term, st, async (isPublic) => {
+                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsv, kv, value, activeId(st), isPublic))
+                if (r.ok) { flash(st, i.varSaved(nsv, kv)); st.secrets = r.v }
+              })
             },
             onCancel: () => { st.input = null }
           })

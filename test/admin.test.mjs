@@ -26,6 +26,19 @@ function fakeDesk () {
   }
 }
 
+/**
+ * Mostrador de VARIABLES de mentira. El de verdad (la bóveda) es quien sella y quien
+ * decide qué valor sale; acá solo se comprueba el enrutado y el límite.
+ */
+function fakeVars () {
+  const calls = []
+  return {
+    calls,
+    list: async (a) => { calls.push(['list', a]); return { enc: { epk: 'EPK', iv: 'IV', ct: 'CT' } } },
+    set: async (a) => { calls.push(['set', a]); return { ok: true, key: a.key } }
+  }
+}
+
 /** Monta la consola; por defecto el cert autoriza (`ok: true`). */
 function mount ({ verify = async () => ({ ok: true, device: 'DPUB' }), ...rest } = {}) {
   const desk = fakeDesk()
@@ -160,4 +173,78 @@ test('la bitácora se lee acotada y con el actor en cada acción', async () => {
   await admin.handle({ op: 'pair', nonce: nonce('i') })
   const pair = audits.find(([op]) => op === 'admin.pair')
   assert.equal(pair[1].by, 'AD01-AD01', 'queda escrito qué dispositivo lo pidió')
+})
+
+// --------------------------- variables de entorno ---------------------------
+
+test('sin mostrador de variables, la consola lo dice en vez de fingir que guardó', async () => {
+  const { admin } = mount()
+  for (const op of ['vars', 'var.set']) {
+    const r = await admin.handle({ op, ns: 'proxy', key: 'PORT', enc: { ct: 'x' }, nonce: nonce(op.padEnd(32, 'z')) })
+    assert.equal(r.ok, false)
+    assert.match(r.error, /does not serve environment variables/)
+  }
+})
+
+test('ver variables: viene lo que da la bóveda, sellado, y queda quién lo pidió', async () => {
+  const vars = fakeVars()
+  const { admin, audits } = mount({ vars })
+
+  const r = await admin.handle({ op: 'vars', nonce: nonce('v') })
+
+  assert.equal(r.ok, true)
+  assert.ok(r.result.enc.ct, 'la lista viaja en un sobre: el proxy no ve ni los nombres')
+  assert.equal(vars.calls[0][1].by, 'AD01-AD01')
+  assert.ok(audits.some(([op, i]) => op === 'admin.vars' && i.by === 'AD01-AD01'))
+})
+
+test('poner valor: UN destino, y el valor SIEMPRE dentro del sobre', async () => {
+  const vars = fakeVars()
+  const { admin } = mount({ vars })
+
+  // Sin destino, o con los dos, no se adivina dónde acaba la variable.
+  const sinDestino = await admin.handle({ op: 'var.set', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('1') })
+  assert.match(sinDestino.error, /exactly one target/)
+  const dosDestinos = await admin.handle({ op: 'var.set', ns: 'proxy', pub: 'PUB', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('2') })
+  assert.match(dosDestinos.error, /exactly one target/)
+
+  // Un valor en claro no se acepta: no es algo que se pueda «arreglar» guardándolo igual.
+  const enClaro = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PORT', value: '8443', nonce: nonce('3') })
+  assert.match(enClaro.error, /sealed with the profile content key/)
+
+  const sinClave = await admin.handle({ op: 'var.set', ns: 'proxy', enc: { ct: 'x' }, nonce: nonce('4') })
+  assert.match(sinClave.error, /needs a key/)
+
+  assert.deepEqual(vars.calls, [], 'nada de eso llegó a la bóveda')
+})
+
+test('poner valor llega al cajón que toca, con su visibilidad, y se AVISA a todos', async () => {
+  const vars = fakeVars()
+  const { admin, notices, audits } = mount({ vars })
+
+  const enScope = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PUBLIC_URL', enc: { ct: 'x' }, public: true, nonce: nonce('5') })
+  assert.equal(enScope.ok, true)
+  assert.deepEqual(
+    { ns: vars.calls[0][1].ns, pub: vars.calls[0][1].pub, key: vars.calls[0][1].key, public: vars.calls[0][1].public },
+    { ns: 'proxy', pub: null, key: 'PUBLIC_URL', public: true }
+  )
+
+  await admin.handle({ op: 'var.set', pub: 'PUB-DEL-PROXY', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('6') })
+  const alAparato = vars.calls[1][1]
+  assert.equal(alAparato.ns, null)
+  assert.equal(alAparato.pub, 'PUB-DEL-PROXY')
+  assert.equal(alAparato.public, undefined, 'sin decir nada, la bóveda conserva la visibilidad')
+
+  // Cambiar la configuración de un servicio a distancia no puede ser invisible.
+  assert.deepEqual(notices.map(([ev]) => ev), ['vars', 'vars'])
+  assert.equal(notices[0][1].by, 'AD01-AD01')
+  assert.ok(audits.some(([op, i]) => op === 'admin.var.set' && i.key === 'PUBLIC_URL' && i.ns === 'proxy'))
+})
+
+test('BORRAR variables no existe a distancia (un aparato robado no te deja sin configuración)', async () => {
+  const { admin } = mount({ vars: fakeVars() })
+  for (const op of ['var.rm', 'var.delete', 'vars.rm']) {
+    const r = await admin.handle({ op, ns: 'proxy', key: 'PORT', nonce: nonce(op.padEnd(32, 'y')) })
+    assert.match(r.error, /invalid operation/)
+  }
 })

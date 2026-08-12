@@ -336,7 +336,11 @@ export async function getMe (profile) {
 // ninguna de las dos: el daemon no los expone.
 // ---------------------------------------------------------------------------
 
-/** Da forma al volcado: `{ ns: {scope:[claves]}, dev: [{pub,id,label,cn,keys,orphan}] }`. */
+/**
+ * Da forma al volcado: `{ ns: {<scope>: [{key, public}]}, dev: [{pub,id,label,cn,keys,orphan}] }`.
+ * `public` dice si el VALOR puede salir de la máquina de la bóveda hacia la consola remota;
+ * el valor en sí no está aquí ni en ningún volcado.
+ */
 const shapeSecrets = (d) => ({ ns: d?.ns || {}, dev: Array.isArray(d?.dev) ? d.dev : [] })
 
 /** Los dos cajones del perfil (NUNCA los valores). */
@@ -365,25 +369,48 @@ async function secretOp (req, profile, check) {
 }
 
 const keysOf = (out, pub) => (out.dev.find((x) => x.pub === pub)?.keys) || []
+/** ¿Está esa clave en la lista? Las listas traen `{key, public}`, nunca el valor. */
+const has = (list, key) => (list || []).some((x) => x.key === key)
+const visibilityOf = (list, key) => !!(list || []).find((x) => x.key === key)?.public
 
-/** Guarda/actualiza una variable de SCOPE. ns: [a-z0-9-]{1,32}. clave: [A-Z0-9_]{1,64}. */
-export function setSecret (ns, key, value, profile) {
-  return secretOp({ op: 'set', ns, key, value }, profile, (out) => {
-    if (!(out.ns[ns] || []).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+/**
+ * Guarda/actualiza una variable de SCOPE. ns: [a-z0-9-]{1,32}. clave: [A-Z0-9_]{1,64}.
+ * `isPublic` opcional: sin decir nada conserva la visibilidad que ya tenía (y una nueva
+ * nace privada, o sea que su valor no sale de la máquina de la bóveda).
+ */
+export function setSecret (ns, key, value, profile, isPublic) {
+  return secretOp({ op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
+    if (!has(out.ns[ns], key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
 /** Borra una variable de SCOPE. Si era la última, el scope desaparece. */
 export function deleteSecret (ns, key, profile) {
   return secretOp({ op: 'rm', ns, key }, profile, (out) => {
-    if ((out.ns[ns] || []).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
+    if (has(out.ns[ns], key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
+  })
+}
+
+/**
+ * Cambia SOLO quién puede ver el valor: `public` deja que la consola remota lo vea,
+ * `private` lo encierra en esta máquina. No toca el valor (ni hace falta conocerlo).
+ */
+export function setSecretVisibility (ns, key, isPublic, profile) {
+  return secretOp({ op: 'vis', ns, key, public: !!isPublic }, profile, (out) => {
+    if (visibilityOf(out.ns[ns], key) !== !!isPublic) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+  })
+}
+
+export function setDeviceSecretVisibility (pub, key, isPublic, profile) {
+  return secretOp({ op: 'dev-vis', pub, key, public: !!isPublic }, profile, (out) => {
+    if (visibilityOf(keysOf(out, pub), key) !== !!isPublic) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
 /** Borra un scope entero (todas sus variables, una por una). */
 export async function deleteScope (ns, profile) {
   let out = await listSecrets(profile)
-  for (const k of out.ns[ns] || []) out = await deleteSecret(ns, k, profile)
+  for (const { key } of out.ns[ns] || []) out = await deleteSecret(ns, key, profile)
   return out
 }
 
@@ -392,23 +419,23 @@ export async function deleteScope (ns, profile) {
  * misma que trae el acta). Solo la lee ese aparato, y le gana a la del scope con el
  * mismo nombre.
  */
-export function setDeviceSecret (pub, key, value, profile) {
-  return secretOp({ op: 'dev-set', pub, key, value }, profile, (out) => {
-    if (!keysOf(out, pub).includes(key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+export function setDeviceSecret (pub, key, value, profile, isPublic) {
+  return secretOp({ op: 'dev-set', pub, key, value, ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
+    if (!has(keysOf(out, pub), key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
 /** Borra una variable de un aparato. */
 export function deleteDeviceSecret (pub, key, profile) {
   return secretOp({ op: 'dev-rm', pub, key }, profile, (out) => {
-    if (keysOf(out, pub).includes(key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
+    if (has(keysOf(out, pub), key)) throw coded('the daemon did not delete the variable (check the service logs)', 'NOT_DELETED')
   })
 }
 
 /** Borra TODAS las variables de un aparato (una por una). */
 export async function deleteDeviceVars (pub, profile) {
   let out = await listSecrets(profile)
-  for (const k of keysOf(out, pub)) out = await deleteDeviceSecret(pub, k, profile)
+  for (const { key } of keysOf(out, pub)) out = await deleteDeviceSecret(pub, key, profile)
   return out
 }
 

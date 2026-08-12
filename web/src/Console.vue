@@ -135,6 +135,25 @@ const T = {
     adm_pending: 'Un dispositivo quiere conectarse',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
+    // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
+    // servicio» ni «namespace», se dice qué es y quién lo puede ver.
+    var_t: 'Variables de tus aplicaciones',
+    var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Desde aquí puedes ver el valor de las que marcaste como visibles y darle un valor nuevo a cualquiera; el valor de las demás no sale de la computadora de tu bóveda, ni siquiera para esta pantalla.',
+    var_shared: 'la usan todas las máquinas',
+    var_only_this: 'solo esta máquina',
+    var_private: 'no se muestra aquí',
+    var_change: 'Cambiar valor',
+    var_new_value: (k) => `Valor nuevo de ${k}`,
+    var_save: 'Guardar',
+    var_where: '¿Dónde?',
+    var_in_scope: (ns) => `En «${ns}» (todas las máquinas)`,
+    var_in_device: (d) => `Solo en ${d}`,
+    var_new_scope: 'En un grupo nuevo…',
+    var_scope_ph: 'nombre del grupo (p. ej. proxy)',
+    var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
+    var_value_ph: 'valor',
+    var_public_ask: 'Que su valor se pueda ver desde aquí',
+    var_add: 'Agregar',
     adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
   },
@@ -227,6 +246,23 @@ const T = {
     adm_pending: 'A device wants to connect',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
+    var_t: 'Your apps\u2019 variables',
+    var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. From here you can see the value of the ones you marked as visible and give any of them a new value; the value of the rest never leaves your vault\u2019s computer, not even for this screen.',
+    var_shared: 'used by every machine',
+    var_only_this: 'this machine only',
+    var_private: 'not shown here',
+    var_change: 'Change value',
+    var_new_value: (k) => `New value for ${k}`,
+    var_save: 'Save',
+    var_where: 'Where?',
+    var_in_scope: (ns) => `In \u201c${ns}\u201d (every machine)`,
+    var_in_device: (d) => `Only on ${d}`,
+    var_new_scope: 'In a new group\u2026',
+    var_scope_ph: 'group name (e.g. proxy)',
+    var_key_ph: 'VARIABLE_NAME',
+    var_value_ph: 'value',
+    var_public_ask: 'Let its value be seen from here',
+    var_add: 'Add',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
@@ -752,7 +788,64 @@ async function refreshAdmin () {
     if (!canAdmin.value) return
     const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
     admPending.value = p.pending || []
+    // Una vez, al entrar: `refreshAdmin` también corre cada 2 s mientras hay un
+    // emparejamiento abierto, y no hay por qué bajar la configuración entera en cada vuelta.
+    if (!vars.value) await loadVars().catch(() => { vars.value = null })
   } catch (_) { canAdmin.value = false }
+}
+
+// ---------- VARIABLES DE ENTORNO (docs/consola-remota.md) ----------
+// Lo que se puede ver de una variable lo decide su dueño en la bóveda: de una PÚBLICA
+// llega el valor, de una PRIVADA solo el nombre. Poner un valor nuevo se puede en las dos
+// —rotar una llave que no puedes leer es justo para lo que sirve—, y borrar no existe.
+// Todo viaja dentro de un sobre cifrado con la clave de contenido del perfil: el proxy
+// transporta y no ve nada, ni siquiera los nombres.
+
+const vars = ref(null)                       // { ns: {<scope>: [...]}, dev: [...] }
+const newVar = ref({ target: '', ns: '', key: '', value: '', public: false })
+const editing = ref(null)                    // { target, key } de la que se está cambiando
+const editValue = ref('')
+
+/** Destino de una variable: `ns:<scope>` o `dev:<pubkey>`. */
+const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.slice(3) })
+
+async function loadVars () {
+  const r = await id.value.vaultAdmin('vars')
+  vars.value = JSON.parse(await id.value.openContent(r.enc))
+}
+
+const scopeNames = computed(() => Object.keys(vars.value?.ns || {}).sort())
+/** Los aparatos a los que SE LES PUEDE poner una variable: los servicios (los que las leen). */
+const varDevices = computed(() => (members.value || []).filter((m) => m.cn))
+
+/** Guarda un valor. `isPublic` sin definir = deja la visibilidad como estaba. */
+function saveVar (target, key, value, isPublic) {
+  return run('var-' + target + '-' + key, async () => {
+    const enc = await id.value.sealContent(JSON.stringify({ value }))
+    await id.value.vaultAdmin('var.set', {
+      ...targetOf(target), key, enc, ...(isPublic === undefined ? {} : { public: isPublic })
+    })
+    await loadVars()
+  })
+}
+
+const startEdit = (target, key) => { editing.value = { target, key }; editValue.value = '' }
+const commitEdit = async () => {
+  const { target, key } = editing.value
+  const value = editValue.value
+  if (!value) return
+  editing.value = null; editValue.value = ''
+  await saveVar(target, key, value)
+}
+
+/** Crear una variable: en un scope (nuevo o existente) o en un aparato. */
+const addVar = () => {
+  const v = newVar.value
+  const target = v.target === 'new' ? 'ns:' + v.ns.trim() : v.target
+  if (!target || target === 'ns:' || !v.key.trim() || !v.value) return
+  return saveVar(target, v.key.trim(), v.value, v.public).then(() => {
+    newVar.value = { target: '', ns: '', key: '', value: '', public: false }
+  })
 }
 
 const admPair = () => run('admpair', async () => {
@@ -1043,6 +1136,71 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
         </div>
         <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
+
+        <!-- VARIABLES DE ENTORNO. Pantalla administrativa: lo que se ve son las variables
+             y los botones. El qué-es-esto (qué significa pública) vive detrás de la (i);
+             lo que NO se esconde es la marca de cada una, que es un dato operativo. -->
+        <h2>
+          {{ t.var_t }}
+          <button type="button" class="i" data-testid="info-vars" :aria-expanded="info === 'vars'"
+                  :aria-label="t.info_label" @click="toggleInfo('vars')">i</button>
+        </h2>
+        <p v-if="info === 'vars'" class="muted info-panel">{{ t.var_b }}</p>
+
+        <p v-if="!vars" class="muted" data-testid="vars-loading">{{ t.loading }}</p>
+        <template v-else>
+          <ul class="vars" data-testid="vars">
+            <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
+              <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
+              <div v-for="v in vars.ns[ns]" :key="v.key" class="varrow" :data-var="ns + '/' + v.key">
+                <code>{{ v.key }}</code>
+                <span v-if="v.public" class="val" :data-testid="'val-' + v.key">{{ v.value }}</span>
+                <span v-else class="tag out">{{ t.var_private }}</span>
+                <button class="btn ghost sm" :data-testid="'edit-' + ns + '-' + v.key"
+                        @click="startEdit('ns:' + ns, v.key)">{{ t.var_change }}</button>
+              </div>
+            </li>
+
+            <li v-for="d in vars.dev" :key="d.pub" class="vargroup" :data-device="d.id">
+              <div class="who">
+                <strong>{{ d.label || d.id }}</strong>
+                <span class="tag svc" v-if="d.cn">{{ t.service }} «{{ d.cn }}»</span>
+                <code class="mid">{{ d.id }}</code>
+                <span class="tag">{{ t.var_only_this }}</span>
+              </div>
+              <div v-for="v in d.keys" :key="v.key" class="varrow" :data-var="d.id + '/' + v.key">
+                <code>{{ v.key }}</code>
+                <span v-if="v.public" class="val" :data-testid="'val-' + v.key">{{ v.value }}</span>
+                <span v-else class="tag out">{{ t.var_private }}</span>
+                <button class="btn ghost sm" :data-testid="'edit-' + d.id + '-' + v.key"
+                        @click="startEdit('dev:' + d.pub, v.key)">{{ t.var_change }}</button>
+              </div>
+            </li>
+          </ul>
+
+          <!-- Cambiar el valor de una: se puede aunque sea privada y no la puedas leer.
+               Es exactamente para lo que sirve (rotar una llave desde donde estés). -->
+          <div v-if="editing" class="confirm" data-testid="var-edit">
+            <span>{{ t.var_new_value(editing.key) }}</span>
+            <input v-model="editValue" type="password" autocomplete="off" data-testid="var-edit-value" />
+            <button class="btn sm" data-testid="var-edit-save" :disabled="!editValue || !!busy" @click="commitEdit">{{ t.var_save }}</button>
+            <button class="btn ghost sm" @click="editing = null">{{ t.cancel }}</button>
+          </div>
+
+          <div class="varnew" data-testid="var-new">
+            <select v-model="newVar.target" data-testid="var-new-target">
+              <option value="">{{ t.var_where }}</option>
+              <option v-for="ns in scopeNames" :key="ns" :value="'ns:' + ns">{{ t.var_in_scope(ns) }}</option>
+              <option v-for="d in varDevices" :key="d.pub" :value="'dev:' + d.pub">{{ t.var_in_device(d.label || d.id) }}</option>
+              <option value="new">{{ t.var_new_scope }}</option>
+            </select>
+            <input v-if="newVar.target === 'new'" v-model="newVar.ns" :placeholder="t.var_scope_ph" data-testid="var-new-ns" />
+            <input v-model="newVar.key" :placeholder="t.var_key_ph" data-testid="var-new-key" />
+            <input v-model="newVar.value" type="password" autocomplete="off" :placeholder="t.var_value_ph" data-testid="var-new-value" />
+            <label class="chk"><input v-model="newVar.public" type="checkbox" data-testid="var-new-public" /> {{ t.var_public_ask }}</label>
+            <button class="btn sm" data-testid="var-new-save" :disabled="!!busy" @click="addVar">{{ t.var_add }}</button>
+          </div>
+        </template>
       </template>
     </template>
   </section>
@@ -1057,6 +1215,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
   padding: 0;
 }
 .i:hover, .i[aria-expanded="true"] { opacity: 1; }
+/* Variables: una fila por variable, el valor a la vista solo si es pública. */
+.vars { list-style: none; padding: 0; margin: 0; }
+.vargroup { border-top: 1px solid #1e2a3d; padding: 10px 0; }
+.varrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 0 12px; }
+.varrow .val { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+.varnew { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: #9fb3c8; }
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }

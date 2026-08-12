@@ -533,6 +533,44 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
   }
 
+  /**
+   * MOSTRADOR DE VARIABLES para la consola remota (`lib/src/admin.js` enruta; la política
+   * y la cripto viven aquí, que es donde están la clave y el disco).
+   *
+   * Dos reglas, y son toda la frontera:
+   *
+   *   1. **El valor de una PRIVADA no sale de esta máquina.** Ni para un aparato tuyo con
+   *      `admin`. Lo que viaja de una privada es su nombre y que es privada — con eso se
+   *      le puede poner un valor nuevo a ciegas, que es lo que hace falta para rotarla.
+   *   2. **Lo que sale, sale CIFRADO** con la clave de contenido del perfil: el proxy
+   *      transporta el sobre y no ve nada. Igual que el contenido del usuario (`store`).
+   */
+  const varsDesk = {
+    async list () {
+      const scope = {}
+      for (const [ns, keys] of Object.entries(secrets.list())) {
+        const values = secrets.publicOf(ns)
+        scope[ns] = keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k))
+      }
+      const devices = []
+      for (const row of await listDeviceSecrets()) {
+        const values = secrets.publicOfDevice(row.pub)
+        devices.push({ ...row, keys: row.keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k)) })
+      }
+      // Se sella la lista ENTERA, no solo los valores: el proxy tampoco tiene por qué
+      // aprender cómo se llaman tus variables ni qué servicios corres.
+      return { enc: await identity.sealContent(JSON.stringify({ ns: scope, dev: devices })) }
+    },
+    async set ({ ns, pub, key, enc, public: isPublic }) {
+      const payload = JSON.parse(await identity.openContent(enc))
+      const value = payload?.value
+      if (typeof value !== 'string' || !value) throw new Error('var.set: the sealed envelope must carry a non-empty value')
+      if (ns) setSecret(ns, key, value, isPublic)
+      else await setDeviceSecret(pub, key, value, isPublic)
+      return { ok: true, key }
+    }
+  }
+
   const admin = createAdminDesk({
     desk,
     deviceIdOf,
@@ -540,6 +578,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     audit,
     notify: notifyMembers,
     readActivity,
+    vars: varsDesk,
     // CERT ∩ ACTA, igual que los secretos con su CN. El cert dice qué se emitió; el acta,
     // qué decidió el dueño AHORA. Sin el segundo, `caps <ID> -administra` no surtía efecto
     // hasta que el cert caducara: quitarle la administración a un aparato que ya no es de
@@ -599,10 +638,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.ADMIN_RESULT, op: p.data.op, result: r.result })
   }
 
-  // API local de secretos (solo CLI/UI del dueño; audita cada cambio).
-  function setSecret (ns, key, value) { secrets.set(ns, key, value); audit('secret.set', { ns, key }); scheduleNotice(ns) }
+  // API local de secretos (CLI/UI del dueño; audita cada cambio). `isPublic` es opcional:
+  // sin decir nada, la variable conserva su visibilidad (y una nueva nace privada).
+  function setSecret (ns, key, value, isPublic) { secrets.set(ns, key, value, isPublic); audit('secret.set', { ns, key }); scheduleNotice(ns) }
   function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
   function listSecrets () { return secrets.list() }
+  /** Cambiar SOLO quién puede ver el valor (no toca el valor ni avisa: el servicio lee lo mismo). */
+  function setSecretVisibility (ns, key, isPublic) {
+    const ok = secrets.setVisibility(ns, key, isPublic)
+    if (ok) audit('secret.visibility', { ns, key, public: !!isPublic })
+    return ok
+  }
 
   /** El miembro del acta con esa llave, o `null` (también si la bóveda todavía no tiene acta). */
   async function memberOf (pub) {
@@ -628,9 +674,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return m
   }
 
-  async function setDeviceSecret (pub, key, value) {
+  async function setDeviceSecret (pub, key, value, isPublic) {
     const m = await requireService(pub)
-    secrets.setDevice(pub, key, value)
+    secrets.setDevice(pub, key, value, isPublic)
     audit('secret.set', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
     scheduleDeviceNotice(pub)
   }
@@ -642,6 +688,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('secret.rm', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
       scheduleDeviceNotice(pub)
     }
+    return ok
+  }
+
+  async function setDeviceSecretVisibility (pub, key, isPublic) {
+    const ok = secrets.setDeviceVisibility(pub, key, isPublic)
+    if (ok) audit('secret.visibility', { device: await deviceIdOf(pub).catch(() => null), key, public: !!isPublic, scope: 'device' })
     return ok
   }
 
@@ -681,8 +733,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return r
     },
     rejectDevice: (deviceId) => desk.reject(deviceId),
-    setSecret, deleteSecret, listSecrets,
-    setDeviceSecret, deleteDeviceSecret, listDeviceSecrets,
+    // El mostrador que atiende a la consola remota. Se expone para poder probar la
+    // frontera de verdad (que el valor de una privada no salga ni dentro del sobre).
+    vars: varsDesk,
+    setSecret, deleteSecret, listSecrets, setSecretVisibility,
+    setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
     listDevices: () => identity.listDelegations(),
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.

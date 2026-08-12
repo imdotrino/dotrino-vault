@@ -508,7 +508,16 @@ function cmdActivity (n = 30) {
 // aparato y PISAN a las del scope con el mismo nombre. Ahí va lo que cambia de máquina a
 // máquina (el puerto, la URL pública) sin tener que partir el ns en uno por servidor.
 async function cmdSecret (rest) {
-  const [sub, ...args] = rest
+  // --public / --private: si el VALOR puede salir de esta máquina hacia la consola remota.
+  // Se sacan de la línea antes de partirla, para que puedan ir en cualquier posición y no
+  // se cuelen dentro del valor (que es lo último y puede llevar espacios).
+  let isPublic
+  const rest2 = rest.filter((a) => {
+    if (a === '--public') { isPublic = true; return false }
+    if (a === '--private') { isPublic = false; return false }
+    return true
+  })
+  const [sub, ...args] = rest2
   const s = requireDaemon()
   const secretsListFile = path.join(dir, 'secrets-list.json')
   const signalAndWaitList = async () => {
@@ -518,11 +527,22 @@ async function cmdSecret (rest) {
     for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return d }
     console.error('El daemon no respondió.'); process.exit(1)
   }
-  const USAGE = 'uso: dotrino-vault secret set <ns> <CLAVE> <valor>        (la comparten todos los aparatos)\n' +
-              '     dotrino-vault secret rm  <ns> <CLAVE>\n' +
-              '     dotrino-vault secret device set <ID> <CLAVE> <valor> (solo la lee ese aparato)\n' +
-              '     dotrino-vault secret device rm  <ID> <CLAVE>\n' +
-              '     dotrino-vault secret list'
+  const USAGE = [
+    'uso: dotrino-vault secret set <ns> <CLAVE> <valor> [--public|--private]',
+    '                                                  (la comparten todos los aparatos del ns)',
+    '     dotrino-vault secret rm  <ns> <CLAVE>',
+    '     dotrino-vault secret device set <ID> <CLAVE> <valor> [--public|--private]',
+    '                                                  (solo la lee ese aparato, y pisa a la del ns)',
+    '     dotrino-vault secret device rm  <ID> <CLAVE>',
+    '     dotrino-vault secret list',
+    '',
+    'Pública o privada dice UNA cosa: si el VALOR puede salir de esta máquina hacia la',
+    'consola remota (vault.dotrino.com). Se nace privada. El servicio recibe las dos igual.'
+  ].join('\n')
+
+  /** Una variable en la lista: su nombre y si su valor puede salir de aquí. */
+  const printVar = (k) => console.log('  · %s%s', k.key, k.public ? '   (pública)' : '')
+  const has = (list, key) => (list || []).some((x) => x.key === key)
 
   if (sub === 'list') {
     const d = await signalAndWaitList()
@@ -536,23 +556,24 @@ async function cmdSecret (rest) {
     if (nss.length) console.log('\n%sPor scope%s (las comparten todos los aparatos del perfil)\n', B, Z)
     for (const n of nss) {
       console.log('%s%s%s  (scope vault:secrets:%s)', B, n, Z, n)
-      for (const k of names[n]) console.log('  · %s', k)
+      for (const k of names[n]) printVar(k)
     }
     if (dev.length) console.log('\n%sPor aparato%s (solo las lee ese aparato; pisan a las del scope)\n', B, Z)
     for (const x of dev) {
       const who = [x.label, x.cn ? `servicio «${x.cn}»` : null, x.orphan ? 'YA NO ESTÁ EN EL ACTA' : null].filter(Boolean).join(' · ')
-      console.log('%s%s%s%s', B, x.id, Z, quien ? '  ' + quien : '')
-      for (const k of x.keys) console.log('  · %s', k)
+      console.log('%s%s%s%s', B, x.id, Z, who ? '  ' + who : '')
+      for (const k of x.keys) printVar(k)
     }
-    console.log('')
+    console.log('\n(pública) = su valor se puede ver desde la consola remota. Las demás no salen de aquí.\n')
     return
   }
 
-  // Por APARATO: `secret device set|rm <ID> <CLAVE> [valor]`.
+  // Por APARATO: `secret device set|rm|visibility <ID> <CLAVE> [valor|public|private]`.
   if (sub === 'device') {
     const [op, id, key, ...valueParts] = args
     const value = valueParts.join(' ')
-    if ((op !== 'set' && op !== 'rm') || !id || !key || (op === 'set' && !value)) { console.error(USAGE); process.exit(2) }
+    const ops = ['set', 'rm', 'visibility']
+    if (!ops.includes(op) || !id || !key || (op === 'set' && !value)) { console.error(USAGE); process.exit(2) }
     const m = await buscarMiembro(id)
     // Se avisa aquí, con nombre y apellido, en vez de dejar que el daemon lo rechace y la
     // CLI diga «no aplicó el cambio»: quien escribe esto quiere saber POR QUÉ no vale.
@@ -561,27 +582,47 @@ async function cmdSecret (rest) {
       console.error('Empareja el servicio con:  dotrino-vault pair --service <ns>')
       process.exit(1)
     }
-    writeReq('secret-request.json', op === 'set' ? { op: 'dev-set', pub: m.pub, key, value } : { op: 'dev-rm', pub: m.pub, key })
+    const req = op === 'set'
+      ? { op: 'dev-set', pub: m.pub, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) }
+      : op === 'rm'
+        ? { op: 'dev-rm', pub: m.pub, key }
+        : { op: 'dev-vis', pub: m.pub, key, public: wantsPublic(value, USAGE) }
+    writeReq('secret-request.json', req)
     const d = await signalAndWaitList()
     const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
-    const ok = op === 'set' ? keys.includes(key) : !keys.includes(key)
-    if (ok) console.log(op === 'set' ? 'Variable guardada: %s/%s' : 'Variable borrada: %s/%s', m.id, key)
-    else { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    const ok = op === 'rm' ? !has(keys, key) : has(keys, key)
+    if (!ok) { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    if (op === 'rm') console.log('Variable borrada: %s/%s', m.id, key)
+    else console.log('Variable guardada: %s/%s%s', m.id, key, (keys.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
   }
 
-  if (sub === 'set' || sub === 'rm') {
+  if (sub === 'set' || sub === 'rm' || sub === 'visibility') {
     const [ns, key, ...valueParts] = args
     const value = valueParts.join(' ')
     if (!ns || !key || (sub === 'set' && !value)) { console.error(USAGE); process.exit(2) }
-    writeReq('secret-request.json', sub === 'set' ? { op: 'set', ns, key, value } : { op: 'rm', ns, key })
+    const req = sub === 'set'
+      ? { op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) }
+      : sub === 'rm'
+        ? { op: 'rm', ns, key }
+        : { op: 'vis', ns, key, public: wantsPublic(value, USAGE) }
+    writeReq('secret-request.json', req)
     const d = await signalAndWaitList()
-    const ok = sub === 'set' ? (d.ns?.[ns] || []).includes(key) : !(d.ns?.[ns] || []).includes(key)
-    if (ok) console.log(sub === 'set' ? 'Secreto guardado: %s/%s' : 'Secreto borrado: %s/%s', ns, key)
-    else { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    const list = d.ns?.[ns] || []
+    const ok = sub === 'rm' ? !has(list, key) : has(list, key)
+    if (!ok) { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    if (sub === 'rm') console.log('Secreto borrado: %s/%s', ns, key)
+    else console.log('Secreto guardado: %s/%s%s', ns, key, (list.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
   }
   console.error(USAGE); process.exit(2)
+}
+
+/** `visibility … public|private` — el único argumento que acepta, y sin adivinar. */
+function wantsPublic (word, usage) {
+  if (word === 'public') return true
+  if (word === 'private') return false
+  console.error('%s\n\nvisibility acepta «public» o «private».', usage); process.exit(2)
 }
 
 /**
@@ -744,6 +785,10 @@ function help () {
                                     del scope que se llame igual (puerto, URL pública…)
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
   secret list                       lista los dos cajones, por nombre (nunca valores)
+  --public | --private              (al hacer un set) si el VALOR puede salir de esta
+                                    máquina hacia la consola remota. Se nace privada.
+  secret visibility <ns> <CLAVE> public|private        cambia eso sin tocar el valor
+  secret device visibility <ID> <CLAVE> public|private
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente

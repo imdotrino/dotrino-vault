@@ -240,10 +240,13 @@ export async function runDaemon () {
         rm(secretReqFile)
         try {
           const vault = targetOf(sec)
-          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
+          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value); console.log('[vault] device secret saved: %s', sec.key) }
+          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
+          // Visibilidad: si el valor puede salir hacia la consola remota. No toca el valor.
+          else if (sec.op === 'vis') { vault.setSecretVisibility(sec.ns, sec.key, sec.public); console.log('[vault] secret visibility: %s/%s → %s', sec.ns, sec.key, sec.public ? 'public' : 'private') }
+          else if (sec.op === 'dev-vis') { await vault.setDeviceSecretVisibility(sec.pub, sec.key, sec.public); console.log('[vault] device secret visibility: %s → %s', sec.key, sec.public ? 'public' : 'private') }
         } catch (e) { console.error('[vault] secret failed:', e.message) }
       }
       // Perfiles / candado.

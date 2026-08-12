@@ -80,8 +80,11 @@ test('render con datos ricos + modos (input/confirm/flash/busy)', () => {
       revoked: [{ nonce: 'n0' }]
     },
     secrets: {
-      ns: { proxy: ['TURN_KEY_ID', 'TURN_SECRET'], geo: ['API_TOKEN'] },
-      dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT', 'PUBLIC_URL'], orphan: false }]
+      ns: {
+        proxy: [{ key: 'TURN_KEY_ID', public: false }, { key: 'TURN_SECRET', public: false }],
+        geo: [{ key: 'API_TOKEN', public: true }]
+      },
+      dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', orphan: false, keys: [{ key: 'PORT', public: true }, { key: 'PUBLIC_URL', public: false }] }]
     }
   }
   const modes = [
@@ -295,8 +298,8 @@ test('Dispositivos y Scopes muestran la barra de pestañas; Bóvedas no', () => 
 test('DOS SITIOS: el scope en su pestaña, el aparato en la suya (y una apunta a la otra)', () => {
   const term = fakeTerm(100, 24)
   const secrets = {
-    ns: { proxy: ['TURN_KEY_ID'] },
-    dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT'], orphan: false }]
+    ns: { proxy: [{ key: 'TURN_KEY_ID', public: false }] },
+    dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', orphan: false, keys: [{ key: 'PORT', public: true }] }]
   }
 
   // La pestaña de scopes lista lo COMPARTIDO y no repite lo del aparato: dice dónde está.
@@ -325,7 +328,7 @@ test('la lista de dispositivos avisa cuántas variables propias tiene cada uno',
     screen: 'devices',
     members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: ['secrets'], cn: 'proxy' }],
     devices: { issued: [{ sub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', scope: ['vault:secrets:proxy'], exp: Date.now() + 8.64e7, nonce: 'n2' }], revoked: [] },
-    secrets: { ns: {}, dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', keys: ['PORT', 'PUBLIC_URL'], orphan: false }] }
+    secrets: { ns: {}, dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', orphan: false, keys: [{ key: 'PORT', public: false }, { key: 'PUBLIC_URL', public: false }] }] }
   }))
   assert.match(term.last.join('\n'), /vars:2/)
 })

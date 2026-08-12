@@ -42,7 +42,11 @@ after(async () => {
 test('flujo completo: set → pair --service → enroll → fetchSecrets', async () => {
   vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123')
   vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 't-456')
-  assert.deepEqual(vault.listSecrets(), { proxy: ['TURN_KEY_ID', 'TURN_KEY_API_TOKEN'] })
+  // La lista da nombres y VISIBILIDAD, nunca valores. Se nace privada: el valor no sale
+  // de esta máquina mientras nadie diga lo contrario.
+  assert.deepEqual(vault.listSecrets(), {
+    proxy: [{ key: 'TURN_KEY_ID', public: false }, { key: 'TURN_KEY_API_TOKEN', public: false }]
+  })
 
   // pair --service proxy (mismo scope que arma el daemon)
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'servicio:proxy', ttlMs: 24 * 60 * 60 * 1000 })
@@ -283,7 +287,8 @@ test('por aparato: se SUMAN a las del scope y le ganan al coincidir', async () =
   // La lista da NOMBRES y quién es cada aparato; valores, ninguno.
   const dev = await vault.listDeviceSecrets()
   const row = dev.find((x) => x.pub === me)
-  assert.deepEqual(row.keys.sort(), ['PORT', 'TURN_KEY_ID'])
+  assert.deepEqual(row.keys.map((k) => k.key).sort(), ['PORT', 'TURN_KEY_ID'])
+  assert.ok(row.keys.every((k) => k.public === false), 'nacen privadas')
   assert.equal(row.cn, 'proxy', 'se dice de qué servicio es, que es lo que decide qué ns lee')
   assert.ok(!JSON.stringify(dev).includes('la-de-esta-maquina'), 'nunca viajan los valores')
 
@@ -341,6 +346,46 @@ test('quitar el aparato se lleva sus variables', async () => {
 
   await vault.revokeDevice({ sub: pub })
   assert.ok(!(await vault.listDeviceSecrets()).some((x) => x.pub === pub), 'se fueron con él')
+})
+
+test('la consola remota ve el valor de una PÚBLICA y jamás el de una privada', async () => {
+  // Es la frontera entera de `docs/consola-remota.md` para variables: lo que cruza no es
+  // «los secretos», son los que su dueño marcó como mostrables.
+  vault.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', true)
+  vault.setSecret('web', 'API_KEY', 'sk-esta-no-sale')
+
+  const { enc } = await vault.vars.list({ by: 'TEST' })
+  const payload = JSON.parse(await vault.identity.openContent(enc))
+  const web = payload.ns.web
+
+  assert.equal(web.find((x) => x.key === 'PUBLIC_URL').value, 'https://ejemplo.com')
+  const priv = web.find((x) => x.key === 'API_KEY')
+  assert.equal(priv.public, false, 'se sabe que existe y que es privada…')
+  assert.ok(!('value' in priv), '…pero su valor no sale ni dentro del sobre')
+  assert.ok(!JSON.stringify(payload).includes('sk-esta-no-sale'))
+})
+
+test('la consola remota CREA variables (scope nuevo o aparato) y rota las privadas a ciegas', async () => {
+  const { readServiceIdentity } = await import('../lib/src/service.js')
+  const me = readServiceIdentity(svcDir).device.publickey
+  const sealed = (value) => vault.identity.sealContent(JSON.stringify({ value }))
+
+  // Un scope que no existía: crear es parte de lo que se delega.
+  await vault.vars.set({ ns: 'nuevo', key: 'API_KEY', enc: await sealed('v1'), public: false })
+  assert.deepEqual(vault.listSecrets().nuevo, [{ key: 'API_KEY', public: false }])
+
+  // Rotar una privada SIN haberla podido leer: es justo para lo que sirve.
+  await vault.vars.set({ ns: 'web', key: 'API_KEY', enc: await sealed('sk-rotada') })
+  assert.equal(vault.secrets.get('web').API_KEY, 'sk-rotada')
+  assert.equal(vault.listSecrets().web.find((x) => x.key === 'API_KEY').public, false,
+    'y rotarla no la vuelve visible por accidente')
+
+  // Y también en el cajón de un aparato.
+  await vault.vars.set({ pub: me, key: 'PUBLIC_URL', enc: await sealed('https://uno.example'), public: true })
+  assert.equal((await fetchSecretsFrom(svcDir)).PUBLIC_URL, 'https://uno.example')
+
+  // El valor NUNCA viaja en claro: sin sobre no hay escritura.
+  await assert.rejects(vault.vars.set({ ns: 'web', key: 'API_KEY', enc: { ct: 'basura', iv: 'x', epk: 'y' } }))
 })
 
 test('el scope corta el acceso a otro namespace', async () => {

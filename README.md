@@ -273,6 +273,27 @@ forma de pedir lo de otro. Solo se le pueden poner a un **servicio** (un miembro
 nombre de servicio en el acta): un teléfono no pide bundles, así que guardárselas sería
 configuración muerta. Y **al quitar el aparato se van con él**.
 
+#### Pública o privada: si el VALOR puede salir de esta máquina
+
+Cada variable, esté en el cajón que esté, es **pública** o **privada**, y eso decide una
+sola cosa: si su valor puede viajar hacia la **consola remota** (`vault.dotrino.com`, un
+aparato tuyo con permiso de administrar). Al servicio que la lee le da igual: recibe las
+dos.
+
+```sh
+dotrino-vault secret set web PUBLIC_URL https://ejemplo.com --public
+dotrino-vault secret set web API_KEY sk-…              # sin bandera: privada
+dotrino-vault secret visibility web PUBLIC_URL private # cambiarlo sin tocar el valor
+```
+
+- **Se nace privada.** Y **rotar el valor conserva la visibilidad**: exponer un secreto
+  tiene que ser una decisión, no el efecto colateral de un `set`.
+- Desde la consola remota se ve el **nombre** de todas y el **valor solo de las públicas**;
+  a cualquiera se le puede poner un valor nuevo **a ciegas** (rotar una llave que no puedes
+  leer es justo para lo que sirve), y **borrar** no se delega. Lo que viaja va **cifrado**
+  con la clave de contenido del perfil: el proxy no ve nada. Detalle y límites en
+  [`docs/consola-remota.md`](./docs/consola-remota.md).
+
 ### Interfaz de terminal (TUI)
 
 Las bóvedas, los dispositivos y los secretos también se manejan desde una **interfaz
@@ -311,7 +332,8 @@ dispositivos/variables que estás viendo:
    Y dentro de **Dispositivos**, con `e` sobre un servicio, sus **variables propias**:
    las que lee solo él y le ganan a las del scope que se llamen igual. Cada cajón se
    administra donde ya elegiste lo que lo distingue — el namespace en su pestaña, el
-   aparato en la lista de aparatos.
+   aparato en la lista de aparatos. En los dos, `t` cambia si la variable es **pública**
+     (su valor se puede ver desde la consola remota) o **privada**.
 
 Al emparejar, la bóveda **pregunta primero a qué cuenta entra el dispositivo** y
 recién después muestra el QR, que además dice de qué cuenta salió. La pregunta ofrece
