@@ -79,7 +79,17 @@ test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const dir = tmp()
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ v: 2, pid: 999999 }))
   const { p } = arrancar(dir)
-  const ok = await esperarArchivo(path.join(dir, 'pair.json'), 1) || await esperarArchivo(path.join(dir, 'profiles-list.json'), 12000)
+  // Arrancó = `state.json` pasa a llevar SU pid (el archivo ya estaba, con el muerto).
+  // Antes se esperaba a `profiles-list.json`, que el daemon volcaba solo cada dos
+  // segundos; ya no lo hace —ese archivo es la RESPUESTA a una petición y volcarlo sin
+  // que nadie pregunte se llevaba por delante las respuestas de verdad (ver daemon.js).
+  const hasta = Date.now() + 12000
+  let ok = false
+  while (Date.now() < hasta && !ok) {
+    const s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8') || '{}')
+    ok = Number(s.pid) === p.pid
+    if (!ok) await sleep(200)
+  }
   p.kill()
   assert.ok(ok, 'arrancó igual: el candado era de un proceso que ya no existe')
   fs.rmSync(dir, { recursive: true, force: true })

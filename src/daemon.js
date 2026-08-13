@@ -79,7 +79,13 @@ export async function runDaemon () {
   }
   writeState()
   const profilesFile = path.join(dir, 'profiles-list.json')
-  const dumpProfiles = (extra = {}) => { writeState(); writeJson(profilesFile, { v: 1, at: Date.now(), current: mgr.currentId(), profiles: mgr.summary(), ...extra }) }
+  // `req: null` VA SIEMPRE, aunque nadie haya pedido nada: el daemon vuelca esta lista
+  // también por su cuenta (cada repaso, y al atender cualquier otra cosa), y quien espera
+  // respuesta tiene que poder distinguir «este volcado no contesta a nadie» de «este
+  // contesta a lo mío». Sin esa marca, un repaso que caía en medio pasaba por respuesta:
+  // el `unlock` se daba por hecho con la foto de cuando aún estaba cerrada, y un
+  // «contraseña incorrecta» se perdía por el camino sin que nadie lo llegara a ver.
+  const dumpProfiles = (extra = {}) => { writeState(); writeJson(profilesFile, { v: 1, at: Date.now(), req: null, current: mgr.currentId(), profiles: mgr.summary(), ...extra }) }
 
   console.log(`dotrino-vault · datos en ${dir} · proxy ${proxyUrl}`)
   for (const p of mgr.summary()) {
@@ -275,29 +281,42 @@ export async function runDaemon () {
       const preq = readJsonSafe(profileReqFile)
       if (preq?.op) {
         rm(profileReqFile) // lleva la contraseña: fuera del disco cuanto antes
-        let extra = {}
-        try { extra = await handleProfileRequest(preq) }
+        // `req`: el id de la petición viaja de vuelta en el volcado. Sin él, quien
+        // espera podía quedarse con un volcado anterior —el daemon los escribe también
+        // por su cuenta— y dar por contestado lo que aún no se había hecho.
+        let extra = { req: preq.id || null }
+        try { extra = { ...extra, ...(await handleProfileRequest(preq)) } }
         // `code`: la TUI es bilingüe y traduce por código (un freno como el D12 tiene
         // que leerse en el idioma de quien lo lee, no en el del daemon).
         catch (e) {
           // `waitSec`/`tries` viajan con el error: quien lo enseña necesita el dato, no
           // solo el motivo («espera 32 s» y «van 9 intentos» son lo que cambia la conducta).
-          extra = { error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.waitSec ? { waitSec: e.waitSec } : {}), ...(e.tries ? { tries: e.tries } : {}) }
+          extra = { req: preq.id || null, error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.waitSec ? { waitSec: e.waitSec } : {}), ...(e.tries ? { tries: e.tries } : {}) }
           console.error('[vault] profile: %s', e.message)
         }
         dumpProfiles(extra)
       } else {
-        dumpProfiles()
+        // NADIE PREGUNTÓ: se refresca el estado, pero NO se pisa `profiles-list.json`.
+        // Ese archivo es la RESPUESTA a una petición, y el daemon repasa su carpeta cada
+        // dos segundos: al volcarlo también sin que nadie lo pidiera, un repaso que caía
+        // entre la respuesta y quien la esperaba se la llevaba por delante. Eso es lo que
+        // hacía que un `unlock` correcto contestara «sigue cerrada» y que un «contraseña
+        // incorrecta» se perdiera sin llegar a verse. Quien lee esta lista —la TUI y el
+        // CLI— siempre pide antes, así que no se queda sin ella.
+        writeState()
       }
       // Volcados que lee la CLI (`devices`, `secret list`). A QUÉ perfil miran lo
       // dice dump-request.json; sin él, al activo.
       const dumpReq = readJsonSafe(dumpReqFile); rm(dumpReqFile)
       const t = resolveTarget(dumpReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current(), locked: false }
+      // El id de la petición vuelve en cada volcado, para que quien espera sepa que le
+      // contestan a ÉL y no lea el volcado de la vuelta anterior (ver `waitFor`).
+      const reqId = dumpReq?.id || null
       if (t.locked) {
         // BLOQUEADO: se contesta que lo está, y nada más. Los volcados se escriben igual
         // (quien pregunta espera una respuesta, no un plantón) pero VACÍOS: ni aparatos, ni
         // nombres de variables, ni acta. Antes el candado no tapaba ninguna de las tres.
-        const cerrado = { v: 1, at: Date.now(), profile: t.id, locked: true }
+        const cerrado = { v: 1, at: Date.now(), req: reqId, profile: t.id, locked: true }
         writeJson(secretsListFile, { ...cerrado, ns: {}, dev: [] })
         writeJson(devFile, { ...cerrado, issued: [], revoked: [] })
         writeJson(path.join(dir, 'acta.json'), { ...cerrado, members: [] })
@@ -308,13 +327,13 @@ export async function runDaemon () {
       // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
       // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
       writeJson(secretsListFile, {
-        v: 2, at: Date.now(), profile: t.id,
+        v: 2, at: Date.now(), req: reqId, profile: t.id,
         ns: t.vault.listSecrets(),
         dev: await t.vault.listDeviceSecrets()
       })
-      writeJson(devFile, { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.listDevices()) })
+      writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
       // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
-      try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+      try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
 
       // PERFIL del usuario (apodo, foto, datos) tal como lo tiene la bóveda: `dotrino-vault me`.
       // Solo se vuelca cuando se PIDE, no en cada señal: es contenido del usuario y no tiene
@@ -328,7 +347,7 @@ export async function runDaemon () {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
           const { me } = tm.vault.threads.methods.profileGet()
           const { avatar, ...resto } = me || {}
-          writeJson(meFile, { v: 1, at: Date.now(), profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null })
+          writeJson(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
     } catch (e) {
@@ -350,8 +369,13 @@ export async function runDaemon () {
   // estorban y hacen que la respuesta sea inmediata.
   const REPASO_MS = 2000
   let atendiendo = false
+  let otraVuelta = false
   async function atender () {
-    if (atendiendo) return          // una a la vez: las peticiones se consumen y se borran
+    // Una a la vez (las peticiones se consumen y se borran), pero lo que llegue mientras
+    // tanto NO se pierde: se anota y se da otra vuelta al terminar. Antes se descartaba,
+    // y la petición se quedaba esperando al repaso de 2 s — tiempo de sobra para que
+    // quien pidió escribiera la siguiente encima.
+    if (atendiendo) { otraVuelta = true; return }
     atendiendo = true
     try {
       // OJO: `fs.watch` avisa al CREAR el archivo, antes de que el CLI termine de
@@ -363,6 +387,7 @@ export async function runDaemon () {
       await atenderPeticiones()
     } catch (e) { console.error('[vault] error serving a request:', e.message) }
     finally { atendiendo = false }
+    if (otraVuelta) { otraVuelta = false; await atender() }
   }
 
   try {

@@ -29,6 +29,15 @@ const PWD_ITER = 300000 // mismo coste que el candado del navegador
 const MAX_NAME = 40
 
 /**
+ * Cuánto tarda el freno en OLVIDAR los fallos. Sin esto la cuenta solo subía —solo la
+ * borraba un acierto—, así que teclear mal la contraseña cinco veces un martes te dejaba
+ * el vault con esperas de minutos el miércoles, y cada intento nuevo (aunque fuera el
+ * bueno) la alargaba sin llegar a comprobarse: la bóveda quedaba cerrada para su dueño.
+ * El freno tiene que estorbar a una RÁFAGA, no a quien vuelve al día siguiente.
+ */
+const TRIES_FORGET_MS = 15 * 60 * 1000
+
+/**
  * Archivos de un perfil que en la versión mono-perfil vivían sueltos en la raíz.
  *
  * `atrest.salt` va en la lista y NO es un detalle: los datos van cifrados con una clave
@@ -191,7 +200,15 @@ export function openProfiles (root = dataDir()) {
       if (!p.pwd) { unlocked.add(id); return { ok: true, locked: false } }
       // Freno de fuerza bruta (una contraseña corta se adivina probando): tras 5
       // fallos, espera exponencial (2^n s, tope 5 min) persistida en el registro.
-      const tries = p.tries || { n: 0, at: 0 }
+      // Los fallos VIEJOS se olvidan (ver TRIES_FORGET_MS): si desde el último ha pasado
+      // el rato, se empieza de cero. Así el freno sigue frenando una ráfaga —los intentos
+      // seguidos se cuentan igual— pero no convierte un despiste de ayer en un vault que
+      // ya no se abre.
+      let tries = p.tries || { n: 0, at: 0 }
+      if (tries.at && Date.now() - tries.at > TRIES_FORGET_MS) {
+        tries = { n: 0, at: 0 }
+        if (p.tries) { delete p.tries; save() }
+      }
       const waitMs = tries.n >= 5 ? Math.min(2 ** (tries.n - 4) * 1000, 5 * 60 * 1000) : 0
       const left = tries.at + waitMs - Date.now()
       // Con CÓDIGO: la TUI es bilingüe y lo traduce, y la CLI puede decirlo con sus

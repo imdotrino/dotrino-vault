@@ -515,3 +515,50 @@ test('Permisos de un aparato que ya no está en el acta: lo dice y no revienta',
   const st = baseState({ screen: 'caps', capsFor: { pub: 'FUERA', deviceId: 'ZZ99-YY88' }, members: [] })
   assert.ok(V.capsRows(st, t).map((r) => r.text).join('').length > 0)
 })
+
+test('la contraseña vale para TODA la sesión: si el daemon pierde el candado, no se vuelve a pedir', async () => {
+  // La regresión: el estado «abierta» vive en la MEMORIA DEL DAEMON, así que un
+  // `systemctl restart` (o una petición perdida) la dejaba cerrada otra vez a mitad de
+  // sesión y la TUI volvía a pedir la contraseña. Tecleada una vez, vale hasta el
+  // candado (`k`) o hasta salir.
+  const boveda = { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' }
+  const lista = { current: 'p1', profiles: [boveda] }
+  let unlocks = 0
+  const api = {
+    listProfiles: async () => lista,
+    unlockProfile: async (id, pwd) => {
+      unlocks++
+      if (pwd !== 'buena') throw Object.assign(new Error('wrong password'), { code: 'WRONG_PASSWORD' })
+      boveda.locked = false
+      return lista
+    }
+  }
+  const st = baseState({ profiles: lista, unlockedHere: new Set(), sessionPwd: new Map() })
+  const term = fakeTerm(90, 24)
+
+  // 1) La primera vez SÍ se pide: queda el campo abierto esperando.
+  let entradas = 0
+  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  assert.ok(st.input, 'la primera vez pide la contraseña')
+  assert.equal(entradas, 0)
+  await st.input.onSubmit('buena')
+  assert.equal(entradas, 1, 'con la contraseña buena, sigue adelante')
+  assert.equal(st.sessionPwd.get('p1'), 'buena', 'y se la queda para esta sesión')
+  assert.ok(st.unlockedHere.has('p1'), 'para volver a cerrarla al salir')
+
+  // 2) El daemon pierde el candado (reinicio del servicio): vuelve a decir «cerrada».
+  boveda.locked = true
+  st.input = null
+  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  assert.equal(st.input, null, 'NO se vuelve a preguntar')
+  assert.equal(entradas, 2, 'se entra igual')
+  assert.equal(boveda.locked, false, 'porque se reabrió sola con la de la sesión')
+  assert.equal(unlocks, 2)
+
+  // 3) Si la contraseña guardada ya no vale, se pregunta (y se olvida la vieja).
+  boveda.locked = true
+  st.sessionPwd.set('p1', 'vieja')
+  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  assert.ok(st.input, 'vuelve a preguntar')
+  assert.equal(st.sessionPwd.has('p1'), false, 'y no se queda con una que ya no sirve')
+})

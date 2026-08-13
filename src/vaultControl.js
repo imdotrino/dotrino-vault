@@ -91,14 +91,33 @@ function requireAlive () {
   if (!s || !pidAlive(s.pid)) throw new DaemonDownError()
 }
 
-function writeReq (name, obj, profile) {
-  const body = { ...obj, at: Date.now() }
-  if (profile) body.profile = profile
+/** Contador de peticiones de ESTE proceso: junto al pid, identifica cada una. */
+let reqSeq = 0
+
+/**
+ * Escribe una petición y devuelve su `id`.
+ *
+ * ESPERA A QUE EL DAEMON SE HAYA LLEVADO LA ANTERIOR. Cada tipo de petición es UN
+ * archivo con nombre fijo, así que escribir la siguiente antes de que se consuma la
+ * primera la BORRABA sin que nadie se enterara. Es exactamente lo que le pasaba al
+ * candado: la TUI manda `unlock` y, pegado, el `list` para repintar; si el daemon
+ * estaba ocupado, el `list` se comía el `unlock` —contraseña incluida— y la bóveda
+ * seguía cerrada sin un solo error por ninguna parte. Se vuelve a preguntar la
+ * contraseña, y otra vez lo mismo.
+ */
+async function writeReq (name, obj, profile) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // Hasta 3 s por la anterior; pasado eso, se pisa (el daemon no la va a atender ya, y
+  // dejar a quien pide esperando para siempre es peor).
+  for (let i = 0; i < 30 && fs.existsSync(p(name)); i++) await sleep(100)
+  const id = `${process.pid}-${++reqSeq}`
+  const body = { ...obj, id, at: Date.now() }
+  if (profile) body.profile = profile
   fs.writeFileSync(p(name), JSON.stringify(body), { mode: 0o600 })
   // `mode` de writeFileSync solo aplica al CREAR: re-chmod por si el archivo ya
   // existía con permisos más laxos (defensa en profundidad; el dir ya es 0700).
   try { fs.chmodSync(p(name), 0o600) } catch (_) {}
+  return id
 }
 
 /**
@@ -137,12 +156,28 @@ function assertOpen (d) {
   return d
 }
 
-/** Espera a que reaparezca un archivo de respuesta (con `.at`) tras borrarlo. */
-async function waitFor (name, { tries = 60, interval = 100 } = {}) {
+/**
+ * Espera a que reaparezca un archivo de respuesta (con `.at`) tras borrarlo.
+ *
+ * Con `req`, solo vale LA RESPUESTA A ESA PETICIÓN (el daemon devuelve el `id` en
+ * `req`). El daemon vuelca la lista de perfiles también por su cuenta —cada repaso, y
+ * al atender cualquier otra cosa—, así que sin esto se podía tomar por respuesta un
+ * volcado de hace un instante, escrito ANTES de que la petición se atendiera: el
+ * `unlock` contestaba con la foto de cuando aún estaba cerrada.
+ *
+ * Un daemon viejo no devuelve `req`: entonces vale cualquier volcado posterior a la
+ * petición (que es lo que se hacía siempre, y sigue siendo mejor que nada).
+ */
+async function waitFor (name, { tries = 60, interval = 100, req = null, since = 0 } = {}) {
   for (let i = 0; i < tries; i++) {
     await sleep(interval)
     const d = read(name, null)
-    if (d && d.at) return d
+    if (!d || !d.at || d.at < since) continue
+    if (!req || d.req === req) return d
+    // Un daemon viejo NO trae el campo. Que venga con `null` significa lo contrario: el
+    // daemon sabe marcarlas y este volcado no contesta a nadie (es uno de los suyos), así
+    // que se sigue esperando el que sí lleva nuestro id.
+    if (!('req' in d)) return d
   }
   return null
 }
@@ -162,9 +197,10 @@ async function profileOp (op, { profile, name, password } = {}) {
   const extra = {}
   if (name != null) extra.name = name
   if (password != null) extra.password = password
-  writeReq(F.profileReq, { op, ...extra }, profile)
+  const since = Date.now()
+  const id = await writeReq(F.profileReq, { op, ...extra }, profile)
   signalOrCleanup('SIGUSR2', [F.profileReq])
-  const d = await waitFor(F.profilesList)
+  const d = await waitFor(F.profilesList, { req: id, since })
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
   // p.ej. MASTER_WITH_MEMBERS (freno D12) o WRONG_PASSWORD. Los datos del error viajan
   // pegados (cuánto hay que esperar, cuántos intentos van): quien lo pinta los necesita.
@@ -193,14 +229,18 @@ export const removeProfilePassword = (profile) => profileOp('password-rm', { pro
 export async function snapshot (profile) {
   requireAlive()
   rm(F.devices); rm(F.secretsList); rm(F.profilesList); rm(F.acta)
-  writeReq(F.dumpReq, {}, profile)
+  const since = Date.now()
+  const id = await writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.dumpReq])
   // El ACTA entra en el volcado normal: es la lista de dispositivos de verdad, y las
   // delegaciones son su reflejo. Sin ella, un miembro sin certificados (revocado a medias,
   // o con el papel caducado) no salía en ninguna pantalla del PC — invisible y, por lo
   // tanto, imposible de quitar desde aquí.
   const [devices, secrets, profiles, acta] = await Promise.all([
-    waitFor(F.devices), waitFor(F.secretsList), waitFor(F.profilesList), waitFor(F.acta)
+    waitFor(F.devices, { req: id, since }), waitFor(F.secretsList, { req: id, since }),
+    // La lista de perfiles NO lleva el id de ESTE volcado (la escribe `dumpProfiles`,
+    // que contesta a las peticiones de perfil): vale la más nueva.
+    waitFor(F.profilesList, { since }), waitFor(F.acta, { req: id, since })
   ])
   assertOpen(devices); assertOpen(secrets); assertOpen(acta)
   return { devices, secrets, profiles, acta }
@@ -260,7 +300,7 @@ export function agruparPorAparato (lista, revoked = []) {
  */
 export async function setDeviceLabel (pub, label, profile) {
   requireAlive()
-  writeReq(F.labelReq, { pub, label }, profile)
+  await writeReq(F.labelReq, { pub, label }, profile)
   signalOrCleanup('SIGUSR2', [F.labelReq])
   await sleep(400)
   return listDevices(profile)
@@ -274,9 +314,10 @@ export async function setDeviceLabel (pub, label, profile) {
 export async function listMembers (profile) {
   requireAlive()
   rm(F.acta)
-  writeReq(F.dumpReq, {}, profile)
+  const since = Date.now()
+  const id = await writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.dumpReq])
-  const d = await waitFor(F.acta)
+  const d = await waitFor(F.acta, { req: id, since })
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
   assertOpen(d)
   return d.members || []
@@ -292,7 +333,7 @@ export async function listMembers (profile) {
  */
 export async function setDeviceCaps (pub, caps, profile) {
   requireAlive()
-  writeReq(F.capsReq, { pub, caps }, profile)
+  await writeReq(F.capsReq, { pub, caps }, profile)
   signalOrCleanup('SIGUSR2', [F.capsReq])
   await sleep(600)
   return listDevices(profile)
@@ -306,7 +347,7 @@ export async function setDeviceCaps (pub, caps, profile) {
 export async function revokeDevice (target, profile) {
   requireAlive()
   const req = typeof target === 'string' ? { nonce: target } : { sub: target?.sub, nonce: target?.nonce }
-  writeReq(F.revokeReq, req, profile)
+  await writeReq(F.revokeReq, req, profile)
   signalOrCleanup('SIGUSR2', [F.revokeReq])
   await sleep(300)
   return listDevices(profile)
@@ -330,9 +371,10 @@ export async function revokeDevice (target, profile) {
 export async function getMe (profile) {
   requireAlive()
   rm(F.me)
-  writeReq(F.meReq, {}, profile)
+  const since = Date.now()
+  const id = await writeReq(F.meReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.meReq])
-  const d = await waitFor(F.me)
+  const d = await waitFor(F.me, { req: id, since })
   rm(F.me)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
   assertOpen(d)
@@ -374,8 +416,8 @@ export async function listSecrets (profile) {
 async function secretOp (req, profile, check) {
   requireAlive() // el VALOR es secreto: no escribirlo si el daemon está caído
   rm(F.secretsList)
-  writeReq(F.secretReq, req, profile)
-  writeReq(F.dumpReq, {}, profile)
+  await writeReq(F.secretReq, req, profile)
+  await writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
@@ -483,7 +525,7 @@ export function pairUrl (qr) {
 export async function startPairing ({ profile, service } = {}) {
   requireAlive()
   rm(F.pair); rm(F.pending)
-  writeReq(F.pairReq, service ? { service } : {}, profile)
+  await writeReq(F.pairReq, service ? { service } : {}, profile)
   signalOrCleanup('SIGUSR1', [F.pairReq])
   for (let i = 0; i < 50; i++) {
     await sleep(100)
@@ -513,7 +555,7 @@ export function pendingEnroll () {
  */
 export async function approvePending (code, profile) {
   requireAlive()
-  writeReq(F.approveReq, { code: String(code) }, profile)
+  await writeReq(F.approveReq, { code: String(code) }, profile)
   signalOrCleanup('SIGUSR2', [F.approveReq])
   await sleep(400)
   return listDevices(profile)
@@ -522,7 +564,7 @@ export async function approvePending (code, profile) {
 /** Rechaza el dispositivo pendiente. */
 export async function rejectPending (deviceId, profile) {
   requireAlive()
-  writeReq(F.rejectReq, { deviceId }, profile)
+  await writeReq(F.rejectReq, { deviceId }, profile)
   signalOrCleanup('SIGUSR2', [F.rejectReq])
   await sleep(200)
 }

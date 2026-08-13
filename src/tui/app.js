@@ -486,9 +486,34 @@ async function refreshMe (term, st) {
   const r = await guard(term, st, L(st).loadingProfile, () => vc.getMe(activeId(st)))
   st.me = r.ok ? r.v : null
 }
-async function refreshProfiles (term, st) {
-  const r = await guard(term, st, L(st).loadingVaults, () => vc.listProfiles())
+async function refreshProfiles (term, st, api = vc) {
+  const r = await guard(term, st, L(st).loadingVaults, () => api.listProfiles())
   if (r.ok) st.profiles = r.v
+}
+
+/**
+ * TECLEADA UNA VEZ, VALE PARA TODA LA SESIÓN de la TUI.
+ *
+ * El candado vive en la MEMORIA DEL DAEMON, así que cualquier cosa que se lleve ese
+ * estado —un `systemctl restart` al actualizar, un reinicio del servicio, una petición
+ * que se perdió— dejaba la bóveda cerrada otra vez EN MITAD de la sesión, y la TUI
+ * volvía a pedir la contraseña como si nunca se hubiera tecleado.
+ *
+ * Por eso la contraseña de lo que se abre aquí se guarda en `st.sessionPwd` (SOLO en
+ * memoria de este proceso) y se vuelve a usar en silencio para reabrir la misma bóveda.
+ * Se olvida con el candado (`k`), al quitar la contraseña y al salir de la TUI, que es
+ * exactamente donde el dueño dijo que tiene que volver a hacer falta.
+ */
+// `api` es `vaultControl` — se recibe para poder probar esto sin un daemon detrás.
+async function reunlockSilently (term, st, p, api = vc) {
+  const pwd = st.sessionPwd?.get(p.id)
+  if (!pwd) return false
+  const r = await guard(term, st, L(st).unlocking, () => api.unlockProfile(p.id, pwd))
+  // Ya no vale (se la cambiaron desde otro sitio, o el freno está esperando): se olvida
+  // y se vuelve al camino normal, que es preguntar diciendo por qué.
+  if (!r.ok) { st.sessionPwd.delete(p.id); return false }
+  await refreshProfiles(term, st, api)
+  return true
 }
 
 /**
@@ -497,8 +522,13 @@ async function refreshProfiles (term, st) {
  * que dura la sesión, no hasta que alguien reinicie el servicio. Lo que ya estaba abierto
  * antes de entrar no se toca — no lo abrió esta pantalla, no le toca cerrarlo.
  */
-async function ensureUnlocked (term, st, p, thenFn, motivo = null) {
+async function ensureUnlocked (term, st, p, thenFn, motivo = null, api = vc) {
   if (!p.protected || !p.locked) return thenFn()
+  // Cerrada, pero la contraseña ya se tecleó en esta sesión: se reabre sin molestar.
+  if (await reunlockSilently(term, st, p, api)) {
+    const fresh = (st.profiles?.profiles || []).find((x) => x.id === p.id) || p
+    return thenFn(fresh)
+  }
   const i = L(st)
   setInput(st, {
     label: i.passwordOf(p.name || p.id),
@@ -509,12 +539,13 @@ async function ensureUnlocked (term, st, p, thenFn, motivo = null) {
     hint: motivo || i.passwordToEdit,
     onSubmit: async (pwd) => {
       st.input = null
-      const r = await guard(term, st, i.unlocking, () => vc.unlockProfile(p.id, pwd))
+      const r = await guard(term, st, i.unlocking, () => api.unlockProfile(p.id, pwd))
       // Rechazada: se vuelve a pedir en el acto, diciendo por qué. Cerrar el campo obligaba
       // a adivinar qué había pasado y a empezar de nuevo.
-      if (!r.ok) return ensureUnlocked(term, st, p, thenFn, humanErr(r.e, st))
+      if (!r.ok) return ensureUnlocked(term, st, p, thenFn, humanErr(r.e, st), api)
       st.unlockedHere?.add(p.id)
-      await refreshProfiles(term, st)
+      st.sessionPwd?.set(p.id, pwd) // vale para toda la sesión (ver reunlockSilently)
+      await refreshProfiles(term, st, api)
       const fresh = (st.profiles.profiles || []).find((x) => x.id === p.id) || p
       await thenFn(fresh)
     },
@@ -634,7 +665,9 @@ async function onKeyProfiles (term, st, key) {
             st.input = null
             if (again !== pwd) { flash(st, i.passwordMismatch, 'danger'); return }
             const r = await guard(term, st, i.savingPassword, () => vc.setProfilePassword(p.id, pwd))
-            if (r.ok) { flash(st, i.passwordSaved); await refreshProfiles(term, st) }
+            // La nueva es la que vale para el resto de la sesión: guardar la vieja dejaría
+            // a la TUI reabriendo con una contraseña que ya no existe.
+            if (r.ok) { st.sessionPwd?.set(p.id, pwd); flash(st, i.passwordSaved); await refreshProfiles(term, st) }
           },
           onCancel: () => { st.input = null }
         })
@@ -645,7 +678,7 @@ async function onKeyProfiles (term, st, key) {
     if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       const r = await guard(term, st, i.removingPassword, () => vc.removeProfilePassword(p.id))
-      if (r.ok) { flash(st, i.passwordRemoved); await refreshProfiles(term, st) }
+      if (r.ok) { st.sessionPwd?.delete(p.id); flash(st, i.passwordRemoved); await refreshProfiles(term, st) }
     })
   } else if (ch === 'u' && cur) {
     if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
@@ -654,7 +687,10 @@ async function onKeyProfiles (term, st, key) {
   } else if (ch === 'k' && cur) { // locK (antes `l`, que ahora es el idioma)
     if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
     const r = await guard(term, st, i.lockingVault, () => vc.lockProfile(cur.id))
-    if (r.ok) { flash(st, i.vaultLocked); await refreshProfiles(term, st) }
+    // Echar el candado a mano es DECIR que vuelva a hacer falta la contraseña: si la TUI
+    // se quedara con ella, la siguiente tecla la reabriría sola y el candado no cerraría
+    // nada.
+    if (r.ok) { st.sessionPwd?.delete(cur.id); st.unlockedHere?.delete(cur.id); flash(st, i.vaultLocked); await refreshProfiles(term, st) }
   }
   return true
 }
@@ -1291,6 +1327,10 @@ export async function runTui () {
     sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0 },
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
     unlockedHere: new Set(),
+    // Su contraseña, SOLO en memoria y SOLO mientras la TUI esté abierta: sirve para
+    // reabrir sin volver a preguntar si el daemon pierde el estado (ver
+    // `reunlockSilently`). Se olvida con `k`, al quitar la contraseña y al salir.
+    sessionPwd: new Map(),
     scroll: {},
     profiles: null,
     devices: null,
@@ -1369,10 +1409,11 @@ export async function runTui () {
     // siguiente reinicio del servicio — un candado que solo se cierra reiniciando no es un
     // candado. (Si la TUI muere de un tirón —kill, ventana cerrada— no hay quien lo haga:
     // ahí el cierre lo pone el reinicio, como antes.)
+    st.sessionPwd.clear()
     for (const id of st.unlockedHere) { try { await vc.lockProfile(id) } catch (_) {} }
     term.close()
   }
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, refreshAll, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, activeLocked, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }

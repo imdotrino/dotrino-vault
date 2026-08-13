@@ -393,3 +393,30 @@ test('el enlace del QR sale corto y sobrevive al navegador', async () => {
   assert.deepEqual(parseInvite(code), qr)
   assert.equal(payload, JSON.stringify(qr))
 })
+
+test('un volcado que NO contesta a nadie no se toma por respuesta (el rechazo no se pierde)', async () => {
+  // LA REGRESIÓN. El daemon repasa su carpeta cada dos segundos y volcaba la lista de
+  // perfiles en cada pasada. Si una de esas caía entre la petición y quien la esperaba,
+  // se tomaba por respuesta: el «contraseña incorrecta» desaparecía —la TUI daba el
+  // desbloqueo por bueno— y la bóveda seguía cerrada, así que a la siguiente tecla
+  // volvía a pedir la contraseña sin decir por qué. Ahora cada volcado dice A QUÉ
+  // PETICIÓN contesta (`req`), y el que no contesta a ninguna se ignora.
+  process.off('SIGUSR2', onUsr2)
+  const ruidoPrimero = () => {
+    const preq = readReq('profile-request.json')
+    dumpProfiles({ req: null })        // el repaso del daemon, que no contesta a nadie
+    setTimeout(() => dumpProfiles({    // la respuesta de verdad, un poco después
+      req: preq?.id ?? null, error: 'wrong password', code: 'WRONG_PASSWORD', tries: 3
+    }), 300)
+  }
+  process.on('SIGUSR2', ruidoPrimero)
+  try {
+    await assert.rejects(
+      () => vc.unlockProfile(model.profiles[0].id, 'la-que-sea'),
+      (e) => e.code === 'WRONG_PASSWORD' && e.tries === 3
+    )
+  } finally {
+    process.off('SIGUSR2', ruidoPrimero)
+    process.on('SIGUSR2', onUsr2)
+  }
+})

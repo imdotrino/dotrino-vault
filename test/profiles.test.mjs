@@ -166,3 +166,40 @@ test('la contraseña exige un mínimo', async () => {
   const { id } = p.migrate()
   await assert.rejects(() => p.setPassword(id, '123'), /at least 4/)
 })
+
+test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda cerrada hoy', async () => {
+  // La regresión: la cuenta de fallos solo la borraba un acierto, así que fallar cinco
+  // veces dejaba esperas exponenciales para siempre — y cada intento nuevo, incluido el
+  // bueno, se rechazaba ANTES de comprobar la contraseña y alargaba la espera. En el VPS
+  // del vault quedó en 10 fallos: minutos de espera por intento y la bóveda inservible
+  // para su dueño.
+  const root = tmp()
+  const p = openProfiles(root)
+  const { id } = p.migrate()
+  await p.setPassword(id, 'secreta')
+  p.lock(id)
+
+  for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
+  // Con cinco fallos ya hay espera: ni la buena llega a comprobarse.
+  await assert.rejects(() => p.unlock(id, 'secreta'), /demasiados intentos/)
+
+  // Los fallos envejecen (se retrasa el último a hace una hora, como si fuera ayer).
+  const file = path.join(root, 'profiles.json')
+  const reg = JSON.parse(fs.readFileSync(file, 'utf8'))
+  reg.profiles[0].tries.at = Date.now() - 60 * 60 * 1000
+  fs.writeFileSync(file, JSON.stringify(reg))
+
+  const mañana = openProfiles(root)
+  await mañana.unlock(id, 'secreta') // sin espera: se olvidaron los de ayer
+  assert.equal(mañana.isLocked(id), false)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).profiles[0].tries, undefined)
+})
+
+test('el freno SIGUE frenando una ráfaga: fallos seguidos hacen esperar', async () => {
+  const p = openProfiles(tmp())
+  const { id } = p.migrate()
+  await p.setPassword(id, 'secreta')
+  p.lock(id)
+  for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
+  await assert.rejects(() => p.unlock(id, 'mala'), (e) => e.code === 'TOO_MANY_TRIES' && e.waitSec > 0)
+})
