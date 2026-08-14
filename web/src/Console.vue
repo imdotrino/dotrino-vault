@@ -436,11 +436,17 @@ async function refresh () {
     const sinPareja = /not paired with a vault/i.test(m)
     sinEnlace.value = sinPareja
     syncError.value = sinPareja ? '' : m
-    // Y que quede en la consola del navegador: no había ni una línea, así que desde fuera
-    // esto era indistinguible de una pantalla que se cargó bien.
-    console.warn('[vault-console] could not sync with the vault:', m)
-    fallos++
-    programarReintento()
+    // NO ES UN FALLO no estar emparejado: es el estado normal de un aparato que manda en su
+    // propia cuenta. Ni se avisa ni se reintenta —reintentar lo que no depende de la red es
+    // dar vueltas para siempre—; si además guarda un acta ajena, eso ya se dice en pantalla
+    // (`copiaVieja`) y la salida es conectarlo, no insistir.
+    if (sinPareja) { fallos = 0; clearTimeout(reintento) } else {
+      // Lo que sí es un fallo, en la consola del navegador: no había ni una línea, así que
+      // desde fuera era indistinguible de una pantalla que se cargó bien.
+      console.warn('[vault-console] could not sync with the vault:', m)
+      fallos++
+      programarReintento()
+    }
   } finally { comprobando.value = false }
   const [a, m, mi] = await Promise.all([
     id.value.profileActa().catch(() => null),
