@@ -207,6 +207,15 @@ Cumple `CONVENCIONES-APPS.md` como cualquier app: `<dotrino-topbar>` con `profil
 bilingüe es/en, GoatCounter, `<meta name="commit">`. La copy va en lenguaje llano (§9.1):
 «Conectar un dispositivo», «Quitar», nunca «emitir un certificado de delegación».
 
+**Dónde se administra cada variable (2026-08-13).** No hay un formulario único con un
+desplegable de destino: se escribe **donde se ve de quién es**. Las de un servicio, en la
+**fila de ese servicio** de la lista de dispositivos, debajo de sus permisos; las de un
+grupo, **dentro del apartado de su grupo**, que se crea primero y se llena después. El
+componente es el mismo en los dos sitios (`web/src/Vars.vue`). La casilla dice **«Privada»**
+—que es como nacen— en vez de describir la consecuencia («que su valor se pueda ver desde
+aquí»), y un grupo recién creado vive solo en la pantalla hasta su primera variable, porque
+en la bóveda un cajón vacío se borra solo.
+
 Detalle de UI que decide la seguridad de todo lo anterior: la pantalla de aprobación
 **pide teclear el código que muestra el otro aparato** y enseña el `deviceId` en grande.
 Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código llegue solo.

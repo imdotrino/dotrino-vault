@@ -12,6 +12,7 @@ import { ref, computed, markRaw, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
+import Vars from './Vars.vue'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
 /**
@@ -147,21 +148,19 @@ const T = {
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
-    var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Desde aquí puedes ver el valor de las que marcaste como visibles y darle un valor nuevo a cualquiera; el valor de las demás no sale de la computadora de tu bóveda, ni siquiera para esta pantalla.',
+    var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
     var_shared: 'la usan todas las máquinas',
-    var_only_this: 'solo esta máquina',
-    var_private: 'no se muestra aquí',
+    var_dev_t: 'Sus variables',
+    var_orphan: 'ya no está en el perfil',
+    var_private: 'privada',
     var_change: 'Cambiar valor',
     var_new_value: (k) => `Valor nuevo de ${k}`,
     var_save: 'Guardar',
-    var_where: '¿Dónde?',
-    var_in_scope: (ns) => `En «${ns}» (todas las máquinas)`,
-    var_in_device: (d) => `Solo en ${d}`,
-    var_new_scope: 'En un grupo nuevo…',
+    var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
     var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
     var_value_ph: 'valor',
-    var_public_ask: 'Que su valor se pueda ver desde aquí',
+    var_private_ask: 'Privada',
     var_add: 'Agregar',
     adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
@@ -261,21 +260,19 @@ const T = {
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
     var_t: 'Your apps\u2019 variables',
-    var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. From here you can see the value of the ones you marked as visible and give any of them a new value; the value of the rest never leaves your vault\u2019s computer, not even for this screen.',
+    var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
-    var_only_this: 'this machine only',
-    var_private: 'not shown here',
+    var_dev_t: 'Its variables',
+    var_orphan: 'no longer in the profile',
+    var_private: 'private',
     var_change: 'Change value',
     var_new_value: (k) => `New value for ${k}`,
     var_save: 'Save',
-    var_where: 'Where?',
-    var_in_scope: (ns) => `In \u201c${ns}\u201d (every machine)`,
-    var_in_device: (d) => `Only on ${d}`,
-    var_new_scope: 'In a new group\u2026',
+    var_group_new: 'New group',
     var_scope_ph: 'group name (e.g. proxy)',
     var_key_ph: 'VARIABLE_NAME',
     var_value_ph: 'value',
-    var_public_ask: 'Let its value be seen from here',
+    var_private_ask: 'Private',
     var_add: 'Add',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
@@ -878,9 +875,8 @@ async function refreshAdmin () {
 // transporta y no ve nada, ni siquiera los nombres.
 
 const vars = ref(null)                       // { ns: {<scope>: [...]}, dev: [...] }
-const newVar = ref({ target: '', ns: '', key: '', value: '', public: false })
-const editing = ref(null)                    // { target, key } de la que se está cambiando
-const editValue = ref('')
+const nuevoGrupo = ref('')                   // el nombre que se está tecleando abajo
+const gruposNuevos = ref([])                 // grupos creados aquí y todavía sin ninguna variable
 
 /** Destino de una variable: `ns:<scope>` o `dev:<pubkey>`. */
 const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.slice(3) })
@@ -890,12 +886,31 @@ async function loadVars () {
   vars.value = JSON.parse(await id.value.openContent(r.enc))
 }
 
-const scopeNames = computed(() => Object.keys(vars.value?.ns || {}).sort())
-/** Los aparatos a los que SE LES PUEDE poner una variable: los servicios (los que las leen). */
-const varDevices = computed(() => (members.value || []).filter((m) => m.cn))
+/**
+ * Los grupos: los que ya tienen variables y los que acabas de crear aquí. Un grupo VACÍO no
+ * existe en la bóveda (un cajón sin nada se borra solo), así que el recién creado vive en
+ * esta pantalla hasta que le pongas la primera variable. Es lo que permite el orden que se
+ * espera: primero el grupo, y dentro las variables.
+ */
+const scopeNames = computed(() => {
+  const del = Object.keys(vars.value?.ns || {})
+  return [...new Set([...del, ...gruposNuevos.value])].sort()
+})
 
-/** Guarda un valor. `isPublic` sin definir = deja la visibilidad como estaba. */
-function saveVar (target, key, value, isPublic) {
+/** Las variables de un aparato, para pintarlas en SU fila. */
+const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)?.keys || []
+/**
+ * Cajones de variables de aparatos que ya no están en el acta. No caben en ninguna fila, y
+ * esconderlos sería dejar configuración invisible: se listan aparte, marcados.
+ */
+const varsHuerfanas = computed(() => (vars.value?.dev || [])
+  .filter((d) => !members.value.some((m) => m.pub === d.pub)))
+
+/**
+ * Guarda un valor. `isPublic` sin definir = deja la visibilidad como estaba (rotar no
+ * cambia quién puede ver). Es lo que `Vars.vue` llama desde los dos sitios.
+ */
+function saveVar ({ target, key, value, isPublic }) {
   return run('var-' + target + '-' + key, async () => {
     const enc = await id.value.sealContent(JSON.stringify({ value }))
     await id.value.vaultAdmin('var.set', {
@@ -905,23 +920,12 @@ function saveVar (target, key, value, isPublic) {
   })
 }
 
-const startEdit = (target, key) => { editing.value = { target, key }; editValue.value = '' }
-const commitEdit = async () => {
-  const { target, key } = editing.value
-  const value = editValue.value
-  if (!value) return
-  editing.value = null; editValue.value = ''
-  await saveVar(target, key, value)
-}
-
-/** Crear una variable: en un scope (nuevo o existente) o en un aparato. */
-const addVar = () => {
-  const v = newVar.value
-  const target = v.target === 'new' ? 'ns:' + v.ns.trim() : v.target
-  if (!target || target === 'ns:' || !v.key.trim() || !v.value) return
-  return saveVar(target, v.key.trim(), v.value, v.public).then(() => {
-    newVar.value = { target: '', ns: '', key: '', value: '', public: false }
-  })
+/** Crear un grupo es solo abrirle su apartado: existe de verdad con la primera variable. */
+function crearGrupo () {
+  const ns = nuevoGrupo.value.trim().toLowerCase()
+  if (!ns) return
+  if (!gruposNuevos.value.includes(ns)) gruposNuevos.value = [...gruposNuevos.value, ns]
+  nuevoGrupo.value = ''
 }
 
 const admPair = () => run('admpair', async () => {
@@ -1125,6 +1129,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <span v-if="!m.caps.length" class="muted">{{ t.caps_none }}</span>
           </div>
           <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
+          <!-- LAS VARIABLES DE UN SERVICIO, EN SU FILA. Son suyas —solo él las lee— así que
+               se administran donde se le ve: nombre, permisos y configuración juntos. Antes
+               había que bajar a otra sección y elegirlo en un desplegable «¿Dónde?». -->
+          <div v-if="canAdmin && m.cn && vars" class="devvars" :data-testid="'devvars-' + m.id">
+            <h3>{{ t.var_dev_t }}</h3>
+            <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
+                  :t="t" :busy="busy" :save="saveVar" />
+          </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
                     data-testid="renounce" @click="confirming = { kind: 'renounce', pub: m.pub }">{{ t.act_renounce }}</button>
@@ -1239,56 +1251,37 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
         <p v-if="!vars" class="muted" data-testid="vars-loading">{{ t.loading }}</p>
         <template v-else>
+          <!-- SOLO LOS GRUPOS: las de un servicio se administran en su fila, arriba. Cada
+               grupo lleva dentro sus variables y su formulario; el grupo se crea primero,
+               abajo, y las variables se ponen dentro de su apartado. -->
           <ul class="vars" data-testid="vars">
             <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
               <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
-              <div v-for="v in vars.ns[ns]" :key="v.key" class="varrow" :data-var="ns + '/' + v.key">
-                <code>{{ v.key }}</code>
-                <span v-if="v.public" class="val" :data-testid="'val-' + v.key">{{ v.value }}</span>
-                <span v-else class="tag out">{{ t.var_private }}</span>
-                <button class="btn ghost sm" :data-testid="'edit-' + ns + '-' + v.key"
-                        @click="startEdit('ns:' + ns, v.key)">{{ t.var_change }}</button>
-              </div>
+              <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
+                    :t="t" :busy="busy" :save="saveVar" />
             </li>
 
-            <li v-for="d in vars.dev" :key="d.pub" class="vargroup" :data-device="d.id">
+            <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->
+            <li v-for="d in varsHuerfanas" :key="d.pub" class="vargroup" :data-device="d.id">
               <div class="who">
                 <strong>{{ d.label || d.id }}</strong>
                 <span class="tag svc" v-if="d.cn">{{ t.service }} «{{ d.cn }}»</span>
                 <code class="mid">{{ d.id }}</code>
-                <span class="tag">{{ t.var_only_this }}</span>
+                <span class="tag out">{{ t.var_orphan }}</span>
               </div>
               <div v-for="v in d.keys" :key="v.key" class="varrow" :data-var="d.id + '/' + v.key">
                 <code>{{ v.key }}</code>
                 <span v-if="v.public" class="val" :data-testid="'val-' + v.key">{{ v.value }}</span>
                 <span v-else class="tag out">{{ t.var_private }}</span>
-                <button class="btn ghost sm" :data-testid="'edit-' + d.id + '-' + v.key"
-                        @click="startEdit('dev:' + d.pub, v.key)">{{ t.var_change }}</button>
               </div>
             </li>
           </ul>
 
-          <!-- Cambiar el valor de una: se puede aunque sea privada y no la puedas leer.
-               Es exactamente para lo que sirve (rotar una llave desde donde estés). -->
-          <div v-if="editing" class="confirm" data-testid="var-edit">
-            <span>{{ t.var_new_value(editing.key) }}</span>
-            <input v-model="editValue" type="password" autocomplete="off" data-testid="var-edit-value" />
-            <button class="btn sm" data-testid="var-edit-save" :disabled="!editValue || !!busy" @click="commitEdit">{{ t.var_save }}</button>
-            <button class="btn ghost sm" @click="editing = null">{{ t.cancel }}</button>
-          </div>
-
-          <div class="varnew" data-testid="var-new">
-            <select v-model="newVar.target" data-testid="var-new-target">
-              <option value="">{{ t.var_where }}</option>
-              <option v-for="ns in scopeNames" :key="ns" :value="'ns:' + ns">{{ t.var_in_scope(ns) }}</option>
-              <option v-for="d in varDevices" :key="d.pub" :value="'dev:' + d.pub">{{ t.var_in_device(d.label || d.id) }}</option>
-              <option value="new">{{ t.var_new_scope }}</option>
-            </select>
-            <input v-if="newVar.target === 'new'" v-model="newVar.ns" :placeholder="t.var_scope_ph" data-testid="var-new-ns" />
-            <input v-model="newVar.key" :placeholder="t.var_key_ph" data-testid="var-new-key" />
-            <input v-model="newVar.value" type="password" autocomplete="off" :placeholder="t.var_value_ph" data-testid="var-new-value" />
-            <label class="chk"><input v-model="newVar.public" type="checkbox" data-testid="var-new-public" /> {{ t.var_public_ask }}</label>
-            <button class="btn sm" data-testid="var-new-save" :disabled="!!busy" @click="addVar">{{ t.var_add }}</button>
+          <div class="varnew" data-testid="var-new-group">
+            <input v-model="nuevoGrupo" type="text" :placeholder="t.var_scope_ph" data-testid="var-new-ns"
+                   @keyup.enter="crearGrupo" />
+            <button class="btn sm" data-testid="var-new-group-save"
+                    :disabled="!nuevoGrupo.trim()" @click="crearGrupo">{{ t.var_group_new }}</button>
           </div>
         </template>
       </template>
@@ -1311,7 +1304,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 .varrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 0 12px; }
 .varrow .val { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
 .varnew { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: #9fb3c8; }
+.varnew input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
+/* Las variables de un servicio, dentro de su fila: subordinadas a ella, no otra sección. */
+.devvars { border-top: 1px solid #1e2a3d; margin: 10px 0 0; padding-top: 10px; }
+.devvars h3 { font-size: 13px; font-weight: 600; color: #9fb0c9; margin: 0; }
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }
