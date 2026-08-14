@@ -267,6 +267,10 @@ const es = {
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
   errPairFailed: 'El daemon no inició el emparejamiento.',
+  // El código NO es la contraseña de la bóveda: son los seis dígitos que el aparato
+  // enseña en su pantalla. Si no coincide, la bóveda no firma nada y el aparato sigue
+  // esperando ahí, así que se puede volver a intentar con A.
+  errWrongCode: 'El código no coincide con el que muestra el dispositivo: no se emitió ningún certificado. Míralo otra vez y pulsa A.',
   errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
   errWrongPassword: (n) => `Contraseña incorrecta${n ? ` — van ${n} intentos fallidos` : ''}`,
   errTooManyTries: (s) => `Demasiados intentos: espera ${s || '?'} s antes de volver a probar`,
@@ -502,6 +506,7 @@ const en = {
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
+  errWrongCode: 'The code does not match the one shown by the device: no certificate was issued. Check it and press A again.',
   errProfileLocked: 'Vault locked: open it with its password',
   errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,
   errTooManyTries: (s) => `Too many attempts: wait ${s || '?'} s before trying again`,

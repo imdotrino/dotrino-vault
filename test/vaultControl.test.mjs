@@ -119,22 +119,41 @@ function onUsr2 () {
     else if (sec.op === 'dev-vis' && sec.pub) { const e = model.devSecrets[t][sec.pub]?.[sec.key]; if (e) e.pub = !!sec.public }
   }
   const preq = readReq('profile-request.json')
-  let extra = {}
-  if (preq?.op) { try { extra = handleProfile(preq) } catch (e) { extra = { error: e.message } } }
-  dumpProfiles(extra)
+  // La lista de bóvedas SOLO se vuelca contestando a una petición de perfil, igual que el
+  // daemon de verdad: volcarla también por su cuenta se llevaba por delante las respuestas.
+  if (preq?.op) {
+    let extra = {}
+    try { extra = handleProfile(preq) } catch (e) { extra = { error: e.message } }
+    dumpProfiles({ ...extra, req: preq.id || null })
+  }
+  // LOS VOLCADOS SON RESPUESTAS: solo se escriben si alguien preguntó, y llevan el id de
+  // SU petición. Igual que el daemon de verdad — escribirlos en cada vuelta se llevaba por
+  // delante la respuesta que otro estaba esperando.
   const dreq = readReq('dump-request.json')
-  const t = resolveTarget(dreq || appr || rej || rv || sec || {})
+  const meReq = readReq('me-request.json')
+  if (!dreq && !meReq) return
+  const req = dreq?.id || null
+  const t = resolveTarget(dreq || meReq || appr || rej || rv || sec || {})
   // EL CANDADO es de esta consola: un perfil bloqueado contesta que lo está y NADA de lo
   // suyo (ni aparatos, ni variables, ni acta), igual que el daemon de verdad.
   if (isLocked(t)) {
-    writeAtomic('secrets-list.json', { profile: t, locked: true, ns: {}, dev: [] })
-    writeAtomic('devices.json', { profile: t, locked: true, issued: [], revoked: [] })
-    writeAtomic('acta.json', { profile: t, locked: true, members: [] })
-    writeAtomic('me.json', { profile: t, locked: true, me: null })
+    const cerrado = { req, profile: t, locked: true }
+    if (dreq) {
+      writeAtomic('secrets-list.json', { ...cerrado, ns: {}, dev: [] })
+      writeAtomic('devices.json', { ...cerrado, issued: [], revoked: [] })
+      writeAtomic('acta.json', { ...cerrado, members: [] })
+    }
+    if (meReq) writeAtomic('me.json', { ...cerrado, req: meReq.id || null, me: null })
     return
   }
-  writeAtomic('secrets-list.json', { profile: t, ns: listSecretsOf(t), dev: listDevSecretsOf(t) })
-  writeAtomic('devices.json', { profile: t, issued: model.devices[t]?.issued || [], revoked: model.devices[t]?.revoked || [] })
+  if (dreq) {
+    // Los tres contestan a la MISMA petición y llevan su id: sin el acta, `snapshot` se
+    // quedaba esperándola los seis segundos de rendirse en cada llamada.
+    writeAtomic('secrets-list.json', { req, profile: t, ns: listSecretsOf(t), dev: listDevSecretsOf(t) })
+    writeAtomic('devices.json', { req, profile: t, issued: model.devices[t]?.issued || [], revoked: model.devices[t]?.revoked || [] })
+    writeAtomic('acta.json', { req, profile: t, members: model.members?.[t] || [] })
+  }
+  if (meReq) writeAtomic('me.json', { req: meReq.id || null, profile: t, me: model.me?.[t] ?? null })
 }
 function onUsr1 () {
   const preq = readReq('pair-request.json')
@@ -419,4 +438,19 @@ test('un volcado que NO contesta a nadie no se toma por respuesta (el rechazo no
     process.off('SIGUSR2', ruidoPrimero)
     process.on('SIGUSR2', onUsr2)
   }
+})
+
+test('el volcado NO espera a la lista de bóvedas: contesta en cuanto llega lo suyo', async () => {
+  // LA OTRA MITAD DE LA MISMA REGRESIÓN. Al dejar de volcar `profiles-list.json` sin que
+  // nadie lo pidiera, `snapshot()` se quedó esperando un archivo que ya no iba a llegar:
+  // seis segundos —los de rendirse— en CADA refresco, con el daemon contestando lo suyo en
+  // cien milisegundos. Eso era la TUI colgada en «Cargando dispositivos…».
+  // Una bóveda recién creada (las de antes quedaron con candado): lo que se mide es el
+  // volcado, no el candado.
+  await vc.addProfile('cronómetro')
+  const t0 = Date.now()
+  const r = await vc.listDevices('cronómetro')
+  const tardo = Date.now() - t0
+  assert.ok(Array.isArray(r.issued), 'contesta con la lista')
+  assert.ok(tardo < 2000, `tiene que contestar en cuanto llega el volcado, no rendirse (tardó ${tardo} ms)`)
 })

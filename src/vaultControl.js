@@ -34,6 +34,7 @@ const F = {
   secretsList: 'secrets-list.json',
   me: 'me.json',
   acta: 'acta.json',
+  approve: 'approve.json',
   // peticiones (las escribe el control; el daemon las consume y borra)
   pairReq: 'pair-request.json',
   approveReq: 'approve-request.json',
@@ -228,7 +229,7 @@ export const removeProfilePassword = (profile) => profileOp('password-rm', { pro
  */
 export async function snapshot (profile) {
   requireAlive()
-  rm(F.devices); rm(F.secretsList); rm(F.profilesList); rm(F.acta)
+  rm(F.devices); rm(F.secretsList); rm(F.acta)
   const since = Date.now()
   const id = await writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.dumpReq])
@@ -236,14 +237,18 @@ export async function snapshot (profile) {
   // delegaciones son su reflejo. Sin ella, un miembro sin certificados (revocado a medias,
   // o con el papel caducado) no salía en ninguna pantalla del PC — invisible y, por lo
   // tanto, imposible de quitar desde aquí.
-  const [devices, secrets, profiles, acta] = await Promise.all([
+  const [devices, secrets, acta] = await Promise.all([
     waitFor(F.devices, { req: id, since }), waitFor(F.secretsList, { req: id, since }),
-    // La lista de perfiles NO lleva el id de ESTE volcado (la escribe `dumpProfiles`,
-    // que contesta a las peticiones de perfil): vale la más nueva.
-    waitFor(F.profilesList, { since }), waitFor(F.acta, { req: id, since })
+    waitFor(F.acta, { req: id, since })
   ])
   assertOpen(devices); assertOpen(secrets); assertOpen(acta)
-  return { devices, secrets, profiles, acta }
+  // LA LISTA DE BÓVEDAS NO SE ESPERA AQUÍ. `profiles-list.json` es la respuesta a una
+  // petición de PERFIL (`dumpProfiles`), y el daemon dejó de volcarlo por su cuenta —
+  // volcarlo sin que nadie preguntara se llevaba por delante las respuestas de verdad.
+  // Seguir esperándolo aquí era esperar seis segundos, los de rendirse, a un archivo que
+  // ya no iba a llegar: CADA refresco de la TUI costaba eso, con el daemon contestando lo
+  // suyo en 100 ms. Quien necesita la lista llama a `listProfiles()`, que sí la pide.
+  return { devices, secrets, acta, profiles: read(F.profilesList, null) }
 }
 
 /**
@@ -555,8 +560,17 @@ export function pendingEnroll () {
  */
 export async function approvePending (code, profile) {
   requireAlive()
-  await writeReq(F.approveReq, { code: String(code) }, profile)
+  rm(F.approve)
+  const since = Date.now()
+  const id = await writeReq(F.approveReq, { code: String(code) }, profile)
   signalOrCleanup('SIGUSR2', [F.approveReq])
+  // SE ESPERA LA RESPUESTA. Antes se daba por hecho: con el código equivocado —que la
+  // bóveda rechaza sin firmar nada— la pantalla decía «Dispositivo aprobado» igual, se
+  // olvidaba del pendiente y no había forma de reintentar desde aquí.
+  const r = await waitFor(F.approve, { req: id, since, tries: 40 })
+  // Sin respuesta: un daemon anterior a esto. Se sigue como antes en vez de inventar un
+  // error (el emparejamiento pudo salir bien).
+  if (r && r.ok === false) throw coded(r.error || 'the code does not match', r.code || 'APPROVE_FAILED')
   await sleep(400)
   return listDevices(profile)
 }

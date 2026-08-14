@@ -159,7 +159,7 @@ export async function runDaemon () {
       //               crea uno vacío), o no habría dónde meterla.
       const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
       const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
-      writeJson(pairFile, { v: 2, qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
+      writeJson(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
       const tok = qr.token
@@ -176,6 +176,7 @@ export async function runDaemon () {
   // --- SIGUSR2: approve / reject / revoke / secretos / perfiles + volcados ---
   const devFile = path.join(dir, 'devices.json')
   const approveReqFile = path.join(dir, 'approve-request.json')
+  const approveFile = path.join(dir, 'approve.json')
   const rejectReqFile = path.join(dir, 'reject-request.json')
   const revokeReqFile = path.join(dir, 'revoke-request.json')
   const secretReqFile = path.join(dir, 'secret-request.json')
@@ -221,11 +222,23 @@ export async function runDaemon () {
     try {
       const appr = readJsonSafe(approveReqFile)
       if (appr?.code) {
+        rm(approveReqFile)
+        // EL RESULTADO SE CONTESTA, no solo se anota en el log del servicio. Un código
+        // equivocado NO emite certificado (lo corta `enroll.js`), pero eso se quedaba en
+        // esta consola: quien aprobaba desde la TUI leía «Dispositivo aprobado», el
+        // pendiente desaparecía de la pantalla y el aparato seguía esperando al otro lado
+        // sin que nadie pudiera reintentar.
+        const responder = (extra) => writeJson(approveFile, { v: 1, at: Date.now(), req: appr.id || null, ...extra })
         try {
           const vault = targetOf(appr)
-          const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile); console.log('[vault] aprobado %s', r.deviceId)
-        } catch (e) { console.error('[vault] approval failed:', e.message) }
-        rm(approveReqFile)
+          if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
+          const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
+          console.log('[vault] aprobado %s', r.deviceId)
+          responder({ ok: true, deviceId: r.deviceId || null })
+        } catch (e) {
+          console.error('[vault] approval failed:', e.message)
+          responder({ ok: false, error: e.message, code: e.code || 'APPROVE_FAILED' })
+        }
       }
       const rej = readJsonSafe(rejectReqFile)
       if (rej?.deviceId) {
@@ -305,10 +318,20 @@ export async function runDaemon () {
         // CLI— siempre pide antes, así que no se queda sin ella.
         writeState()
       }
-      // Volcados que lee la CLI (`devices`, `secret list`). A QUÉ perfil miran lo
-      // dice dump-request.json; sin él, al activo.
+      // Volcados que lee la CLI (`devices`, `members`, `secret list`) y la TUI. A QUÉ
+      // perfil miran lo dice dump-request.json; sin él, al activo.
+      //
+      // SOLO SI ALGUIEN LOS PIDIÓ. Estos archivos son la RESPUESTA a una petición, igual
+      // que `profiles-list.json` (ver arriba), y el daemon pasa por aquí cada dos segundos
+      // —y otra vez, en el acto, si algo llegó mientras atendía—. Volcarlos también sin que
+      // nadie preguntara se llevaba por delante la respuesta recién escrita: quien esperaba
+      // veía un volcado con `req: null` en vez del suyo, seguía esperando y a los seis
+      // segundos se rendía. Eso era la TUI colgada en «Cargando dispositivos…» y luego «el
+      // daemon no responde» — con el daemon sano y contestando en milisegundos.
       const dumpReq = readJsonSafe(dumpReqFile); rm(dumpReqFile)
-      const t = resolveTarget(dumpReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current(), locked: false }
+      const meReq = readJsonSafe(meReqFile)
+      if (!dumpReq && !meReq) return
+      const t = resolveTarget(dumpReq || meReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current(), locked: false }
       // El id de la petición vuelve en cada volcado, para que quien espera sepa que le
       // contestan a ÉL y no lea el volcado de la vuelta anterior (ver `waitFor`).
       const reqId = dumpReq?.id || null
@@ -317,30 +340,33 @@ export async function runDaemon () {
         // (quien pregunta espera una respuesta, no un plantón) pero VACÍOS: ni aparatos, ni
         // nombres de variables, ni acta. Antes el candado no tapaba ninguna de las tres.
         const cerrado = { v: 1, at: Date.now(), req: reqId, profile: t.id, locked: true }
-        writeJson(secretsListFile, { ...cerrado, ns: {}, dev: [] })
-        writeJson(devFile, { ...cerrado, issued: [], revoked: [] })
-        writeJson(path.join(dir, 'acta.json'), { ...cerrado, members: [] })
+        if (dumpReq) {
+          writeJson(secretsListFile, { ...cerrado, ns: {}, dev: [] })
+          writeJson(devFile, { ...cerrado, issued: [], revoked: [] })
+          writeJson(path.join(dir, 'acta.json'), { ...cerrado, members: [] })
+        }
         rm(meReqFile)
-        writeJson(meFile, { ...cerrado, me: null })
+        if (meReq) writeJson(meFile, { ...cerrado, req: meReq.id || null, me: null })
         return
       }
-      // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
-      // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
-      writeJson(secretsListFile, {
-        v: 2, at: Date.now(), req: reqId, profile: t.id,
-        ns: t.vault.listSecrets(),
-        dev: await t.vault.listDeviceSecrets()
-      })
-      writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
-      // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
-      try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+      if (dumpReq) {
+        // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
+        // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
+        writeJson(secretsListFile, {
+          v: 2, at: Date.now(), req: reqId, profile: t.id,
+          ns: t.vault.listSecrets(),
+          dev: await t.vault.listDeviceSecrets()
+        })
+        writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
+        // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
+        try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+      }
 
       // PERFIL del usuario (apodo, foto, datos) tal como lo tiene la bóveda: `dotrino-vault me`.
       // Solo se vuelca cuando se PIDE, no en cada señal: es contenido del usuario y no tiene
       // por qué quedar escrito en un archivo suelto cada vez que alguien mira los miembros.
       // La FOTO no entra en el volcado (son hasta ~90 KB de data-URI que nadie va a leer en
       // una terminal): solo se dice que la hay, de qué tipo y cuánto pesa.
-      const meReq = readJsonSafe(meReqFile)
       if (meReq) {
         rm(meReqFile)
         try {

@@ -63,6 +63,7 @@ function humanErr (e, st) {
     NOT_APPLIED: t.errNotApplied,
     NOT_DELETED: t.errNotDeleted,
     PAIR_FAILED: t.errPairFailed,
+    APPROVE_FAILED: t.errWrongCode,
     MASTER_WITH_MEMBERS: t.errMasterWithMembers,
     PROFILE_LOCKED: t.errProfileLocked
   }
@@ -466,13 +467,23 @@ async function refreshAll (term, st, api = vc) {
   }
 }
 
+/**
+ * Guarda un volcado de dispositivos EN LOS DOS SITIOS.
+ *
+ * La lista se pinta desde el ACTA (`st.members`) con los certificados pegados
+ * (`st.devices`), así que quedarse solo con la mitad deja la pantalla mintiendo: aprobar
+ * un aparato no lo hacía aparecer y quitarlo no lo hacía desaparecer, hasta que algo
+ * volviera a pedir el acta. Peor todavía en una lista: el aparato recién entrado no salía,
+ * así que la fila «la última» era otra y quitarla se llevaba por delante a quien no era.
+ */
+function aplicarVolcado (st, v) {
+  st.devices = v
+  if (Array.isArray(v?.members)) st.members = v.members
+}
+
 async function refreshDevices (term, st) {
   const r = await guard(term, st, L(st).loadingDevices, () => vc.listDevices(activeId(st)))
-  if (!r.ok) return
-  st.devices = r.v
-  // La lista se pinta desde el acta; traerla aparte dejaba la pantalla con los miembros de
-  // hace dos operaciones (quitar uno no lo quitaba de la vista).
-  if (Array.isArray(r.v.members)) st.members = r.v.members
+  if (r.ok) aplicarVolcado(st, r.v)
 }
 async function refreshSecrets (term, st) {
   const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
@@ -729,7 +740,7 @@ async function onKeyDevices (term, st, key) {
         st.confirm = null
         // Por `sub`: se le retiran TODOS los certificados, no solo el de esta fila.
         const r = await guard(term, st, i.revoking, () => vc.revokeDevice({ sub: cur.sub, nonce: cur.nonce }, activeId(st)))
-        if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); st.devices = r.v; st.sel.devices = 0 }
+        if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); aplicarVolcado(st, r.v); st.sel.devices = 0 }
       },
       onNo: () => { st.confirm = null }
     })
@@ -745,7 +756,7 @@ async function onKeyDevices (term, st, key) {
         const name = String(raw || '').trim()
         if (!name) return
         const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, name, activeId(st)))
-        if (r.ok) { st.devices = r.v; flash(st, i.deviceRenamed(name)) }
+        if (r.ok) { aplicarVolcado(st, r.v); flash(st, i.deviceRenamed(name)) }
       }
     })
   } else if (ch === 'c' && cur?.sub) {
@@ -801,7 +812,7 @@ async function onKeyCaps (term, st, key) {
   const apply = async () => {
     const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...caps], activeId(st)))
     if (!r.ok) return
-    st.devices = r.v
+    aplicarVolcado(st, r.v)
     await refreshMembers(term, st)
     flash(st, giving ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
   }
@@ -862,7 +873,7 @@ function promptApprove (term, st) {
       st.input = null
       if (!code.trim()) { flash(st, i.codeMissing, 'danger'); return }
       const r = await guard(term, st, i.approving, () => vc.approvePending(code.trim(), activeId(st)))
-      if (r.ok) { flash(st, i.deviceApproved); st.devices = r.v; st.pending = null; st.screen = 'devices' }
+      if (r.ok) { flash(st, i.deviceApproved); aplicarVolcado(st, r.v); st.pending = null; st.screen = 'devices' }
     },
     onCancel: () => { st.input = null }
   })

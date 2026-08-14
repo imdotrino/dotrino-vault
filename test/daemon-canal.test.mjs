@@ -75,6 +75,53 @@ test('una segunda bóveda sobre los MISMOS datos no arranca', async () => {
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
+/**
+ * EL VOLCADO ES UNA RESPUESTA, NO UN LATIDO.
+ *
+ * El daemon repasa su carpeta cada dos segundos. Mientras volcaba `devices.json`,
+ * `acta.json` y `secrets-list.json` en cada vuelta —preguntara alguien o no—, ese repaso
+ * caía justo entre la respuesta y quien la esperaba y se la llevaba por delante: la TUI se
+ * quedaba en «Cargando dispositivos…» y a los seis segundos decía que el daemon no
+ * responde, con el daemon sano y habiendo contestado en milisegundos.
+ */
+test('nadie pregunta: el daemon NO vuelca devices.json por su cuenta', async () => {
+  const dir = tmp()
+  const { p } = arrancar(dir)
+  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+
+  const dev = path.join(dir, 'devices.json')
+  // Que exista uno viejo no cuenta: se borra y se le dan varias vueltas del repaso (2 s).
+  fs.rmSync(dev, { force: true })
+  await sleep(5000)
+  const solo = fs.existsSync(dev)
+  p.kill()
+  assert.equal(solo, false, 'sin petición no hay volcado')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('y la respuesta a una petición NO se la pisa el repaso siguiente', async () => {
+  const dir = tmp()
+  const { p } = arrancar(dir)
+  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+
+  const dev = path.join(dir, 'devices.json')
+  fs.rmSync(dev, { force: true })
+  fs.writeFileSync(path.join(dir, 'dump-request.json'), JSON.stringify({ id: 'yo-1', at: Date.now() }))
+
+  const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
+  let d = null
+  const hasta = Date.now() + 10000
+  while (Date.now() < hasta && !(d = leer())?.at) await sleep(100)
+  assert.equal(d?.req, 'yo-1', 'el volcado dice a QUIÉN contesta')
+
+  // Lo que rompía: dos vueltas del repaso después, el archivo era otro (`req: null`) y
+  // quien esperaba su respuesta ya no la encontraba nunca.
+  await sleep(5000)
+  p.kill()
+  assert.equal(leer()?.req, 'yo-1', 'la respuesta sigue ahí, sin pisar')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
 test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const dir = tmp()
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ v: 2, pid: 999999 }))
