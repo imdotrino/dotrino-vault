@@ -44,9 +44,9 @@ const T = {
     caps_none: 'sin permisos',
     info_label: 'Qué es esto',
     sync_err_t: 'No se pudo hablar con tu bóveda',
-    // El reintento es un BOTÓN, no algo que haya que adivinar recargando: la lista puede
-    // llevar semanas sin confirmarse y hasta ahora no había forma de pedir que lo hiciera.
-    sync_retry: 'Actualizar', sync_checking: 'Comprobando…',
+    // El reintento es AUTOMÁTICO: nadie tiene que pulsar nada para que una lista se ponga
+    // al día. Lo único que se enseña es el estado — cuándo se confirmó por última vez.
+    sync_checking: 'comprobando con tu bóveda…',
     sync_at: (h) => `confirmado con tu bóveda a las ${h}`,
     sync_stale: 'sin confirmar con tu bóveda',
     // Este aparato guarda el acta de una bóveda con la que ya no puede hablar. No es un
@@ -179,7 +179,7 @@ const T = {
     caps_none: 'no permissions',
     info_label: 'What is this',
     sync_err_t: 'Could not reach your vault',
-    sync_retry: 'Refresh', sync_checking: 'Checking…',
+    sync_checking: 'checking with your vault…',
     sync_at: (h) => `confirmed with your vault at ${h}`,
     sync_stale: 'not confirmed with your vault',
     nolink_t: 'This device can no longer talk to your vault',
@@ -388,6 +388,31 @@ function groupCerts (devices) {
   return m
 }
 
+/**
+ * REINTENTO AUTOMÁTICO. Que una lista se ponga al día no es trabajo del usuario: si no se
+ * pudo confirmar con la bóveda, se vuelve a intentar solo —espaciando los intentos para no
+ * castigar a una bóveda apagada—, y además al volver a esta pestaña y al recuperar la red,
+ * que es cuando de verdad cambian las cosas.
+ */
+const ESPERAS_MS = [3000, 10000, 30000, 60000]
+let fallos = 0
+let reintento = null
+function programarReintento () {
+  clearTimeout(reintento)
+  reintento = setTimeout(() => { refresh() }, ESPERAS_MS[Math.min(fallos - 1, ESPERAS_MS.length - 1)])
+}
+const alVolver = () => { if (document.visibilityState === 'visible' && fallos) refresh() }
+const alHaberRed = () => { if (fallos) refresh() }
+onMounted(() => {
+  document.addEventListener('visibilitychange', alVolver)
+  window.addEventListener('online', alHaberRed)
+})
+onBeforeUnmount(() => {
+  clearTimeout(reintento)
+  document.removeEventListener('visibilitychange', alVolver)
+  window.removeEventListener('online', alHaberRed)
+})
+
 async function refresh () {
   // Si este aparato vive en una bóveda, lo PRIMERO es traerse su acta. Lo que se ve aquí
   // es lo que decidió el dueño en la bóveda —permisos, nombres, quién entró—, no la copia
@@ -400,6 +425,8 @@ async function refresh () {
     syncError.value = ''
     sinEnlace.value = false
     comprobadoAt.value = Date.now()
+    fallos = 0
+    clearTimeout(reintento)
   } catch (e) {
     // «No emparejado con ninguna bóveda» no siempre es lo mismo: en un aparato que todavía
     // no entró en ninguna (o que ES la bóveda) no hay nada que decir, pero en uno que
@@ -412,6 +439,8 @@ async function refresh () {
     // Y que quede en la consola del navegador: no había ni una línea, así que desde fuera
     // esto era indistinguible de una pantalla que se cargó bien.
     console.warn('[vault-console] could not sync with the vault:', m)
+    fallos++
+    programarReintento()
   } finally { comprobando.value = false }
   const [a, m, mi] = await Promise.all([
     id.value.profileActa().catch(() => null),
@@ -1029,11 +1058,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <div v-if="syncError" class="banner bad" data-testid="sync-error">
         <strong>{{ t.sync_err_t }}</strong> — {{ t.sync_err_b }}
         <code class="mid">{{ syncError }}</code>
-        <div class="row">
-          <button class="btn ghost sm" data-testid="resync-err" :disabled="comprobando" @click="refresh">
-            {{ comprobando ? t.sync_checking : t.sync_retry }}
-          </button>
-        </div>
       </div>
 
       <!-- Copia vieja Y sin forma de confirmarla: es lo que hay que decir en la cara, con
@@ -1063,11 +1087,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
         <!-- CUÁNDO se confirmó esto con la bóveda, y con qué volver a intentarlo. Es dato y
              es acción: exactamente lo que va en una pantalla de administración. -->
-        <li>
-          <button class="btn ghost sm" data-testid="resync" :disabled="comprobando" @click="refresh">
-            {{ comprobando ? t.sync_checking : t.sync_retry }}
-          </button>
-          <span class="muted">{{ comprobadoAt ? t.sync_at(horaCorta(comprobadoAt)) : t.sync_stale }}</span>
+        <li data-testid="sync-state" class="muted">
+          {{ comprobando ? t.sync_checking : (comprobadoAt ? t.sync_at(horaCorta(comprobadoAt)) : t.sync_stale) }}
         </li>
       </ul>
 

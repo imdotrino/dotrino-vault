@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
-import { verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
+import { verifyChain, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
 import { createAdminDesk } from '../lib/src/admin.js'
@@ -283,6 +283,37 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
   }
 
+  /**
+   * «¿SIGO SIENDO DE ESTA CASA?» — la única pregunta que se atiende SIN certificado.
+   *
+   * Existe por el aparato que se quedó sin papel: no puede firmar, ni leer, ni renovar, y
+   * —esto es lo grave— tampoco tenía forma de enterarse de que lo echaron, porque todo lo
+   * demás exige el certificado que ya no tiene. Se quedaba enseñando para siempre una
+   * cuenta que ya no era suya. Va firmada con la llave del propio aparato, que es
+   * exactamente lo que el acta nombra, así que decir quién pregunta no necesita más.
+   *
+   * La respuesta es sí o no, y nada más: al que sigue dentro no se le manda el acta —no la
+   * pidió, y contarle el perfil entero a quien no trae papel es dar de más—. Al que ya no
+   * está se le manda el aviso FIRMADO de expulsión, que es lo único que le borra la cuenta.
+   * Que un desconocido pregunte no cuesta nada: lo que se le puede contestar es un aviso a
+   * nombre de SU propia llave, que no le sirve contra nadie más (`verifyRevoke` exige que
+   * el aviso nombre al aparato que lo recibe).
+   */
+  async function handleCheck (from, p) {
+    if (!isFresh(p?.data)) return staleReply(from)
+    const pub = p.data.publickey
+    if (typeof pub !== 'string') return reply(from, { type: MSG.ERROR, error: 'unauthorized: shape' })
+    if (!(await verifyDeviceSig({ publickey: pub, data: p.data, signature: p.signature }))) {
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: bad-signature' })
+    }
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const dentro = (acta?.members || []).some((m) => m?.pub === pub)
+    audit('check', { device: await deviceIdOf(pub).catch(() => null), in: dentro })
+    if (dentro) return reply(from, { type: MSG.CHECKED, in: true })
+    await notifyIfRevoked(pub, null, null, 'revoked')
+    reply(from, { type: MSG.CHECKED, in: false })
+  }
+
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
@@ -396,6 +427,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.SIGN) return await handleSign(from, payload)
       if (payload.type === MSG.GET) return await handleGet(from, payload)
       if (payload.type === MSG.STORE) return await handleStore(from, payload)
+      if (payload.type === MSG.CHECK) return await handleCheck(from, payload)
       if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
       if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
       if (payload.type === MSG.SECRETS) return await handleSecrets(from, payload)
