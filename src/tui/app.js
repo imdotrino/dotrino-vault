@@ -1161,9 +1161,14 @@ const helpSegs = (i, screen, st = {}) => {
     devvars: i.helpDevVars
   }[screen] || []
   if (typeof segs !== 'function') return segs
+  // El aparato señalado ahora mismo: `e variables` solo tiene sentido en un servicio (es
+  // el único que las lee), y las filas seleccionables de la lista son justo los aparatos.
+  const devs = mergeMembersAndCerts(st.members, st.devices?.issued || [])
+  const cur = devs[Math.min(st.sel?.devices || 0, devs.length - 1)]
   return segs({
     pending: !!st.pending,
     hasDevices: (st.devices?.issued || []).length > 0,
+    isService: !!cur?.cn,
     hasSecrets: Object.keys(st.secrets?.ns || {}).length > 0,
     hasVars: devVarsOf(st, st.varsFor?.pub).length > 0
   })

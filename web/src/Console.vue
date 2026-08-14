@@ -151,7 +151,6 @@ const T = {
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
     var_shared: 'la usan todas las máquinas',
     var_dev_t: 'Sus variables',
-    var_dev_none: 'Este aparato no es un servicio, y solo un servicio lee variables. Se decide al conectarlo.',
     var_dev_hint: 'Las variables de un aparato se ponen en su fila, arriba.',
     var_orphan: 'ya no está en el perfil',
     var_private: 'privada',
@@ -263,7 +262,6 @@ const T = {
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
     var_dev_t: 'Its variables',
-    var_dev_none: 'This device is not a service, and only a service reads variables. That is decided when you connect it.',
     var_dev_hint: 'A device’s variables live in its own row, above.',
     var_orphan: 'no longer in the profile',
     var_private: 'private',
@@ -1129,32 +1127,19 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <span v-if="!m.caps.length" class="muted">{{ t.caps_none }}</span>
           </div>
           <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
-          <!-- LAS VARIABLES DE UN APARATO, EN SU FILA. Son suyas —solo él las lee— así que
+          <!-- LAS VARIABLES DE UN SERVICIO, EN SU FILA. Son suyas —solo él las lee— así que
                se administran donde se le ve: nombre, permisos y configuración juntos. Antes
                había que bajar a otra sección y elegirlo en un desplegable «¿Dónde?».
 
-               EL APARTADO SALE EN TODAS LAS FILAS, incluso donde no se puede escribir. Antes
-               se escondía en los aparatos que no son servicio y el resultado era buscarlo por
-               toda la pantalla sin encontrarlo: una fila que calla no dice «aquí no», dice
-               «lo pusieron en otro sitio». Donde no aplica, se dice por qué en una línea.
-
-               Y la bóveda solo se las guarda a quien las lee (`requireService`), así que a un
-               aparato que no es servicio no se le ofrece el formulario: sería un botón que
-               falla siempre. Lo que arrastre de antes se sigue viendo y se puede cambiar —
-               configuración invisible es configuración que nadie arregla el día que falla. -->
-          <div v-if="canAdmin && vars" class="devvars" :data-testid="'devvars-' + m.id">
-            <h3>
-              {{ t.var_dev_t }}
-              <!-- El porqué de que aquí no haya formulario cabe en una frase y NO se
-                   estampa en la fila: iba suelta debajo del título y era un párrafo de
-                   manual repetido en cada aparato (§5.1). Detrás de la (i), como el resto. -->
-              <button v-if="!m.cn" type="button" class="i" :data-testid="'info-devvars-' + m.id"
-                      :aria-expanded="info === 'devvars-' + m.id" :aria-label="t.info_label"
-                      @click="toggleInfo('devvars-' + m.id)">i</button>
-            </h3>
-            <p v-if="info === 'devvars-' + m.id" class="muted info-panel">{{ t.var_dev_none }}</p>
-            <Vars v-if="m.cn || varsOfDevice(m.pub).length"
-                  :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
+               EN LOS DEMÁS APARATOS NO SALE NADA, ni el título ni una explicación de por qué:
+               un teléfono no lee variables (`requireService`), así que un apartado vacío en su
+               fila solo sería ruido repetido en toda la lista. Lo que un aparato así arrastre
+               de antes se sigue viendo y se puede cambiar — configuración invisible es
+               configuración que nadie arregla el día que falla. -->
+          <div v-if="canAdmin && vars && (m.cn || varsOfDevice(m.pub).length)" class="devvars"
+               :data-testid="'devvars-' + m.id">
+            <h3>{{ t.var_dev_t }}</h3>
+            <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
                   :t="t" :busy="busy" :save="saveVar" :add="!!m.cn" />
           </div>
           <div class="acts">

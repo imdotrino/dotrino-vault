@@ -216,14 +216,14 @@ componente es el mismo en los dos sitios (`web/src/Vars.vue`). La casilla dice *
 aquí»), y un grupo recién creado vive solo en la pantalla hasta su primera variable, porque
 en la bóveda un cajón vacío se borra solo.
 
-El apartado **«Sus variables» sale en TODAS las filas**, también en las de un aparato que no
-es servicio: ahí no hay formulario —la bóveda solo se las guarda a quien las lee, ver
-`requireService`— y el porqué va **detrás de la (i)** del título, no estampado en la fila
-(§5.1: una pantalla administrativa no lleva documentación, y esa frase repetida en cada
-aparato era un párrafo de manual). Esconder el apartado entero era peor que negarlo: una fila
-que calla no se lee como «aquí no se puede», se lee como «esto estará en otra pantalla», y se
-busca por toda la consola. Lo que un aparato así arrastre de antes se sigue viendo y se puede
-cambiar.
+**Donde no se puede, no sale nada.** El apartado «Sus variables» aparece en la fila de un
+**servicio** y en ninguna otra: solo él las lee (`requireService`), así que en un teléfono no
+hay ni formulario ni un letrero explicando por qué no lo hay — un «aquí no» repetido en cada
+fila de la lista es ruido, y la §5.1 lo saca de una pantalla administrativa. Lo mismo en la
+TUI: la barra de teclas ofrece `e variables` solo si el aparato señalado es un servicio (ya
+era la regla de esa barra: anunciar teclas muertas confunde). Lo que un aparato arrastre de
+antes se sigue viendo y se puede cambiar — configuración invisible es configuración que nadie
+arregla el día que falla.
 
 Detalle de UI que decide la seguridad de todo lo anterior: la pantalla de aprobación
 **pide teclear el código que muestra el otro aparato** y enseña el `deviceId` en grande.

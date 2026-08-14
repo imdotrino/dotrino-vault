@@ -189,6 +189,11 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
     assert.ok(conAparatos.includes('r') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
     assert.ok(!conAparatos.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
 
+    // `e variables` solo en un SERVICIO: en un teléfono la tecla solo sabía decir que no,
+    // que es lo mismo que sobraba en la consola web (un apartado para decir «aquí no»).
+    assert.ok(!conAparatos.includes('e'), 'un aparato que no es servicio no ofrece variables: ' + conAparatos)
+    assert.ok(teclas(d.helpDevices({ hasDevices: true, isService: true })).includes('e'), 'un servicio sí')
+
     assert.ok(!teclas(d.helpSecrets({ hasSecrets: false })).includes('x'), 'sin secretos no se ofrece quitar')
     assert.ok(teclas(d.helpSecrets({ hasSecrets: true })).includes('x'), 'con secretos sí')
   }

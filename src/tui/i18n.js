@@ -221,10 +221,14 @@ const es = {
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
-  helpDevices: ({ pending, hasDevices } = {}) => [
+  // `e variables` solo en un SERVICIO: es el único que las lee, así que en un teléfono
+  // era una tecla que solo sabía decir que no.
+  helpDevices: ({ pending, hasDevices, isService } = {}) => [
     '←→ pestaña', '↑↓', 'p emparejar',
     ...(pending ? ['a aprobar', 'x rechazar'] : []),
-    ...(hasDevices ? ['r renombrar', 'c permisos', 'e variables', 'v revocar'] : []),
+    ...(hasDevices ? ['r renombrar', 'c permisos'] : []),
+    ...(isService ? ['e variables'] : []),
+    ...(hasDevices ? ['v revocar'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
@@ -462,10 +466,12 @@ const en = {
   helpConfirm: 'y confirm · n/Esc cancel',
 
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
-  helpDevices: ({ pending, hasDevices } = {}) => [
+  helpDevices: ({ pending, hasDevices, isService } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(pending ? ['a approve', 'x reject'] : []),
-    ...(hasDevices ? ['r rename', 'c permissions', 'e variables', 'v revoke'] : []),
+    ...(hasDevices ? ['r rename', 'c permissions'] : []),
+    ...(isService ? ['e variables'] : []),
+    ...(hasDevices ? ['v revoke'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,
