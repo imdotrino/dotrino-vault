@@ -186,13 +186,19 @@ test('fitHelp respeta el ancho y conserva la cola', () => {
 
 test('antes del QR, el vault PREGUNTA a qué cuenta entra el dispositivo', () => {
   const t = makeTheme()
-  for (const [lang, aqui, nueva] of [['es', /Entrar a esta cuenta: Perfil 1/, /Estrenar una cuenta nueva/], ['en', /Join this account: Perfil 1/, /Start a new account/]]) {
+  for (const [lang, aqui, nueva, servicio] of [
+    ['es', /Entrar a esta cuenta: Perfil 1/, /Estrenar una cuenta nueva/, /Conectar un servicio/],
+    ['en', /Join this account: Perfil 1/, /Start a new account/, /Connect a service/]
+  ]) {
     const rows = V.pairModeRows(baseState({ screen: 'pairmode', lang }), t)
     const opciones = rows.filter((r) => r.sel)
-    assert.equal(opciones.length, 2, 'hoy se puede responder de dos formas')
-    assert.deepEqual(opciones.map((r) => r.meta.mode), ['here', 'new'])
+    assert.equal(opciones.length, 3, 'hoy se puede responder de tres formas')
+    assert.deepEqual(opciones.map((r) => r.meta.mode), ['here', 'new', 'service'])
     assert.match(rows.map((r) => r.text).join('\n'), aqui)
     assert.match(rows.map((r) => r.text).join('\n'), nueva)
+    // Un SERVICIO se emparejaba solo por la línea de comandos (`pair --service <ns>`):
+    // la TUI te dejaba a medias y había que salirse a la terminal a terminar.
+    assert.match(rows.map((r) => r.text).join('\n'), servicio)
     // La tercera (adoptar la cuenta del dispositivo) se nombra pero NO se puede elegir.
     assert.match(rows.map((r) => r.text).join('\n'), lang === 'es' ? /Adoptar la cuenta que trae/ : /Adopt the account the device brings/)
     assert.ok(!opciones.some((r) => r.meta.mode === 'adopt'))
@@ -220,6 +226,20 @@ test('la pantalla de emparejar dice DE QUÉ CUENTA sale el QR', () => {
 
   st.lang = 'en'
   assert.match(V.pairingBody(st, t, 80, 20)[0], /Account being shared/)
+})
+
+test('un QR de SERVICIO lo dice, y el de un aparato normal no inventa un servicio', () => {
+  const t = makeTheme()
+  const st = baseState({ screen: 'pairing' })
+  st.pairing = { url: 'https://vault.dotrino.com/d#v=AAAA', payload: '{"v":2}', b64: 'AAAA', expiresAt: Date.now() + 200000 }
+  assert.ok(!V.pairingBody(st, t, 80, 20).some((l) => /SERVICIO/.test(l)), 'un aparato normal no lleva ese aviso')
+
+  // Con servicio: se dice ANTES del QR qué papel se está entregando (no firma, no ve
+  // el contenido, solo lee las variables de su ns).
+  st.pairing.service = 'proxy'
+  assert.match(V.pairingBody(st, t, 80, 20)[1], /SERVICIO «proxy»/)
+  st.lang = 'en'
+  assert.match(V.pairingBody(st, t, 80, 20)[1], /SERVICE “proxy”/)
 })
 
 test('el QR se dibuja cuando cabe de ancho, y el código pegable es base64', () => {

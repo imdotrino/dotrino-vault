@@ -271,11 +271,15 @@ function deviceRows (st, t) {
 /**
  * LA PREGUNTA DEL EMPAREJAMIENTO. La decisión es del vault (es quien lo inicia) y
  * este daemon puede tener varias cuentas: antes de mostrar el QR hay que decir a
- * cuál entra el dispositivo. Hoy se responde con las dos formas que existen —una
- * cuenta que ya vive aquí, o una nueva que se estrena para él—; la tercera
- * («adoptar la que trae el aparato») necesita el protocolo de adopción y se
- * muestra desactivada para no prometer lo que todavía no hace
- * (docs/vinculacion-de-cuentas.md §5).
+ * cuál entra el dispositivo. Se responde con las tres formas que existen —una
+ * cuenta que ya vive aquí, una nueva que se estrena para él, o un SERVICIO de la
+ * cuenta activa—; la cuarta («adoptar la que trae el aparato») necesita el
+ * protocolo de adopción y se muestra desactivada para no prometer lo que todavía
+ * no hace (docs/vinculacion-de-cuentas.md §5).
+ *
+ * Lo del servicio estaba SOLO en la línea de comandos (`pair --service <ns>`), y una
+ * máquina que sirve el proxy no se empareja de otra manera: sin esta opción, la TUI
+ * te dejaba a medio camino y había que salirse a la terminal a terminar el trabajo.
  */
 function pairModeRows (st, t) {
   const i = L(st)
@@ -286,6 +290,9 @@ function pairModeRows (st, t) {
   rows.push({ text: '', sel: false })
   rows.push({ text: ` ${t.bold(i.pairModeNew)}`, sel: true, meta: { mode: 'new' } })
   rows.push({ text: t.muted('     ' + i.pairModeNewHint), sel: false })
+  rows.push({ text: '', sel: false })
+  rows.push({ text: ` ${t.bold(i.pairModeService)}`, sel: true, meta: { mode: 'service' } })
+  rows.push({ text: t.muted('     ' + i.pairModeServiceHint), sel: false })
   rows.push({ text: '', sel: false })
   rows.push({ text: ' ' + t.muted(i.pairModeAdopt), sel: false })
   rows.push({ text: t.muted('     (' + i.pairModeAdoptSoon + ')'), sel: false })
@@ -791,10 +798,16 @@ async function onKeyDevices (term, st, key) {
   return true
 }
 
-/** Abre el emparejamiento contra `profile` y salta a la pantalla del QR. */
-async function beginPairing (term, st, profile) {
-  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile }))
-  if (r.ok) { st.pairing = r.v; st.pending = null; st.scroll.pairing = { value: 0 }; st.screen = 'pairing' }
+/**
+ * Abre el emparejamiento contra `profile` y salta a la pantalla del QR. Con `service`,
+ * el QR es el de un SERVICIO de ese namespace (cert limitado a sus variables).
+ */
+async function beginPairing (term, st, profile, service = null) {
+  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile, ...(service ? { service } : {}) }))
+  // `service` se pega al estado porque el daemon no lo devuelve: la pantalla del QR
+  // tiene que poder decir qué se está entregando, que no es lo mismo un aparato tuyo
+  // que una máquina que solo va a leer la configuración del proxy.
+  if (r.ok) { st.pairing = { ...r.v, ...(service ? { service } : {}) }; st.pending = null; st.scroll.pairing = { value: 0 }; st.screen = 'pairing' }
   return r.ok
 }
 
@@ -851,6 +864,25 @@ async function onKeyPairMode (term, st, key) {
   if (key.name !== 'enter' || !cur) return true
 
   if (cur.mode === 'here') { await beginPairing(term, st, activeId(st)); return true }
+
+  // SERVICIO: entra a la cuenta activa, pero con un certificado que solo sirve para
+  // pedir las variables de SU namespace. El nombre del ns es el que luego pide el
+  // servicio al arrancar, así que se valida aquí con la misma regla que la CLI: un
+  // ns con mayúsculas o espacios se enrola igual y falla el día del despliegue.
+  if (cur.mode === 'service') {
+    setInput(st, {
+      label: i.serviceNsLabel,
+      hint: i.serviceNsHint,
+      onSubmit: async (raw) => {
+        st.input = null
+        const ns = String(raw || '').trim().toLowerCase()
+        if (!/^[a-z0-9-]{1,32}$/.test(ns)) { flash(st, i.serviceNsBad, 'danger'); return }
+        await beginPairing(term, st, activeId(st), ns)
+      },
+      onCancel: () => { st.input = null }
+    })
+    return true
+  }
 
   // Cuenta nueva: se crea aquí, se ACTIVA (así aprobar/rechazar y las listas miran
   // a la misma que el QR) y recién entonces se abre el emparejamiento contra ella.
@@ -1202,6 +1234,9 @@ function pairingBody (st, t, cols, height) {
   const acct = info.profileName || ap?.name || info.profile || ap?.id || '—'
   const left = Math.max(0, Math.round((info.expiresAt - Date.now()) / 60000))
   lines.push(t.bold(i.pairAccount(acct, left)))
+  // Y si lo que se entrega es un SERVICIO, se dice: el papel que sale de este QR no
+  // firma ni ve el contenido, solo lee las variables de ese namespace.
+  if (info.service) lines.push(t.warn(i.pairService(info.service)))
   // QR: se dibuja siempre que quepa de ancho; si es más alto que la pantalla se
   // puede hacer scroll hacia arriba/abajo para verlo completo.
   let qr = ''

@@ -336,10 +336,15 @@ dispositivos/variables que estás viendo:
      (su valor se puede ver desde la consola remota) o **privada**.
 
 Al emparejar, la bóveda **pregunta primero a qué cuenta entra el dispositivo** y
-recién después muestra el QR, que además dice de qué cuenta salió. La pregunta ofrece
-una tercera opción, «adoptar la cuenta que trae el dispositivo», que aparece
-**desactivada**: el dispositivo todavía no sabe entregar la suya. Desde la CLI ese
-camino ya se inicia con `dotrino-vault pair --adopt`.
+recién después muestra el QR, que además dice de qué cuenta salió. Se responde de tres
+formas: entrar a la cuenta activa, estrenar una nueva, o **conectar un servicio**
+(pide el namespace —`proxy`, `geo`…— y emite la invitación con scope
+`vault:secrets:<ns>`, igual que `pair --service`; el QR avisa de que lo que entrega es
+un servicio y no un aparato del dueño). Es lo que hace falta para que ese aparato
+luego tenga variables propias: sin `cn`, la bóveda no se las guarda. Una cuarta
+opción, «adoptar la cuenta que trae el dispositivo», aparece **desactivada**: el
+dispositivo todavía no sabe entregar la suya. Desde la CLI ese camino ya se inicia con
+`dotrino-vault pair --adopt`.
 
 `Esc` desde las pestañas vuelve a la lista de bóvedas; `q` sale desde cualquier
 pantalla, salvo mientras escribes en un campo o respondes una confirmación: ahí se
