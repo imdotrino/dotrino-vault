@@ -216,6 +216,13 @@ componente es el mismo en los dos sitios (`web/src/Vars.vue`). La casilla dice *
 aquí»), y un grupo recién creado vive solo en la pantalla hasta su primera variable, porque
 en la bóveda un cajón vacío se borra solo.
 
+El apartado **«Sus variables» sale en TODAS las filas**, también en las de un aparato que no
+es servicio: ahí no hay formulario —la bóveda solo se las guarda a quien las lee, ver
+`requireService`— y en su lugar va una línea diciéndolo. Esconderlo era peor que negarlo: una
+fila que calla no se lee como «aquí no se puede», se lee como «esto estará en otra pantalla»,
+y se busca por toda la consola. Lo que un aparato así arrastre de antes se sigue viendo y se
+puede cambiar.
+
 Detalle de UI que decide la seguridad de todo lo anterior: la pantalla de aprobación
 **pide teclear el código que muestra el otro aparato** y enseña el `deviceId` en grande.
 Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código llegue solo.
