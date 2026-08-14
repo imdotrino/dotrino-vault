@@ -579,19 +579,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   const varsDesk = {
     async list () {
-      const scope = {}
-      for (const [ns, keys] of Object.entries(secrets.list())) {
-        const values = secrets.publicOf(ns)
-        scope[ns] = keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k))
-      }
-      const devices = []
-      for (const row of await listDeviceSecrets()) {
-        const values = secrets.publicOfDevice(row.pub)
-        devices.push({ ...row, keys: row.keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k)) })
-      }
+      // `listSecrets`/`listDeviceSecrets` ya traen el valor de las públicas y solo de esas:
+      // la frontera se decide en un sitio, y lo mismo ve el dueño en su terminal que aquí.
       // Se sella la lista ENTERA, no solo los valores: el proxy tampoco tiene por qué
       // aprender cómo se llaman tus variables ni qué servicios corres.
-      return { enc: await identity.sealContent(JSON.stringify({ ns: scope, dev: devices })) }
+      return {
+        enc: await identity.sealContent(JSON.stringify({
+          ns: listSecrets(), dev: await listDeviceSecrets()
+        }))
+      }
     },
     async set ({ ns, pub, key, enc, public: isPublic }) {
       const payload = JSON.parse(await identity.openContent(enc))
@@ -674,7 +670,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // sin decir nada, la variable conserva su visibilidad (y una nueva nace privada).
   function setSecret (ns, key, value, isPublic) { secrets.set(ns, key, value, isPublic); audit('secret.set', { ns, key }); scheduleNotice(ns) }
   function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
-  function listSecrets () { return secrets.list() }
+  /**
+   * Los nombres, y el VALOR de las públicas. Pública quiere decir «este valor puede salir
+   * de esta máquina»: taparlo justo aquí —en la máquina donde vive, delante de su dueño—
+   * era lo único que la marca no significaba. La consola remota ya las enseña.
+   */
+  function listSecrets () {
+    const out = {}
+    for (const [ns, keys] of Object.entries(secrets.list())) {
+      const values = secrets.publicOf(ns)
+      out[ns] = keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k))
+    }
+    return out
+  }
   /** Cambiar SOLO quién puede ver el valor (no toca el valor ni avisa: el servicio lee lo mismo). */
   function setSecretVisibility (ns, key, isPublic) {
     const ok = secrets.setVisibility(ns, key, isPublic)
@@ -730,9 +738,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /**
-   * Nombres (nunca valores) de las variables por aparato, con quién es cada aparato pegado:
-   * una llave suelta no se puede administrar. `orphan` marca las que quedaron de una llave
-   * que ya no está en el acta.
+   * Las variables por aparato —nombres, y el valor de las PÚBLICAS, igual que `listSecrets`—
+   * con quién es cada aparato pegado: una llave suelta no se puede administrar. `orphan`
+   * marca las que quedaron de una llave que ya no está en el acta.
    */
   async function listDeviceSecrets () {
     const acta = (await identity.profileActa?.().catch(() => null))?.acta
@@ -740,12 +748,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const out = []
     for (const [pub, keys] of Object.entries(secrets.listDevices())) {
       const m = members.find((x) => x.pub === pub) || null
+      const values = secrets.publicOfDevice(pub)
       out.push({
         pub,
         id: m?.id || await deviceIdOf(pub).catch(() => null),
         label: m?.label || '',
         cn: m?.cn || null,
-        keys,
+        keys: keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k)),
         orphan: !!members.length && !m
       })
     }

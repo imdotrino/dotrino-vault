@@ -350,8 +350,14 @@ export async function runDaemon () {
         return
       }
       if (dumpReq) {
-        // Nombres de secretos, nunca valores. Los DOS cajones: `ns` (por scope, que
-        // comparten todos los aparatos del perfil) y `dev` (las propias de cada aparato).
+        // Los DOS cajones: `ns` (por scope, que comparten todos los aparatos del perfil) y
+        // `dev` (las propias de cada aparato). Con el VALOR de las públicas —que es lo que
+        // pública significa— y sin el de las privadas, que no salen del proceso.
+        //
+        // Ese valor queda escrito en claro en este archivo (0600, y quien lo lee lo borra
+        // en cuanto lo tiene). Es material que su dueño marcó como mostrable, y aquí ya
+        // viaja a un navegador; lo que NO puede pasar es que se quede en el disco esperando
+        // a que alguien copie la carpeta, porque eso sí burlaría el cifrado en reposo.
         writeJson(secretsListFile, {
           v: 2, at: Date.now(), req: reqId, profile: t.id,
           ns: t.vault.listSecrets(),

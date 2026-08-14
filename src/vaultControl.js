@@ -241,6 +241,10 @@ export async function snapshot (profile) {
     waitFor(F.devices, { req: id, since }), waitFor(F.secretsList, { req: id, since }),
     waitFor(F.acta, { req: id, since })
   ])
+  // El volcado de variables lleva el valor de las PÚBLICAS, así que se borra en cuanto se
+  // tiene: en la memoria de quien lo pidió, no esperando en el disco a que copien la
+  // carpeta (ahí es donde el cifrado en reposo dejaría de servir de nada).
+  rm(F.secretsList)
   assertOpen(devices); assertOpen(secrets); assertOpen(acta)
   // LA LISTA DE BÓVEDAS NO SE ESPERA AQUÍ. `profiles-list.json` es la respuesta a una
   // petición de PERFIL (`dumpProfiles`), y el daemon dejó de volcarlo por su cuenta —
@@ -425,6 +429,7 @@ async function secretOp (req, profile, check) {
   await writeReq(F.dumpReq, {}, profile)
   signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
   const d = await waitFor(F.secretsList)
+  rm(F.secretsList) // lleva el valor de las públicas: no se queda en el disco (ver `snapshot`)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
   assertOpen(d)
   const out = shapeSecrets(d)

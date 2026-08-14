@@ -151,10 +151,9 @@ const T = {
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
     var_shared: 'la usan todas las máquinas',
     var_dev_t: 'Sus variables',
+    var_dev_hint: 'Las variables de un aparato se ponen en su fila, arriba.',
     var_orphan: 'ya no está en el perfil',
     var_private: 'privada',
-    var_change: 'Cambiar valor',
-    var_new_value: (k) => `Valor nuevo de ${k}`,
     var_save: 'Guardar',
     var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
@@ -263,10 +262,9 @@ const T = {
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
     var_dev_t: 'Its variables',
+    var_dev_hint: 'A device’s variables live in its own row, above.',
     var_orphan: 'no longer in the profile',
     var_private: 'private',
-    var_change: 'Change value',
-    var_new_value: (k) => `New value for ${k}`,
     var_save: 'Save',
     var_group_new: 'New group',
     var_scope_ph: 'group name (e.g. proxy)',
@@ -1132,10 +1130,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <!-- LAS VARIABLES DE UN SERVICIO, EN SU FILA. Son suyas —solo él las lee— así que
                se administran donde se le ve: nombre, permisos y configuración juntos. Antes
                había que bajar a otra sección y elegirlo en un desplegable «¿Dónde?». -->
-          <div v-if="canAdmin && m.cn && vars" class="devvars" :data-testid="'devvars-' + m.id">
+          <!-- Un aparato que NO es servicio no puede recibir variables (la bóveda solo se
+               las guarda a quien las lee), pero si arrastra alguna de antes se ve igual:
+               configuración invisible es configuración que nadie arregla el día que falla. -->
+          <div v-if="canAdmin && vars && (m.cn || varsOfDevice(m.pub).length)" class="devvars"
+               :data-testid="'devvars-' + m.id">
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
-                  :t="t" :busy="busy" :save="saveVar" />
+                  :t="t" :busy="busy" :save="saveVar" :add="!!m.cn" />
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
@@ -1249,6 +1251,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         </h2>
         <p v-if="info === 'vars'" class="muted info-panel">{{ t.var_b }}</p>
 
+        <!-- Puntero, no explicación: aquí abajo SOLO están los grupos, y quien busque las
+             de un aparato tiene que saber que están arriba (lo mismo que hace la TUI). -->
+        <p class="muted devhint" data-testid="var-dev-hint">{{ t.var_dev_hint }}</p>
         <p v-if="!vars" class="muted" data-testid="vars-loading">{{ t.loading }}</p>
         <template v-else>
           <!-- SOLO LOS GRUPOS: las de un servicio se administran en su fila, arriba. Cada
@@ -1308,6 +1313,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 /* Las variables de un servicio, dentro de su fila: subordinadas a ella, no otra sección. */
 .devvars { border-top: 1px solid #1e2a3d; margin: 10px 0 0; padding-top: 10px; }
 .devvars h3 { font-size: 13px; font-weight: 600; color: #9fb0c9; margin: 0; }
+.devhint { font-size: 13px; margin: 4px 0 0; }
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }

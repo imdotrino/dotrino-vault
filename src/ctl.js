@@ -551,7 +551,13 @@ async function cmdSecret (rest) {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
     writeReq('dump-request.json', {}) // de qué perfil son los secretos
     avisar(s.pid, 'SIGUSR2')
-    for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(secretsListFile, null); if (d?.at) return assertOpen(d) }
+    for (let i = 0; i < 50; i++) {
+      await sleep(100)
+      const d = readJson(secretsListFile, null)
+      // El volcado lleva el valor de las públicas: se borra en cuanto se tiene, para que no
+      // se quede esperando en el disco a que copien la carpeta (ver `daemon.js`).
+      if (d?.at) { try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {} ; return assertOpen(d) }
+    }
     console.error('El daemon no respondió.'); process.exit(1)
   }
   const USAGE = [
@@ -567,8 +573,12 @@ async function cmdSecret (rest) {
     'consola remota (vault.dotrino.com). Se nace privada. El servicio recibe las dos igual.'
   ].join('\n')
 
-  /** Una variable en la lista: su nombre y si su valor puede salir de aquí. */
-  const printVar = (k) => console.log('  · %s%s', k.key, k.public ? '   (pública)' : '')
+  /**
+   * Una variable en la lista: su nombre y su valor. La PÚBLICA enseña el suyo (pública
+   * quiere decir que ese valor puede salir de esta máquina: taparlo aquí, delante de su
+   * dueño, era lo único que la marca no significaba). La privada no se muestra.
+   */
+  const printVar = (k) => console.log('  · %s   %s', k.key, k.public ? `${k.value ?? ''}   (pública)` : '••••••')
   const has = (list, key) => (list || []).some((x) => x.key === key)
 
   if (sub === 'list') {
@@ -818,7 +828,8 @@ function help () {
                                     variable de UN aparato: solo la lee él, y pisa a la
                                     del scope que se llame igual (puerto, URL pública…)
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
-  secret list                       lista los dos cajones, por nombre (nunca valores)
+  secret list                       lista los dos cajones: el valor de las públicas,
+                                    tapadas las privadas
   --public | --private              (al hacer un set) si el VALOR puede salir de esta
                                     máquina hacia la consola remota. Se nace privada.
   secret visibility <ns> <CLAVE> public|private        cambia eso sin tocar el valor

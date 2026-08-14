@@ -42,8 +42,8 @@ after(async () => {
 test('flujo completo: set → pair --service → enroll → fetchSecrets', async () => {
   vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123')
   vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 't-456')
-  // La lista da nombres y VISIBILIDAD, nunca valores. Se nace privada: el valor no sale
-  // de esta máquina mientras nadie diga lo contrario.
+  // Se nace privada: el valor no sale de esta máquina mientras nadie diga lo contrario,
+  // así que de estas dos la lista solo da el nombre.
   assert.deepEqual(vault.listSecrets(), {
     proxy: [{ key: 'TURN_KEY_ID', public: false }, { key: 'TURN_KEY_API_TOKEN', public: false }]
   })
@@ -62,6 +62,29 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
 
   const secrets = await fetchSecrets({ dir: svcDir })
   assert.deepEqual(secrets, { TURN_KEY_ID: 'k-123', TURN_KEY_API_TOKEN: 't-456' })
+})
+
+test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', async () => {
+  // «Pública» quiere decir UNA cosa: que ese valor puede salir de esta máquina. Taparlo
+  // justo aquí —en la lista que mira su dueño desde la terminal de la propia bóveda—
+  // era lo único que la marca no significaba, y obligaba a abrir `secrets.json` a mano
+  // para comprobar una URL. La privada sigue sin salir ni a esta lista.
+  vault.setSecret('escaparate', 'PUBLIC_URL', 'https://ejemplo.com', true)
+  vault.setSecret('escaparate', 'API_KEY', 's3cr3t')
+  assert.deepEqual(vault.listSecrets().escaparate, [
+    { key: 'PUBLIC_URL', public: true, value: 'https://ejemplo.com' },
+    { key: 'API_KEY', public: false }
+  ])
+
+  // El cajón por aparato va por la misma regla, y por el mismo camino.
+  const pub = 'PUB-DE-UN-APARATO'
+  vault.secrets.setDevice(pub, 'PORT', '8443', true)
+  vault.secrets.setDevice(pub, 'DB_PASSWORD', 'nope')
+  const fila = (await vault.listDeviceSecrets()).find((d) => d.pub === pub)
+  assert.deepEqual(fila.keys, [
+    { key: 'PORT', public: true, value: '8443' },
+    { key: 'DB_PASSWORD', public: false }
+  ])
 })
 
 test('loadEnv() inyecta los secretos en process.env y PISA el .env', async () => {

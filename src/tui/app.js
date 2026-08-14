@@ -348,11 +348,19 @@ const devVarsOf = (st, pub) => (st.secrets?.dev || []).find((x) => x.pub === pub
 const sortByKey = (list) => (list || []).slice().sort((a, b) => a.key.localeCompare(b.key))
 
 /**
- * Una variable: su nombre, el valor tapado y —si es pública— el aviso de que ese valor
- * SALE de esta máquina cuando la consola remota lo pide. Es un dato operativo, no un
- * adorno: es la diferencia entre un secreto que solo vive aquí y uno que viaja.
+ * Una variable: su nombre y su valor. La PÚBLICA enseña el suyo —pública significa que ese
+ * valor puede salir de esta máquina, así que taparlo delante de su dueño, en la máquina
+ * donde vive, era lo único que la marca no quería decir— con el aviso de que viaja cuando
+ * la consola remota lo pide. La privada sigue tapada: no sale ni a esta pantalla.
  */
-const varLine = (v, t, i) => `      ${v.key}   ${t.muted('••••••')}${v.public ? '   ' + t.warn(i.varPublic) : ''}`
+const varLine = (v, t, i) => `      ${v.key}   ` +
+  (v.public ? `${corto(v.value)}   ${t.warn(i.varPublic)}` : t.muted('••••••'))
+
+/** Un valor largo no puede empujar la marca «pública» fuera de la pantalla. */
+const corto = (s) => {
+  const v = String(s ?? '')
+  return v.length > 40 ? v.slice(0, 39) + '…' : v
+}
 
 /**
  * Las variables de UN aparato. Se entra desde Dispositivos con `e`, ya con el aparato
@@ -605,10 +613,14 @@ async function onKeyProfiles (term, st, key) {
         const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
         if (!r.ok) return
         flash(st, i.vaultNowActive(p.name || p.id))
-        await refreshAll(term, st)
       }
+      // ENTRAR RECARGA TODO, SIEMPRE. Antes solo se recargaba al CAMBIAR de bóveda, y lo
+      // que traía era `refreshDevices`: aparatos y acta, no las variables. Así que entrar a
+      // la bóveda que ya estaba activa —el caso normal cuando estaba cerrada y acabas de
+      // teclear la contraseña, que es cuando la memoria está vacía a propósito— dejaba
+      // Scopes en blanco hasta que alguien pulsara F5. Un volcado trae las tres cosas.
+      await refreshAll(term, st)
       st.screen = 'devices'
-      await refreshDevices(term, st)
     })
   } else if (ch === 'p' && cur) {
     // Emparejar SIN tener que entrar antes: `p` significa lo mismo aquí que en la
