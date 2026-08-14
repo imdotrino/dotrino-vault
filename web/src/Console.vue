@@ -44,6 +44,15 @@ const T = {
     caps_none: 'sin permisos',
     info_label: 'Qué es esto',
     sync_err_t: 'No se pudo hablar con tu bóveda',
+    // El reintento es un BOTÓN, no algo que haya que adivinar recargando: la lista puede
+    // llevar semanas sin confirmarse y hasta ahora no había forma de pedir que lo hiciera.
+    sync_retry: 'Actualizar', sync_checking: 'Comprobando…',
+    sync_at: (h) => `confirmado con tu bóveda a las ${h}`,
+    sync_stale: 'sin confirmar con tu bóveda',
+    // Este aparato guarda el acta de una bóveda con la que ya no puede hablar. No es un
+    // fallo de red, y por eso se callaba: se tomaba por «todavía no está en ninguna».
+    nolink_t: 'Este dispositivo ya no puede hablar con tu bóveda',
+    nolink_b: 'No le queda conexión guardada, así que lo de abajo es una copia vieja y no hay forma de actualizarla desde aquí. Conéctalo otra vez.',
     sync_err_b: 'Lo de abajo es la última copia que tiene este dispositivo, puede estar desfasada. ¿Está encendida la bóveda?',
     solo_warn_t: 'Solo tienes este dispositivo',
     solo_warn_b: 'Si lo pierdes, pierdes el perfil: no hay forma de recuperarlo. Conecta al menos otro dispositivo o tu bóveda.',
@@ -170,6 +179,11 @@ const T = {
     caps_none: 'no permissions',
     info_label: 'What is this',
     sync_err_t: 'Could not reach your vault',
+    sync_retry: 'Refresh', sync_checking: 'Checking…',
+    sync_at: (h) => `confirmed with your vault at ${h}`,
+    sync_stale: 'not confirmed with your vault',
+    nolink_t: 'This device can no longer talk to your vault',
+    nolink_b: 'It has no saved connection left, so the list below is an old copy and there is no way to update it from here. Connect it again.',
     sync_err_b: 'What you see below is the last copy this device has, and it may be out of date. Is the vault running?',
     solo_warn_t: 'You only have this device',
     solo_warn_b: 'If you lose it, you lose the profile: there is no way to recover it. Connect at least one more device or your vault.',
@@ -326,6 +340,23 @@ async function calcularPerfilId () {
 
 /** Falla al hablar con la bóveda: se ENSEÑA, no se traga (ver `syncError`). */
 const syncError = ref('')
+/**
+ * SIN CONEXIÓN GUARDADA: este aparato tiene el acta de una bóveda con la que ya no puede
+ * hablar (no le queda certificado). Se callaba —se tomaba por «todavía no está en ninguna
+ * bóveda»— y la pantalla seguía enseñando la copia vieja como si fuera de ahora: el perfil,
+ * el master y sus permisos, todo de un acta de hace semanas. Y sin conexión tampoco puede
+ * recibir el aviso firmado que le borraría la cuenta, así que se queda así para siempre.
+ */
+const sinEnlace = ref(false)
+/** Comprobando contra la bóveda (el botón de actualizar) y cuándo se confirmó por última vez. */
+const comprobando = ref(false)
+const comprobadoAt = ref(0)
+/** Copia vieja e incomprobable: hay acta de otro, y no hay con qué preguntarle. */
+const copiaVieja = computed(() => sinEnlace.value && !!acta.value && !isMaster.value)
+const horaCorta = (ms) => {
+  try { return new Date(ms).toLocaleTimeString(props.lang === 'en' ? 'en-US' : 'es-ES', { hour: '2-digit', minute: '2-digit' }) }
+  catch (_) { return '' }
+}
 
 /**
  * BOTÓN (i): las explicaciones no se leen, estorban.
@@ -362,16 +393,26 @@ async function refresh () {
   // es lo que decidió el dueño en la bóveda —permisos, nombres, quién entró—, no la copia
   // del día que emparejamos. Sin esto la pantalla se quedaba congelada en ese día: el
   // dispositivo renombrado seguía con el nombre viejo y los permisos nuevos no salían.
+  comprobando.value = true
   try {
     const r = await id.value.listVaultDevices()
     certBySub.value = groupCerts(r?.devices)
     syncError.value = ''
+    sinEnlace.value = false
+    comprobadoAt.value = Date.now()
   } catch (e) {
-    // «No emparejado con ninguna bóveda» no es un fallo: es un aparato que todavía no
-    // entró en ninguna (o que ES la bóveda). Cualquier otra cosa sí se cuenta.
+    // «No emparejado con ninguna bóveda» no siempre es lo mismo: en un aparato que todavía
+    // no entró en ninguna (o que ES la bóveda) no hay nada que decir, pero en uno que
+    // GUARDA un acta ajena significa que perdió la conexión — y eso hay que contarlo, no
+    // tragárselo. Lo de antes lo callaba en los dos casos.
     const m = e?.message || String(e)
-    syncError.value = /not paired with a vault/i.test(m) ? '' : m
-  }
+    const sinPareja = /not paired with a vault/i.test(m)
+    sinEnlace.value = sinPareja
+    syncError.value = sinPareja ? '' : m
+    // Y que quede en la consola del navegador: no había ni una línea, así que desde fuera
+    // esto era indistinguible de una pantalla que se cargó bien.
+    console.warn('[vault-console] could not sync with the vault:', m)
+  } finally { comprobando.value = false }
   const [a, m, mi] = await Promise.all([
     id.value.profileActa().catch(() => null),
     id.value.profileMembers().catch(() => ({ members: [] })),
@@ -988,6 +1029,20 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <div v-if="syncError" class="banner bad" data-testid="sync-error">
         <strong>{{ t.sync_err_t }}</strong> — {{ t.sync_err_b }}
         <code class="mid">{{ syncError }}</code>
+        <div class="row">
+          <button class="btn ghost sm" data-testid="resync-err" :disabled="comprobando" @click="refresh">
+            {{ comprobando ? t.sync_checking : t.sync_retry }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Copia vieja Y sin forma de confirmarla: es lo que hay que decir en la cara, con
+           la salida al lado. Callarlo dejaba una pantalla que parecía al día. -->
+      <div v-else-if="copiaVieja" class="banner warn" data-testid="no-link">
+        <strong>{{ t.nolink_t }}</strong> — {{ t.nolink_b }}
+        <div class="row">
+          <a class="btn ghost sm" data-testid="nolink-pair" :href="pairHref">{{ t.gone_go }}</a>
+        </div>
       </div>
 
       <!-- La bóveda nos rechaza, pero el mensaje NO va firmado: no borra nada (sería un
@@ -1006,6 +1061,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <li>{{ t.profile }} <code data-testid="profile-id">{{ perfilId || '—' }}</code></li>
         <li>{{ t.version }} <code>#{{ acta.seq }}</code></li>
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
+        <!-- CUÁNDO se confirmó esto con la bóveda, y con qué volver a intentarlo. Es dato y
+             es acción: exactamente lo que va en una pantalla de administración. -->
+        <li>
+          <button class="btn ghost sm" data-testid="resync" :disabled="comprobando" @click="refresh">
+            {{ comprobando ? t.sync_checking : t.sync_retry }}
+          </button>
+          <span class="muted">{{ comprobadoAt ? t.sync_at(horaCorta(comprobadoAt)) : t.sync_stale }}</span>
+        </li>
       </ul>
 
       <!-- LOS DISPOSITIVOS — una sola lista, la del acta, con el estado de cada uno.
