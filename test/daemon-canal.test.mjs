@@ -122,6 +122,48 @@ test('y la respuesta a una petición NO se la pisa el repaso siguiente', async (
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
+/**
+ * LA PETICIÓN A MEDIO ESCRIBIR NO SE TIRA A LA BASURA.
+ *
+ * `fs.watch` avisa al CREAR el archivo, no al terminar de escribirlo, así que el daemon
+ * puede leerlo incompleto. Cuando eso pasaba, lo BORRABA igual: la petición se perdía y
+ * quien la había pedido esperaba seis segundos y leía «el daemon no respondió», con el
+ * daemon sano y atendiendo todo lo demás. Es lo que se comió el emparejamiento del proxy
+ * del 2026-08-14: aprobó bien y la pantalla dio error.
+ */
+test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', async () => {
+  const dir = tmp()
+  const { p } = arrancar(dir)
+  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+
+  const req = path.join(dir, 'dump-request.json')
+  const dev = path.join(dir, 'devices.json')
+  fs.rmSync(dev, { force: true })
+
+  // El daemon se mata SIEMPRE, también si falla un assert: uno vivo mantiene abierto el
+  // runner de tests y lo que se ve luego es la suite colgada, no el fallo.
+  try {
+    // Un JSON cortado a la mitad: exactamente lo que ve el vigilante si mira mientras el
+    // otro proceso escribe.
+    fs.writeFileSync(req, '{"id":"yo-2","at":')
+    await sleep(3000)
+    assert.ok(fs.existsSync(req), 'no se tira lo que no se pudo leer')
+    assert.ok(!fs.existsSync(dev), 'y tampoco se contesta a medias')
+
+    // Ahora entera: se atiende, y AHÍ sí se consume.
+    fs.writeFileSync(req, JSON.stringify({ id: 'yo-2', at: Date.now() }))
+    const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
+    const hasta = Date.now() + 10000
+    let d = null
+    while (Date.now() < hasta && !(d = leer())?.at) await sleep(100)
+    assert.equal(d?.req, 'yo-2', 'la respuesta llega y dice a quién contesta')
+    assert.ok(!fs.existsSync(req), 'la petición atendida sí se consume')
+  } finally {
+    p.kill()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const dir = tmp()
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ v: 2, pid: 999999 }))

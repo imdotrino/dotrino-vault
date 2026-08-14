@@ -328,7 +328,14 @@ export async function runDaemon () {
       // veía un volcado con `req: null` en vez del suyo, seguía esperando y a los seis
       // segundos se rendía. Eso era la TUI colgada en «Cargando dispositivos…» y luego «el
       // daemon no responde» — con el daemon sano y contestando en milisegundos.
-      const dumpReq = readJsonSafe(dumpReqFile); rm(dumpReqFile)
+      // NO SE BORRA LO QUE NO SE PUDO LEER. `readJsonSafe` devuelve null tanto si el
+      // archivo no está como si llegó a medias (`fs.watch` avisa al crearlo, no al
+      // terminar de escribirlo), y borrarlo en ese segundo caso destruía la petición: el
+      // que la había pedido esperaba seis segundos y leía «el daemon no respondió», con el
+      // daemon sano y contestando lo demás. Si no parsea se deja donde está y lo recoge el
+      // repaso de 2 s, que es la misma regla que ya tenía la petición de emparejamiento.
+      const dumpReq = readJsonSafe(dumpReqFile)
+      if (dumpReq || !fs.existsSync(dumpReqFile)) rm(dumpReqFile)
       const meReq = readJsonSafe(meReqFile)
       if (!dumpReq && !meReq) return
       const t = resolveTarget(dumpReq || meReq || appr || rej || req || sec || {}) || { id: mgr.currentId(), vault: mgr.current(), locked: false }

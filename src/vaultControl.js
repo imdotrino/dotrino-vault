@@ -114,7 +114,15 @@ async function writeReq (name, obj, profile) {
   const id = `${process.pid}-${++reqSeq}`
   const body = { ...obj, id, at: Date.now() }
   if (profile) body.profile = profile
-  fs.writeFileSync(p(name), JSON.stringify(body), { mode: 0o600 })
+  // ATÓMICO (escribir aparte y renombrar), y no por manía: el daemon vigila esta carpeta
+  // con `fs.watch`, que avisa al CREAR el archivo — no al terminar de escribirlo. Escrito
+  // en el sitio, el daemon podía leerlo a medias, y como una petición sin `id` no es de
+  // nadie, se perdía: quien la había pedido esperaba seis segundos y leía «el daemon no
+  // respondió», con el daemon sano. `rename` es atómico dentro del mismo sistema de
+  // archivos, así que el vigilante o no ve nada, o ve la petición ENTERA.
+  const tmp = p(name) + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 })
+  fs.renameSync(tmp, p(name))
   // `mode` de writeFileSync solo aplica al CREAR: re-chmod por si el archivo ya
   // existía con permisos más laxos (defensa en profundidad; el dir ya es 0700).
   try { fs.chmodSync(p(name), 0o600) } catch (_) {}
@@ -577,7 +585,12 @@ export async function approvePending (code, profile) {
   // error (el emparejamiento pudo salir bien).
   if (r && r.ok === false) throw coded(r.error || 'the code does not match', r.code || 'APPROVE_FAILED')
   await sleep(400)
-  return listDevices(profile)
+  // LA LISTA ES UN EXTRA, NO PARTE DE APROBAR. Si el volcado no llega, el aparato ya
+  // entró igual: el certificado se firmó y el acta se selló antes de esto. Dejar que ese
+  // fallo suba convertía un emparejamiento correcto en «el daemon no respondió», que es
+  // lo contrario de lo que pasó — y el dueño se queda sin saber si repetirlo o no.
+  // Se devuelve null y quien llama refresca por su cuenta.
+  try { return await listDevices(profile) } catch (_) { return null }
 }
 
 /** Rechaza el dispositivo pendiente. */

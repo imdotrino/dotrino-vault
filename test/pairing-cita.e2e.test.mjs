@@ -57,8 +57,11 @@ before(async () => {
   // este test con `PROXY_NODE_PREFIX='K7'`, una variable que ya no existe) es
   // apostar a que el hash caiga donde uno quiere. Se calcula con el mismo
   // módulo que usa el proxio, que es además lo que se quiere comprobar.
+  // `loadNodeIdentity` es ASÍNCRONA desde que el proxio lee ese archivo con el lector del
+  // vault (la lib es ESM y el proxio CommonJS): sin el `await`, `hint` salía `undefined` y
+  // el fallo se leía como «la cita no lleva el prefijo del nodo», que apunta a otro sitio.
   const { loadNodeIdentity } = require(path.join(HERE, '..', '..', 'dotrino-proxy', 'nodeIdentity.js'))
-  hint = loadNodeIdentity(dir).hint
+  hint = (await loadNodeIdentity(dir)).hint
 
   proxy = require(proxyServerPath)
   const port = await proxy.start(0)

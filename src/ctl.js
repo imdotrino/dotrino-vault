@@ -49,7 +49,18 @@ function takeProfileFlag (args) {
 }
 /** Campo `profile` de las peticiones al daemon (omitido = perfil activo). */
 const withProfile = (obj) => (PROFILE ? { ...obj, profile: PROFILE } : obj)
-const writeReq = (name, obj) => fs.writeFileSync(path.join(dir, name), JSON.stringify(withProfile({ ...obj, at: Date.now() })), { mode: 0o600 })
+/**
+ * Deja una petición para el daemon. ATÓMICA (escribir aparte y renombrar): el daemon
+ * vigila la carpeta con `fs.watch`, que avisa al CREAR el archivo y no al terminar de
+ * escribirlo, así que escrito en el sitio se puede leer a medias — y una petición que no
+ * parsea se pierde con todos sus datos.
+ */
+const writeReq = (name, obj) => {
+  const dest = path.join(dir, name)
+  const tmp = dest + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(withProfile({ ...obj, at: Date.now() })), { mode: 0o600 })
+  fs.renameSync(tmp, dest)
+}
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.

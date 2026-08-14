@@ -917,7 +917,15 @@ function promptApprove (term, st) {
       st.input = null
       if (!code.trim()) { flash(st, i.codeMissing, 'danger'); return }
       const r = await guard(term, st, i.approving, () => vc.approvePending(code.trim(), activeId(st)))
-      if (r.ok) { flash(st, i.deviceApproved); aplicarVolcado(st, r.v); st.pending = null; st.screen = 'devices' }
+      if (r.ok) {
+        flash(st, i.deviceApproved)
+        st.pending = null
+        st.screen = 'devices'
+        // Sin lista (el volcado se perdió): se pide otra vez. El aparato ya está dentro;
+        // lo único que falta es la foto, y esa se vuelve a pedir sin drama.
+        if (r.v) aplicarVolcado(st, r.v)
+        else await refreshDevices(term, st)
+      }
     },
     onCancel: () => { st.input = null }
   })
