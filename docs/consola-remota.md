@@ -218,10 +218,12 @@ en la bóveda un cajón vacío se borra solo.
 
 El apartado **«Sus variables» sale en TODAS las filas**, también en las de un aparato que no
 es servicio: ahí no hay formulario —la bóveda solo se las guarda a quien las lee, ver
-`requireService`— y en su lugar va una línea diciéndolo. Esconderlo era peor que negarlo: una
-fila que calla no se lee como «aquí no se puede», se lee como «esto estará en otra pantalla»,
-y se busca por toda la consola. Lo que un aparato así arrastre de antes se sigue viendo y se
-puede cambiar.
+`requireService`— y el porqué va **detrás de la (i)** del título, no estampado en la fila
+(§5.1: una pantalla administrativa no lleva documentación, y esa frase repetida en cada
+aparato era un párrafo de manual). Esconder el apartado entero era peor que negarlo: una fila
+que calla no se lee como «aquí no se puede», se lee como «esto estará en otra pantalla», y se
+busca por toda la consola. Lo que un aparato así arrastre de antes se sigue viendo y se puede
+cambiar.
 
 Detalle de UI que decide la seguridad de todo lo anterior: la pantalla de aprobación
 **pide teclear el código que muestra el otro aparato** y enseña el `deviceId` en grande.

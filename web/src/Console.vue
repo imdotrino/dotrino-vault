@@ -1143,11 +1143,19 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                falla siempre. Lo que arrastre de antes se sigue viendo y se puede cambiar —
                configuración invisible es configuración que nadie arregla el día que falla. -->
           <div v-if="canAdmin && vars" class="devvars" :data-testid="'devvars-' + m.id">
-            <h3>{{ t.var_dev_t }}</h3>
+            <h3>
+              {{ t.var_dev_t }}
+              <!-- El porqué de que aquí no haya formulario cabe en una frase y NO se
+                   estampa en la fila: iba suelta debajo del título y era un párrafo de
+                   manual repetido en cada aparato (§5.1). Detrás de la (i), como el resto. -->
+              <button v-if="!m.cn" type="button" class="i" :data-testid="'info-devvars-' + m.id"
+                      :aria-expanded="info === 'devvars-' + m.id" :aria-label="t.info_label"
+                      @click="toggleInfo('devvars-' + m.id)">i</button>
+            </h3>
+            <p v-if="info === 'devvars-' + m.id" class="muted info-panel">{{ t.var_dev_none }}</p>
             <Vars v-if="m.cn || varsOfDevice(m.pub).length"
                   :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
                   :t="t" :busy="busy" :save="saveVar" :add="!!m.cn" />
-            <p v-if="!m.cn" class="muted svc-note" :data-testid="'devvars-none-' + m.id">{{ t.var_dev_none }}</p>
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
