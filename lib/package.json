@@ -32,7 +32,8 @@
     "src",
     "bin",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!src/types.d.ts"
   ],
   "keywords": [
     "dotrino",

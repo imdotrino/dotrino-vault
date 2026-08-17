@@ -38,7 +38,9 @@
     "src",
     "README.md",
     "vendor",
-    "lib/src"
+    "lib/src",
+    "!src/types.d.ts",
+    "!lib/src/types.d.ts"
   ],
   "devDependencies": {
     "@dotrino/remote-agent": "^0.3.0",
