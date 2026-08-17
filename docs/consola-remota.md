@@ -71,8 +71,14 @@ Y una regla de pantalla que sale de todo esto: **la consola guarda con UN solo b
 Cada guardado hace que la bóveda avise al servicio y el servicio **salga** para releer su
 configuración entera (`watchEnv`); con un «Guardar» por fila, cargar seis variables eran
 seis reinicios, y los cinco primeros arrancaban el servicio a medio configurar. Por eso se
-edita todo lo que haga falta —incluido pegar un `.env` entero, que se reparte en filas— y
-se confirma una vez, en un `var.setMany`.
+edita todo lo que haga falta —incluido pegar un `.env` entero **en el campo del nombre**,
+que se reparte en filas— y se confirma una vez, en un `var.setMany`.
+
+Y de ahí sale la segunda regla de esa pantalla: **añadir varias no es una pantalla aparte,
+ni un botón**. Hay siempre una fila en blanco al final y, en cuanto empiezas a llenarla,
+nace otra debajo; cargar seis variables es teclear seis veces. Antes había un botón
+«Agregar variable» y, al lado, un cuadro de texto suelto con su propio botón de repartir:
+tres controles para lo que ahora hacen la propia fila y el pegado.
 
 El riesgo que sí se acepta, dicho en voz alta: un admin comprometido puede **envenenar**
 la configuración de un servicio (apuntar una URL a otro sitio, meter una llave inservible).

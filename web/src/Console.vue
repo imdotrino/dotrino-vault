@@ -165,11 +165,11 @@ const T = {
     var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
     var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
+    // Lo único que queda del cuadro de texto de antes: decir dónde se pega el archivo
+    // entero. La fila nueva aparece sola al escribir, así que no hay botón que explicar.
+    var_paste_hint: 'Para cargar varias de una vez, pega tu configuración (NOMBRE=valor, una por línea) en el campo del nombre.',
     var_value_ph: 'valor',
     var_private_ask: 'Privada',
-    var_add: 'Agregar variable',
-    var_paste: 'Repartir en filas',
-    var_paste_ph: 'pega aquí tu configuración: NOMBRE=valor, una por línea',
     var_paste_err: (e) => ({
       shape: `línea ${e.line}: no tiene la forma NOMBRE=valor`,
       key: `línea ${e.line}: «${e.key}» va en MAYUSCULAS_CON_GUION_BAJO`,
@@ -286,8 +286,6 @@ const T = {
     var_save_hint: 'They are saved together: the app restarts only once.',
     var_pending: 'unsaved',
     var_incomplete: 'A row has no name or no value.',
-    var_paste: 'Split into rows',
-    var_paste_ph: 'paste your configuration here: NAME=value, one per line',
     var_paste_err: (e) => ({
       shape: `line ${e.line}: not in the form NAME=value`,
       key: `line ${e.line}: "${e.key}" must be UPPERCASE_WITH_UNDERSCORES`,
@@ -298,9 +296,9 @@ const T = {
     var_group_new: 'New group',
     var_scope_ph: 'group name (e.g. proxy)',
     var_key_ph: 'VARIABLE_NAME',
+    var_paste_hint: 'To load several at once, paste your configuration (NAME=value, one per line) into the name field.',
     var_value_ph: 'value',
     var_private_ask: 'Private',
-    var_add: 'Add variable',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
