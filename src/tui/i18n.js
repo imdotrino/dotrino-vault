@@ -74,7 +74,6 @@ const es = {
   links: 'Enlaces',
   otherData: 'Otros datos',
   hidden: '   (oculto)',
-  noName: '(sin nombre)',
   no: 'no',
   helpMe: ['←→ pestaña', 'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'],
   tabsHint: '   (←→ cambiar)',
@@ -255,7 +254,6 @@ const es = {
   ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
   renameDeviceHint: 'el nombre con el que lo reconoces (Esc cancela)',
-  renaming: 'Renombrando…',
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable', 'i cargar varias',
@@ -314,7 +312,6 @@ const en = {
   daemonRunning: 'running',
   daemonStopped: 'STOPPED',
   activeVault: 'Active vault: ',
-  noName: '(unnamed)',
   tooSmall: 'Terminal too small',
   tooSmallHint: (cols, rows) => `Resize to ≥ 24×9 (now ${cols}×${rows}).`,
 
@@ -518,7 +515,6 @@ const en = {
   ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,
   renameDeviceHint: 'the name you recognise it by (Esc cancels)',
-  renaming: 'Renaming…',
   deviceRenamed: (n) => `Now called "${n}"`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ tab', '↑↓', 'n new variable', 'i load several',
