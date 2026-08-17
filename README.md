@@ -241,8 +241,12 @@ dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovacione
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
 dotrino-vault secret set <ns> <CLAVE> <valor>   # variable del SCOPE: la comparten todos los
                                                 # aparatos que sirven ese namespace
+dotrino-vault secret set <ns> CLAVE=valor CLAVE2=valor2 …   # VARIAS de una vez (un solo aviso)
+dotrino-vault secret import <ns> [archivo.env]  # lo mismo desde un .env (o por la entrada estándar)
 dotrino-vault secret rm  <ns> <CLAVE>           # borra una variable del scope
 dotrino-vault secret device set <ID> <CLAVE> <valor>   # variable de UN aparato: solo la lee él
+dotrino-vault secret device set <ID> CLAVE=valor …     # varias de una vez
+dotrino-vault secret device import <ID> [archivo.env]
 dotrino-vault secret device rm  <ID> <CLAVE>           # borra una variable de ese aparato
 dotrino-vault secret list                       # los dos cajones, por nombre (nunca valores)
 dotrino-vault logs                 # últimas 40 líneas del servicio (journalctl; solo donde hay systemd)
@@ -255,6 +259,32 @@ su compromiso— y lo aprende cuando lo tecleas. El que sí recibe `deviceId` es
 
 El `ns` de un secreto va en minúsculas (`[a-z0-9-]`, hasta 32), la clave en
 MAYÚSCULAS_CON_GUION_BAJO (hasta 64) y el valor es texto de hasta 8 KB.
+
+#### Cargar la configuración de un servicio: JUNTA, no de una en una
+
+Guardar una variable hace que la bóveda **avise al servicio de que su configuración
+cambió**, y el servicio **sale** para que su supervisor lo levante y la lea entera y
+fresca (`watchEnv`, más abajo). Cargándolas de una en una, seis variables son **seis
+avisos**: el servicio obedece el primero y arranca con lo que hubiera puesto en ese
+momento mientras tú sigues escribiendo el resto — configuración a medias, y encima
+parece que funcionó.
+
+Por eso cargar configuración es **una sola orden**:
+
+```sh
+dotrino-vault secret import proxy .env             # el .env que ya tienes
+cat .env | dotrino-vault secret import proxy       # o por la entrada estándar
+dotrino-vault secret set proxy TURN_KEY_ID=k-123 DB_URL=postgres://…   # o a mano, juntas
+```
+
+Se leen `CLAVE=valor` (comentarios con `#`, `export` delante, comillas alrededor del
+valor). **Todo o nada**: si una línea está mal, no se guarda ninguna y se dice cuál —
+media configuración aplicada es peor que ninguna. Un `#` **a mitad de línea no corta el
+valor** (una contraseña puede llevarlo), y una clave repetida es un error, no «gana la
+última».
+
+Lo mismo desde la **TUI** (tecla `i` en Variables) y desde la **consola remota**, donde
+se edita todo lo que haga falta y se confirma con **un solo botón**.
 
 #### Las variables de entorno se ponen en DOS SITIOS
 

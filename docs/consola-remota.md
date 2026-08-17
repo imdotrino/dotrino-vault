@@ -67,6 +67,13 @@ Tres cosas sostienen la fila:
    —daño acotado y reversible, se le revoca— pero no puede dejar a tus servicios sin
    ninguna. Escribir, además, **avisa a todos los miembros** (§5).
 
+Y una regla de pantalla que sale de todo esto: **la consola guarda con UN solo botón**.
+Cada guardado hace que la bóveda avise al servicio y el servicio **salga** para releer su
+configuración entera (`watchEnv`); con un «Guardar» por fila, cargar seis variables eran
+seis reinicios, y los cinco primeros arrancaban el servicio a medio configurar. Por eso se
+edita todo lo que haga falta —incluido pegar un `.env` entero, que se reparte en filas— y
+se confirma una vez, en un `var.setMany`.
+
 El riesgo que sí se acepta, dicho en voz alta: un admin comprometido puede **envenenar**
 la configuración de un servicio (apuntar una URL a otro sitio, meter una llave inservible).
 Se detecta por el aviso firmado y por la bitácora —cada `var.set` queda con el aparato que
@@ -125,6 +132,7 @@ ventana de frescura ±5 min. Responde `vault.admin.result`.
 | `audit` | `{ limit?, ts, nonce }` | últimas N entradas de la bitácora (tope 500) |
 | `vars` | `{ ts, nonce }` | los dos cajones de variables **sellados**: nombres y visibilidad de todas, y el **valor solo de las públicas** |
 | `var.set` | `{ ns \| pub, key, enc, public?, ts, nonce }` | crea o cambia una variable. `enc` es el valor **sellado** con la clave de contenido del perfil; sin él se rechaza. Exactamente un destino: un scope (`ns`) o un aparato (`pub`) |
+| `var.setMany` | `{ ns \| pub, enc, public?, ts, nonce }` | **varias de una vez**: `enc` sella `{ items: [{ key, value, public? }] }` —los nombres también van dentro—. Mismo permiso y misma frontera que `var.set` (borrar sigue sin delegarse); lo que cambia es que la bóveda las guarda juntas y manda **un solo aviso de cambio**, o sea que el servicio se reinicia una vez con la configuración entera en vez de una vez por variable |
 
 Tres cosas que **no** son opcionales:
 

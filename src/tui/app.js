@@ -29,7 +29,9 @@
  * en todas las pantallas: `p` es SIEMPRE emparejar (también en Bóvedas, sin tener
  * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
  */
+import fs from 'node:fs'
 import { execFile } from 'node:child_process'
+import { parseEnvInput } from '../../lib/src/envtext.js'
 import { createTerm, widthOf } from './term.js'
 import { qrToString } from '../qr.js'
 import { dict, otherLang, loadLang, saveLang } from './i18n.js'
@@ -988,6 +990,8 @@ async function onKeySecrets (term, st, key) {
 
   if (ch === 'n') {
     promptNewVariable(term, st)
+  } else if (ch === 'i') {
+    promptLoadScopeVars(term, st)
   } else if ((ch === 'x' || key.name === 'delete') && cur) {
     if (cur.key) {
       setConfirm(st, {
@@ -1053,6 +1057,7 @@ async function onKeyDevVars (term, st, key) {
   }
   if (key.name === 'f5') { await refreshSecrets(term, st); return true }
   if (ch === 'n') { promptNewDeviceVariable(term, st); return true }
+  if (ch === 'i' && target) { promptLoadVars(term, st, { pub: target.pub, donde: target.deviceId }); return true }
   if (ch === 't' && cur && target) {
     await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st)))
     return true
@@ -1111,6 +1116,64 @@ function promptNewDeviceVariable (term, st) {
         },
         onCancel: () => { st.input = null }
       })
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
+/**
+ * CARGAR VARIAS DE UNA VEZ (tecla `i`, de *import*, la misma palabra que en el CLI).
+ *
+ * Guardar las variables de un servicio una por una es, para la bóveda, un cambio de
+ * configuración por variable: el servicio obedece el primero —sale y lo levanta su
+ * supervisor— y arranca con media configuración mientras se teclea el resto. Cargarlas
+ * juntas hace que se reinicie UNA vez, con todo puesto.
+ *
+ * Se acepta lo que se pueda escribir en una línea (`CLAVE=valor CLAVE2=valor2`) o la
+ * RUTA de un `.env`, que es como suele llegar la configuración de un servicio.
+ */
+function promptLoadVars (term, st, { ns = null, pub = null, donde }) {
+  const i = L(st)
+  setInput(st, {
+    label: i.loadLabel(donde),
+    hint: i.loadHint,
+    onSubmit: async (raw) => {
+      const texto = raw.trim()
+      st.input = null
+      if (!texto) return
+      let contenido = texto
+      // Sin un `=` no es una lista de variables: es la ruta de un archivo.
+      if (!texto.includes('=')) {
+        try { contenido = fs.readFileSync(texto, 'utf8') } catch (_) { flash(st, i.loadNoFile(texto), 'danger'); return }
+      }
+      const { items, errors } = parseEnvInput(contenido)
+      // Un archivo con un problema no se carga a medias: se dice qué línea y no se
+      // escribe nada. Media configuración aplicada es peor que ninguna.
+      if (errors.length) { flash(st, i.loadNothing + ' ' + i.envErr[errors[0].code](errors[0]), 'danger'); return }
+      askVisibility(term, st, async (isPublic) => {
+        const conVis = items.map((it) => ({ ...it, public: isPublic }))
+        const r = await guard(term, st, i.loadingVars, () => (pub
+          ? vc.applyDeviceSecrets(pub, conVis, activeId(st))
+          : vc.applySecrets(ns, conVis, activeId(st))))
+        if (r.ok) { flash(st, i.loadedVars(items.length, donde)); st.secrets = r.v }
+      })
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
+/** Cargar varias en un SCOPE: primero cuál, luego el bloque. */
+function promptLoadScopeVars (term, st) {
+  const i = L(st)
+  const existing = Object.keys(st.secrets?.ns || {})
+  setInput(st, {
+    label: i.nsLabel,
+    hint: existing.length ? i.nsHintExisting(existing.join(', ')) : i.nsHint,
+    onSubmit: (ns) => {
+      const nsv = ns.trim()
+      if (!NS_RE.test(nsv)) { flash(st, i.nsInvalid, 'danger'); return }
+      st.input = null
+      promptLoadVars(term, st, { ns: nsv, donde: nsv })
     },
     onCancel: () => { st.input = null }
   })

@@ -281,7 +281,15 @@ export async function runDaemon () {
         rm(secretReqFile)
         try {
           const vault = targetOf(sec)
-          if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
+          // Carga en GRUPO (`secret set ns K=v K2=v2`, `secret import`): todas las
+          // variables entran de una vez y sale UN solo aviso de cambio, para que el
+          // servicio no se reinicie a media carga y arranque con la mitad puesta.
+          if (sec.op === 'batch') {
+            const changed = sec.pub
+              ? await vault.applyDeviceSecrets(sec.pub, sec.items)
+              : vault.applySecrets(sec.ns, sec.items)
+            console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
+          } else if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }

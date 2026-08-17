@@ -111,7 +111,22 @@ function onUsr2 () {
       const before = (bag[k] ??= {})[key]
       bag[k][key] = { v: value, pub: isPublic === undefined ? !!before?.pub : !!isPublic }
     }
-    if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { put(model.secrets[t], sec.ns, sec.key, sec.value, sec.public) }
+    // CARGA EN GRUPO: varias variables en una sola orden (y, en el daemon de verdad, un
+    // solo aviso de cambio a los servicios). Todo o nada, como el vault real: si una no
+    // vale, no se aplica ninguna.
+    const drop = (bag, k, key) => { if (bag[k]) { delete bag[k][key]; if (!Object.keys(bag[k]).length) delete bag[k] } }
+    if (sec.op === 'batch' && Array.isArray(sec.items)) {
+      const dest = sec.pub ? model.devSecrets[t] : model.secrets[t]
+      const k = sec.pub || sec.ns
+      const vale = (sec.pub ? !!sec.pub : NS_OK(sec.ns)) &&
+        sec.items.every((it) => KEY_OK(it.key) && (it.op === 'rm' || !!it.value))
+      if (vale) {
+        for (const it of sec.items) {
+          if (it.op === 'rm') drop(dest, k, it.key)
+          else put(dest, k, it.key, it.value, it.public)
+        }
+      }
+    } else if (sec.op === 'set' && NS_OK(sec.ns) && KEY_OK(sec.key) && sec.value) { put(model.secrets[t], sec.ns, sec.key, sec.value, sec.public) }
     else if (sec.op === 'rm' && NS_OK(sec.ns)) { if (model.secrets[t][sec.ns]) { delete model.secrets[t][sec.ns][sec.key]; if (!Object.keys(model.secrets[t][sec.ns]).length) delete model.secrets[t][sec.ns] } }
     else if (sec.op === 'dev-set' && sec.pub && KEY_OK(sec.key) && sec.value) { put(model.devSecrets[t], sec.pub, sec.key, sec.value, sec.public) }
     else if (sec.op === 'dev-rm' && sec.pub) { if (model.devSecrets[t][sec.pub]) { delete model.devSecrets[t][sec.pub][sec.key]; if (!Object.keys(model.devSecrets[t][sec.pub]).length) delete model.devSecrets[t][sec.pub] } }

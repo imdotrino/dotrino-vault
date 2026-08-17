@@ -37,6 +37,17 @@ const SCHEMA_VERSION = 3
 const MAX_VALUE_LEN = 8 * 1024
 const KEY_RE = /^[A-Z0-9_]{1,64}$/
 
+/**
+ * Valida un par nombre/valor. Se exporta porque quien carga varias variables de golpe
+ * las comprueba TODAS antes de escribir ninguna: media configuración aplicada y un
+ * error a la mitad es justo lo que la carga en grupo viene a evitar.
+ */
+export function assertVar (key, value) {
+  if (!KEY_RE.test(String(key || ''))) throw new Error('invalid key (use UPPERCASE_WITH_UNDERSCORES, e.g. TURN_KEY_ID)')
+  if (typeof value !== 'string' || !value) throw new Error('value must be a non-empty string')
+  if (value.length > MAX_VALUE_LEN) throw new Error(`value too long (max ${MAX_VALUE_LEN})`)
+}
+
 /** Una variable guardada: `{ v: valor, pub: ¿la puede ver la consola? }`. */
 const entry = (value, isPublic) => ({ v: value, pub: !!isPublic })
 
@@ -65,7 +76,13 @@ export function openSecretsStore (dir) {
   }
   if (!data.dev) data.dev = {}
   writeJson(file, data, atRest) // reescribe al abrir: cifra lo que venía en claro
-  const save = () => writeJson(file, data, atRest)
+
+  // Un grupo de escrituras se guarda UNA vez (ver `batch`). Fuera de un grupo, `held`
+  // vale 0 y cada cambio va al disco en el acto, como siempre.
+  let held = 0
+  let pending = false
+  const flush = () => writeJson(file, data, atRest)
+  const save = () => { if (held) { pending = true; return } ; flush() }
 
   const assertNs = (ns) => {
     if (!isValidSecretsNs(ns)) throw new Error('invalid namespace (use [a-z0-9-]{1,32}, e.g. "proxy")')
@@ -73,11 +90,7 @@ export function openSecretsStore (dir) {
   const assertPub = (pub) => {
     if (typeof pub !== 'string' || !pub) throw new Error('device required (the member public key)')
   }
-  const assertKeyValue = (key, value) => {
-    if (!KEY_RE.test(String(key || ''))) throw new Error('invalid key (use UPPERCASE_WITH_UNDERSCORES, e.g. TURN_KEY_ID)')
-    if (typeof value !== 'string' || !value) throw new Error('value must be a non-empty string')
-    if (value.length > MAX_VALUE_LEN) throw new Error(`value too long (max ${MAX_VALUE_LEN})`)
-  }
+  const assertKeyValue = assertVar
 
   /** Borra la rama si se quedó vacía: un scope (o un aparato) sin variables no existe. */
   const prune = (bag, k) => { if (bag[k] && Object.keys(bag[k]).length === 0) delete bag[k] }
@@ -124,6 +137,22 @@ export function openSecretsStore (dir) {
   }
 
   return {
+    /**
+     * MUCHAS ESCRITURAS, UN GUARDADO. Cargar la configuración de un servicio son veinte
+     * variables pero un solo cambio: con un `save()` por variable, el archivo entero se
+     * reescribía y se volvía a cifrar veinte veces.
+     *
+     * Solo síncrono: `fn` no puede esperar nada, porque el grupo se cierra al volver.
+     * Si `fn` lanza a la mitad se guarda igual lo que ya había tocado — es lo mismo que
+     * pasaba escribiendo de una en una, y quien llama valida ANTES para que no ocurra.
+     */
+    batch (fn) {
+      held++
+      try { return fn() } finally {
+        held--
+        if (!held && pending) { pending = false; flush() }
+      }
+    },
     /**
      * El bundle que se le entrega a un servicio: lo del scope con lo del aparato
      * ENCIMA. Públicas y privadas por igual — la visibilidad no es un permiso de

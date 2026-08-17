@@ -484,11 +484,38 @@ export function setDeviceSecretVisibility (pub, key, isPublic, profile) {
   })
 }
 
-/** Borra un scope entero (todas sus variables, una por una). */
+/**
+ * CARGA VARIAS DE UNA VEZ: un solo viaje al daemon, un solo guardado y —lo que de
+ * verdad importa— UN solo aviso a los servicios de ese scope.
+ *
+ * De una en una, cada variable es un cambio de configuración: el servicio obedece el
+ * primero, sale, lo levanta su supervisor y arranca con lo que hubiera puesto en ese
+ * momento, mientras quien administra sigue escribiendo el resto. Por eso cargar
+ * configuración tiene que llegar entera hasta abajo, y no romperse en N órdenes.
+ *
+ * @param {Array<{op:'set'|'rm', key:string, value?:string, public?:boolean}>} items
+ */
+export function applySecrets (ns, items, profile) {
+  return secretOp({ op: 'batch', ns, items }, profile, (out) => {
+    const falta = items.find((it) => (it.op === 'rm' ? has(out.ns[ns], it.key) : !has(out.ns[ns], it.key)))
+    if (falta) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+  })
+}
+
+/** Lo mismo para el cajón de UN aparato. */
+export function applyDeviceSecrets (pub, items, profile) {
+  return secretOp({ op: 'batch', pub, items }, profile, (out) => {
+    const falta = items.find((it) => (it.op === 'rm' ? has(keysOf(out, pub), it.key) : !has(keysOf(out, pub), it.key)))
+    if (falta) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+  })
+}
+
+/** Borra un scope entero: todas sus variables juntas, para no avisar una vez por variable. */
 export async function deleteScope (ns, profile) {
-  let out = await listSecrets(profile)
-  for (const { key } of out.ns[ns] || []) out = await deleteSecret(ns, key, profile)
-  return out
+  const out = await listSecrets(profile)
+  const keys = (out.ns[ns] || []).map(({ key }) => ({ op: 'rm', key }))
+  if (!keys.length) return out
+  return applySecrets(ns, keys, profile)
 }
 
 /**
@@ -509,11 +536,12 @@ export function deleteDeviceSecret (pub, key, profile) {
   })
 }
 
-/** Borra TODAS las variables de un aparato (una por una). */
+/** Borra TODAS las variables de un aparato, juntas (mismo motivo que `deleteScope`). */
 export async function deleteDeviceVars (pub, profile) {
-  let out = await listSecrets(profile)
-  for (const { key } of keysOf(out, pub)) out = await deleteDeviceSecret(pub, key, profile)
-  return out
+  const out = await listSecrets(profile)
+  const keys = keysOf(out, pub).map(({ key }) => ({ op: 'rm', key }))
+  if (!keys.length) return out
+  return applyDeviceSecrets(pub, keys, profile)
 }
 
 // ---------------------------------------------------------------------------

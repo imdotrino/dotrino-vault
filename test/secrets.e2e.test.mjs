@@ -25,6 +25,9 @@ let proxy, proxyUrl, vault, svcDir
 before(async () => {
   process.env.NODE_ENV = 'test'
   process.env.PROXY_DB_FILE = ':memory:'
+  // La ventana con la que la bóveda agrupa avisos (3 s en producción). Acortada para no
+  // pasar el test entero esperando: lo que se comprueba es CUÁNTOS avisos salen, no cuándo.
+  process.env.DOTRINO_VAULT_NOTICE_MS = '150'
   proxy = require(proxyServerPath)
   const port = await proxy.start(0)
   proxyUrl = `ws://127.0.0.1:${port}`
@@ -425,6 +428,59 @@ test('un cert revocado deja de poder leer', async () => {
   assert.ok(mine, 'el servicio enrolado aparece en delegations')
   await vault.revokeDevice(mine.nonce)
   await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)
+})
+
+/**
+ * LA PROMESA DE CARGAR EN GRUPO: seis variables, UN aviso.
+ *
+ * Guardadas de una en una son seis cambios de configuración, y el servicio obedece el
+ * primero —sale y lo levanta su supervisor— arrancando con lo que hubiera puesto en ese
+ * momento, mientras quien administra sigue escribiendo. Este test cuenta los avisos que
+ * llegan al servicio de verdad, por el proxy de verdad, que es donde eso se nota.
+ */
+test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable)', async () => {
+  const { enrollService, watchSecretsChanges } = await import('../lib/src/service.js')
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  // Servicio propio: este test no puede depender de en qué estado dejaron los otros al
+  // que comparten (uno de ellos le revoca el certificado).
+  const ns = 'lote'
+  const svcDir = tmp('svc-lote-')
+  vault.setSecret(ns, 'YA_ESTABA', '0')
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+  await enrollService({
+    qr: encodeInvite(qr), ns, dir: svcDir,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+
+  const avisos = []
+  // Sin gracia ni mínimo entre avisos: aquí se cuenta lo que MANDA la bóveda, no los
+  // frenos del agente (que tienen sus propias razones y su propia prueba).
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns, graceMs: 0, minIntervalMs: 0, jitterMs: 0, onChange: (i) => avisos.push(i)
+  })
+  const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  try {
+    vault.applySecrets(ns, [
+      { op: 'set', key: 'LOTE_UNO', value: '1' },
+      { op: 'set', key: 'LOTE_DOS', value: '2' },
+      { op: 'set', key: 'LOTE_TRES', value: '3' }
+    ])
+    await esperar(600)
+    assert.equal(avisos.length, 1, 'tres variables juntas son UN cambio de configuración')
+    const leidos = await fetchSecretsFrom(svcDir)
+    assert.equal(leidos.LOTE_UNO, '1')
+    assert.equal(leidos.LOTE_TRES, '3', 'y el servicio las lee todas, no las primeras')
+
+    // El contraste, que es lo que justifica todo esto: sueltas y espaciadas, un aviso
+    // por variable — o sea, un reinicio por variable.
+    avisos.length = 0
+    for (const [k, v] of [['SUELTA_UNA', 'a'], ['SUELTA_DOS', 'b']]) {
+      vault.setSecret(ns, k, v)
+      await esperar(400)
+    }
+    assert.equal(avisos.length, 2)
+  } finally { w.stop() }
 })
 
 async function fetchSecretsFrom (dir) {

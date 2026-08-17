@@ -25,6 +25,8 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
+import { assertVar } from './secretsStore.js'
+import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
 import { VERSION } from './version.js'
@@ -545,6 +547,48 @@ function cmdActivity (n = 30) {
 // sirven ese namespace; las del APARATO (`secret device set <ID> …`) las lee solo ese
 // aparato y PISAN a las del scope con el mismo nombre. Ahí va lo que cambia de máquina a
 // máquina (el puerto, la URL pública) sin tener que partir el ns en uno por servidor.
+/**
+ * `KEY=valor KEY2=valor2` — la forma de CARGAR VARIAS de una vez. Devuelve `null` si no
+ * son todos pares, para que la forma clásica de tres argumentos (`set ns CLAVE valor`,
+ * donde el valor puede llevar espacios y hasta un `=`) siga funcionando igual.
+ */
+function asPairs (args) {
+  if (!args.length) return null
+  const out = []
+  for (const a of args) {
+    const m = PAIR_RE.exec(a)
+    if (!m) return null
+    out.push({ op: 'set', key: m[1], value: m[2] })
+  }
+  return out
+}
+
+/** Un `.env` con un problema no se carga A MEDIAS: se dice qué línea y no se escribe nada. */
+function abortarEnv (errors) {
+  console.error('%sNo se cargó nada%s:', R, Z)
+  for (const e of errors) console.error('  · %s', envErrorText(e))
+  process.exit(2)
+}
+
+/** Los códigos del lector de `.env`, en la lengua del CLI. */
+function envErrorText (e) {
+  if (e.code === 'shape') return `línea ${e.line}: no tiene la forma CLAVE=valor`
+  if (e.code === 'key') return `línea ${e.line}: «${e.key}» va en MAYÚSCULAS_CON_GUION_BAJO`
+  if (e.code === 'novalue') return `línea ${e.line}: ${e.key} no tiene valor (para quitarla: secret rm)`
+  if (e.code === 'dup') return `línea ${e.line}: ${e.key} ya venía en la línea ${e.first}`
+  return 'no hay ninguna variable que cargar'
+}
+
+/** El problema de una variable, en español, o `null`. Las reglas son las del cajón. */
+function problemaDe (key, value) {
+  try { assertVar(key, value); return null } catch (e) {
+    if (/invalid key/.test(e.message)) return 'el nombre va en MAYÚSCULAS_CON_GUION_BAJO (p. ej. TURN_KEY_ID)'
+    if (/non-empty/.test(e.message)) return 'no tiene valor (para quitarla: secret rm)'
+    if (/too long/.test(e.message)) return 'el valor es demasiado largo'
+    return e.message
+  }
+}
+
 async function cmdSecret (rest) {
   // --public / --private: si el VALOR puede salir de esta máquina hacia la consola remota.
   // Se sacan de la línea antes de partirla, para que puedan ir en cualquier posición y no
@@ -574,15 +618,69 @@ async function cmdSecret (rest) {
   const USAGE = [
     'uso: dotrino-vault secret set <ns> <CLAVE> <valor> [--public|--private]',
     '                                                  (la comparten todos los aparatos del ns)',
+    '     dotrino-vault secret set <ns> CLAVE=valor [CLAVE2=valor2 …]   varias DE UNA VEZ',
+    '     dotrino-vault secret import <ns> [archivo.env]               desde un .env (o stdin)',
     '     dotrino-vault secret rm  <ns> <CLAVE>',
     '     dotrino-vault secret device set <ID> <CLAVE> <valor> [--public|--private]',
     '                                                  (solo la lee ese aparato, y pisa a la del ns)',
+    '     dotrino-vault secret device set <ID> CLAVE=valor [CLAVE2=valor2 …]',
+    '     dotrino-vault secret device import <ID> [archivo.env]',
     '     dotrino-vault secret device rm  <ID> <CLAVE>',
     '     dotrino-vault secret list',
+    '',
+    'CARGA LA CONFIGURACIÓN DE UN SERVICIO DE UNA VEZ (`set` con varios pares, o `import`):',
+    'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
+    'cambio de configuración y el servicio se reinicia a media carga.',
     '',
     'Pública o privada dice UNA cosa: si el VALOR puede salir de esta máquina hacia la',
     'consola remota (vault.dotrino.com). Se nace privada. El servicio recibe las dos igual.'
   ].join('\n')
+
+  /**
+   * Manda un grupo entero al daemon y comprueba que llegó completo.
+   *
+   * Se valida TODO aquí antes de escribir nada: si una variable del archivo está mal, no
+   * se carga ninguna. Media configuración aplicada es peor que ninguna, porque el
+   * servicio arranca con ella y parece que funcionó.
+   */
+  const sendBatch = async ({ ns = null, pub = null, items, donde }) => {
+    const malas = items.map((it) => [it.key, problemaDe(it.key, it.value)]).filter(([, p]) => p)
+    if (malas.length) {
+      console.error('%sNo se cargó nada%s. Revisa:', R, Z)
+      for (const [key, p] of malas) console.error('  · %s: %s', key, p)
+      process.exit(2)
+    }
+    const conVis = items.map((it) => (isPublic === undefined ? it : { ...it, public: isPublic }))
+    writeReq('secret-request.json', pub ? { op: 'batch', pub, items: conVis } : { op: 'batch', ns, items: conVis })
+    const d = await signalAndWaitList()
+    const list = pub
+      ? ((Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === pub)?.keys || [])
+      : (d.ns?.[ns] || [])
+    const faltan = items.filter((it) => !has(list, it.key)).map((it) => it.key)
+    if (faltan.length) {
+      console.error('El daemon no guardó: %s (revisa: dotrino-vault logs)', faltan.join(', '))
+      process.exit(1)
+    }
+    console.log('%d variables guardadas en %s%s%s%s', items.length, B, donde, Z,
+      isPublic === undefined ? '' : isPublic ? '   (públicas)' : '   (privadas)')
+    console.log('Un solo aviso de cambio: el servicio se reinicia una vez, con todo puesto.')
+  }
+
+  /** El texto del `.env`: de un archivo, o de la entrada estándar si no se da ninguno. */
+  const leerEnv = (archivo) => {
+    if (archivo) {
+      try { return fs.readFileSync(archivo, 'utf8') } catch (e) {
+        console.error('No se pudo leer %s: %s', archivo, e.message); process.exit(1)
+      }
+    }
+    if (process.stdin.isTTY) {
+      console.error('%s\n\nimport necesita un archivo, o el .env por la entrada estándar:', USAGE)
+      console.error('  dotrino-vault secret import proxy .env')
+      console.error('  cat .env | dotrino-vault secret import proxy')
+      process.exit(2)
+    }
+    return fs.readFileSync(0, 'utf8')
+  }
 
   /**
    * Una variable en la lista: su nombre y su valor. La PÚBLICA enseña el suyo (pública
@@ -620,8 +718,9 @@ async function cmdSecret (rest) {
   if (sub === 'device') {
     const [op, id, key, ...valueParts] = args
     const value = valueParts.join(' ')
-    const ops = ['set', 'rm', 'visibility']
-    if (!ops.includes(op) || !id || !key || (op === 'set' && !value)) { console.error(USAGE); process.exit(2) }
+    const ops = ['set', 'rm', 'visibility', 'import']
+    const enGrupo = op === 'import' || (op === 'set' && !!asPairs(args.slice(2)))
+    if (!ops.includes(op) || !id || (!enGrupo && (!key || (op === 'set' && !value)))) { console.error(USAGE); process.exit(2) }
     const m = await buscarMiembro(id)
     // Se avisa aquí, con nombre y apellido, en vez de dejar que el daemon lo rechace y la
     // CLI diga «no aplicó el cambio»: quien escribe esto quiere saber POR QUÉ no vale.
@@ -629,6 +728,16 @@ async function cmdSecret (rest) {
       console.error('%s no es un servicio, y solo los servicios leen variables.', m.id)
       console.error('Empareja el servicio con:  dotrino-vault pair --service <ns>')
       process.exit(1)
+    }
+    if (op === 'import') {
+      const { items, errors } = parseEnvText(leerEnv(args[2]))
+      if (errors.length) return abortarEnv(errors)
+      return sendBatch({ pub: m.pub, items, donde: m.id })
+    }
+    if (enGrupo) return sendBatch({ pub: m.pub, items: asPairs(args.slice(2)), donde: m.id })
+    if (key && PAIR_RE.test(key) && args.length > 3) {
+      console.error('%s\n\nO todos los argumentos son CLAVE=valor, o es una sola variable.', USAGE)
+      process.exit(2)
     }
     const req = op === 'set'
       ? { op: 'dev-set', pub: m.pub, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) }
@@ -645,9 +754,28 @@ async function cmdSecret (rest) {
     return
   }
 
+  // Desde un `.env`: el caso real de estrenar un servicio, y el que de una en una
+  // reiniciaba al agente una vez por variable.
+  if (sub === 'import') {
+    const [ns, archivo] = args
+    if (!ns) { console.error(USAGE); process.exit(2) }
+    const { items, errors } = parseEnvText(leerEnv(archivo))
+    if (errors.length) return abortarEnv(errors)
+    return sendBatch({ ns, items, donde: ns })
+  }
+
   if (sub === 'set' || sub === 'rm' || sub === 'visibility') {
     const [ns, key, ...valueParts] = args
     const value = valueParts.join(' ')
+    // `set <ns> CLAVE=valor CLAVE2=valor2` — varias de una vez, un solo aviso.
+    const pares = sub === 'set' ? asPairs(args.slice(1)) : null
+    if (ns && pares) return sendBatch({ ns, items: pares, donde: ns })
+    // Mezclar las dos formas (`K1=v1 CLAVE valor`) no es ninguna de las dos: mejor
+    // decirlo que guardar una variable llamada «K1=v1».
+    if (sub === 'set' && key && PAIR_RE.test(key) && args.length > 2) {
+      console.error('%s\n\nO todos los argumentos son CLAVE=valor, o es una sola variable: set <ns> <CLAVE> <valor>.', USAGE)
+      process.exit(2)
+    }
     if (!ns || !key || (sub === 'set' && !value)) { console.error(USAGE); process.exit(2) }
     const req = sub === 'set'
       ? { op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) }
@@ -834,10 +962,16 @@ function help () {
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
+  secret set <ns> CLAVE=valor CLAVE2=valor2 …
+                                    carga VARIAS de una vez: se aplican juntas y el
+                                    servicio recibe UN solo aviso (se reinicia una vez)
+  secret import <ns> [archivo.env]  lo mismo desde un .env (o por la entrada estándar)
   secret rm <ns> <CLAVE>            borra una variable del scope
   secret device set <ID> <CLAVE> <valor>
                                     variable de UN aparato: solo la lee él, y pisa a la
                                     del scope que se llame igual (puerto, URL pública…)
+  secret device set <ID> CLAVE=valor …
+  secret device import <ID> [archivo.env]
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
   secret list                       lista los dos cajones: el valor de las públicas,
                                     tapadas las privadas

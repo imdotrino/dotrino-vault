@@ -169,6 +169,22 @@ const es = {
   valueEmpty: 'El valor no puede estar vacío',
   savingVar: 'Guardando variable…',
   varSaved: (ns, key) => `Guardado ${ns}/${key}`,
+
+  // CARGAR VARIAS DE UNA VEZ (tecla c). Una a una, cada variable es un cambio de
+  // configuración y el servicio se reinicia a media carga; juntas, se reinicia una vez.
+  loadLabel: (ns) => `Cargar varias en "${ns}"`,
+  loadHint: 'CLAVE=valor CLAVE2=valor2 · o la ruta de un archivo .env',
+  loadNoFile: (f) => `No se pudo leer ${f}`,
+  loadingVars: 'Cargando variables…',
+  loadedVars: (n, ns) => `${n} variables cargadas en ${ns} · un solo aviso de cambio`,
+  envErr: {
+    shape: (e) => `línea ${e.line}: no tiene la forma CLAVE=valor`,
+    key: (e) => `línea ${e.line}: «${e.key}» va en MAYUSCULAS_CON_GUION_BAJO`,
+    novalue: (e) => `línea ${e.line}: ${e.key} no tiene valor`,
+    dup: (e) => `línea ${e.line}: ${e.key} ya venía en la línea ${e.first}`,
+    empty: () => 'No hay ninguna variable que cargar'
+  },
+  loadNothing: 'No se cargó nada:',
   varPublic: 'pública',
   newVarPublicAsk: '¿Que su valor se pueda VER desde la consola remota? (las demás no salen de esta máquina)',
   makePublicConfirm: '¿Dejar que su valor se vea desde la consola remota?',
@@ -242,12 +258,12 @@ const es = {
   renaming: 'Renombrando…',
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
   helpSecrets: ({ hasSecrets } = {}) => [
-    '←→ pestaña', '↑↓', 'n nueva variable',
+    '←→ pestaña', '↑↓', 'n nueva variable', 'i cargar varias',
     ...(hasSecrets ? ['t pública/privada', 'x quitar (variable/scope)'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   helpDevVars: ({ hasVars } = {}) => [
-    '↑↓', 'n nueva variable',
+    '↑↓', 'n nueva variable', 'i cargar varias',
     ...(hasVars ? ['t pública/privada', 'x quitar'] : []),
     'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'
   ],
@@ -432,6 +448,20 @@ const en = {
   valueEmpty: 'The value cannot be empty',
   savingVar: 'Saving variable…',
   varSaved: (ns, key) => `Saved ${ns}/${key}`,
+
+  loadLabel: (ns) => `Load several into "${ns}"`,
+  loadHint: 'KEY=value KEY2=value2 · or the path to a .env file',
+  loadNoFile: (f) => `Could not read ${f}`,
+  loadingVars: 'Loading variables…',
+  loadedVars: (n, ns) => `${n} variables loaded into ${ns} · a single change notice`,
+  envErr: {
+    shape: (e) => `line ${e.line}: not in the form KEY=value`,
+    key: (e) => `line ${e.line}: "${e.key}" must be UPPERCASE_WITH_UNDERSCORES`,
+    novalue: (e) => `line ${e.line}: ${e.key} has no value`,
+    dup: (e) => `line ${e.line}: ${e.key} already came on line ${e.first}`,
+    empty: () => 'There is no variable to load'
+  },
+  loadNothing: 'Nothing was loaded:',
   varPublic: 'public',
   newVarPublicAsk: 'Let its value be SEEN from the remote console? (the rest never leave this machine)',
   makePublicConfirm: 'Let its value be seen from the remote console?',
@@ -491,12 +521,12 @@ const en = {
   renaming: 'Renaming…',
   deviceRenamed: (n) => `Now called "${n}"`,
   helpSecrets: ({ hasSecrets } = {}) => [
-    '←→ tab', '↑↓', 'n new variable',
+    '←→ tab', '↑↓', 'n new variable', 'i load several',
     ...(hasSecrets ? ['t public/private', 'x remove (variable/scope)'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   helpDevVars: ({ hasVars } = {}) => [
-    '↑↓', 'n new variable',
+    '↑↓', 'n new variable', 'i load several',
     ...(hasVars ? ['t public/private', 'x remove'] : []),
     'F5 refresh', 'Esc devices', 'l Español', 'q quit'
   ],

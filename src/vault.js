@@ -21,7 +21,7 @@ import { shouldNotifyRevoked } from '../lib/src/revocation.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
-import { openSecretsStore } from './secretsStore.js'
+import { openSecretsStore, assertVar } from './secretsStore.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
 import { atRestFor, machineKey, migrateFile } from './atrest.js'
@@ -596,6 +596,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (ns) setSecret(ns, key, value, isPublic)
       else await setDeviceSecret(pub, key, value, isPublic)
       return { ok: true, key }
+    },
+    /**
+     * VARIAS DE UNA VEZ, y por eso existe: cada guardado suelto hace que la bóveda avise
+     * al servicio de que su configuración cambió, y el servicio SALE para releerla entera
+     * (`watchEnv`). Guardadas de una en una, quien administra a distancia reiniciaba el
+     * servicio una vez por variable, y las primeras veces arrancaba con la configuración a
+     * medio poner. Juntas: un guardado, un aviso, un reinicio.
+     *
+     * Los NOMBRES también viajan dentro del sobre —no solo los valores—: el proxy
+     * transporta y no tiene por qué aprender cómo se llama la configuración de un servicio.
+     */
+    async setMany ({ ns, pub, enc, public: isPublic }) {
+      const payload = JSON.parse(await identity.openContent(enc))
+      const items = payload?.items
+      if (!Array.isArray(items) || !items.length) throw new Error('var.setMany: the sealed envelope must carry the variables')
+      // Borrar no se delega (`docs/consola-remota.md` §2): un aparato robado no puede
+      // dejar sin configuración a un servicio. Así que aquí solo entran valores nuevos.
+      /** @type {Array<{op:'set', key:string, value:string, public?:boolean}>} */
+      const list = items.map((it) => ({
+        op: /** @type {'set'} */ ('set'),
+        key: it?.key,
+        value: it?.value,
+        ...(typeof it?.public === 'boolean' ? { public: it.public } : (isPublic === undefined ? {} : { public: isPublic }))
+      }))
+      const keys = ns ? applySecrets(ns, list) : await applyDeviceSecrets(pub, list)
+      return { ok: true, keys }
     }
   }
 
@@ -670,6 +696,82 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // sin decir nada, la variable conserva su visibilidad (y una nueva nace privada).
   function setSecret (ns, key, value, isPublic) { secrets.set(ns, key, value, isPublic); audit('secret.set', { ns, key }); scheduleNotice(ns) }
   function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
+
+  /**
+   * CARGAR CONFIGURACIÓN ES UNA TRANSACCIÓN: muchas variables, UN aviso.
+   *
+   * De una en una, cada `set` es un cambio de configuración para la bóveda, y el agente
+   * obedece el primero —sale, lo levanta el supervisor, lee lo que hubiera en ese
+   * instante— mientras el dueño sigue tecleando. El resultado es un servicio corriendo
+   * con media configuración, y encima con el arranque a medio hacer. La ventana de
+   * agrupado (`NOTICE_GROUP_MS`) tapa el caso de un script, no el de una persona
+   * escribiendo con quince segundos entre variable y variable.
+   *
+   * Así que la carga en grupo llega hasta aquí entera: se valida TODO primero, se
+   * escribe en un solo guardado y sale UN aviso al final. Las visibilidades no entran:
+   * no cambian lo que el servicio lee y por eso nunca avisaron.
+   *
+   * @param {string} ns
+   * @param {Array<{op:'set'|'rm', key:string, value?:string, public?:boolean}>} items
+   * @returns {string[]} las claves que efectivamente cambiaron (un `rm` de lo que no
+   *   estaba no cambia nada, y no tiene por qué reiniciar a nadie).
+   */
+  function applySecrets (ns, items) {
+    const list = assertItems(items)
+    const changed = []
+    secrets.batch(() => {
+      for (const it of list) {
+        if (it.op === 'rm') {
+          if (secrets.delete(ns, it.key)) { audit('secret.rm', { ns, key: it.key }); changed.push(it.key) }
+        } else {
+          secrets.set(ns, it.key, it.value, it.public)
+          audit('secret.set', { ns, key: it.key })
+          changed.push(it.key)
+        }
+      }
+    })
+    if (changed.length) scheduleNotice(ns)
+    return changed
+  }
+
+  /** Lo mismo para el cajón de UN aparato (el aviso va solo a él). */
+  async function applyDeviceSecrets (pub, items) {
+    const list = assertItems(items)
+    const m = await requireService(pub)
+    const changed = []
+    secrets.batch(() => {
+      for (const it of list) {
+        if (it.op === 'rm') {
+          if (secrets.deleteDevice(pub, it.key)) changed.push(it.key)
+        } else {
+          secrets.setDevice(pub, it.key, it.value, it.public)
+          changed.push(it.key)
+        }
+      }
+    })
+    if (changed.length) {
+      const device = await deviceIdOf(pub).catch(() => null)
+      for (const it of list) {
+        if (!changed.includes(it.key)) continue
+        audit(it.op === 'rm' ? 'secret.rm' : 'secret.set', { device, ns: m?.cn || null, key: it.key, scope: 'device' })
+      }
+      scheduleDeviceNotice(pub)
+    }
+    return changed
+  }
+
+  /**
+   * Todo o nada: si una variable del grupo no vale, no se escribe NINGUNA. Media
+   * configuración cargada es peor que ninguna — el servicio arranca con ella.
+   */
+  function assertItems (items) {
+    if (!Array.isArray(items) || !items.length) throw new Error('batch: no items')
+    for (const it of items) {
+      if (!it || (it.op !== 'set' && it.op !== 'rm')) throw new Error('batch: each item must be a set or an rm')
+      if (it.op === 'rm') { if (!it.key) throw new Error('batch: rm needs a key') } else assertVar(it.key, it.value)
+    }
+    return items
+  }
   /**
    * Los nombres, y el VALOR de las públicas. Pública quiere decir «este valor puede salir
    * de esta máquina»: taparlo justo aquí —en la máquina donde vive, delante de su dueño—
@@ -779,6 +881,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     vars: varsDesk,
     setSecret, deleteSecret, listSecrets, setSecretVisibility,
     setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
+    applySecrets, applyDeviceSecrets,
     listDevices: () => identity.listDelegations(),
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.

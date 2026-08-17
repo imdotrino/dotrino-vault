@@ -155,12 +155,28 @@ const T = {
     var_orphan: 'ya no está en el perfil',
     var_private: 'privada',
     var_save: 'Guardar',
+    // UN solo botón: se edita todo y se confirma una vez. Cada guardado reinicia la
+    // aplicación que usa esas variables, así que guardar de una en una la reiniciaba
+    // por cada una, y arrancaba con la configuración a medias.
+    var_save_n: (n) => `Guardar ${n} cambio${n === 1 ? '' : 's'}`,
+    var_save_hint: 'Se guardan juntas: la aplicación se reinicia una sola vez.',
+    var_pending: 'sin guardar',
+    var_incomplete: 'Hay una fila sin nombre o sin valor.',
     var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
     var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
     var_value_ph: 'valor',
     var_private_ask: 'Privada',
-    var_add: 'Agregar',
+    var_add: 'Agregar variable',
+    var_paste: 'Repartir en filas',
+    var_paste_ph: 'pega aquí tu configuración: NOMBRE=valor, una por línea',
+    var_paste_err: (e) => ({
+      shape: `línea ${e.line}: no tiene la forma NOMBRE=valor`,
+      key: `línea ${e.line}: «${e.key}» va en MAYUSCULAS_CON_GUION_BAJO`,
+      novalue: `línea ${e.line}: ${e.key} no tiene valor`,
+      dup: `línea ${e.line}: ${e.key} ya venía en la línea ${e.first}`,
+      empty: 'No hay ninguna variable ahí'
+    })[e.code],
     adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
   },
@@ -266,12 +282,25 @@ const T = {
     var_orphan: 'no longer in the profile',
     var_private: 'private',
     var_save: 'Save',
+    var_save_n: (n) => `Save ${n} change${n === 1 ? '' : 's'}`,
+    var_save_hint: 'They are saved together: the app restarts only once.',
+    var_pending: 'unsaved',
+    var_incomplete: 'A row has no name or no value.',
+    var_paste: 'Split into rows',
+    var_paste_ph: 'paste your configuration here: NAME=value, one per line',
+    var_paste_err: (e) => ({
+      shape: `line ${e.line}: not in the form NAME=value`,
+      key: `line ${e.line}: "${e.key}" must be UPPERCASE_WITH_UNDERSCORES`,
+      novalue: `line ${e.line}: ${e.key} has no value`,
+      dup: `line ${e.line}: ${e.key} already came on line ${e.first}`,
+      empty: 'There is no variable there'
+    })[e.code],
     var_group_new: 'New group',
     var_scope_ph: 'group name (e.g. proxy)',
     var_key_ph: 'VARIABLE_NAME',
     var_value_ph: 'value',
     var_private_ask: 'Private',
-    var_add: 'Add',
+    var_add: 'Add variable',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
@@ -905,15 +934,21 @@ const varsHuerfanas = computed(() => (vars.value?.dev || [])
   .filter((d) => !members.value.some((m) => m.pub === d.pub)))
 
 /**
- * Guarda un valor. `isPublic` sin definir = deja la visibilidad como estaba (rotar no
- * cambia quién puede ver). Es lo que `Vars.vue` llama desde los dos sitios.
+ * Guarda TODO lo editado de un destino en UNA sola operación. Es lo que `Vars.vue` llama
+ * desde su único botón.
+ *
+ * Que sea una sola no es una comodidad de la pantalla: cada guardado hace que la bóveda
+ * avise a la aplicación de que su configuración cambió, y esa aplicación se reinicia para
+ * leerla entera y fresca. Guardando de una en una, seis variables eran seis reinicios, y
+ * los cinco primeros arrancaban la aplicación con la configuración a medio poner.
+ *
+ * Los nombres viajan DENTRO del sobre cifrado, igual que los valores: el proxy transporta
+ * y no aprende ni cómo se llaman las variables de tus servicios.
  */
-function saveVar ({ target, key, value, isPublic }) {
-  return run('var-' + target + '-' + key, async () => {
-    const enc = await id.value.sealContent(JSON.stringify({ value }))
-    await id.value.vaultAdmin('var.set', {
-      ...targetOf(target), key, enc, ...(isPublic === undefined ? {} : { public: isPublic })
-    })
+function saveVars ({ target, items }) {
+  return run('var-' + target, async () => {
+    const enc = await id.value.sealContent(JSON.stringify({ items }))
+    await id.value.vaultAdmin('var.setMany', { ...targetOf(target), enc })
     await loadVars()
   })
 }
@@ -1140,7 +1175,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                :data-testid="'devvars-' + m.id">
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
-                  :t="t" :busy="busy" :save="saveVar" :add="!!m.cn" />
+                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn" />
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
@@ -1266,7 +1301,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
               <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
               <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
-                    :t="t" :busy="busy" :save="saveVar" />
+                    :t="t" :busy="busy" :save="saveVars" />
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->

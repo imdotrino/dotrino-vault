@@ -98,6 +98,24 @@ test('un aparato que se va se lleva sus variables; el scope ni se entera', () =>
   assert.equal(s.forgetDevice('NUNCA-EXISTIO'), 0)
 })
 
+test('un grupo de escrituras se guarda UNA vez, al final', () => {
+  const dir = tmp()
+  const s = openSecretsStore(dir)
+  const file = path.join(dir, 'secrets.json')
+  const leerDisco = () => readJson(file, null, atRestFor(dir))
+
+  s.batch(() => {
+    s.set('proxy', 'UNO', '1')
+    s.set('proxy', 'DOS', '2')
+    // A media carga el disco todavía no sabe nada: por eso es UN guardado y no tres.
+    assert.equal(leerDisco().ns.proxy, undefined, 'nada se escribe hasta cerrar el grupo')
+    s.set('proxy', 'TRES', '3')
+  })
+
+  assert.deepEqual(Object.keys(leerDisco().ns.proxy), ['UNO', 'DOS', 'TRES'])
+  assert.deepEqual(s.get('proxy'), { UNO: '1', DOS: '2', TRES: '3' })
+})
+
 test('las claves y los valores se validan igual en los dos cajones', () => {
   const dir = tmp()
   const s = openSecretsStore(dir)
