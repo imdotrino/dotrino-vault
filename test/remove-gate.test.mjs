@@ -13,7 +13,7 @@ test('master con otros miembros: NO se puede borrar', () => {
   assert.ok(e, 'tenía que frenar')
   assert.equal(e.code, 'MASTER_WITH_MEMBERS')
   assert.match(e.message, /Personal/)
-  assert.match(e.message, /2 dispositivo/) // los OTROS, no el total
+  assert.match(e.message, /2 more device/) // los OTROS, no el total
 })
 
 test('master solo (es el único miembro): se borra sin más', () => {

@@ -191,9 +191,9 @@ test('antes del QR, el vault PREGUNTA a qué cuenta entra el dispositivo', () =>
     ['en', /Join this account: Perfil 1/, /Start a new account/, /Connect a service/]
   ]) {
     const rows = V.pairModeRows(baseState({ screen: 'pairmode', lang }), t)
-    const opciones = rows.filter((r) => r.sel)
-    assert.equal(opciones.length, 3, 'hoy se puede responder de tres formas')
-    assert.deepEqual(opciones.map((r) => r.meta.mode), ['here', 'new', 'service'])
+    const options = rows.filter((r) => r.sel)
+    assert.equal(options.length, 3, 'hoy se puede responder de tres formas')
+    assert.deepEqual(options.map((r) => r.meta.mode), ['here', 'new', 'service'])
     assert.match(rows.map((r) => r.text).join('\n'), aqui)
     assert.match(rows.map((r) => r.text).join('\n'), nueva)
     // Un SERVICIO se emparejaba solo por la línea de comandos (`pair --service <ns>`):
@@ -201,7 +201,7 @@ test('antes del QR, el vault PREGUNTA a qué cuenta entra el dispositivo', () =>
     assert.match(rows.map((r) => r.text).join('\n'), servicio)
     // La tercera (adoptar la cuenta del dispositivo) se nombra pero NO se puede elegir.
     assert.match(rows.map((r) => r.text).join('\n'), lang === 'es' ? /Adoptar la cuenta que trae/ : /Adopt the account the device brings/)
-    assert.ok(!opciones.some((r) => r.meta.mode === 'adopt'))
+    assert.ok(!options.some((r) => r.meta.mode === 'adopt'))
   }
 
   // Y se dibuja entera, en los dos idiomas y en terminales chicos.
@@ -274,10 +274,10 @@ test('el QR de una invitación real cabe en una terminal normal', async () => {
     m: 'join',
     acct: 'Perfil 1'
   }
-  const lineas = qrToString(inviteUrl(qr)).replace(/\n$/, '').split('\n')
-  const ancho = Math.max(...lineas.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length))
-  assert.ok(ancho <= 53, `el QR mide ${ancho} columnas`)
-  assert.ok(lineas.length <= 27, `el QR mide ${lineas.length} filas`)
+  const lines = qrToString(inviteUrl(qr)).replace(/\n$/, '').split('\n')
+  const width = Math.max(...lines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length))
+  assert.ok(width <= 53, `el QR mide ${width} columnas`)
+  assert.ok(lines.length <= 27, `el QR mide ${lines.length} filas`)
 
   // Y se dibuja de verdad en la pantalla de emparejar de una terminal de 80 columnas.
   const st = baseState({ screen: 'pairing' })
@@ -357,36 +357,36 @@ test('arrancar con la bóveda activa CERRADA: se carga la lista y no se pide su 
   // La regresión, en la función donde ocurrió. Antes se pedía el volcado de la activa
   // ANTES que la lista: la petición fallaba con «bloqueada», se salía por el error, y
   // `st.profiles` se quedaba en null → pantalla de entrada vacía.
-  const bovedas = {
+  const vaults = {
     current: 'p1',
     profiles: [
       { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' },
       { id: 'p2', name: 'Trabajo', protected: false, locked: false, current: false, fingerprint: 'fp2' }
     ]
   }
-  let pidioContenido = false
+  let askedForContent = false
   const api = {
-    listProfiles: async () => bovedas,
-    snapshot: async () => { pidioContenido = true; throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' }) },
+    listProfiles: async () => vaults,
+    snapshot: async () => { askedForContent = true; throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' }) },
     deviceIdOf: async () => 'AB12-CD34'
   }
   const st = baseState({ profiles: null, devices: { issued: [{ deviceId: 'VIEJO' }], revoked: [] }, secrets: { ns: { viejo: [] }, dev: [] } })
 
   await V.refreshAll(fakeTerm(80, 24), st, api)
 
-  assert.deepEqual(st.profiles, bovedas, 'la lista de bóvedas se carga igual')
-  assert.equal(pidioContenido, false, 'y ni se pide lo de la cerrada')
+  assert.deepEqual(st.profiles, vaults, 'la lista de bóvedas se carga igual')
+  assert.equal(askedForContent, false, 'y ni se pide lo de la cerrada')
   assert.equal(st.devices, null, 'lo que hubiera cargado se suelta, no se queda en pantalla')
   assert.equal(st.secrets, null)
   assert.equal(st.flash, null, 'mirar una bóveda cerrada desde fuera no es un error')
 
   // Abierta, todo lo demás sigue igual que siempre.
-  bovedas.profiles[0].locked = false
+  vaults.profiles[0].locked = false
   api.snapshot = async () => ({
-    profiles: bovedas,
+    profiles: vaults,
     devices: { issued: [{ sub: 'PUB1', nonce: 'n1' }], revoked: [] },
     secrets: { ns: { proxy: [{ key: 'K', public: false }] }, dev: [] },
-    acta: { members: [{ pub: 'PUB1', id: 'AB12-CD34', caps: ['sign'] }] }
+    record: { members: [{ pub: 'PUB1', id: 'AB12-CD34', caps: ['sign'] }] }
   })
   await V.refreshAll(fakeTerm(80, 24), st, api)
   assert.equal(st.devices.issued.length, 1)
@@ -439,25 +439,25 @@ test('Perfil: muestra lo que sincronizó el aparato, y NUNCA los bytes de la fot
     links: [{ id: '1', type: 'github', value: 'seyacat', visible: true }],
     updatedAt: Date.now()
   }
-  const texto = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
-  assert.match(texto, /Seyacat/)
-  assert.match(texto, /image\/jpeg/)
-  assert.match(texto, /7\.8 KB/, 'el tamaño en KB, no en bytes crudos')
-  assert.match(texto, /sandrade@dotrino\.com/)
-  assert.match(texto, /0999/)
-  assert.match(texto, /oculto/, 'lo que el usuario marcó como oculto se dice')
-  assert.match(texto, /github/)
-  assert.ok(!texto.includes('base64'), 'la foto se resume, no se vuelca')
+  const text = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
+  assert.match(text, /Seyacat/)
+  assert.match(text, /image\/jpeg/)
+  assert.match(text, /7\.8 KB/, 'el tamaño en KB, no en bytes crudos')
+  assert.match(text, /sandrade@dotrino\.com/)
+  assert.match(text, /0999/)
+  assert.match(text, /oculto/, 'lo que el usuario marcó como oculto se dice')
+  assert.match(text, /github/)
+  assert.ok(!text.includes('base64'), 'la foto se resume, no se vuelca')
 })
 
 test('Perfil vacío: lo dice y explica qué hacer, sin reventar', () => {
   const t = makeTheme()
   for (const me of [null, undefined]) {
-    const texto = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
-    assert.ok(texto.length > 0, 'siempre dibuja algo')
+    const text = V.meRows(baseState({ screen: 'me', me }), t).map((r) => r.text).join('\n')
+    assert.ok(text.length > 0, 'siempre dibuja algo')
   }
-  const vacio = V.meRows(baseState({ screen: 'me', me: null }), t).map((r) => r.text).join('\n')
-  assert.match(vacio, /perfil/i)
+  const empty = V.meRows(baseState({ screen: 'me', me: null }), t).map((r) => r.text).join('\n')
+  assert.match(empty, /perfil/i)
 })
 
 
@@ -468,13 +468,13 @@ test('Permisos: los cuatro, en cristiano, con su marca — y admin destacado', (
     capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
     members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign', 'read'] }]
   })
-  const texto = V.capsRows(st, t).map((r) => r.text).join('\n')
-  assert.match(texto, /AB12-CD34/)
-  assert.match(texto, /\[x\].*Firmar/, 'lo que tiene va marcado')
-  assert.match(texto, /\[ \].*Administrar/, 'lo que no tiene, sin marcar')
-  assert.match(texto, /sin venir aquí/, 'y se explica qué implica administrar')
+  const text = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(text, /AB12-CD34/)
+  assert.match(text, /\[x\].*Firmar/, 'lo que tiene va marcado')
+  assert.match(text, /\[ \].*Administrar/, 'lo que no tiene, sin marcar')
+  assert.match(text, /sin venir aquí/, 'y se explica qué implica administrar')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
-  assert.ok(!/vault:|scope|cert/i.test(texto), 'sin jerga: ' + texto)
+  assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
   // Se puede elegir cada permiso.
   assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 4)
 })
@@ -503,11 +503,11 @@ test('Dispositivos: un miembro SIN certificado sale igual, marcado, y se puede q
     }
   })
   const rows = V.deviceRows(st, t)
-  const texto = rows.map((r) => r.text).join('\n')
+  const text = rows.map((r) => r.text).join('\n')
 
-  assert.match(texto, /9E32-02BC/, 'el fantasma se ve')
-  assert.match(texto, /SIN ACCESO/, 'y se dice que no puede entrar')
-  assert.match(texto, /C8AA-7DCF/, 'el que sí tiene papel también')
+  assert.match(text, /9E32-02BC/, 'el fantasma se ve')
+  assert.match(text, /SIN ACCESO/, 'y se dice que no puede entrar')
+  assert.match(text, /C8AA-7DCF/, 'el que sí tiene papel también')
 
   // Y se puede seleccionar para quitarlo: sin `sub` la tecla de quitar no hace nada.
   const ghost = rows.find((r) => r.sel && r.meta?.deviceId === '9E32-02BC')
@@ -541,44 +541,44 @@ test('la contraseña vale para TODA la sesión: si el daemon pierde el candado, 
   // `systemctl restart` (o una petición perdida) la dejaba cerrada otra vez a mitad de
   // sesión y la TUI volvía a pedir la contraseña. Tecleada una vez, vale hasta el
   // candado (`k`) o hasta salir.
-  const boveda = { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' }
-  const lista = { current: 'p1', profiles: [boveda] }
+  const vault = { id: 'p1', name: 'Dotrino', protected: true, locked: true, current: true, fingerprint: 'fp1' }
+  const list = { current: 'p1', profiles: [vault] }
   let unlocks = 0
   const api = {
-    listProfiles: async () => lista,
+    listProfiles: async () => list,
     unlockProfile: async (id, pwd) => {
       unlocks++
       if (pwd !== 'buena') throw Object.assign(new Error('wrong password'), { code: 'WRONG_PASSWORD' })
-      boveda.locked = false
-      return lista
+      vault.locked = false
+      return list
     }
   }
-  const st = baseState({ profiles: lista, unlockedHere: new Set(), sessionPwd: new Map() })
+  const st = baseState({ profiles: list, unlockedHere: new Set(), sessionPwd: new Map() })
   const term = fakeTerm(90, 24)
 
   // 1) La primera vez SÍ se pide: queda el campo abierto esperando.
-  let entradas = 0
-  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  let entries = 0
+  await V.ensureUnlocked(term, st, vault, () => { entries++ }, null, api)
   assert.ok(st.input, 'la primera vez pide la contraseña')
-  assert.equal(entradas, 0)
+  assert.equal(entries, 0)
   await st.input.onSubmit('buena')
-  assert.equal(entradas, 1, 'con la contraseña buena, sigue adelante')
+  assert.equal(entries, 1, 'con la contraseña buena, sigue adelante')
   assert.equal(st.sessionPwd.get('p1'), 'buena', 'y se la queda para esta sesión')
   assert.ok(st.unlockedHere.has('p1'), 'para volver a cerrarla al salir')
 
   // 2) El daemon pierde el candado (reinicio del servicio): vuelve a decir «cerrada».
-  boveda.locked = true
+  vault.locked = true
   st.input = null
-  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  await V.ensureUnlocked(term, st, vault, () => { entries++ }, null, api)
   assert.equal(st.input, null, 'NO se vuelve a preguntar')
-  assert.equal(entradas, 2, 'se entra igual')
-  assert.equal(boveda.locked, false, 'porque se reabrió sola con la de la sesión')
+  assert.equal(entries, 2, 'se entra igual')
+  assert.equal(vault.locked, false, 'porque se reabrió sola con la de la sesión')
   assert.equal(unlocks, 2)
 
   // 3) Si la contraseña guardada ya no vale, se pregunta (y se olvida la vieja).
-  boveda.locked = true
+  vault.locked = true
   st.sessionPwd.set('p1', 'vieja')
-  await V.ensureUnlocked(term, st, boveda, () => { entradas++ }, null, api)
+  await V.ensureUnlocked(term, st, vault, () => { entries++ }, null, api)
   assert.ok(st.input, 'vuelve a preguntar')
   assert.equal(st.sessionPwd.has('p1'), false, 'y no se queda con una que ya no sirve')
 })

@@ -48,13 +48,13 @@ const props = defineProps({
   add: { type: Boolean, default: true }
 })
 
-const borrador = ref([])   // las que ya existen, con lo tecleado encima
-const nuevas = ref([])     // las que se están añadiendo, aún sin confirmar
-const errorPegado = ref('')
+const draft = ref([])   // las que ya existen, con lo tecleado encima
+const added = ref([])     // las que se están añadiendo, aún sin confirmar
+const pasteError = ref('')
 
-const filaVacia = () => ({ key: '', value: '', priv: true })
+const emptyRow = () => ({ key: '', value: '', priv: true })
 /** Una fila nueva «cuenta» en cuanto tiene algo escrito; la última en blanco es el hueco. */
-const usada = (n) => !!n.key.trim() || !!n.value
+const used = (n) => !!n.key.trim() || !!n.value
 
 /**
  * El borrador se rehace con cada lista que llega de la bóveda (confirmar recarga), así que
@@ -62,12 +62,12 @@ const usada = (n) => !!n.key.trim() || !!n.value
  * su campo nace vacío y lo que escribas ahí es el valor NUEVO.
  */
 watch(() => props.rows, (rows) => {
-  borrador.value = (rows || []).map((r) => {
+  draft.value = (rows || []).map((r) => {
     const value = r.public ? (r.value ?? '') : ''
-    return { key: r.key, value, priv: !r.public, era: { value, priv: !r.public } }
+    return { key: r.key, value, priv: !r.public, was: { value, priv: !r.public } }
   })
-  nuevas.value = props.add ? [filaVacia()] : []
-  errorPegado.value = ''
+  added.value = props.add ? [emptyRow()] : []
+  pasteError.value = ''
 }, { immediate: true, deep: true })
 
 /**
@@ -75,32 +75,32 @@ watch(() => props.rows, (rows) => {
  * lo que quita el botón «Agregar variable» — cargar seis variables es teclear, no alternar
  * entre teclear y pulsar. Nunca hay más de una en blanco al final.
  */
-watch(nuevas, (ns) => {
+watch(added, (ns) => {
   if (!props.add) return
-  const ultima = ns[ns.length - 1]
-  if (!ultima || usada(ultima)) nuevas.value = [...ns, filaVacia()]
+  const last = ns[ns.length - 1]
+  if (!last || used(last)) added.value = [...ns, emptyRow()]
 }, { deep: true })
 
-const cambiada = (d) => d.value !== d.era.value || d.priv !== d.era.priv
+const changed = (d) => d.value !== d.was.value || d.priv !== d.was.priv
 /**
  * Confirmar exige un valor, siempre. Por eso una privada no se puede volver pública sin
  * teclearlo: quien administra a distancia no puede destapar un secreto que no conoce,
  * solo reemplazarlo (y eso queda en la bitácora).
  */
-const listas = computed(() => [
-  ...borrador.value.filter((d) => cambiada(d) && !!d.value),
-  ...nuevas.value.filter((d) => isValidVarKey(d.key.trim().toUpperCase()) && !!d.value)
+const ready = computed(() => [
+  ...draft.value.filter((d) => changed(d) && !!d.value),
+  ...added.value.filter((d) => isValidVarKey(d.key.trim().toUpperCase()) && !!d.value)
 ])
 
 /** Lo que está a medias: una fila con nombre y sin valor, o al revés. No se puede confirmar. */
-const aMedias = computed(() => [
-  ...borrador.value.filter((d) => cambiada(d) && !d.value),
-  ...nuevas.value.filter((d) => (!!d.key.trim() || !!d.value) && !(isValidVarKey(d.key.trim().toUpperCase()) && !!d.value))
+const incomplete = computed(() => [
+  ...draft.value.filter((d) => changed(d) && !d.value),
+  ...added.value.filter((d) => (!!d.key.trim() || !!d.value) && !(isValidVarKey(d.key.trim().toUpperCase()) && !!d.value))
 ].length > 0)
 
-const puedeConfirmar = computed(() => !!listas.value.length && !aMedias.value && !props.busy)
+const canConfirm = computed(() => !!ready.value.length && !incomplete.value && !props.busy)
 
-const quitarFila = (i) => { nuevas.value = nuevas.value.filter((_, n) => n !== i) }
+const removeRow = (i) => { added.value = added.value.filter((_, n) => n !== i) }
 
 /**
  * Pegar la configuración tal como ya la tienes (un `.env`) EN EL CAMPO DEL NOMBRE: cada
@@ -111,61 +111,61 @@ const quitarFila = (i) => { nuevas.value = nuevas.value.filter((_, n) => n !== i
  * como en cualquier campo. Y solo en el campo del NOMBRE, nunca en el del valor: un
  * secreto puede llevar `=` (base64 termina en `==`) y partirlo lo estropearía en silencio.
  */
-function pegar (ev, idx) {
-  const texto = ev.clipboardData?.getData('text') || ''
-  if (!/[\n=]/.test(texto)) return
+function onPaste (ev, idx) {
+  const text = ev.clipboardData?.getData('text') || ''
+  if (!/[\n=]/.test(text)) return
   ev.preventDefault()
-  errorPegado.value = ''
-  const { items, errors } = parseEnvText(texto)
+  pasteError.value = ''
+  const { items, errors } = parseEnvText(text)
   if (errors.length) {
-    errorPegado.value = props.t.var_paste_err?.(errors[0]) || 'error'
+    pasteError.value = props.t.var_paste_err?.(errors[0]) || 'error'
     return
   }
-  const destino = [...nuevas.value]
-  let hueco = idx
+  const next = [...added.value]
+  let slot = idx
   for (const it of items) {
     // Si la variable ya está arriba, lo pegado es su valor NUEVO: se escribe en su fila en
     // vez de duplicarla (dos filas con el mismo nombre serían una trampa).
-    const fila = borrador.value.find((d) => d.key === it.key)
-    if (fila) { fila.value = it.value; continue }
-    const n = destino.find((d) => d.key.trim().toUpperCase() === it.key)
+    const row = draft.value.find((d) => d.key === it.key)
+    if (row) { row.value = it.value; continue }
+    const n = next.find((d) => d.key.trim().toUpperCase() === it.key)
     if (n) { n.value = it.value; continue }
     // La primera cae en la fila donde se pegó (si estaba en blanco); las demás, detrás.
-    if (hueco !== null && destino[hueco] && !usada(destino[hueco])) {
-      destino[hueco] = { key: it.key, value: it.value, priv: true }
-      hueco = null
-    } else destino.push({ key: it.key, value: it.value, priv: true })
+    if (slot !== null && next[slot] && !used(next[slot])) {
+      next[slot] = { key: it.key, value: it.value, priv: true }
+      slot = null
+    } else next.push({ key: it.key, value: it.value, priv: true })
   }
-  nuevas.value = destino
+  added.value = next
 }
 
 /** UNA llamada con todo dentro: la bóveda las guarda juntas y avisa una sola vez. */
-const confirmar = () => props.save({
+const submit = () => props.save({
   target: props.target,
-  items: listas.value.map((d) => ({ key: (d.key || '').trim().toUpperCase(), value: d.value, public: !d.priv }))
+  items: ready.value.map((d) => ({ key: (d.key || '').trim().toUpperCase(), value: d.value, public: !d.priv }))
 })
 </script>
 
 <template>
   <div class="varlist">
-    <div v-for="d in borrador" :key="d.key" class="varrow" :data-var="tid + '/' + d.key">
+    <div v-for="d in draft" :key="d.key" class="varrow" :data-var="tid + '/' + d.key">
       <!-- El nombre se queda: renombrar no existe (sería crear otra y dejar la vieja). -->
       <input class="k" type="text" :value="d.key" disabled :data-testid="'var-key-' + tid + '-' + d.key" />
       <input v-model="d.value" :type="d.priv ? 'password' : 'text'" autocomplete="off"
-             :placeholder="d.era.priv ? '••••••' : t.var_value_ph"
+             :placeholder="d.was.priv ? '••••••' : t.var_value_ph"
              :data-testid="'var-value-' + tid + '-' + d.key" />
       <label class="chk">
         <input v-model="d.priv" type="checkbox" :data-testid="'var-private-' + tid + '-' + d.key" />
         {{ t.var_private_ask }}
       </label>
-      <span v-if="cambiada(d)" class="tag">{{ t.var_pending }}</span>
+      <span v-if="changed(d)" class="tag">{{ t.var_pending }}</span>
     </div>
 
     <template v-if="add">
-      <div v-for="(n, idx) in nuevas" :key="'n' + idx" class="varrow nueva" :data-testid="'var-new-' + tid + '-' + idx">
+      <div v-for="(n, idx) in added" :key="'n' + idx" class="varrow added" :data-testid="'var-new-' + tid + '-' + idx">
         <!-- Aquí también se PEGA el `.env` entero: si trae `=` o varias líneas, se reparte. -->
         <input v-model="n.key" class="k" type="text" :placeholder="t.var_key_ph"
-               :data-testid="'var-new-key-' + tid + '-' + idx" @paste="pegar($event, idx)" />
+               :data-testid="'var-new-key-' + tid + '-' + idx" @paste="onPaste($event, idx)" />
         <input v-model="n.value" :type="n.priv ? 'password' : 'text'" autocomplete="off"
                :placeholder="t.var_value_ph" :data-testid="'var-new-value-' + tid + '-' + idx" />
         <!-- Nace PRIVADA, y la casilla lo dice con esa palabra: «que su valor se pueda ver
@@ -175,23 +175,23 @@ const confirmar = () => props.save({
           {{ t.var_private_ask }}
         </label>
         <!-- La fila en blanco del final no se quita: es el hueco, no una fila de más. -->
-        <button v-if="usada(n)" class="btn sm ghost" :data-testid="'var-new-drop-' + tid + '-' + idx"
-                @click="quitarFila(idx)">×</button>
+        <button v-if="used(n)" class="btn sm ghost" :data-testid="'var-new-drop-' + tid + '-' + idx"
+                @click="removeRow(idx)">×</button>
       </div>
       <!-- Lo único que queda del cuadro de texto: decir dónde se pega. Sin esta línea el
            gesto no se descubre, y no cabe dentro del campo sin recortar el ejemplo. -->
-      <p class="hint pista" :data-testid="'var-paste-hint-' + tid">{{ t.var_paste_hint }}</p>
-      <p v-if="errorPegado" class="err" :data-testid="'var-paste-error-' + tid">{{ errorPegado }}</p>
+      <p class="hint paste-hint" :data-testid="'var-paste-hint-' + tid">{{ t.var_paste_hint }}</p>
+      <p v-if="pasteError" class="err" :data-testid="'var-paste-error-' + tid">{{ pasteError }}</p>
     </template>
 
     <!-- EL botón. Uno solo, para todo lo de arriba: así la aplicación recibe un único
          aviso de cambio y se reinicia una vez, con la configuración entera. -->
-    <div class="confirmar">
-      <button class="btn" :data-testid="'var-save-' + tid" :disabled="!puedeConfirmar" @click="confirmar">
-        {{ listas.length ? t.var_save_n(listas.length) : t.var_save }}
+    <div class="actions">
+      <button class="btn" :data-testid="'var-save-' + tid" :disabled="!canConfirm" @click="submit">
+        {{ ready.length ? t.var_save_n(ready.length) : t.var_save }}
       </button>
-      <span v-if="aMedias" class="hint">{{ t.var_incomplete }}</span>
-      <span v-else-if="listas.length" class="hint">{{ t.var_save_hint }}</span>
+      <span v-if="incomplete" class="hint">{{ t.var_incomplete }}</span>
+      <span v-else-if="ready.length" class="hint">{{ t.var_save_hint }}</span>
     </div>
   </div>
 </template>
@@ -203,12 +203,12 @@ const confirmar = () => props.save({
 .varrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 0 12px; }
 /* Las nuevas se separan del bloque de las guardadas, pero entre ellas van juntas: son
    una lista que crece mientras tecleas, no fichas sueltas. */
-.varrow.nueva { margin-top: 14px; }
-.varrow.nueva + .varrow.nueva { margin-top: 6px; }
+.varrow.added { margin-top: 14px; }
+.varrow.added + .varrow.added { margin-top: 6px; }
 .chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: #9fb3c8; }
-.confirmar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0 12px; }
+.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0 12px; }
 .hint { font-size: 12px; color: #9fb3c8; }
-.pista { margin: 6px 0 0 12px; }
+.paste-hint { margin: 6px 0 0 12px; }
 .err { margin: 6px 0 0 12px; font-size: 13px; color: #ffb4a2; }
 .tag { font-size: 12px; color: #ffd79a; }
 input[type="text"], input[type="password"] {

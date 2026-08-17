@@ -52,7 +52,7 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   })
 
   // pair --service proxy (mismo scope que arma el daemon)
-  const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'servicio:proxy', ttlMs: 24 * 60 * 60 * 1000 })
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'service:proxy', ttlMs: 24 * 60 * 60 * 1000 })
 
   const { enrollService, fetchSecrets, readServiceIdentity } = await import('../lib/src/service.js')
   const { device, cert } = await enrollService({
@@ -83,8 +83,8 @@ test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', asy
   const pub = 'PUB-DE-UN-APARATO'
   vault.secrets.setDevice(pub, 'PORT', '8443', true)
   vault.secrets.setDevice(pub, 'DB_PASSWORD', 'nope')
-  const fila = (await vault.listDeviceSecrets()).find((d) => d.pub === pub)
-  assert.deepEqual(fila.keys, [
+  const row = (await vault.listDeviceSecrets()).find((d) => d.pub === pub)
+  assert.deepEqual(row.keys, [
     { key: 'PORT', public: true, value: '8443' },
     { key: 'DB_PASSWORD', public: false }
   ])
@@ -116,7 +116,7 @@ test('loadEnv() inyecta los secretos en process.env y PISA el .env', async () =>
   // required: si falta una clave, no arranca
   await assert.rejects(
     loadEnv({ ns: 'proxy', dir: svcDir, wait: false, required: ['NO_EXISTE'] }),
-    /faltan secretos/
+    /missing secrets/
   )
 })
 
@@ -132,7 +132,7 @@ test('enrolar acepta la invitación TAL COMO la imprime el vault (no JSON)', asy
   for (const [nombre, comoLoDa] of [['código compacto', encodeInvite], ['URL del QR', inviteUrl]]) {
     const ns = nombre === 'código compacto' ? 'compacto' : 'urlqr'
     vault.setSecret(ns, 'API_KEY', 'v-' + ns)
-    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
     const dir = tmp('svc-' + ns + '-')
 
     await enrollService({
@@ -144,7 +144,7 @@ test('enrolar acepta la invitación TAL COMO la imprime el vault (no JSON)', asy
 
   await assert.rejects(
     enrollService({ qr: 'esto no es una invitación', ns: 'proxy', dir: tmp('svc-basura-') }),
-    /no parece una invitación del vault/
+    /does not look like a vault invitation/
   )
 })
 
@@ -159,29 +159,29 @@ test('un agente tiene UNA identidad: re-enrolar reemplaza y avisa qué descarta'
   vault.setSecret(ns, 'API_KEY', 'v1')
   const dir = tmp('svc-rot-')
 
-  const enrolar = async (onReplace) => {
-    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+  const enroll = async (onReplace) => {
+    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
     return enrollService({
       qr: encodeInvite(qr), ns, dir, onReplace,
       onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
     })
   }
 
-  const primera = await enrolar()
-  assert.equal(primera.replaced, null, 'la primera vez no hay nada que descartar')
-  const llaveVieja = readServiceIdentity(dir).device.publickey
+  const first = await enroll()
+  assert.equal(first.replaced, null, 'la primera vez no hay nada que descartar')
+  const oldKey = readServiceIdentity(dir).device.publickey
 
-  let avisado = null
-  const segunda = await enrolar((prev) => { avisado = prev })
-  assert.ok(avisado, 're-enrolar tiene que avisar que descarta la identidad anterior')
-  assert.equal(avisado.ns, ns)
-  assert.match(avisado.deviceId, /^[0-9A-F]{8}$/)
-  assert.deepEqual(segunda.replaced, avisado)
+  let notified = null
+  const second = await enroll((prev) => { notified = prev })
+  assert.ok(notified, 're-enrolar tiene que avisar que descarta la identidad anterior')
+  assert.equal(notified.ns, ns)
+  assert.match(notified.deviceId, /^[0-9A-F]{8}$/)
+  assert.deepEqual(second.replaced, notified)
 
   // Reemplazo, no convivencia: en disco queda UNA identidad, la nueva.
-  const guardada = readServiceIdentity(dir)
-  assert.notEqual(guardada.device.publickey, llaveVieja, 'la llave tiene que ser otra')
-  assert.equal(guardada.device.publickey, segunda.device.publickey)
+  const saved = readServiceIdentity(dir)
+  assert.notEqual(saved.device.publickey, oldKey, 'la llave tiene que ser otra')
+  assert.equal(saved.device.publickey, second.device.publickey)
   assert.deepEqual(await fetchSecretsFrom(dir), { API_KEY: 'v1' }, 'la identidad nueva sirve para leer')
 })
 
@@ -199,7 +199,7 @@ test('un agente NUNCA adopta: el camino de transferir identidad se rechaza de en
 
   await assert.rejects(
     enrollService({ qr: encodeInvite(qr), ns: 'adoptame', dir: tmp('svc-adopt-') }),
-    /un agente no transfiere su identidad/
+    /an agent does not transfer its identity/
   )
 })
 
@@ -209,43 +209,43 @@ test('la bóveda AVISA al agente cuando su configuración cambia (agrupado)', as
   // que su supervisor lo levante limpio — así lee todo fresco y, sobre todo, el
   // valor viejo deja de existir en su memoria (en JS un string no se puede borrar).
   const { watchSecretsChanges } = await import('../lib/src/service.js')
-  const avisos = []
+  const notices = []
   const w = await watchSecretsChanges({
     dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
-    onChange: (i) => avisos.push(i)
+    onChange: (i) => notices.push(i)
   })
   try {
     // Los tests anteriores también guardaron secretos de este ns, y su aviso
     // agrupado puede seguir en vuelo: se deja pasar la ventana y se cuenta desde
     // cero, o se estaría midiendo el eco de otra prueba.
     await new Promise((r) => setTimeout(r, 4000))
-    avisos.length = 0
+    notices.length = 0
 
     vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-1')
     // AGRUPADO: tres escrituras seguidas son UN cambio de configuración, no tres.
     vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 'rotada-2')
     vault.setSecret('proxy', 'OTRA', 'rotada-3')
 
-    await esperarA(() => avisos.length > 0, 'el aviso de cambio')
+    await waitFor(() => notices.length > 0, 'el aviso de cambio')
     await new Promise((r) => setTimeout(r, 1500))
-    assert.equal(avisos.length, 1, 'tres `secret set` seguidos avisan UNA vez, no tres')
-    assert.equal(avisos[0].ns, 'proxy')
+    assert.equal(notices.length, 1, 'tres `secret set` seguidos avisan UNA vez, no tres')
+    assert.equal(notices[0].ns, 'proxy')
   } finally { w.stop() }
 })
 
 test('el aviso de otro namespace no le llega a este agente', async () => {
   const { watchSecretsChanges } = await import('../lib/src/service.js')
-  const avisos = []
+  const notices = []
   const w = await watchSecretsChanges({
     dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
-    onChange: (i) => avisos.push(i)
+    onChange: (i) => notices.push(i)
   })
   try {
     // El aviso dice QUÉ ns cambió, así que mandárselo a un agente ajeno sería
     // contarle que ese namespace existe. Se manda solo a los del ns.
     vault.setSecret('geo', 'DB_URL', 'nada-que-ver')
     await new Promise((r) => setTimeout(r, 1500))
-    assert.equal(avisos.length, 0, 'el agente del ns «proxy» no se entera de lo de «geo»')
+    assert.equal(notices.length, 0, 'el agente del ns «proxy» no se entera de lo de «geo»')
   } finally { w.stop() }
 })
 
@@ -257,10 +257,10 @@ test('un aviso mal firmado NO reinicia a nadie (sería un ataque de denegación)
   const { makeDeviceKey, signWithDevice } = await import('@dotrino/identity/capabilities')
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
 
-  const avisos = []
+  const notices = []
   const w = await watchSecretsChanges({
     dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
-    onChange: (i) => avisos.push(i)
+    onChange: (i) => notices.push(i)
   })
   try {
     // Un impostor con llave propia y bien formada: firma de verdad, pero NO es la
@@ -274,7 +274,7 @@ test('un aviso mal firmado NO reinicia a nadie (sería un ataque de denegación)
     c.sendByPubkey(yo.device.publickey, { type: MSG.SECRETS_CHANGED, body, signature })
     await new Promise((r) => setTimeout(r, 1500))
     c.close()
-    assert.equal(avisos.length, 0, 'un aviso que no viene de TU bóveda se ignora')
+    assert.equal(notices.length, 0, 'un aviso que no viene de TU bóveda se ignora')
   } finally { w.stop() }
 })
 
@@ -285,7 +285,7 @@ async function readServiceIdentitySync () {
   return readServiceIdentity(svcDir)
 }
 
-async function esperarA (fn, que, timeoutMs = 8000) {
+async function waitFor (fn, que, timeoutMs = 8000) {
   const t = Date.now() + timeoutMs
   while (Date.now() < t) {
     if (await fn()) return true
@@ -327,9 +327,9 @@ test('las variables de un aparato solo se le ponen a un SERVICIO', async () => {
   // A un teléfono no se le pueden poner: no existe forma de que las lea (no pide bundle),
   // así que aceptarlas sería guardar configuración muerta donde nadie la va a buscar.
   const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
-  const forastero = await makeDeviceKey({ label: 'ajeno' })
+  const stranger = await makeDeviceKey({ label: 'ajeno' })
   await assert.rejects(
-    vault.setDeviceSecret(forastero.publickey, 'PORT', '1'),
+    vault.setDeviceSecret(stranger.publickey, 'PORT', '1'),
     /not a member/
   )
   await assert.rejects(
@@ -341,17 +341,17 @@ test('las variables de un aparato solo se le ponen a un SERVICIO', async () => {
 test('la bóveda avisa a ESE aparato cuando cambia una variable suya', async () => {
   const { watchSecretsChanges, readServiceIdentity } = await import('../lib/src/service.js')
   const me = readServiceIdentity(svcDir).device.publickey
-  const avisos = []
+  const notices = []
   const w = await watchSecretsChanges({
     dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
-    onChange: (i) => avisos.push(i)
+    onChange: (i) => notices.push(i)
   })
   try {
     await new Promise((r) => setTimeout(r, 4000)) // dejar pasar avisos en vuelo de otras pruebas
-    avisos.length = 0
+    notices.length = 0
     await vault.setDeviceSecret(me, 'PORT', '9443')
-    await esperarA(() => avisos.length > 0, 'el aviso de cambio del aparato')
-    assert.equal(avisos[0].ns, 'proxy', 'el aviso dice el namespace, que es lo que el agente sabe releer')
+    await waitFor(() => notices.length > 0, 'el aviso de cambio del aparato')
+    assert.equal(notices[0].ns, 'proxy', 'el aviso dice el namespace, que es lo que el agente sabe releer')
   } finally { w.stop() }
 })
 
@@ -379,7 +379,7 @@ test('el aviso que NO llegó no deja al agente con la configuración vieja: al c
     onChange: (i) => changes.push(i)
   })
   try {
-    await esperarA(() => changes.length > 0, 'la comparación al conectar')
+    await waitFor(() => changes.length > 0, 'la comparación al conectar')
     assert.equal(changes[0].via, 'reconcile', 'no se enteró por un aviso: se enteró preguntando')
     assert.equal(changes[0].ns, 'proxy')
     // Y no se repite: lo que encontró pasa a ser la referencia.
@@ -439,7 +439,7 @@ test('el proxio arranca SIN variables y las recibe después: eso no es un cambio
   // (cuando sale, no hay a quién mandárselo). Es el orden real —primero se configura el
   // servicio, después se enrola— y aquí además evita medir el eco de la preparación.
   await new Promise((r) => setTimeout(r, 600))
-  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   await enrollService({
     qr: encodeInvite(qr), ns, dir,
     onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
@@ -484,7 +484,7 @@ test('la comparación no puede volverse un ciclo de reinicios: durante la gracia
   try {
     await new Promise((r) => setTimeout(r, 1200))
     assert.deepEqual(changes, [], 'recién arrancado no se reinicia por comparación')
-    await esperarA(() => changes.length > 0, 'la comparación aplazada hasta el fin de la gracia')
+    await waitFor(() => changes.length > 0, 'la comparación aplazada hasta el fin de la gracia')
     assert.equal(changes[0].via, 'reconcile', 'y cuando llega, llega entera')
   } finally { w.stop() }
 })
@@ -558,7 +558,7 @@ test('el scope corta el acceso a otro namespace', async () => {
 
 test('un cert revocado deja de poder leer', async () => {
   const { issued } = await vault.listDevices()
-  const mine = issued.find((d) => d.label === 'servicio:proxy')
+  const mine = issued.find((d) => d.label === 'service:proxy')
   assert.ok(mine, 'el servicio enrolado aparece en delegations')
   await vault.revokeDevice(mine.nonce)
   await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)
@@ -580,19 +580,19 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
   const ns = 'lote'
   const svcDir = tmp('svc-lote-')
   vault.setSecret(ns, 'YA_ESTABA', '0')
-  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   await enrollService({
     qr: encodeInvite(qr), ns, dir: svcDir,
     onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
   })
 
-  const avisos = []
+  const notices = []
   // Sin gracia ni mínimo entre avisos: aquí se cuenta lo que MANDA la bóveda, no los
   // frenos del agente (que tienen sus propias razones y su propia prueba).
   const w = await watchSecretsChanges({
-    dir: svcDir, ns, graceMs: 0, minIntervalMs: 0, jitterMs: 0, onChange: (i) => avisos.push(i)
+    dir: svcDir, ns, graceMs: 0, minIntervalMs: 0, jitterMs: 0, onChange: (i) => notices.push(i)
   })
-  const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
   try {
     vault.applySecrets(ns, [
@@ -600,20 +600,20 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
       { op: 'set', key: 'LOTE_DOS', value: '2' },
       { op: 'set', key: 'LOTE_TRES', value: '3' }
     ])
-    await esperar(600)
-    assert.equal(avisos.length, 1, 'tres variables juntas son UN cambio de configuración')
-    const leidos = await fetchSecretsFrom(svcDir)
-    assert.equal(leidos.LOTE_UNO, '1')
-    assert.equal(leidos.LOTE_TRES, '3', 'y el servicio las lee todas, no las primeras')
+    await wait(600)
+    assert.equal(notices.length, 1, 'tres variables juntas son UN cambio de configuración')
+    const read = await fetchSecretsFrom(svcDir)
+    assert.equal(read.LOTE_UNO, '1')
+    assert.equal(read.LOTE_TRES, '3', 'y el servicio las lee todas, no las primeras')
 
     // El contraste, que es lo que justifica todo esto: sueltas y espaciadas, un aviso
     // por variable — o sea, un reinicio por variable.
-    avisos.length = 0
+    notices.length = 0
     for (const [k, v] of [['SUELTA_UNA', 'a'], ['SUELTA_DOS', 'b']]) {
       vault.setSecret(ns, k, v)
-      await esperar(400)
+      await wait(400)
     }
-    assert.equal(avisos.length, 2)
+    assert.equal(notices.length, 2)
   } finally { w.stop() }
 })
 

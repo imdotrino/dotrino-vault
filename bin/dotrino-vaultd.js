@@ -57,16 +57,16 @@ if (process.argv.includes('--tui')) {
     // escribiendo sus logs en stdout, se los pinta ENCIMA y la deja ilegible. Se guardan
     // y se sueltan al salir, para no perder un error por el camino.
     const real = { log: console.log, error: console.error, warn: console.warn }
-    const guardados = []
-    const capturar = (nivel) => (...a) => { guardados.push([nivel, a]) }
-    console.log = capturar('log'); console.error = capturar('error'); console.warn = capturar('warn')
+    const buffered = []
+    const capture = (level) => (...a) => { buffered.push([level, a]) }
+    console.log = capture('log'); console.error = capture('error'); console.warn = capture('warn')
 
     const { runTui } = await import('../src/tui/app.js')
     try {
       await runTui()        // al salir de la TUI, se para todo: es la misma ventana
     } finally {
       Object.assign(console, real)
-      for (const [nivel, a] of guardados) real[nivel](...a)
+      for (const [level, a] of buffered) real[level](...a)
     }
     process.exit(0)
   }

@@ -84,12 +84,12 @@ test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', a
 
 test('el salt viaja con los datos: mover un perfil sin él los dejaría ilegibles', async () => {
   const { openSecretsStore } = await import('../src/secretsStore.js')
-  const origen = tmp(); const destino = tmp()
-  openSecretsStore(origen).set('proxy', 'TURN_KEY_ID', 'TOKEN')
+  const source = tmp(); const target = tmp()
+  openSecretsStore(source).set('proxy', 'TURN_KEY_ID', 'TOKEN')
 
   // Migración legacy → dir del perfil, tal como la hace profiles.js.
-  for (const f of ['secrets.json', 'atrest.salt']) fs.renameSync(path.join(origen, f), path.join(destino, f))
-  assert.equal(openSecretsStore(destino).get('proxy').TURN_KEY_ID, 'TOKEN')
+  for (const f of ['secrets.json', 'atrest.salt']) fs.renameSync(path.join(source, f), path.join(target, f))
+  assert.equal(openSecretsStore(target).get('proxy').TURN_KEY_ID, 'TOKEN')
 
-  fs.rmSync(origen, { recursive: true, force: true }); fs.rmSync(destino, { recursive: true, force: true })
+  fs.rmSync(source, { recursive: true, force: true }); fs.rmSync(target, { recursive: true, force: true })
 })

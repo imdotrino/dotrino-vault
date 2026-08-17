@@ -169,33 +169,33 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
   // Por SEGMENTOS y no con una regex sobre la línea entera: la tecla es la primera
   // palabra de cada segmento, y buscar `\ba ` en el texto casa con la «a» de «pestaña»
   // (la ñ no es carácter de palabra) — es justo el falso positivo que me comí.
-  const teclas = (segs) => segs.map((x) => x.split(' ')[0])
+  const keys = (segs) => segs.map((x) => x.split(' ')[0])
 
   for (const lang of ['es', 'en']) {
     const d = dict(lang)
-    const vacio = teclas(d.helpDevices({ pending: false, hasDevices: false }))
-    assert.ok(!vacio.includes('a'), 'sin nadie esperando no se ofrece aprobar: ' + vacio)
-    assert.ok(!vacio.includes('x'), 'ni rechazar: ' + vacio)
-    assert.ok(!vacio.includes('v'), 'sin aparatos no se ofrece revocar: ' + vacio)
-    assert.ok(!vacio.includes('r'), 'ni renombrar: ' + vacio)
-    assert.ok(vacio.includes('p'), 'emparejar SIEMPRE se puede')
-    assert.ok(vacio.includes('F5') && vacio.includes('q'), 'refrescar y salir también')
+    const empty = keys(d.helpDevices({ pending: false, hasDevices: false }))
+    assert.ok(!empty.includes('a'), 'sin nadie esperando no se ofrece aprobar: ' + empty)
+    assert.ok(!empty.includes('x'), 'ni rechazar: ' + empty)
+    assert.ok(!empty.includes('v'), 'sin aparatos no se ofrece revocar: ' + empty)
+    assert.ok(!empty.includes('r'), 'ni renombrar: ' + empty)
+    assert.ok(empty.includes('p'), 'emparejar SIEMPRE se puede')
+    assert.ok(empty.includes('F5') && empty.includes('q'), 'refrescar y salir también')
 
-    const conPendiente = teclas(d.helpDevices({ pending: true, hasDevices: false }))
-    assert.ok(conPendiente.includes('a') && conPendiente.includes('x'), 'con alguien esperando: aprobar y rechazar')
-    assert.ok(!conPendiente.includes('v'), 'pero seguir sin aparatos no habilita revocar')
+    const withPending = keys(d.helpDevices({ pending: true, hasDevices: false }))
+    assert.ok(withPending.includes('a') && withPending.includes('x'), 'con alguien esperando: aprobar y rechazar')
+    assert.ok(!withPending.includes('v'), 'pero seguir sin aparatos no habilita revocar')
 
-    const conAparatos = teclas(d.helpDevices({ pending: false, hasDevices: true }))
-    assert.ok(conAparatos.includes('r') && conAparatos.includes('v'), 'con aparatos: renombrar y revocar')
-    assert.ok(!conAparatos.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
+    const withDevices = keys(d.helpDevices({ pending: false, hasDevices: true }))
+    assert.ok(withDevices.includes('r') && withDevices.includes('v'), 'con aparatos: renombrar y revocar')
+    assert.ok(!withDevices.includes('a'), 'y sin pendiente sigue sin ofrecer aprobar')
 
     // `e variables` solo en un SERVICIO: en un teléfono la tecla solo sabía decir que no,
     // que es lo mismo que sobraba en la consola web (un apartado para decir «aquí no»).
-    assert.ok(!conAparatos.includes('e'), 'un aparato que no es servicio no ofrece variables: ' + conAparatos)
-    assert.ok(teclas(d.helpDevices({ hasDevices: true, isService: true })).includes('e'), 'un servicio sí')
+    assert.ok(!withDevices.includes('e'), 'un aparato que no es servicio no ofrece variables: ' + withDevices)
+    assert.ok(keys(d.helpDevices({ hasDevices: true, isService: true })).includes('e'), 'un servicio sí')
 
-    assert.ok(!teclas(d.helpSecrets({ hasSecrets: false })).includes('x'), 'sin secretos no se ofrece quitar')
-    assert.ok(teclas(d.helpSecrets({ hasSecrets: true })).includes('x'), 'con secretos sí')
+    assert.ok(!keys(d.helpSecrets({ hasSecrets: false })).includes('x'), 'sin secretos no se ofrece quitar')
+    assert.ok(keys(d.helpSecrets({ hasSecrets: true })).includes('x'), 'con secretos sí')
   }
 })
 
@@ -203,14 +203,14 @@ test('la barra solo anuncia lo que se puede hacer AHORA', () => {
 test('`r` significa RENOMBRAR en toda la TUI (una tecla, un significado)', () => {
   for (const lang of ['es', 'en']) {
     const d = dict(lang)
-    const enDispositivos = d.helpDevices({ hasDevices: true }).find((x) => x.startsWith('r '))
-    const enBovedas = d.helpProfiles.find((x) => x.startsWith('r '))
-    assert.ok(/(renombrar|rename)/.test(enDispositivos), 'r = renombrar en Dispositivos: ' + enDispositivos)
-    assert.ok(/(renombrar|rename)/.test(enBovedas), 'r = renombrar en Bóvedas: ' + enBovedas)
+    const onDevices = d.helpDevices({ hasDevices: true }).find((x) => x.startsWith('r '))
+    const onVaults = d.helpProfiles.find((x) => x.startsWith('r '))
+    assert.ok(/(renombrar|rename)/.test(onDevices), 'r = renombrar en Dispositivos: ' + onDevices)
+    assert.ok(/(renombrar|rename)/.test(onVaults), 'r = renombrar en Bóvedas: ' + onVaults)
     // Y refrescar deja de comerse una letra: es F5, como en todas partes.
     for (const segs of [d.helpDevices({ hasDevices: true }), d.helpSecrets({ hasSecrets: true }), d.helpMe]) {
-      const refrescar = segs.find((x) => /(refrescar|refresh)/.test(x))
-      assert.ok(refrescar.startsWith('F5 '), 'refrescar es F5: ' + refrescar)
+      const refresh = segs.find((x) => /(refrescar|refresh)/.test(x))
+      assert.ok(refresh.startsWith('F5 '), 'refrescar es F5: ' + refresh)
     }
   }
 })

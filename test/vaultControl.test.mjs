@@ -152,13 +152,13 @@ function onUsr2 () {
   // EL CANDADO es de esta consola: un perfil bloqueado contesta que lo está y NADA de lo
   // suyo (ni aparatos, ni variables, ni acta), igual que el daemon de verdad.
   if (isLocked(t)) {
-    const cerrado = { req, profile: t, locked: true }
+    const closed = { req, profile: t, locked: true }
     if (dreq) {
-      writeAtomic('secrets-list.json', { ...cerrado, ns: {}, dev: [] })
-      writeAtomic('devices.json', { ...cerrado, issued: [], revoked: [] })
-      writeAtomic('acta.json', { ...cerrado, members: [] })
+      writeAtomic('secrets-list.json', { ...closed, ns: {}, dev: [] })
+      writeAtomic('devices.json', { ...closed, issued: [], revoked: [] })
+      writeAtomic('acta.json', { ...closed, members: [] })
     }
-    if (meReq) writeAtomic('me.json', { ...cerrado, req: meReq.id || null, me: null })
+    if (meReq) writeAtomic('me.json', { ...closed, req: meReq.id || null, me: null })
     return
   }
   if (dreq) {
@@ -206,18 +206,18 @@ test('perfiles: list / add / use / rename / rm', async () => {
 
   d = await vc.addProfile('Trabajo')
   assert.equal(d.profiles.length, 2)
-  const trabajo = d.profiles.find((p) => p.name === 'Trabajo')
-  assert.ok(trabajo)
-  assert.equal(trabajo.current, false) // add no cambia el activo
+  const work = d.profiles.find((p) => p.name === 'Trabajo')
+  assert.ok(work)
+  assert.equal(work.current, false) // add no cambia el activo
 
   d = await vc.useProfile('Trabajo')
   assert.equal(d.profiles.find((p) => p.name === 'Trabajo').current, true)
 
-  d = await vc.renameProfile(trabajo.id, 'Oficina')
+  d = await vc.renameProfile(work.id, 'Oficina')
   assert.ok(d.profiles.find((p) => p.name === 'Oficina'))
 
   await vc.useProfile('Perfil 1')
-  d = await vc.removeProfile(trabajo.id)
+  d = await vc.removeProfile(work.id)
   assert.equal(d.profiles.length, 1)
 })
 
@@ -436,21 +436,21 @@ test('un volcado que NO contesta a nadie no se toma por respuesta (el rechazo no
   // volvía a pedir la contraseña sin decir por qué. Ahora cada volcado dice A QUÉ
   // PETICIÓN contesta (`req`), y el que no contesta a ninguna se ignora.
   process.off('SIGUSR2', onUsr2)
-  const ruidoPrimero = () => {
+  const noiseFirst = () => {
     const preq = readReq('profile-request.json')
     dumpProfiles({ req: null })        // el repaso del daemon, que no contesta a nadie
     setTimeout(() => dumpProfiles({    // la respuesta de verdad, un poco después
       req: preq?.id ?? null, error: 'wrong password', code: 'WRONG_PASSWORD', tries: 3
     }), 300)
   }
-  process.on('SIGUSR2', ruidoPrimero)
+  process.on('SIGUSR2', noiseFirst)
   try {
     await assert.rejects(
       () => vc.unlockProfile(model.profiles[0].id, 'la-que-sea'),
       (e) => e.code === 'WRONG_PASSWORD' && e.tries === 3
     )
   } finally {
-    process.off('SIGUSR2', ruidoPrimero)
+    process.off('SIGUSR2', noiseFirst)
     process.on('SIGUSR2', onUsr2)
   }
 })
@@ -465,7 +465,7 @@ test('el volcado NO espera a la lista de bóvedas: contesta en cuanto llega lo s
   await vc.addProfile('cronómetro')
   const t0 = Date.now()
   const r = await vc.listDevices('cronómetro')
-  const tardo = Date.now() - t0
+  const slow = Date.now() - t0
   assert.ok(Array.isArray(r.issued), 'contesta con la lista')
-  assert.ok(tardo < 2000, `tiene que contestar en cuanto llega el volcado, no rendirse (tardó ${tardo} ms)`)
+  assert.ok(slow < 2000, `tiene que contestar en cuanto llega el volcado, no rendirse (tardó ${slow} ms)`)
 })

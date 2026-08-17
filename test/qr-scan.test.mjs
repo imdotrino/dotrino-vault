@@ -36,8 +36,8 @@ function rasterize (text, { scale = 4, quiet = 4 } = {}) {
     for (let x = 0; x < side; x++) {
       const mr = Math.floor(y / scale) - quiet
       const mc = Math.floor(x / scale) - quiet
-      const oscuro = mr >= 0 && mc >= 0 && mr < n && mc < n && qr.isDark(mr, mc)
-      if (!oscuro) continue
+      const dark = mr >= 0 && mc >= 0 && mr < n && mc < n && qr.isDark(mr, mc)
+      if (!dark) continue
       const i = (y * side + x) * 4
       data[i] = data[i + 1] = data[i + 2] = 0
     }
@@ -45,7 +45,7 @@ function rasterize (text, { scale = 4, quiet = 4 } = {}) {
   return { data, side, modules: n }
 }
 
-async function invitacion () {
+async function invitation () {
   const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
   const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('')
   return {
@@ -61,21 +61,21 @@ async function invitacion () {
 
 test('un lector de QR saca la invitación entera del código', { skip: !jsQR && 'jsQR no instalado (npm i en web/)' }, async () => {
   for (let i = 0; i < 5; i++) {
-    const qr = await invitacion()
+    const qr = await invitation()
     const url = inviteUrl(qr)
     const { data, side } = rasterize(url)
-    const leido = jsQR(data, side, side)
-    assert.ok(leido, 'el lector no encontró ningún QR')
-    assert.equal(leido.data, url, 'el lector sacó otra cosa de la que se codificó')
-    assert.deepEqual(parseInvite(leido.data), qr, 'lo escaneado no reconstruye la invitación')
+    const decoded = jsQR(data, side, side)
+    assert.ok(decoded, 'el lector no encontró ningún QR')
+    assert.equal(decoded.data, url, 'el lector sacó otra cosa de la que se codificó')
+    assert.deepEqual(parseInvite(decoded.data), qr, 'lo escaneado no reconstruye la invitación')
   }
 })
 
 test('sigue leyéndose con el QR pequeño (2 píxeles por módulo)', { skip: !jsQR && 'jsQR no instalado (npm i en web/)' }, async () => {
-  const qr = await invitacion()
+  const qr = await invitation()
   const url = inviteUrl(qr)
   const { data, side, modules } = rasterize(url, { scale: 2 })
-  const leido = jsQR(data, side, side)
-  assert.ok(leido, `no se leyó a 2 px/módulo (${modules} módulos)`)
-  assert.equal(leido.data, url)
+  const decoded = jsQR(data, side, side)
+  assert.ok(decoded, `no se leyó a 2 px/módulo (${modules} módulos)`)
+  assert.equal(decoded.data, url)
 })

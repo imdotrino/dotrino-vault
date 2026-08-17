@@ -306,10 +306,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!(await verifyDeviceSig({ publickey: pub, data: p.data, signature: p.signature }))) {
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: bad-signature' })
     }
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
-    const dentro = (acta?.members || []).some((m) => m?.pub === pub)
-    audit('check', { device: await deviceIdOf(pub).catch(() => null), in: dentro })
-    if (dentro) return reply(from, { type: MSG.CHECKED, in: true })
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const inside = (record?.members || []).some((m) => m?.pub === pub)
+    audit('check', { device: await deviceIdOf(pub).catch(() => null), in: inside })
+    if (inside) return reply(from, { type: MSG.CHECKED, in: true })
     await notifyIfRevoked(pub, null, null, 'revoked')
     reply(from, { type: MSG.CHECKED, in: false })
   }
@@ -321,7 +321,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
     // Si el dispositivo estuvo apagado y viene con un `seq` viejo, se le manda la CADENA
     // que falta (ventana de retención, §1.3) para que compruebe el encadenamiento en vez
     // de tragarse un salto a ciegas. Si se salió de la ventana, llega vacía y toca
@@ -342,7 +342,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
-    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta, chain })
+    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain })
   }
 
   // RENOVACIÓN automática: un dispositivo con cert VIGENTE y no revocado pide un
@@ -363,10 +363,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // `administra` no llegaba nunca al cert (la consola remota no podía funcionar) y
     // QUITARLO tampoco surtía efecto hasta que el cert caducara, hasta un mes después.
     // Si el miembro ya no está en el acta, no se renueva nada: lo echaron.
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
     let scope = p.cert.scope
-    if (acta) {
-      scope = Acta.memberScopes(acta, p.cert.sub)
+    if (record) {
+      scope = Acta.memberScopes(record, p.cert.sub)
       if (!scope.length) {
         audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
         return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
@@ -401,8 +401,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
     // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
     // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta
-    if (acta && !Acta.memberCanReadSecrets(acta, chk.device, ns)) {
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (record && !Acta.memberCanReadSecrets(record, chk.device, ns)) {
       audit('rejected', { what: 'secrets', ns, reason: 'cn' })
       return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
     }
@@ -497,8 +497,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function notifyDeviceChange (pub) {
     let cn = null
     try {
-      const acta = (await identity.profileActa?.().catch(() => null))?.acta
-      cn = (acta?.members || []).find((m) => m.pub === pub)?.cn || null
+      const record = (await identity.profileActa?.().catch(() => null))?.acta
+      cn = (record?.members || []).find((m) => m.pub === pub)?.cn || null
     } catch (e) { return log('[vault] could not look up who to notify:', e.message) }
     if (!cn) return
     const body = { op: 'secrets.changed', ns: cn, ts: Date.now() }
@@ -649,8 +649,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         await notifyIfRevoked(data?.publickey, cert?.nonce || null, cert?.iss || null, chk.reason)
         return chk
       }
-      const acta = (await identity.profileActa?.().catch(() => null))?.acta
-      if (acta && !Acta.memberCan(acta, chk.device, 'admin')) return { ok: false, reason: 'acta' }
+      const record = (await identity.profileActa?.().catch(() => null))?.acta
+      if (record && !Acta.memberCan(record, chk.device, 'admin')) return { ok: false, reason: 'acta' }
       return chk
     }
   })
@@ -794,9 +794,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   /** El miembro del acta con esa llave, o `null` (también si la bóveda todavía no tiene acta). */
   async function memberOf (pub) {
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta
-    if (!acta) return null
-    return (acta.members || []).find((m) => m.pub === pub) || null
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record) return null
+    return (record.members || []).find((m) => m.pub === pub) || null
   }
 
   /**
@@ -808,8 +808,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function requireService (pub) {
     const m = await memberOf(pub)
     if (!m) {
-      const acta = (await identity.profileActa?.().catch(() => null))?.acta
-      if (acta) throw new Error('device: it is not a member of this profile')
+      const record = (await identity.profileActa?.().catch(() => null))?.acta
+      if (record) throw new Error('device: it is not a member of this profile')
       return null
     }
     if (!m.cn) throw new Error('device: it is not a service (only services read variables); pair it with `pair --service <ns>`')
@@ -845,8 +845,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * marca las que quedaron de una llave que ya no está en el acta.
    */
   async function listDeviceSecrets () {
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta
-    const members = acta?.members || []
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const members = record?.members || []
     const out = []
     for (const [pub, keys] of Object.entries(secrets.listDevices())) {
       const m = members.find((x) => x.pub === pub) || null

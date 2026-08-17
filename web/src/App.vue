@@ -290,11 +290,11 @@ routeNow()
  * El `href` se queda por accesibilidad y para poder abrir en pestaña nueva; el
  * desplazamiento lo hacemos nosotros.
  */
-function irA (id, ev) {
-  const destino = document.getElementById(id)
-  if (!destino) return
+function goTo (id, ev) {
+  const target = document.getElementById(id)
+  if (!target) return
   ev?.preventDefault()
-  destino.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function go (v, ev) {
@@ -335,9 +335,9 @@ onMounted(async () => {
       :lang="lang"
       @dotrino-lang="onTopbarLang"
     >
-      <a v-if="view === 'home'" href="#how" @click="irA('how', $event)">{{ t.nav_how }}</a>
-      <a v-if="view === 'home'" href="#download" @click="irA('download', $event)">{{ t.nav_download }}</a>
-      <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="irA('use', $event)">{{ t.nav_use }}</a>
+      <a v-if="view === 'home'" href="#how" @click="goTo('how', $event)">{{ t.nav_how }}</a>
+      <a v-if="view === 'home'" href="#download" @click="goTo('download', $event)">{{ t.nav_download }}</a>
+      <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
       <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>

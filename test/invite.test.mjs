@@ -39,7 +39,7 @@ async function qrReal (extra = {}) {
   }
 }
 
-const URL_LARGA = 'https://vault.dotrino.com/dispositivos#vault='
+const URL_LONG = 'https://vault.dotrino.com/dispositivos#vault='
 
 test('por defecto emite la forma compacta, y se lee de vuelta', async () => {
   const qr = await qrReal()
@@ -74,13 +74,13 @@ test('la llave maestra vuelve BYTE A BYTE igual (el proxy direcciona por esa str
 test('las dos formas de JWK del ecosistema (Node y navegador) se comprimen igual', async () => {
   const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
   const { x, y } = await crypto.subtle.exportKey('jwk', par.publicKey)
-  const formas = [
+  const forms = [
     // WebCrypto de Node (el daemon del PC)
     `{"key_ops":["verify"],"ext":true,"kty":"EC","x":"${x}","y":"${y}","crv":"P-256"}`,
     // WebCrypto de navegador (Chrome/Firefox/Safari: alfabético)
     `{"crv":"P-256","ext":true,"key_ops":["verify"],"kty":"EC","x":"${x}","y":"${y}"}`
   ]
-  for (const iss of formas) {
+  for (const iss of forms) {
     const qr = await qrReal({ iss })
     const inv = encodeInvite(qr)
     assert.equal(inv[0], FMT_COMPACT, 'esta forma de JWK debería comprimirse')
@@ -90,14 +90,14 @@ test('las dos formas de JWK del ecosistema (Node y navegador) se comprimen igual
 
 test('lo que no se pueda comprimir SIN PERDER NADA cae a la forma larga', async () => {
   const iss = await jwkPub()
-  const casos = {
+  const cases = {
     'JWK con una forma desconocida': { iss: JSON.stringify({ kty: 'EC', crv: 'P-256', x: 'AAA', y: 'BBB' }) },
     'token que no es hex': { token: 'tok1' },
     'un campo que el codec no sabe escribir': { extra: 'no perder esto' },
     'nombre de cuenta imposible de largo': { acct: 'x'.repeat(300) },
     'modo desconocido': { m: 'otra-cosa' }
   }
-  for (const [que, extra] of Object.entries(casos)) {
+  for (const [que, extra] of Object.entries(cases)) {
     const qr = { v: 2, iss, proxy: 'wss://proxy.dotrino.com', token: hex(12), sn: hex(12), m: 'join', ...extra }
     const inv = encodeInvite(qr)
     assert.equal(inv[0], FMT_B64, que)
@@ -132,7 +132,7 @@ test('lee la invitación dentro de una URL (corta o larga) y suelta', async () =
   const qr = await qrReal()
   const inv = encodeInvite(qr)
   assert.deepEqual(parseInvite(PAIR_URL + inv), qr, 'enlace corto /d#v=')
-  assert.deepEqual(parseInvite(URL_LARGA + inv), qr, 'enlace largo /dispositivos#vault=')
+  assert.deepEqual(parseInvite(URL_LONG + inv), qr, 'enlace largo /dispositivos#vault=')
   assert.deepEqual(parseInvite(inv), qr, 'código suelto')
   assert.deepEqual(parseInvite('  ' + inv + '  '), qr, 'con espacios alrededor')
 })
@@ -141,18 +141,18 @@ test('los formatos VIEJOS se siguen leyendo', async () => {
   const qr = await qrReal({ token: 'a'.repeat(32), sn: 'b'.repeat(32) })
   const json = JSON.stringify(qr)
   const b64 = Buffer.from(json, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-  assert.deepEqual(parseInvite(URL_LARGA + b64), qr, 'base64 sin marca (0.7.6 y antes)')
+  assert.deepEqual(parseInvite(URL_LONG + b64), qr, 'base64 sin marca (0.7.6 y antes)')
   assert.deepEqual(parseInvite(json), qr, 'JSON pegado a pelo')
-  assert.deepEqual(parseInvite(URL_LARGA + json), qr, 'JSON crudo sin marca (0.7.8/0.7.9)')
-  assert.deepEqual(parseInvite(URL_LARGA + 'j' + json), qr, 'JSON crudo con marca (0.8.0)')
-  assert.deepEqual(parseInvite(encodeURI(URL_LARGA + 'j' + json)), qr, 'ese mismo, tras el navegador')
-  assert.deepEqual(parseInvite(URL_LARGA + 'b' + b64), qr, 'base64 con marca (0.8.0)')
+  assert.deepEqual(parseInvite(URL_LONG + json), qr, 'JSON crudo sin marca (0.7.8/0.7.9)')
+  assert.deepEqual(parseInvite(URL_LONG + 'j' + json), qr, 'JSON crudo con marca (0.8.0)')
+  assert.deepEqual(parseInvite(encodeURI(URL_LONG + 'j' + json)), qr, 'ese mismo, tras el navegador')
+  assert.deepEqual(parseInvite(URL_LONG + 'b' + b64), qr, 'base64 con marca (0.8.0)')
 })
 
 test('lo que no es una invitación devuelve null, no explota', () => {
-  const basuras = ['', null, undefined, 'hola', '{roto', 'b###', 'j{no es json}', URL_LARGA, PAIR_URL, '#vault=', '#v=',
+  const junkCases = ['', null, undefined, 'hola', '{roto', 'b###', 'j{no es json}', URL_LONG, PAIR_URL, '#vault=', '#v=',
     'c', 'cAAAA', 'c' + 'A'.repeat(200)]
-  for (const basura of basuras) assert.equal(parseInvite(basura), null, JSON.stringify(basura))
+  for (const junk of junkCases) assert.equal(parseInvite(junk), null, JSON.stringify(junk))
 })
 
 test('un punto que no está en la curva no se acepta como llave', async () => {
@@ -160,17 +160,17 @@ test('un punto que no está en la curva no se acepta como llave', async () => {
   const inv = encodeInvite(qr)
   // Estropear un byte de la coordenada `x`: casi nunca cae en la curva, y cuando
   // cae da otra llave — en los dos casos NO puede devolver la original.
-  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-  let rotos = 0
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  let broken = 0
   for (let i = 2; i < 20; i++) {
     const ch = inv[i]
-    const otro = alfabeto[(alfabeto.indexOf(ch) + 7) % alfabeto.length]
-    const tocado = inv.slice(0, i) + otro + inv.slice(i + 1)
-    const back = parseInvite(tocado)
+    const other = alphabet[(alphabet.indexOf(ch) + 7) % alphabet.length]
+    const tampered = inv.slice(0, i) + other + inv.slice(i + 1)
+    const back = parseInvite(tampered)
     assert.notEqual(back?.iss, qr.iss, 'una invitación tocada no puede dar la llave original')
-    if (back === null) rotos++
+    if (back === null) broken++
   }
-  assert.ok(rotos > 0, 'al menos algunos puntos tocados se rechazan por no estar en la curva')
+  assert.ok(broken > 0, 'al menos algunos puntos tocados se rechazan por no estar en la curva')
 })
 
 /**
@@ -197,7 +197,7 @@ test('la invitación corta lleva solo dirección y nonce', () => {
 test('la corta distingue el modo y no acepta basura', () => {
   const adopt = { v: 2, conn: 'M2zZ9!', sn: 'ffffffffffffffff', m: 'adopt', proxy: 'wss://proxy.dotrino.com' }
   assert.deepEqual(parseInvite(encodeInvite(adopt)), adopt)
-  for (const basura of ['t', 'tAAAA', 't' + 'A'.repeat(60)]) assert.equal(parseInvite(basura), null, basura)
+  for (const junk of ['t', 'tAAAA', 't' + 'A'.repeat(60)]) assert.equal(parseInvite(junk), null, junk)
 })
 
 /**
@@ -207,10 +207,10 @@ test('la corta distingue el modo y no acepta basura', () => {
  * esperando. Lo cazó el E2E de secretos, que levanta un proxy local.
  */
 test('la corta lleva el proxy cuando no es el del ecosistema', () => {
-  const propio = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'ws://127.0.0.1:8787' }
-  const inv = encodeInvite(propio)
+  const own = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'ws://127.0.0.1:8787' }
+  const inv = encodeInvite(own)
   assert.equal(inv[0], 't')
-  assert.deepEqual(parseInvite(inv), propio, 'el proxy propio tiene que volver')
+  assert.deepEqual(parseInvite(inv), own, 'el proxy propio tiene que volver')
   // Y el del ecosistema NO viaja: se sobreentiende y no gasta módulos.
   const eco = { v: 2, conn: 'K7aB3x', sn: '0123456789abcdef', m: 'join', proxy: 'wss://proxy.dotrino.com' }
   assert.ok(encodeInvite(eco).length < inv.length)

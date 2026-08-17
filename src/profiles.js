@@ -106,7 +106,7 @@ export function openProfiles (root = dataDir()) {
       const needle = String(ref).trim().toLowerCase()
       const hits = data.profiles.filter((p) => (p.name || '').toLowerCase() === needle)
       if (hits.length === 1) return hits[0].id
-      if (hits.length > 1) throw new Error(`hay ${hits.length} perfiles llamados "${ref}"; usa su id (dotrino-vault profile ls)`)
+      if (hits.length > 1) throw new Error(`there are ${hits.length} profiles named "${ref}"; use its id (dotrino-vault profile ls)`)
       throw new Error('profile does not exist: ' + ref)
     },
 
@@ -215,7 +215,7 @@ export function openProfiles (root = dataDir()) {
       // palabras. Sin código, el rechazo llegaba como un texto suelto del daemon y era
       // indistinguible de «se volvió a pedir la contraseña porque sí».
       if (left > 0) {
-        throw Object.assign(new Error(`demasiados intentos: espera ${Math.ceil(left / 1000)} s`),
+        throw Object.assign(new Error(`too many tries: wait ${Math.ceil(left / 1000)} s`),
           { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
       }
       const proof = await derivePwd(password, p.pwd.salt, p.pwd.iter)

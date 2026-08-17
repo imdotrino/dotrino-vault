@@ -72,11 +72,11 @@ test('nace privada; rotar el valor no la vuelve visible, y se puede cambiar sin 
 test('lo guardado antes de que existiera la visibilidad entra como PRIVADO', () => {
   const dir = tmp()
   // Un `secrets.json` de los de antes: valores sueltos, sin marca de nada.
-  const viejo = { schemaVersion: 2, ns: { proxy: { TURN_KEY_ID: 'k-123' } }, dev: { [PUB]: { PORT: '8443' } } }
+  const old = { schemaVersion: 2, ns: { proxy: { TURN_KEY_ID: 'k-123' } }, dev: { [PUB]: { PORT: '8443' } } }
   const file = path.join(dir, 'secrets.json')
   fs.mkdirSync(dir, { recursive: true })
   const atRest = atRestFor(dir)
-  writeJson(file, viejo, atRest)
+  writeJson(file, old, atRest)
 
   const s = openSecretsStore(dir)
   assert.equal(s.get('proxy').TURN_KEY_ID, 'k-123', 'no se pierde nada')
@@ -119,9 +119,9 @@ test('un grupo de escrituras se guarda UNA vez, al final', () => {
 test('las claves y los valores se validan igual en los dos cajones', () => {
   const dir = tmp()
   const s = openSecretsStore(dir)
-  for (const mal of ['minusculas', 'CON-GUION', '', 'X'.repeat(65)]) {
-    assert.throws(() => s.set('proxy', mal, 'v'), /invalid key/)
-    assert.throws(() => s.setDevice(PUB, mal, 'v'), /invalid key/)
+  for (const bad of ['minusculas', 'CON-GUION', '', 'X'.repeat(65)]) {
+    assert.throws(() => s.set('proxy', bad, 'v'), /invalid key/)
+    assert.throws(() => s.setDevice(PUB, bad, 'v'), /invalid key/)
   }
   assert.throws(() => s.set('proxy', 'K', ''), /non-empty/)
   assert.throws(() => s.set('MAL NS', 'K', 'v'), /invalid namespace/)

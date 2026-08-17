@@ -37,7 +37,7 @@ const es = {
   tabMe: 'Perfil',
   // PERMISOS de un dispositivo (§9.1: se dice el beneficio, no el scope del cert).
   titleCaps: 'Permisos del dispositivo',
-  capsFor: (id, nombre) => `Permisos de ${id}${nombre ? ' · ' + nombre : ''}`,
+  capsFor: (id, name) => `Permisos de ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (este dispositivo ya no está en el acta)',
   capsApplyHint: 'Enter marca o desmarca. Cada cambio se aplica y se avisa a tus otros aparatos.',
   capName: {
@@ -63,7 +63,7 @@ const es = {
   loadingProfile: 'Cargando el perfil…',
   noProfile: '  (esta bóveda todavía no tiene perfil)',
   noProfileHint: '  Edita tu nombre o tu foto en un dispositivo emparejado y pulsa F5.',
-  profileUpdated: (cuando) => `  actualizado ${cuando}`,
+  profileUpdated: (when) => `  actualizado ${when}`,
   fieldName: 'nombre',
   fieldPhoto: 'foto',
   fieldFirstName: 'nombres',
@@ -322,7 +322,7 @@ const en = {
   tabSecrets: 'Scopes & variables',
   tabMe: 'Profile',
   titleCaps: 'Device permissions',
-  capsFor: (id, nombre) => `Permissions for ${id}${nombre ? ' · ' + nombre : ''}`,
+  capsFor: (id, name) => `Permissions for ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (this device is no longer in the record)',
   capsApplyHint: 'Enter ticks or unticks. Each change applies and your other devices are told.',
   capName: {
@@ -346,7 +346,7 @@ const en = {
   loadingProfile: 'Loading profile…',
   noProfile: '  (this vault has no profile yet)',
   noProfileHint: '  Edit your name or photo on a paired device and press F5.',
-  profileUpdated: (cuando) => `  updated ${cuando}`,
+  profileUpdated: (when) => `  updated ${when}`,
   fieldName: 'name',
   fieldPhoto: 'photo',
   fieldFirstName: 'first name',

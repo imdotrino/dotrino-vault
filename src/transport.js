@@ -53,8 +53,8 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY }) {
     const { signature } = await identity.signData(data)
     // Con el acta, el proxy bindea también el `profileId`: escribirle a la PERSONA llega
     // a cualquiera de sus dispositivos, no solo a esta bóveda.
-    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
-    await client.identify({ data, signature, acta })
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    await client.identify({ data, signature, acta: record })
   }
   await identify()
   // Re-identificar al reconectar (el token cambia).

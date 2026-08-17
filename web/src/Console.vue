@@ -315,7 +315,7 @@ const t = computed(() => T[props.lang] || T.es)
  * cerrojo, un enlace del tipo `vault.dotrino.com/dispositivos?vault=…` podría apuntar tu
  * identidad a un iframe ajeno, que es exactamente el ataque que este proyecto evita.
  */
-function opcionesIdentidad () {
+function identityOptions () {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
   if (!local) return {}
   // En localhost usamos el iframe de `/id/` (vite sirve @dotrino/identity con
@@ -327,7 +327,7 @@ function opcionesIdentidad () {
 const id = ref(null)
 const loading = ref(true)
 const fatal = ref('')
-const acta = ref(null)
+const record = ref(null)
 const members = ref([])
 const mine = ref(null)
 const msg = ref(null) // { kind:'ok'|'bad'|'info', text }
@@ -341,7 +341,7 @@ const isMaster = computed(() => !!mine.value?.isMaster)
  * traspasarlo no es una casilla): eran dos pasos de alta que se quedaban a la vista para
  * siempre, invitando a hacer algo que no procede.
  */
-const yaEnBoveda = computed(() => !!acta.value && !isMaster.value)
+const alreadyInVault = computed(() => !!record.value && !isMaster.value)
 const soloMember = computed(() => members.value.length <= 1)
 /**
  * El identificador del perfil es una **pubkey JWK**, no un id corto: recortarla a 8
@@ -349,15 +349,15 @@ const soloMember = computed(() => members.value.length <= 1)
  * huella, que es la misma que ves al emparejar, en la lista de miembros y en el CLI.
  */
 const shortId = (s) => (s || '').slice(0, 8)
-const perfilId = ref('')
-async function calcularPerfilId () {
-  const pub = acta.value?.profileId
-  if (!pub) { perfilId.value = ''; return }
+const profileIdShort = ref('')
+async function computeProfileIdShort () {
+  const pub = record.value?.profileId
+  if (!pub) { profileIdShort.value = ''; return }
   try {
     const { pubkeyId } = await import('@dotrino/identity/capabilities')
     const h = (await pubkeyId(pub)).slice(0, 8).toUpperCase()
-    perfilId.value = h.slice(0, 4) + '-' + h.slice(4)
-  } catch (_) { perfilId.value = shortId(pub) }
+    profileIdShort.value = h.slice(0, 4) + '-' + h.slice(4)
+  } catch (_) { profileIdShort.value = shortId(pub) }
 }
 
 /** Falla al hablar con la bóveda: se ENSEÑA, no se traga (ver `syncError`). */
@@ -369,13 +369,13 @@ const syncError = ref('')
  * el master y sus permisos, todo de un acta de hace semanas. Y sin conexión tampoco puede
  * recibir el aviso firmado que le borraría la cuenta, así que se queda así para siempre.
  */
-const sinEnlace = ref(false)
+const notLinked = ref(false)
 /** Comprobando contra la bóveda (el botón de actualizar) y cuándo se confirmó por última vez. */
-const comprobando = ref(false)
-const comprobadoAt = ref(0)
+const checking = ref(false)
+const checkedAt = ref(0)
 /** Copia vieja e incomprobable: hay acta de otro, y no hay con qué preguntarle. */
-const copiaVieja = computed(() => sinEnlace.value && !!acta.value && !isMaster.value)
-const horaCorta = (ms) => {
+const staleCopy = computed(() => notLinked.value && !!record.value && !isMaster.value)
+const shortTime = (ms) => {
   try { return new Date(ms).toLocaleTimeString(props.lang === 'en' ? 'en-US' : 'es-ES', { hour: '2-digit', minute: '2-digit' }) }
   catch (_) { return '' }
 }
@@ -416,23 +416,23 @@ function groupCerts (devices) {
  * castigar a una bóveda apagada—, y además al volver a esta pestaña y al recuperar la red,
  * que es cuando de verdad cambian las cosas.
  */
-const ESPERAS_MS = [3000, 10000, 30000, 60000]
-let fallos = 0
-let reintento = null
-function programarReintento () {
-  clearTimeout(reintento)
-  reintento = setTimeout(() => { refresh() }, ESPERAS_MS[Math.min(fallos - 1, ESPERAS_MS.length - 1)])
+const RETRY_MS = [3000, 10000, 30000, 60000]
+let failures = 0
+let retryTimer = null
+function scheduleRetry () {
+  clearTimeout(retryTimer)
+  retryTimer = setTimeout(() => { refresh() }, RETRY_MS[Math.min(failures - 1, RETRY_MS.length - 1)])
 }
-const alVolver = () => { if (document.visibilityState === 'visible' && fallos) refresh() }
-const alHaberRed = () => { if (fallos) refresh() }
+const onVisible = () => { if (document.visibilityState === 'visible' && failures) refresh() }
+const onOnline = () => { if (failures) refresh() }
 onMounted(() => {
-  document.addEventListener('visibilitychange', alVolver)
-  window.addEventListener('online', alHaberRed)
+  document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('online', onOnline)
 })
 onBeforeUnmount(() => {
-  clearTimeout(reintento)
-  document.removeEventListener('visibilitychange', alVolver)
-  window.removeEventListener('online', alHaberRed)
+  clearTimeout(retryTimer)
+  document.removeEventListener('visibilitychange', onVisible)
+  window.removeEventListener('online', onOnline)
 })
 
 async function refresh () {
@@ -440,44 +440,44 @@ async function refresh () {
   // es lo que decidió el dueño en la bóveda —permisos, nombres, quién entró—, no la copia
   // del día que emparejamos. Sin esto la pantalla se quedaba congelada en ese día: el
   // dispositivo renombrado seguía con el nombre viejo y los permisos nuevos no salían.
-  comprobando.value = true
+  checking.value = true
   try {
     const r = await id.value.listVaultDevices()
     certBySub.value = groupCerts(r?.devices)
     syncError.value = ''
-    sinEnlace.value = false
-    comprobadoAt.value = Date.now()
-    fallos = 0
-    clearTimeout(reintento)
+    notLinked.value = false
+    checkedAt.value = Date.now()
+    failures = 0
+    clearTimeout(retryTimer)
   } catch (e) {
     // «No emparejado con ninguna bóveda» no siempre es lo mismo: en un aparato que todavía
     // no entró en ninguna (o que ES la bóveda) no hay nada que decir, pero en uno que
     // GUARDA un acta ajena significa que perdió la conexión — y eso hay que contarlo, no
     // tragárselo. Lo de antes lo callaba en los dos casos.
     const m = e?.message || String(e)
-    const sinPareja = /not paired with a vault/i.test(m)
-    sinEnlace.value = sinPareja
-    syncError.value = sinPareja ? '' : m
+    const unpaired = /not paired with a vault/i.test(m)
+    notLinked.value = unpaired
+    syncError.value = unpaired ? '' : m
     // NO ES UN FALLO no estar emparejado: es el estado normal de un aparato que manda en su
     // propia cuenta. Ni se avisa ni se reintenta —reintentar lo que no depende de la red es
     // dar vueltas para siempre—; si además guarda un acta ajena, eso ya se dice en pantalla
     // (`copiaVieja`) y la salida es conectarlo, no insistir.
-    if (sinPareja) { fallos = 0; clearTimeout(reintento) } else {
+    if (unpaired) { failures = 0; clearTimeout(retryTimer) } else {
       // Lo que sí es un fallo, en la consola del navegador: no había ni una línea, así que
       // desde fuera era indistinguible de una pantalla que se cargó bien.
       console.warn('[vault-console] could not sync with the vault:', m)
-      fallos++
-      programarReintento()
+      failures++
+      scheduleRetry()
     }
-  } finally { comprobando.value = false }
+  } finally { checking.value = false }
   const [a, m, mi] = await Promise.all([
     id.value.profileActa().catch(() => null),
     id.value.profileMembers().catch(() => ({ members: [] })),
     id.value.myMembership().catch(() => null)
   ])
-  acta.value = a?.acta || null
+  record.value = a?.acta || null
   members.value = m.members || []
-  calcularPerfilId()
+  computeProfileIdShort()
   mine.value = mi
 }
 
@@ -561,7 +561,7 @@ onMounted(async () => {
   // que metes en un ref, y esta instancia habla con su iframe por `postMessage`, que
   // no sabe clonar un Proxy: emparejar moría con «#<Object> could not be cloned».
   // (Venía roto desde que existe esta consola; lo destapó una prueba de punta a punta.)
-  try { id.value = markRaw(await Identity.connect(opcionesIdentidad())) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
+  try { id.value = markRaw(await Identity.connect(identityOptions())) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
   await refresh()
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
@@ -900,8 +900,8 @@ async function refreshAdmin () {
 // transporta y no ve nada, ni siquiera los nombres.
 
 const vars = ref(null)                       // { ns: {<scope>: [...]}, dev: [...] }
-const nuevoGrupo = ref('')                   // el nombre que se está tecleando abajo
-const gruposNuevos = ref([])                 // grupos creados aquí y todavía sin ninguna variable
+const newGroup = ref('')                   // el nombre que se está tecleando abajo
+const newGroups = ref([])                 // grupos creados aquí y todavía sin ninguna variable
 
 /** Destino de una variable: `ns:<scope>` o `dev:<pubkey>`. */
 const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.slice(3) })
@@ -919,7 +919,7 @@ async function loadVars () {
  */
 const scopeNames = computed(() => {
   const del = Object.keys(vars.value?.ns || {})
-  return [...new Set([...del, ...gruposNuevos.value])].sort()
+  return [...new Set([...del, ...newGroups.value])].sort()
 })
 
 /** Las variables de un aparato, para pintarlas en SU fila. */
@@ -928,7 +928,7 @@ const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)
  * Cajones de variables de aparatos que ya no están en el acta. No caben en ninguna fila, y
  * esconderlos sería dejar configuración invisible: se listan aparte, marcados.
  */
-const varsHuerfanas = computed(() => (vars.value?.dev || [])
+const orphanVars = computed(() => (vars.value?.dev || [])
   .filter((d) => !members.value.some((m) => m.pub === d.pub)))
 
 /**
@@ -952,11 +952,11 @@ function saveVars ({ target, items }) {
 }
 
 /** Crear un grupo es solo abrirle su apartado: existe de verdad con la primera variable. */
-function crearGrupo () {
-  const ns = nuevoGrupo.value.trim().toLowerCase()
+function createGroup () {
+  const ns = newGroup.value.trim().toLowerCase()
   if (!ns) return
-  if (!gruposNuevos.value.includes(ns)) gruposNuevos.value = [...gruposNuevos.value, ns]
-  nuevoGrupo.value = ''
+  if (!newGroups.value.includes(ns)) newGroups.value = [...newGroups.value, ns]
+  newGroup.value = ''
 }
 
 const admPair = () => run('admpair', async () => {
@@ -1103,7 +1103,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
       <!-- Copia vieja Y sin forma de confirmarla: es lo que hay que decir en la cara, con
            la salida al lado. Callarlo dejaba una pantalla que parecía al día. -->
-      <div v-else-if="copiaVieja" class="banner warn" data-testid="no-link">
+      <div v-else-if="staleCopy" class="banner warn" data-testid="no-link">
         <strong>{{ t.nolink_t }}</strong> — {{ t.nolink_b }}
         <div class="row">
           <a class="btn ghost sm" data-testid="nolink-pair" :href="pairHref">{{ t.gone_go }}</a>
@@ -1122,14 +1122,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
       <!-- Ficha del acta: qué cuenta es, por qué versión va y quién es el Master. Es
            DATO, no explicación, y por eso se queda a la vista. -->
-      <ul class="facts" v-if="acta">
-        <li>{{ t.profile }} <code data-testid="profile-id">{{ perfilId || '—' }}</code></li>
-        <li>{{ t.version }} <code>#{{ acta.seq }}</code></li>
+      <ul class="facts" v-if="record">
+        <li>{{ t.profile }} <code data-testid="profile-id">{{ profileIdShort || '—' }}</code></li>
+        <li>{{ t.version }} <code>#{{ record.seq }}</code></li>
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
         <!-- CUÁNDO se confirmó esto con la bóveda, y con qué volver a intentarlo. Es dato y
              es acción: exactamente lo que va en una pantalla de administración. -->
         <li data-testid="sync-state" class="muted">
-          {{ comprobando ? t.sync_checking : (comprobadoAt ? t.sync_at(horaCorta(comprobadoAt)) : t.sync_stale) }}
+          {{ checking ? t.sync_checking : (checkedAt ? t.sync_at(shortTime(checkedAt)) : t.sync_stale) }}
         </li>
       </ul>
 
@@ -1198,7 +1198,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       <!-- Conectar este dispositivo a una bóveda. Aquí solo está la ENTRADA al
            proceso (escanear / abrir archivo / pegar); en cuanto hay una invitación,
            la pantalla del proceso se lo lleva todo (ver `pairFlow`). -->
-      <template v-if="!yaEnBoveda">
+      <template v-if="!alreadyInVault">
       <h2>
         {{ t.pair_t }}
         <button type="button" class="i" data-testid="info-pair" :aria-expanded="info === 'pair'"
@@ -1303,7 +1303,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->
-            <li v-for="d in varsHuerfanas" :key="d.pub" class="vargroup" :data-device="d.id">
+            <li v-for="d in orphanVars" :key="d.pub" class="vargroup" :data-device="d.id">
               <div class="who">
                 <strong>{{ d.label || d.id }}</strong>
                 <span class="tag svc" v-if="d.cn">{{ t.service }} «{{ d.cn }}»</span>
@@ -1319,10 +1319,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           </ul>
 
           <div class="varnew" data-testid="var-new-group">
-            <input v-model="nuevoGrupo" type="text" :placeholder="t.var_scope_ph" data-testid="var-new-ns"
-                   @keyup.enter="crearGrupo" />
+            <input v-model="newGroup" type="text" :placeholder="t.var_scope_ph" data-testid="var-new-ns"
+                   @keyup.enter="createGroup" />
             <button class="btn sm" data-testid="var-new-group-save"
-                    :disabled="!nuevoGrupo.trim()" @click="crearGrupo">{{ t.var_group_new }}</button>
+                    :disabled="!newGroup.trim()" @click="createGroup">{{ t.var_group_new }}</button>
           </div>
         </template>
       </template>

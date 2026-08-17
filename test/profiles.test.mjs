@@ -57,7 +57,7 @@ test('resolve acepta id o nombre, y rechaza el ambiguo en vez de adivinar', () =
   assert.equal(p.resolve('trabajo'), a.id, 'sin distinguir mayúsculas')
   assert.equal(p.resolve(a.id), a.id)
   p.add('Trabajo')
-  assert.throws(() => p.resolve('Trabajo'), /hay 2 perfiles/)
+  assert.throws(() => p.resolve('Trabajo'), /there are 2 profiles/)
   assert.throws(() => p.resolve('nope'), /does not exist/)
 })
 
@@ -158,7 +158,7 @@ test('tras 5 fallos, el freno de fuerza bruta hace esperar', async () => {
   await p.setPassword(id, 'secreta')
   p.lock(id)
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
-  await assert.rejects(() => p.unlock(id, 'secreta'), /demasiados intentos/, 'ni con la buena, hasta que pase la espera')
+  await assert.rejects(() => p.unlock(id, 'secreta'), /too many tries/, 'ni con la buena, hasta que pase la espera')
 })
 
 test('la contraseña exige un mínimo', async () => {
@@ -181,7 +181,7 @@ test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda 
 
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   // Con cinco fallos ya hay espera: ni la buena llega a comprobarse.
-  await assert.rejects(() => p.unlock(id, 'secreta'), /demasiados intentos/)
+  await assert.rejects(() => p.unlock(id, 'secreta'), /too many tries/)
 
   // Los fallos envejecen (se retrasa el último a hace una hora, como si fuera ayer).
   const file = path.join(root, 'profiles.json')
@@ -189,9 +189,9 @@ test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda 
   reg.profiles[0].tries.at = Date.now() - 60 * 60 * 1000
   fs.writeFileSync(file, JSON.stringify(reg))
 
-  const mañana = openProfiles(root)
-  await mañana.unlock(id, 'secreta') // sin espera: se olvidaron los de ayer
-  assert.equal(mañana.isLocked(id), false)
+  const tomorrow = openProfiles(root)
+  await tomorrow.unlock(id, 'secreta') // sin espera: se olvidaron los de ayer
+  assert.equal(tomorrow.isLocked(id), false)
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).profiles[0].tries, undefined)
 })
 

@@ -40,15 +40,15 @@ test('editar conserva id y fecha de creación, y actualiza updatedAt', async () 
   const d = tmp()
   const { methods: m } = openThreadStore(d)
   const { id } = m['secure.put']({ meta: 'm1', enc: 'v1' })
-  const creado = m['secure.get']({ id }).ts
+  const created = m['secure.get']({ id }).ts
   await new Promise((r) => setTimeout(r, 5))
 
   m['secure.put']({ id, enc: 'v2' })
-  const tras = m['secure.get']({ id })
-  assert.equal(tras.ts, creado, 'la fecha de creación no se mueve')
-  assert.equal(tras.enc, 'v2')
-  assert.equal(tras.meta, 'm1', 'no mandar meta conserva la que había')
-  assert.ok(tras.updatedAt > creado)
+  const after = m['secure.get']({ id })
+  assert.equal(after.ts, created, 'la fecha de creación no se mueve')
+  assert.equal(after.enc, 'v2')
+  assert.equal(after.meta, 'm1', 'no mandar meta conserva la que había')
+  assert.ok(after.updatedAt > created)
   clean(d)
 })
 

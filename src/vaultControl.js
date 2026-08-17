@@ -245,7 +245,7 @@ export async function snapshot (profile) {
   // delegaciones son su reflejo. Sin ella, un miembro sin certificados (revocado a medias,
   // o con el papel caducado) no salía en ninguna pantalla del PC — invisible y, por lo
   // tanto, imposible de quitar desde aquí.
-  const [devices, secrets, acta] = await Promise.all([
+  const [devices, secrets, record] = await Promise.all([
     waitFor(F.devices, { req: id, since }), waitFor(F.secretsList, { req: id, since }),
     waitFor(F.acta, { req: id, since })
   ])
@@ -253,14 +253,14 @@ export async function snapshot (profile) {
   // tiene: en la memoria de quien lo pidió, no esperando en el disco a que copien la
   // carpeta (ahí es donde el cifrado en reposo dejaría de servir de nada).
   rm(F.secretsList)
-  assertOpen(devices); assertOpen(secrets); assertOpen(acta)
+  assertOpen(devices); assertOpen(secrets); assertOpen(record)
   // LA LISTA DE BÓVEDAS NO SE ESPERA AQUÍ. `profiles-list.json` es la respuesta a una
   // petición de PERFIL (`dumpProfiles`), y el daemon dejó de volcarlo por su cuenta —
   // volcarlo sin que nadie preguntara se llevaba por delante las respuestas de verdad.
   // Seguir esperándolo aquí era esperar seis segundos, los de rendirse, a un archivo que
   // ya no iba a llegar: CADA refresco de la TUI costaba eso, con el daemon contestando lo
   // suyo en 100 ms. Quien necesita la lista llama a `listProfiles()`, que sí la pide.
-  return { devices, secrets, acta, profiles: read(F.profilesList, null) }
+  return { devices, secrets, record, profiles: read(F.profilesList, null) }
 }
 
 /**
@@ -268,7 +268,7 @@ export async function snapshot (profile) {
  * `issued` viene de identity.listDelegations(); el deviceId se deriva del `sub`.
  */
 export async function listDevices (profile) {
-  const { devices, acta } = await snapshot(profile)
+  const { devices, record } = await snapshot(profile)
   if (!devices) throw coded('the daemon did not reply', 'NO_REPLY')
   const issued = devices.issued || devices.active || devices.delegations || []
   const revoked = devices.revoked || []
@@ -279,9 +279,9 @@ export async function listDevices (profile) {
   // certificados son su reflejo. Quien pinte la lista los necesita a la vez, o acaba
   // enseñando solo a los que tienen papel — y el que hay que quitar es justo el que no.
   return {
-    issued: agruparPorAparato(withIds, revoked),
+    issued: groupCertsByDevice(withIds, revoked),
     revoked,
-    members: acta?.members || [],
+    members: record?.members || [],
     profile: devices.profile || null
   }
 }
@@ -295,20 +295,20 @@ export async function listDevices (profile) {
  * como «enrolados». Se agrupa por llave, se queda el más nuevo y se guardan TODOS sus
  * nonces, que es lo que hace falta para retirarlo entero.
  */
-export function agruparPorAparato (lista, revoked = []) {
-  const fuera = new Set(revoked.map((r) => r?.nonce || r))
-  const porLlave = new Map()
-  for (const d of lista) {
-    if (d.revokedAt || fuera.has(d.nonce)) continue
-    const clave = d.sub || d.nonce
-    const y = porLlave.get(clave)
-    if (!y) porLlave.set(clave, { ...d, nonces: [d.nonce] })
+export function groupCertsByDevice (list, revoked = []) {
+  const out = new Set(revoked.map((r) => r?.nonce || r))
+  const byKey = new Map()
+  for (const d of list) {
+    if (d.revokedAt || out.has(d.nonce)) continue
+    const key = d.sub || d.nonce
+    const y = byKey.get(key)
+    if (!y) byKey.set(key, { ...d, nonces: [d.nonce] })
     else {
       y.nonces.push(d.nonce)
       if ((d.exp || 0) > (y.exp || 0)) Object.assign(y, { ...d, nonces: y.nonces })
     }
   }
-  return [...porLlave.values()]
+  return [...byKey.values()]
 }
 
 /**
@@ -497,16 +497,16 @@ export function setDeviceSecretVisibility (pub, key, isPublic, profile) {
  */
 export function applySecrets (ns, items, profile) {
   return secretOp({ op: 'batch', ns, items }, profile, (out) => {
-    const falta = items.find((it) => (it.op === 'rm' ? has(out.ns[ns], it.key) : !has(out.ns[ns], it.key)))
-    if (falta) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+    const missing = items.find((it) => (it.op === 'rm' ? has(out.ns[ns], it.key) : !has(out.ns[ns], it.key)))
+    if (missing) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
 /** Lo mismo para el cajón de UN aparato. */
 export function applyDeviceSecrets (pub, items, profile) {
   return secretOp({ op: 'batch', pub, items }, profile, (out) => {
-    const falta = items.find((it) => (it.op === 'rm' ? has(keysOf(out, pub), it.key) : !has(keysOf(out, pub), it.key)))
-    if (falta) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
+    const missing = items.find((it) => (it.op === 'rm' ? has(keysOf(out, pub), it.key) : !has(keysOf(out, pub), it.key)))
+    if (missing) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 

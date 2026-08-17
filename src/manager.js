@@ -24,11 +24,11 @@ import { dataDir, ensureDir } from './paths.js'
  */
 export function assertCanRemove ({ isMaster, memberCount, name = '' }) {
   if (!isMaster || memberCount <= 1) return true
-  const otros = memberCount - 1
+  const others = memberCount - 1
   const e = new Error(
-    `la cuenta "${name}" la manda esta bóveda y tiene ${otros} dispositivo(s) más: ` +
-    'pásale primero el mando a uno que esté conectado. Si la borras así, se quedan ' +
-    'con su llave y sin nadie que pueda volver a firmar el acta.'
+    `this vault is the master of account "${name}" and it has ${others} more device(s): ` +
+    'hand the master over to one that is connected first. Deleting it like this leaves them ' +
+    'with their key and nobody able to sign the record again.'
   )
   e.code = 'MASTER_WITH_MEMBERS'
   e.members = memberCount
@@ -114,11 +114,11 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       // se lleva su llave y su copia, y la cuenta sigue viva donde vive el master.)
       const v = running.get(id)
       if (v) {
-        const [soyMaster, acta] = await Promise.all([
+        const [isMaster, record] = await Promise.all([
           v.isMaster().catch(() => false),
           v.profileMembers().catch(() => ({ members: [] }))
         ])
-        assertCanRemove({ isMaster: soyMaster, memberCount: (acta?.members || []).length, name: profiles.get(id)?.name || id })
+        assertCanRemove({ isMaster, memberCount: (record?.members || []).length, name: profiles.get(id)?.name || id })
       } else {
         log('[vault] profile %s is not open: deleting without being able to check its record', id)
       }

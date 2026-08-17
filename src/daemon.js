@@ -36,7 +36,7 @@ const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
  * pid muerto (se cortó la luz) no estorba. Con `DOTRINO_VAULT_DIR` distintos conviven
  * cuantas quieras: lo que colisiona es el directorio, no el programa.
  */
-function comprobarInstanciaUnica (dir) {
+function assertSingleInstance (dir) {
   let s = null
   try { s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')) } catch (_) { return }
   const pid = Number(s?.pid)
@@ -52,7 +52,7 @@ function comprobarInstanciaUnica (dir) {
 export async function runDaemon () {
   const dir = dataDir()
   const proxyUrl = process.env.PROXY_URL || 'wss://proxy.dotrino.com'
-  comprobarInstanciaUnica(dir)
+  assertSingleInstance(dir)
 
   const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId (y a QUÉ perfil
@@ -119,7 +119,7 @@ export async function runDaemon () {
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
   const pairReqFile = path.join(dir, 'pair-request.json')
-  async function atenderEmparejamiento () {
+  async function handlePairingRequest () {
     try {
       rm(pendingEnrollFile)
       // Pairing manual por CLI = gesto explícito del dueño → cert de identidad completo.
@@ -132,19 +132,19 @@ export async function runDaemon () {
       // vault:secrets:<ns> — para enrolar un SERVICIO (proxy, geo…) que lee sus
       // secretos, sin poder firmar como el usuario ni leer sus datos.
       const pairReq = readJsonSafe(pairReqFile); rm(pairReqFile)
-      const bloqueado = resolveTarget(pairReq)
-      if (bloqueado?.locked) {
+      const locked = resolveTarget(pairReq)
+      if (locked?.locked) {
         // Se responde por el MISMO archivo que espera quien pidió el QR: si no, se queda
         // mirando una pantalla vacía hasta que se agote el tiempo, sin saber por qué.
-        writeJson(pairFile, { v: 2, at: Date.now(), profile: bloqueado.id, locked: true })
-        return console.error('[vault] profile %s is locked: pairing refused', bloqueado.id)
+        writeJson(pairFile, { v: 2, at: Date.now(), profile: locked.id, locked: true })
+        return console.error('[vault] profile %s is locked: pairing refused', locked.id)
       }
       const vault = targetOf(pairReq)
       if (!vault) return
       const profileId = pairReq?.profile ? mgr.resolve(pairReq.profile) : mgr.currentId()
       const isService = typeof pairReq?.service === 'string' && pairReq.service
       const scope = isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
-      const label = pairReq?.label || (isService ? 'servicio:' + pairReq.service : 'cli')
+      const label = pairReq?.label || (isService ? 'service:' + pairReq.service : 'cli')
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
       // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`). El nombre viaja
@@ -218,7 +218,7 @@ export async function runDaemon () {
     }
   }
 
-  async function atenderPeticiones () {
+  async function handleRequests () {
     try {
       const appr = readJsonSafe(approveReqFile)
       if (appr?.code) {
@@ -228,16 +228,16 @@ export async function runDaemon () {
         // esta consola: quien aprobaba desde la TUI leía «Dispositivo aprobado», el
         // pendiente desaparecía de la pantalla y el aparato seguía esperando al otro lado
         // sin que nadie pudiera reintentar.
-        const responder = (extra) => writeJson(approveFile, { v: 1, at: Date.now(), req: appr.id || null, ...extra })
+        const answer = (extra) => writeJson(approveFile, { v: 1, at: Date.now(), req: appr.id || null, ...extra })
         try {
           const vault = targetOf(appr)
           if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
           console.log('[vault] aprobado %s', r.deviceId)
-          responder({ ok: true, deviceId: r.deviceId || null })
+          answer({ ok: true, deviceId: r.deviceId || null })
         } catch (e) {
           console.error('[vault] approval failed:', e.message)
-          responder({ ok: false, error: e.message, code: e.code || 'APPROVE_FAILED' })
+          answer({ ok: false, error: e.message, code: e.code || 'APPROVE_FAILED' })
         }
       }
       const rej = readJsonSafe(rejectReqFile)
@@ -354,14 +354,14 @@ export async function runDaemon () {
         // BLOQUEADO: se contesta que lo está, y nada más. Los volcados se escriben igual
         // (quien pregunta espera una respuesta, no un plantón) pero VACÍOS: ni aparatos, ni
         // nombres de variables, ni acta. Antes el candado no tapaba ninguna de las tres.
-        const cerrado = { v: 1, at: Date.now(), req: reqId, profile: t.id, locked: true }
+        const closed = { v: 1, at: Date.now(), req: reqId, profile: t.id, locked: true }
         if (dumpReq) {
-          writeJson(secretsListFile, { ...cerrado, ns: {}, dev: [] })
-          writeJson(devFile, { ...cerrado, issued: [], revoked: [] })
-          writeJson(path.join(dir, 'acta.json'), { ...cerrado, members: [] })
+          writeJson(secretsListFile, { ...closed, ns: {}, dev: [] })
+          writeJson(devFile, { ...closed, issued: [], revoked: [] })
+          writeJson(path.join(dir, 'acta.json'), { ...closed, members: [] })
         }
         rm(meReqFile)
-        if (meReq) writeJson(meFile, { ...cerrado, req: meReq.id || null, me: null })
+        if (meReq) writeJson(meFile, { ...closed, req: meReq.id || null, me: null })
         return
       }
       if (dumpReq) {
@@ -393,8 +393,8 @@ export async function runDaemon () {
         try {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
           const { me } = tm.vault.threads.methods.profileGet()
-          const { avatar, ...resto } = me || {}
-          writeJson(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...resto, avatar: avatarInfo(avatar) } : null })
+          const { avatar, ...rest } = me || {}
+          writeJson(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...rest, avatar: avatarInfo(avatar) } : null })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
     } catch (e) {
@@ -414,44 +414,44 @@ export async function runDaemon () {
   // sistemas, más un repaso periódico por si el watcher se pierde un evento (pasa en
   // carpetas de red y en algunos montajes). Las señales se mantienen donde existen: no
   // estorban y hacen que la respuesta sea inmediata.
-  const REPASO_MS = 2000
-  let atendiendo = false
-  let otraVuelta = false
-  async function atender () {
+  const SWEEP_MS = 2000
+  let serving = false
+  let anotherRound = false
+  async function serve () {
     // Una a la vez (las peticiones se consumen y se borran), pero lo que llegue mientras
     // tanto NO se pierde: se anota y se da otra vuelta al terminar. Antes se descartaba,
     // y la petición se quedaba esperando al repaso de 2 s — tiempo de sobra para que
     // quien pidió escribiera la siguiente encima.
-    if (atendiendo) { otraVuelta = true; return }
-    atendiendo = true
+    if (serving) { anotherRound = true; return }
+    serving = true
     try {
       // OJO: `fs.watch` avisa al CREAR el archivo, antes de que el CLI termine de
       // escribirlo. Si se lee a medias, el JSON no parsea y la petición se pierde con
       // sus datos — y el emparejamiento salía como si fuera de un dispositivo normal,
       // sin el `--service`, emitiendo un cert con el scope equivocado. Así que solo se
       // atiende cuando el archivo YA parsea; si no, lo recoge el repaso de 2 s.
-      if (readJsonSafe(pairReqFile)) await atenderEmparejamiento()
-      await atenderPeticiones()
+      if (readJsonSafe(pairReqFile)) await handlePairingRequest()
+      await handleRequests()
     } catch (e) { console.error('[vault] error serving a request:', e.message) }
-    finally { atendiendo = false }
-    if (otraVuelta) { otraVuelta = false; await atender() }
+    finally { serving = false }
+    if (anotherRound) { anotherRound = false; await serve() }
   }
 
   try {
-    fs.watch(dir, (_ev, file) => { if (!file || /-request\.json$/.test(file)) atender() })
+    fs.watch(dir, (_ev, file) => { if (!file || /-request\.json$/.test(file)) serve() })
   } catch (e) {
     console.error('[vault] could not watch %s (%s); will be served by polling only', dir, e.message)
   }
-  const repaso = setInterval(atender, REPASO_MS)
-  repaso.unref?.()
+  const sweep = setInterval(serve, SWEEP_MS)
+  sweep.unref?.()
 
   // POSIX: la señal sigue valiendo como atajo inmediato. En Windows no existe y no pasa nada.
   // Van por `atender()` y NO llaman directo: si no, la señal y el vigilante corren a la
   // vez, la primera consume la petición y la segunda la lee vacía — y un `pair --service`
   // acababa emitiendo un cert de dispositivo normal, con el scope equivocado.
   if (process.platform !== 'win32') {
-    process.on('SIGUSR1', () => { atender() })
-    process.on('SIGUSR2', () => { atender() })
+    process.on('SIGUSR1', () => { serve() })
+    process.on('SIGUSR2', () => { serve() })
   }
 
   // --- apagado limpio ---

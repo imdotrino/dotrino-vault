@@ -109,8 +109,8 @@ test('el otro lado canjea la cita y alcanza a la bóveda', async () => {
     assert.match(r.instance, new RegExp(`^${hint}`), 'la instancia que devuelve es del nodo que emitió la cita')
 
     // Y no vale una segunda vez.
-    const otra = await client.redeemPairingCode(qr.conn)
-    assert.equal(otra.ok, false, 'la cita tiene que quemarse al usarse')
+    const other = await client.redeemPairingCode(qr.conn)
+    assert.equal(other.ok, false, 'la cita tiene que quemarse al usarse')
   } finally {
     client.close()
   }

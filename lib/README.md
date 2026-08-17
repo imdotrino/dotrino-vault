@@ -173,7 +173,7 @@ Salir en vez de recargar, por tres razones — y la primera es la de peso:
    queda corta, falla en silencio.
 3. **Es un interruptor de emergencia.** Revocar el cert de un agente ya no espera a
    que alguien se acuerde de reiniciarlo: recibe el `REVOKED` firmado, se apaga, y
-   al arrancar `fetchSecrets` recibe «no autorizado: revoked», que no se arregla
+   al arrancar `fetchSecrets` recibe «unauthorized: revoked», que no se arregla
    reintentando. Antes, revocar no le quitaba nada a un proceso ya corriendo.
 
 Defensas, porque una señal que provoca reinicios es un arma si se descuida: firma

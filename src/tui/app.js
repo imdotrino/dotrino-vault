@@ -255,12 +255,12 @@ function deviceRows (st, t) {
       (vars ? t.muted(`  vars:${vars}`) : '')
     // SIN ACCESO: está en el acta y no puede entrar. Es un aviso, no un adorno, así que va
     // en el color de aviso y en el sitio donde estaría su vencimiento.
-    const estado = d.noAccess
+    const status = d.noAccess
       ? t.warn(i.deviceNoAccess)
       : d.isMaster
         ? t.muted(i.thisVault)
         : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp))
-    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}  ${estado}${extra}`, sel: true, meta: d })
+    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -306,7 +306,7 @@ function pairModeRows (st, t) {
  * una marca de si los tiene. El de administrar va aparte y avisado: es el único que deja
  * a ese aparato meter y sacar dispositivos sin venir aquí.
  */
-const CAPS_ORDEN = ['sign', 'store', 'read', 'admin']
+const CAPS_ORDER = ['sign', 'store', 'read', 'admin']
 
 function capsRows (st, t) {
   const i = L(st)
@@ -320,7 +320,7 @@ function capsRows (st, t) {
     { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
     { text: '', sel: false }
   ]
-  for (const cap of CAPS_ORDEN) {
+  for (const cap of CAPS_ORDER) {
     const mark = has.has(cap) ? '[x]' : '[ ]'
     const name = i.capName[cap]
     const line = ` ${mark}  ${cap === 'admin' ? t.bold(name) : name}`
@@ -363,10 +363,10 @@ const sortByKey = (list) => (list || []).slice().sort((a, b) => a.key.localeComp
  * la consola remota lo pide. La privada sigue tapada: no sale ni a esta pantalla.
  */
 const varLine = (v, t, i) => `      ${v.key}   ` +
-  (v.public ? `${corto(v.value)}   ${t.warn(i.varPublic)}` : t.muted('••••••'))
+  (v.public ? `${short(v.value)}   ${t.warn(i.varPublic)}` : t.muted('••••••'))
 
 /** Un valor largo no puede empujar la marca «pública» fuera de la pantalla. */
-const corto = (s) => {
+const short = (s) => {
   const v = String(s ?? '')
   return v.length > 40 ? v.slice(0, 39) + '…' : v
 }
@@ -407,27 +407,27 @@ function meRows (st, t) {
   if (!me) return [{ text: t.muted(i.noProfile), sel: false }, { text: '', sel: false }, { text: t.muted(i.noProfileHint), sel: false }]
 
   const rows = []
-  const campo = (etiqueta, valor, oculto) => rows.push({
-    text: `  ${t.muted(String(etiqueta).padEnd(12))} ${valor}${oculto ? t.muted(i.hidden) : ''}`, sel: false
+  const field = (label, value, hidden) => rows.push({
+    text: `  ${t.muted(String(label).padEnd(12))} ${value}${hidden ? t.muted(i.hidden) : ''}`, sel: false
   })
   rows.push({ text: t.muted(i.profileUpdated(me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—')), sel: false })
   rows.push({ text: '', sel: false })
-  campo(i.fieldName, me.nickname ? t.bold(me.nickname) : t.muted(i.noName))
-  campo(i.fieldPhoto, me.avatar
+  field(i.fieldName, me.nickname ? t.bold(me.nickname) : t.muted(i.noName))
+  field(i.fieldPhoto, me.avatar
     ? `${me.avatar.type || '?'} · ${(me.avatar.bytes / 1024).toFixed(1)} KB`
     : t.muted(i.no))
 
   const STD = [['nombres', i.fieldFirstName], ['apellidos', i.fieldLastName], ['email', i.fieldEmail],
     ['telefono', i.fieldPhone], ['direccion', i.fieldAddress]]
-  const puestos = STD.filter(([k]) => me[k])
-  if (puestos.length) rows.push({ text: '', sel: false })
-  for (const [k, etiqueta] of puestos) campo(etiqueta, me[k], me[k + 'Visible'] === false)
+  const filled = STD.filter(([k]) => me[k])
+  if (filled.length) rows.push({ text: '', sel: false })
+  for (const [k, label] of filled) field(label, me[k], me[k + 'Visible'] === false)
 
-  for (const [titulo, lista] of [[i.links, me.links], [i.otherData, me.fields]]) {
-    if (!Array.isArray(lista) || !lista.length) continue
+  for (const [title, list] of [[i.links, me.links], [i.otherData, me.fields]]) {
+    if (!Array.isArray(list) || !list.length) continue
     rows.push({ text: '', sel: false })
-    rows.push({ text: t.accent(' ▸ ' + titulo), sel: false })
-    for (const x of lista) campo(x.type || x.label || '', x.value, x.visible === false)
+    rows.push({ text: t.accent(' ▸ ' + title), sel: false })
+    for (const x of list) field(x.type || x.label || '', x.value, x.visible === false)
   }
   return rows
 }
@@ -471,13 +471,13 @@ async function refreshAll (term, st, api = vc) {
   }
   const r = await guard(term, st, L(st).loading, () => api.snapshot(activeId(st)))
   if (!r.ok) return
-  const { devices, secrets, profiles, acta } = r.v
+  const { devices, secrets, profiles, record } = r.v
   if (profiles) st.profiles = profiles
   // Los DOS cajones de variables viajan juntos: `ns` (por scope) y `dev` (por aparato).
   if (secrets) st.secrets = { ns: secrets.ns || {}, dev: Array.isArray(secrets.dev) ? secrets.dev : [] }
   // El ACTA entra en el volcado normal: es de donde sale la lista de dispositivos (ver
   // `mergeMembersAndCerts`). Antes solo se pedía al abrir la pantalla de permisos.
-  if (acta) st.members = acta.members || []
+  if (record) st.members = record.members || []
   if (devices) {
     const issued = (devices.issued || devices.active || devices.delegations || [])
     st.devices = { issued: await Promise.all(issued.map(async (d) => ({ ...d, deviceId: d.sub ? await api.deviceIdOf(d.sub) : '????-????' }))), revoked: devices.revoked || [] }
@@ -493,14 +493,14 @@ async function refreshAll (term, st, api = vc) {
  * volviera a pedir el acta. Peor todavía en una lista: el aparato recién entrado no salía,
  * así que la fila «la última» era otra y quitarla se llevaba por delante a quien no era.
  */
-function aplicarVolcado (st, v) {
+function applyDump (st, v) {
   st.devices = v
   if (Array.isArray(v?.members)) st.members = v.members
 }
 
 async function refreshDevices (term, st) {
   const r = await guard(term, st, L(st).loadingDevices, () => vc.listDevices(activeId(st)))
-  if (r.ok) aplicarVolcado(st, r.v)
+  if (r.ok) applyDump(st, r.v)
 }
 async function refreshSecrets (term, st) {
   const r = await guard(term, st, L(st).loadingSecrets, () => vc.listSecrets(activeId(st)))
@@ -550,7 +550,7 @@ async function reunlockSilently (term, st, p, api = vc) {
  * que dura la sesión, no hasta que alguien reinicie el servicio. Lo que ya estaba abierto
  * antes de entrar no se toca — no lo abrió esta pantalla, no le toca cerrarlo.
  */
-async function ensureUnlocked (term, st, p, thenFn, motivo = null, api = vc) {
+async function ensureUnlocked (term, st, p, thenFn, reason = null, api = vc) {
   if (!p.protected || !p.locked) return thenFn()
   // Cerrada, pero la contraseña ya se tecleó en esta sesión: se reabre sin molestar.
   if (await reunlockSilently(term, st, p, api)) {
@@ -564,7 +564,7 @@ async function ensureUnlocked (term, st, p, thenFn, motivo = null, api = vc) {
     // Si la anterior fue rechazada, el motivo se queda AQUÍ, pegado al campo, en vez de
     // irse en un aviso de cuatro segundos que se lleva el siguiente redibujado. Eso era lo
     // que hacía que un rechazo pareciera «me la vuelve a pedir porque sí».
-    hint: motivo || i.passwordToEdit,
+    hint: reason || i.passwordToEdit,
     onSubmit: async (pwd) => {
       st.input = null
       const r = await guard(term, st, i.unlocking, () => api.unlockProfile(p.id, pwd))
@@ -761,7 +761,7 @@ async function onKeyDevices (term, st, key) {
         st.confirm = null
         // Por `sub`: se le retiran TODOS los certificados, no solo el de esta fila.
         const r = await guard(term, st, i.revoking, () => vc.revokeDevice({ sub: cur.sub, nonce: cur.nonce }, activeId(st)))
-        if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); aplicarVolcado(st, r.v); st.sel.devices = 0 }
+        if (r.ok) { flash(st, i.deviceRevoked(cur.deviceId)); applyDump(st, r.v); st.sel.devices = 0 }
       },
       onNo: () => { st.confirm = null }
     })
@@ -777,7 +777,7 @@ async function onKeyDevices (term, st, key) {
         const name = String(raw || '').trim()
         if (!name) return
         const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, name, activeId(st)))
-        if (r.ok) { aplicarVolcado(st, r.v); flash(st, i.deviceRenamed(name)) }
+        if (r.ok) { applyDump(st, r.v); flash(st, i.deviceRenamed(name)) }
       }
     })
   } else if (ch === 'c' && cur?.sub) {
@@ -839,7 +839,7 @@ async function onKeyCaps (term, st, key) {
   const apply = async () => {
     const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...caps], activeId(st)))
     if (!r.ok) return
-    aplicarVolcado(st, r.v)
+    applyDump(st, r.v)
     await refreshMembers(term, st)
     flash(st, giving ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
   }
@@ -925,7 +925,7 @@ function promptApprove (term, st) {
         st.screen = 'devices'
         // Sin lista (el volcado se perdió): se pide otra vez. El aparato ya está dentro;
         // lo único que falta es la foto, y esa se vuelve a pedir sin drama.
-        if (r.v) aplicarVolcado(st, r.v)
+        if (r.v) applyDump(st, r.v)
         else await refreshDevices(term, st)
       }
     },
@@ -1057,7 +1057,7 @@ async function onKeyDevVars (term, st, key) {
   }
   if (key.name === 'f5') { await refreshSecrets(term, st); return true }
   if (ch === 'n') { promptNewDeviceVariable(term, st); return true }
-  if (ch === 'i' && target) { promptLoadVars(term, st, { pub: target.pub, donde: target.deviceId }); return true }
+  if (ch === 'i' && target) { promptLoadVars(term, st, { pub: target.pub, where: target.deviceId }); return true }
   if (ch === 't' && cur && target) {
     await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st)))
     return true
@@ -1132,30 +1132,30 @@ function promptNewDeviceVariable (term, st) {
  * Se acepta lo que se pueda escribir en una línea (`CLAVE=valor CLAVE2=valor2`) o la
  * RUTA de un `.env`, que es como suele llegar la configuración de un servicio.
  */
-function promptLoadVars (term, st, { ns = null, pub = null, donde }) {
+function promptLoadVars (term, st, { ns = null, pub = null, where }) {
   const i = L(st)
   setInput(st, {
-    label: i.loadLabel(donde),
+    label: i.loadLabel(where),
     hint: i.loadHint,
     onSubmit: async (raw) => {
-      const texto = raw.trim()
+      const text = raw.trim()
       st.input = null
-      if (!texto) return
-      let contenido = texto
+      if (!text) return
+      let content = text
       // Sin un `=` no es una lista de variables: es la ruta de un archivo.
-      if (!texto.includes('=')) {
-        try { contenido = fs.readFileSync(texto, 'utf8') } catch (_) { flash(st, i.loadNoFile(texto), 'danger'); return }
+      if (!text.includes('=')) {
+        try { content = fs.readFileSync(text, 'utf8') } catch (_) { flash(st, i.loadNoFile(text), 'danger'); return }
       }
-      const { items, errors } = parseEnvInput(contenido)
+      const { items, errors } = parseEnvInput(content)
       // Un archivo con un problema no se carga a medias: se dice qué línea y no se
       // escribe nada. Media configuración aplicada es peor que ninguna.
       if (errors.length) { flash(st, i.loadNothing + ' ' + i.envErr[errors[0].code](errors[0]), 'danger'); return }
       askVisibility(term, st, async (isPublic) => {
-        const conVis = items.map((it) => ({ ...it, public: isPublic }))
+        const withVisibility = items.map((it) => ({ ...it, public: isPublic }))
         const r = await guard(term, st, i.loadingVars, () => (pub
-          ? vc.applyDeviceSecrets(pub, conVis, activeId(st))
-          : vc.applySecrets(ns, conVis, activeId(st))))
-        if (r.ok) { flash(st, i.loadedVars(items.length, donde)); st.secrets = r.v }
+          ? vc.applyDeviceSecrets(pub, withVisibility, activeId(st))
+          : vc.applySecrets(ns, withVisibility, activeId(st))))
+        if (r.ok) { flash(st, i.loadedVars(items.length, where)); st.secrets = r.v }
       })
     },
     onCancel: () => { st.input = null }
@@ -1170,10 +1170,10 @@ function promptLoadScopeVars (term, st) {
     label: i.nsLabel,
     hint: existing.length ? i.nsHintExisting(existing.join(', ')) : i.nsHint,
     onSubmit: (ns) => {
-      const nsv = ns.trim()
-      if (!NS_RE.test(nsv)) { flash(st, i.nsInvalid, 'danger'); return }
+      const nsName = ns.trim()
+      if (!NS_RE.test(nsName)) { flash(st, i.nsInvalid, 'danger'); return }
       st.input = null
-      promptLoadVars(term, st, { ns: nsv, donde: nsv })
+      promptLoadVars(term, st, { ns: nsName, where: nsName })
     },
     onCancel: () => { st.input = null }
   })
@@ -1186,26 +1186,26 @@ function promptNewVariable (term, st) {
     label: i.nsLabel,
     hint: existing.length ? i.nsHintExisting(existing.join(', ')) : i.nsHint,
     onSubmit: (ns) => {
-      const nsv = ns.trim()
-      if (!NS_RE.test(nsv)) { flash(st, i.nsInvalid, 'danger'); promptNewVariable(term, st); return }
+      const nsName = ns.trim()
+      if (!NS_RE.test(nsName)) { flash(st, i.nsInvalid, 'danger'); promptNewVariable(term, st); return }
       st.input = null
       setInput(st, {
-        label: i.keyLabel(nsv),
+        label: i.keyLabel(nsName),
         hint: i.keyHint,
         onSubmit: (key) => {
           const kv = key.trim()
           if (!KEY_RE.test(kv)) { flash(st, i.keyInvalid, 'danger'); return }
           st.input = null
           setInput(st, {
-            label: i.valueLabel(nsv, kv),
+            label: i.valueLabel(nsName, kv),
             mask: true,
             hint: i.valueHint,
             onSubmit: async (value) => {
               st.input = null
               if (!value) { flash(st, i.valueEmpty, 'danger'); return }
               askVisibility(term, st, async (isPublic) => {
-                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsv, kv, value, activeId(st), isPublic))
-                if (r.ok) { flash(st, i.varSaved(nsv, kv)); st.secrets = r.v }
+                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsName, kv, value, activeId(st), isPublic))
+                if (r.ok) { flash(st, i.varSaved(nsName, kv)); st.secrets = r.v }
               })
             },
             onCancel: () => { st.input = null }
@@ -1348,9 +1348,9 @@ function render (term, st) {
 
   const s = st.state
   const up = st.daemonUp
-  const ver = s?.version || 'dev'
+  const version = s?.version || 'dev'
   const daemonTxt = up ? i.daemonRunning : i.daemonStopped
-  lines[0] = t.bar(`dotrino-vault ${ver}   daemon: ${daemonTxt}   ${vc.vaultDir()}`, cols)
+  lines[0] = t.bar(`dotrino-vault ${version}   daemon: ${daemonTxt}   ${vc.vaultDir()}`, cols)
 
   const ap = activeProfile(st)
   const apTxt = ap ? `${t.accent('●')} ${t.bold(ap.name || i.noName)} ${lockGlyph(ap)} ${t.muted('· ' + (ap.fingerprint || '—'))}` : t.muted('—')

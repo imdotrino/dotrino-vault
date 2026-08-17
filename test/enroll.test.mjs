@@ -123,8 +123,8 @@ test('firma de dispositivo inválida: no pasa del ENROLL', async () => {
   const { desk, sent } = await mount()
   const { qr } = await desk.startPairing()
   const { payload } = await deviceEnroll(qr)
-  const otro = await makeDeviceKey({})
-  payload.data.dpub = otro.publickey // la firma ya no corresponde a este dpub
+  const other = await makeDeviceKey({})
+  payload.data.dpub = other.publickey // la firma ya no corresponde a este dpub
 
   await desk.handleEnroll('tok-1', payload)
   assert.equal(sent.at(-1).type, 'vault.error')
@@ -146,12 +146,12 @@ test('token/sesión que no son de este emparejamiento', async () => {
   const { desk, sent } = await mount()
   const { qr } = await desk.startPairing()
 
-  const ajeno = await deviceEnroll({ ...qr, token: 'otro-token' })
-  await desk.handleEnroll('tok-1', ajeno.payload)
+  const foreign = await deviceEnroll({ ...qr, token: 'otro-token' })
+  await desk.handleEnroll('tok-1', foreign.payload)
   assert.match(sent.at(-1).error, /pairing token/)
 
-  const snMalo = await deviceEnroll({ ...qr, sn: 'otro-sn' })
-  await desk.handleEnroll('tok-1', snMalo.payload)
+  const badSn = await deviceEnroll({ ...qr, sn: 'otro-sn' })
+  await desk.handleEnroll('tok-1', badSn.payload)
   assert.match(sent.at(-1).error, /invalid session/)
 })
 

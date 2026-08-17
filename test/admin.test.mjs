@@ -75,8 +75,8 @@ test('el nonce es obligatorio y de un solo uso (approve no se reproduce)', async
   assert.equal(sinNonce.ok, false)
   assert.match(sinNonce.error, /nonce/)
 
-  const uno = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
-  assert.equal(uno.ok, true)
+  const first = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
+  assert.equal(first.ok, true)
 
   // El mismo mensaje otra vez, dentro de la ventana de frescura: no vale.
   const dos = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
@@ -86,29 +86,29 @@ test('el nonce es obligatorio y de un solo uso (approve no se reproduce)', async
 })
 
 test('un cert inválido no le quema los nonces a un admin legítimo', async () => {
-  let autoriza = false
-  const { admin } = mount({ verify: async () => (autoriza ? { ok: true, device: 'D' } : { ok: false, reason: 'firma' }) })
+  let authorized = false
+  const { admin } = mount({ verify: async () => (authorized ? { ok: true, device: 'D' } : { ok: false, reason: 'firma' }) })
 
   const n = nonce('c')
   assert.equal((await admin.handle({ op: 'pending', nonce: n })).ok, false, 'el impostor no pasa')
-  autoriza = true
+  authorized = true
   assert.equal((await admin.handle({ op: 'pending', nonce: n })).ok, true, 'y el nonce sigue sirviendo')
 })
 
 test('EL LÍMITE: un admin no concede «administra» ni claves de servicio', async () => {
   const { admin, desk, audits } = mount()
 
-  for (const malo of [['vault:admin'], ['vault:read', 'vault:admin'], ['vault:secrets:proxy']]) {
-    const r = await admin.handle({ op: 'pair', scope: malo, nonce: nonce(String(malo)) })
-    assert.equal(r.ok, false, `${malo} debe rechazarse`)
+  for (const bad of [['vault:admin'], ['vault:read', 'vault:admin'], ['vault:secrets:proxy']]) {
+    const r = await admin.handle({ op: 'pair', scope: bad, nonce: nonce(String(bad)) })
+    assert.equal(r.ok, false, `${bad} debe rechazarse`)
     assert.match(r.error, /vault machine/, 'y decir dónde SÍ se hace')
   }
   assert.deepEqual(desk.calls, [], 'ningún emparejamiento llegó a abrirse')
   assert.ok(audits.some(([, i]) => i?.reason === 'forbidden-scope'))
 
-  const bueno = await admin.handle({ op: 'pair', scope: ['vault:read'], nonce: nonce('d') })
-  assert.equal(bueno.ok, true)
-  assert.equal(bueno.result.qr, 'cAAAA')
+  const good = await admin.handle({ op: 'pair', scope: ['vault:read'], nonce: nonce('d') })
+  assert.equal(good.ok, true)
+  assert.equal(good.result.qr, 'cAAAA')
 })
 
 test('no existen las operaciones que no se delegan', async () => {
@@ -203,17 +203,17 @@ test('poner valor: UN destino, y el valor SIEMPRE dentro del sobre', async () =>
   const { admin } = mount({ vars })
 
   // Sin destino, o con los dos, no se adivina dónde acaba la variable.
-  const sinDestino = await admin.handle({ op: 'var.set', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('1') })
-  assert.match(sinDestino.error, /exactly one target/)
-  const dosDestinos = await admin.handle({ op: 'var.set', ns: 'proxy', pub: 'PUB', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('2') })
-  assert.match(dosDestinos.error, /exactly one target/)
+  const noTarget = await admin.handle({ op: 'var.set', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('1') })
+  assert.match(noTarget.error, /exactly one target/)
+  const twoTargets = await admin.handle({ op: 'var.set', ns: 'proxy', pub: 'PUB', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('2') })
+  assert.match(twoTargets.error, /exactly one target/)
 
   // Un valor en claro no se acepta: no es algo que se pueda «arreglar» guardándolo igual.
-  const enClaro = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PORT', value: '8443', nonce: nonce('3') })
-  assert.match(enClaro.error, /sealed with the profile content key/)
+  const inClear = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PORT', value: '8443', nonce: nonce('3') })
+  assert.match(inClear.error, /sealed with the profile content key/)
 
-  const sinClave = await admin.handle({ op: 'var.set', ns: 'proxy', enc: { ct: 'x' }, nonce: nonce('4') })
-  assert.match(sinClave.error, /needs a key/)
+  const noKey = await admin.handle({ op: 'var.set', ns: 'proxy', enc: { ct: 'x' }, nonce: nonce('4') })
+  assert.match(noKey.error, /needs a key/)
 
   assert.deepEqual(vars.calls, [], 'nada de eso llegó a la bóveda')
 })
@@ -230,10 +230,10 @@ test('poner valor llega al cajón que toca, con su visibilidad, y se AVISA a tod
   )
 
   await admin.handle({ op: 'var.set', pub: 'PUB-DEL-PROXY', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('6') })
-  const alAparato = vars.calls[1][1]
-  assert.equal(alAparato.ns, null)
-  assert.equal(alAparato.pub, 'PUB-DEL-PROXY')
-  assert.equal(alAparato.public, undefined, 'sin decir nada, la bóveda conserva la visibilidad')
+  const toDevice = vars.calls[1][1]
+  assert.equal(toDevice.ns, null)
+  assert.equal(toDevice.pub, 'PUB-DEL-PROXY')
+  assert.equal(toDevice.public, undefined, 'sin decir nada, la bóveda conserva la visibilidad')
 
   // Cambiar la configuración de un servicio a distancia no puede ser invisible.
   assert.deepEqual(notices.map(([ev]) => ev), ['vars', 'vars'])

@@ -20,26 +20,26 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const RAIZ = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-const DAEMON = path.join(RAIZ, 'bin', 'dotrino-vaultd.js')
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const DAEMON = path.join(ROOT, 'bin', 'dotrino-vaultd.js')
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vaultd-'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function arrancar (dir) {
+function start (dir) {
   const p = spawn(process.execPath, [DAEMON], {
     env: { ...process.env, DOTRINO_VAULT_DIR: dir },
     stdio: ['ignore', 'pipe', 'pipe']
   })
-  let salida = ''
-  p.stdout.on('data', (d) => { salida += d })
-  p.stderr.on('data', (d) => { salida += d })
-  return { p, log: () => salida }
+  let output = ''
+  p.stdout.on('data', (d) => { output += d })
+  p.stderr.on('data', (d) => { output += d })
+  return { p, log: () => output }
 }
 
 /** Espera a que exista un archivo, hasta `ms`. Devuelve si apareció. */
-async function esperarArchivo (file, ms = 12000) {
-  const hasta = Date.now() + ms
-  while (Date.now() < hasta) {
+async function waitForFile (file, ms = 12000) {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
     if (fs.existsSync(file)) return true
     await sleep(200)
   }
@@ -48,30 +48,30 @@ async function esperarArchivo (file, ms = 12000) {
 
 test('el daemon atiende una petición SIN que nadie le mande una señal (el caso Windows)', async () => {
   const dir = tmp()
-  const { p } = arrancar(dir)
-  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+  const { p } = start(dir)
+  assert.ok(await waitForFile(path.join(dir, 'state.json')), 'arrancó')
 
   // Esto es lo único que hace el CLI en Windows: dejar el archivo. Sin SIGUSR1.
   fs.writeFileSync(path.join(dir, 'pair-request.json'), JSON.stringify({ at: Date.now() }))
 
-  const atendido = await esperarArchivo(path.join(dir, 'pair.json'))
+  const served = await waitForFile(path.join(dir, 'pair.json'))
   p.kill()
-  assert.ok(atendido, 'el daemon leyó la petición solo con verla aparecer')
+  assert.ok(served, 'el daemon leyó la petición solo con verla aparecer')
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
 test('una segunda bóveda sobre los MISMOS datos no arranca', async () => {
   const dir = tmp()
-  const primera = arrancar(dir)
-  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'la primera arrancó')
+  const first = start(dir)
+  assert.ok(await waitForFile(path.join(dir, 'state.json')), 'la primera arrancó')
 
-  const segunda = arrancar(dir)
-  const code = await new Promise((r) => segunda.p.on('exit', r))
-  primera.p.kill()
+  const second = start(dir)
+  const code = await new Promise((r) => second.p.on('exit', r))
+  first.p.kill()
 
   assert.equal(code, 3, 'sale con error, no se pone a competir')
-  assert.match(segunda.log(), /vault is already running/i)
-  assert.match(segunda.log(), /DOTRINO_VAULT_DIR/, 'y dice cómo tener dos a propósito')
+  assert.match(second.log(), /vault is already running/i)
+  assert.match(second.log(), /DOTRINO_VAULT_DIR/, 'y dice cómo tener dos a propósito')
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
@@ -86,8 +86,8 @@ test('una segunda bóveda sobre los MISMOS datos no arranca', async () => {
  */
 test('nadie pregunta: el daemon NO vuelca devices.json por su cuenta', async () => {
   const dir = tmp()
-  const { p } = arrancar(dir)
-  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+  const { p } = start(dir)
+  assert.ok(await waitForFile(path.join(dir, 'state.json')), 'arrancó')
 
   const dev = path.join(dir, 'devices.json')
   // Que exista uno viejo no cuenta: se borra y se le dan varias vueltas del repaso (2 s).
@@ -101,8 +101,8 @@ test('nadie pregunta: el daemon NO vuelca devices.json por su cuenta', async () 
 
 test('y la respuesta a una petición NO se la pisa el repaso siguiente', async () => {
   const dir = tmp()
-  const { p } = arrancar(dir)
-  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+  const { p } = start(dir)
+  assert.ok(await waitForFile(path.join(dir, 'state.json')), 'arrancó')
 
   const dev = path.join(dir, 'devices.json')
   fs.rmSync(dev, { force: true })
@@ -110,8 +110,8 @@ test('y la respuesta a una petición NO se la pisa el repaso siguiente', async (
 
   const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
   let d = null
-  const hasta = Date.now() + 10000
-  while (Date.now() < hasta && !(d = leer())?.at) await sleep(100)
+  const until = Date.now() + 10000
+  while (Date.now() < until && !(d = leer())?.at) await sleep(100)
   assert.equal(d?.req, 'yo-1', 'el volcado dice a QUIÉN contesta')
 
   // Lo que rompía: dos vueltas del repaso después, el archivo era otro (`req: null`) y
@@ -133,8 +133,8 @@ test('y la respuesta a una petición NO se la pisa el repaso siguiente', async (
  */
 test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', async () => {
   const dir = tmp()
-  const { p } = arrancar(dir)
-  assert.ok(await esperarArchivo(path.join(dir, 'state.json')), 'arrancó')
+  const { p } = start(dir)
+  assert.ok(await waitForFile(path.join(dir, 'state.json')), 'arrancó')
 
   const req = path.join(dir, 'dump-request.json')
   const dev = path.join(dir, 'devices.json')
@@ -153,9 +153,9 @@ test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', as
     // Ahora entera: se atiende, y AHÍ sí se consume.
     fs.writeFileSync(req, JSON.stringify({ id: 'yo-2', at: Date.now() }))
     const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
-    const hasta = Date.now() + 10000
+    const until = Date.now() + 10000
     let d = null
-    while (Date.now() < hasta && !(d = leer())?.at) await sleep(100)
+    while (Date.now() < until && !(d = leer())?.at) await sleep(100)
     assert.equal(d?.req, 'yo-2', 'la respuesta llega y dice a quién contesta')
     assert.ok(!fs.existsSync(req), 'la petición atendida sí se consume')
   } finally {
@@ -167,14 +167,14 @@ test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', as
 test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const dir = tmp()
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ v: 2, pid: 999999 }))
-  const { p } = arrancar(dir)
+  const { p } = start(dir)
   // Arrancó = `state.json` pasa a llevar SU pid (el archivo ya estaba, con el muerto).
   // Antes se esperaba a `profiles-list.json`, que el daemon volcaba solo cada dos
   // segundos; ya no lo hace —ese archivo es la RESPUESTA a una petición y volcarlo sin
   // que nadie pregunte se llevaba por delante las respuestas de verdad (ver daemon.js).
-  const hasta = Date.now() + 12000
+  const until = Date.now() + 12000
   let ok = false
-  while (Date.now() < hasta && !ok) {
+  while (Date.now() < until && !ok) {
     const s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8') || '{}')
     ok = Number(s.pid) === p.pid
     if (!ok) await sleep(200)

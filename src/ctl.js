@@ -73,13 +73,13 @@ const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
  * contenedor, así que decir siempre «systemctl» manda a la mitad de la gente a un
  * comando que no existe.
  */
-const EN_DOCKER = !!process.env.DOTRINO_IN_DOCKER
-const START_HINT = EN_DOCKER
+const IN_DOCKER = !!process.env.DOTRINO_IN_DOCKER
+const START_HINT = IN_DOCKER
   ? 'docker start dotrino-vault'
   : process.platform === 'linux'
     ? 'systemctl --user start dotrino-vault'
     : 'dotrino-vaultd   (o: npx -y @dotrino/vaultd)'
-const RESTART_HINT = EN_DOCKER
+const RESTART_HINT = IN_DOCKER
   ? 'docker restart dotrino-vault'
   : process.platform === 'linux'
     ? 'systemctl --user restart dotrino-vault'
@@ -101,7 +101,7 @@ function alive (pid) { try { return !!pid && (process.kill(pid, 0) || true) } ca
  * vigila la carpeta igualmente, así que la petición se atiende en cuanto se escribe el
  * archivo; la señal solo se ahorra la latencia del watcher.
  */
-function avisar (pid, sig) { try { process.kill(pid, sig) } catch (_) { /* Windows, o el daemon ya se enteró */ } }
+function sendSignal (pid, sig) { try { process.kill(pid, sig) } catch (_) { /* Windows, o el daemon ya se enteró */ } }
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 function requireDaemon () {
   const s = readState()
@@ -211,7 +211,7 @@ async function cmdPair (args = []) {
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
   writeReq('pair-request.json', { ...(service ? { service } : {}), ...(adopt ? { mode: 'adopt' } : {}) })
-  avisar(s.pid, 'SIGUSR1')
+  sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
   for (let i = 0; i < 50; i++) {
@@ -269,7 +269,7 @@ function cmdApprove (code) {
   if (!code) { console.error('uso: dotrino-vault approve <código>   (los dígitos que muestra el dispositivo)'); process.exit(2) }
   const s = requireDaemon()
   writeReq('approve-request.json', { code: String(code) })
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   console.log('Aprobando con el código %s… verifica con: dotrino-vault devices', code)
 }
 
@@ -277,7 +277,7 @@ function cmdReject (deviceId) {
   if (!deviceId) { console.error('uso: dotrino-vault reject <deviceId>'); process.exit(2) }
   const s = requireDaemon()
   writeReq('reject-request.json', { deviceId })
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   console.log('Rechazado %s.', deviceId)
 }
 
@@ -297,7 +297,7 @@ async function cmdMe () {
   const meFile = path.join(dir, 'me.json')
   try { fs.rmSync(meFile, { force: true }) } catch (_) {}
   writeReq('me-request.json', {})
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   let dump = null
   for (let n = 0; n < 50; n++) { await sleep(100); const d = readJson(meFile, null); if (d?.at) { dump = d; break } }
   // El volcado es contenido del usuario: se lee y se BORRA, no se queda ahí suelto.
@@ -312,8 +312,8 @@ async function cmdMe () {
     return
   }
 
-  const cuando = me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—'
-  console.log('\n%sPerfil%s · actualizado %s\n', B, Z, cuando)
+  const when = me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—'
+  console.log('\n%sPerfil%s · actualizado %s\n', B, Z, when)
   console.log('  nombre      : %s', me.nickname || '(sin nombre)')
   console.log('  foto        : %s', me.avatar
     ? `sí · ${me.avatar.type || 'desconocido'} · ${(me.avatar.bytes / 1024).toFixed(1)} KB`
@@ -322,17 +322,17 @@ async function cmdMe () {
   // Los campos estándar. `visible` es del usuario: teléfono y dirección nacen ocultos.
   const STD = [['nombres', 'nombres'], ['apellidos', 'apellidos'], ['email', 'correo'],
     ['telefono', 'teléfono'], ['direccion', 'dirección']]
-  const puestos = STD.filter(([k]) => me[k])
-  if (puestos.length) {
+  const filled = STD.filter(([k]) => me[k])
+  if (filled.length) {
     console.log('')
-    for (const [k, etiqueta] of puestos) {
-      console.log('  %s: %s%s', etiqueta.padEnd(12), me[k], me[k + 'Visible'] === false ? '   (oculto)' : '')
+    for (const [k, label] of filled) {
+      console.log('  %s: %s%s', label.padEnd(12), me[k], me[k + 'Visible'] === false ? '   (oculto)' : '')
     }
   }
-  for (const [titulo, lista] of [['Enlaces', me.links], ['Otros datos', me.fields]]) {
-    if (!Array.isArray(lista) || !lista.length) continue
-    console.log('\n  %s:', titulo)
-    for (const x of lista) console.log('    %s %s%s', (x.type || x.label || '').padEnd(12), x.value, x.visible === false ? '   (oculto)' : '')
+  for (const [title, list] of [['Enlaces', me.links], ['Otros datos', me.fields]]) {
+    if (!Array.isArray(list) || !list.length) continue
+    console.log('\n  %s:', title)
+    for (const x of list) console.log('    %s %s%s', (x.type || x.label || '').padEnd(12), x.value, x.visible === false ? '   (oculto)' : '')
   }
 
   console.log('')
@@ -344,31 +344,31 @@ async function cmdMe () {
  */
 async function cmdMembers () {
   const s = requireDaemon()
-  const actaFile = path.join(dataDir(), 'acta.json')
-  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
+  const recordFile = path.join(dataDir(), 'acta.json')
+  try { fs.rmSync(recordFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {})
-  avisar(s.pid, 'SIGUSR2')
-  let acta = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
-  if (!acta) { console.error('El daemon no respondió.'); process.exit(1) }
-  assertOpen(acta)
-  if (!acta.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
+  sendSignal(s.pid, 'SIGUSR2')
+  let record = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(recordFile, null); if (a?.at) { record = a; break } }
+  if (!record) { console.error('El daemon no respondió.'); process.exit(1) }
+  assertOpen(record)
+  if (!record.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
   const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}` }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
   // misma que se enseña al emparejar y en la lista de miembros.
-  const perfilId = await deviceIdOf(acta.profileId).catch(() => '????-????')
-  console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, perfilId, acta.seq)
-  for (const m of acta.members) {
-    const quien = m.label || m.id
-    const marcas = [
+  const profileId = await deviceIdOf(record.profileId).catch(() => '????-????')
+  console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, profileId, record.seq)
+  for (const m of record.members) {
+    const who = m.label || m.id
+    const marks = [
       m.isMaster ? `${B}Master${Z}` : null,
       m.isMe ? 'este dispositivo' : null,
       m.cn ? `servicio «${m.cn}»` : null
     ].filter(Boolean)
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
-    console.log('  %s  %s%s\n      %s', m.id, quien, marcas.length ? '  [' + marcas.join(' · ') + ']' : '', caps)
+    console.log('  %s  %s%s\n      %s', m.id, who, marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
   }
   console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
@@ -384,56 +384,56 @@ async function cmdMembers () {
  * tener que revocar y volver a emparejar.
  */
 async function cmdLabel (args = []) {
-  const [id, ...resto] = args
-  const nombre = resto.join(' ').trim()
-  if (!id || !nombre) {
+  const [id, ...rest] = args
+  const name = rest.join(' ').trim()
+  if (!id || !name) {
     console.error('uso: dotrino-vault label <ID> <nombre>   (p.ej. label AB12-CD34 "Teléfono de casa")')
     process.exit(2)
   }
-  const m = await buscarMiembro(id)
-  writeReq('label-request.json', { pub: m.pub, label: nombre })
-  avisar(requireDaemon().pid, 'SIGUSR2')
-  console.log('Listo: %s ahora se llama «%s». Compruébalo con: dotrino-vault members', m.id, nombre.slice(0, 60))
+  const m = await findMember(id)
+  writeReq('label-request.json', { pub: m.pub, label: name })
+  sendSignal(requireDaemon().pid, 'SIGUSR2')
+  console.log('Listo: %s ahora se llama «%s». Compruébalo con: dotrino-vault members', m.id, name.slice(0, 60))
 }
 
 /** Busca un miembro del acta por su identificador (AB12-CD34) o se rinde con un mensaje claro. */
-async function buscarMiembro (id) {
+async function findMember (id) {
   const s = requireDaemon()
-  const actaFile = path.join(dataDir(), 'acta.json')
-  try { fs.rmSync(actaFile, { force: true }) } catch (_) {}
+  const recordFile = path.join(dataDir(), 'acta.json')
+  try { fs.rmSync(recordFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {})
-  avisar(s.pid, 'SIGUSR2')
-  let acta = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(actaFile, null); if (a?.at) { acta = a; break } }
-  assertOpen(acta)
-  const m = acta?.members?.find((x) => x.id === String(id).toUpperCase())
+  sendSignal(s.pid, 'SIGUSR2')
+  let record = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(recordFile, null); if (a?.at) { record = a; break } }
+  assertOpen(record)
+  const m = record?.members?.find((x) => x.id === String(id).toUpperCase())
   if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
   return m
 }
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
-  const [id, ...cambios] = args
-  if (!id || !cambios.length) {
+  const [id, ...changes] = args
+  if (!id || !changes.length) {
     console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra')
     process.exit(2)
   }
-  const NOMBRE = {
+  const CAP_BY_WORD = {
     firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin',
     sign: 'sign', store: 'store', read: 'read', admin: 'admin'
   }
   const s = requireDaemon()
-  const m = await buscarMiembro(id)
+  const m = await findMember(id)
 
   const caps = new Set(m.caps)
-  for (const c of cambios) {
-    const signo = c[0]
-    const cap = NOMBRE[c.slice(1).toLowerCase()]
-    if (!cap || (signo !== '+' && signo !== '-')) { console.error('permiso no reconocido: %s', c); process.exit(2) }
-    if (signo === '+') caps.add(cap); else caps.delete(cap)
+  for (const c of changes) {
+    const sign = c[0]
+    const cap = CAP_BY_WORD[c.slice(1).toLowerCase()]
+    if (!cap || (sign !== '+' && sign !== '-')) { console.error('permiso no reconocido: %s', c); process.exit(2) }
+    if (sign === '+') caps.add(cap); else caps.delete(cap)
   }
   writeReq('caps-request.json', { pub: m.pub, caps: [...caps] })
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   console.log('Listo. Compruébalo con: dotrino-vault members')
 }
 
@@ -441,26 +441,26 @@ async function cmdDevices () {
   const s = requireDaemon()
   try { fs.rmSync(devFile, { force: true }) } catch (_) {}
   writeReq('dump-request.json', {}) // de qué perfil queremos los dispositivos
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   let snap = null
   for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
   if (!snap) { console.error('El daemon no respondió.'); process.exit(1) }
   assertOpen(snap)
   const revoked = snap.revoked || []
-  const fuera = new Set(revoked.map((r) => r?.nonce || r))
+  const revokedSet = new Set(revoked.map((r) => r?.nonce || r))
   // UN APARATO, UNA LÍNEA. El daemon lleva la cuenta por CERTIFICADO —correcto para él,
   // porque revocar es revocar un papel—, pero renovar emite uno nuevo cada 30 días: un
   // aparato de un año salía doce veces, y los ya retirados seguían contando como
   // enrolados. Se agrupa por llave y se dice cuántos certificados tiene.
-  const porLlave = new Map()
+  const byKey = new Map()
   for (const d of (snap.issued || snap.active || snap.delegations || [])) {
-    if (d.revokedAt || fuera.has(d.nonce)) continue
-    const clave = d.sub || d.nonce
-    const y = porLlave.get(clave)
-    if (!y) porLlave.set(clave, { ...d, certs: 1 })
+    if (d.revokedAt || revokedSet.has(d.nonce)) continue
+    const key = d.sub || d.nonce
+    const y = byKey.get(key)
+    if (!y) byKey.set(key, { ...d, certs: 1 })
     else { y.certs++; if ((d.exp || 0) > (y.exp || 0)) Object.assign(y, { ...d, certs: y.certs }) }
   }
-  const active = [...porLlave.values()]
+  const active = [...byKey.values()]
   console.log('Dispositivos enrolados: %d', active.length)
   for (const d of active) {
     const did = d.sub ? await deviceIdOf(d.sub) : '????-????'
@@ -490,14 +490,14 @@ async function cmdRevoke (arg) {
   const esId = /^[0-9a-f]{4}-?[0-9a-f]{4}$/i.test(arg)
   const s = requireDaemon()
   if (esId) {
-    const m = await buscarMiembro(arg.toUpperCase().includes('-') ? arg.toUpperCase() : arg.toUpperCase().replace(/(.{4})(.{4})/, '$1-$2'))
+    const m = await findMember(arg.toUpperCase().includes('-') ? arg.toUpperCase() : arg.toUpperCase().replace(/(.{4})(.{4})/, '$1-$2'))
     writeReq('revoke-request.json', { sub: m.pub })
-    avisar(s.pid, 'SIGUSR2')
+    sendSignal(s.pid, 'SIGUSR2')
     console.log('Quitado %s (todos sus certificados). Se autoborrará al reconectar. Verifica: dotrino-vault devices', m.id)
     return
   }
   writeReq('revoke-request.json', { nonce: arg })
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   console.log('Revocación enviada para nonce=%s. El dispositivo se autoborrará al reconectar. Verifica: dotrino-vault devices', arg)
 }
 
@@ -564,7 +564,7 @@ function asPairs (args) {
 }
 
 /** Un `.env` con un problema no se carga A MEDIAS: se dice qué línea y no se escribe nada. */
-function abortarEnv (errors) {
+function abortEnv (errors) {
   console.error('%sNo se cargó nada%s:', R, Z)
   for (const e of errors) console.error('  · %s', envErrorText(e))
   process.exit(2)
@@ -580,7 +580,7 @@ function envErrorText (e) {
 }
 
 /** El problema de una variable, en español, o `null`. Las reglas son las del cajón. */
-function problemaDe (key, value) {
+function problemWith (key, value) {
   try { assertVar(key, value); return null } catch (e) {
     if (/invalid key/.test(e.message)) return 'el nombre va en MAYÚSCULAS_CON_GUION_BAJO (p. ej. TURN_KEY_ID)'
     if (/non-empty/.test(e.message)) return 'no tiene valor (para quitarla: secret rm)'
@@ -605,7 +605,7 @@ async function cmdSecret (rest) {
   const signalAndWaitList = async () => {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
     writeReq('dump-request.json', {}) // de qué perfil son los secretos
-    avisar(s.pid, 'SIGUSR2')
+    sendSignal(s.pid, 'SIGUSR2')
     for (let i = 0; i < 50; i++) {
       await sleep(100)
       const d = readJson(secretsListFile, null)
@@ -643,34 +643,34 @@ async function cmdSecret (rest) {
    * se carga ninguna. Media configuración aplicada es peor que ninguna, porque el
    * servicio arranca con ella y parece que funcionó.
    */
-  const sendBatch = async ({ ns = null, pub = null, items, donde }) => {
-    const malas = items.map((it) => [it.key, problemaDe(it.key, it.value)]).filter(([, p]) => p)
-    if (malas.length) {
+  const sendBatch = async ({ ns = null, pub = null, items, where }) => {
+    const bad = items.map((it) => [it.key, problemWith(it.key, it.value)]).filter(([, p]) => p)
+    if (bad.length) {
       console.error('%sNo se cargó nada%s. Revisa:', R, Z)
-      for (const [key, p] of malas) console.error('  · %s: %s', key, p)
+      for (const [key, p] of bad) console.error('  · %s: %s', key, p)
       process.exit(2)
     }
-    const conVis = items.map((it) => (isPublic === undefined ? it : { ...it, public: isPublic }))
-    writeReq('secret-request.json', pub ? { op: 'batch', pub, items: conVis } : { op: 'batch', ns, items: conVis })
+    const withVisibility = items.map((it) => (isPublic === undefined ? it : { ...it, public: isPublic }))
+    writeReq('secret-request.json', pub ? { op: 'batch', pub, items: withVisibility } : { op: 'batch', ns, items: withVisibility })
     const d = await signalAndWaitList()
     const list = pub
       ? ((Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === pub)?.keys || [])
       : (d.ns?.[ns] || [])
-    const faltan = items.filter((it) => !has(list, it.key)).map((it) => it.key)
-    if (faltan.length) {
-      console.error('El daemon no guardó: %s (revisa: dotrino-vault logs)', faltan.join(', '))
+    const missing = items.filter((it) => !has(list, it.key)).map((it) => it.key)
+    if (missing.length) {
+      console.error('El daemon no guardó: %s (revisa: dotrino-vault logs)', missing.join(', '))
       process.exit(1)
     }
-    console.log('%d variables guardadas en %s%s%s%s', items.length, B, donde, Z,
+    console.log('%d variables guardadas en %s%s%s%s', items.length, B, where, Z,
       isPublic === undefined ? '' : isPublic ? '   (públicas)' : '   (privadas)')
     console.log('Un solo aviso de cambio: el servicio se reinicia una vez, con todo puesto.')
   }
 
   /** El texto del `.env`: de un archivo, o de la entrada estándar si no se da ninguno. */
-  const leerEnv = (archivo) => {
-    if (archivo) {
-      try { return fs.readFileSync(archivo, 'utf8') } catch (e) {
-        console.error('No se pudo leer %s: %s', archivo, e.message); process.exit(1)
+  const readEnvText = (file) => {
+    if (file) {
+      try { return fs.readFileSync(file, 'utf8') } catch (e) {
+        console.error('No se pudo leer %s: %s', file, e.message); process.exit(1)
       }
     }
     if (process.stdin.isTTY) {
@@ -719,9 +719,9 @@ async function cmdSecret (rest) {
     const [op, id, key, ...valueParts] = args
     const value = valueParts.join(' ')
     const ops = ['set', 'rm', 'visibility', 'import']
-    const enGrupo = op === 'import' || (op === 'set' && !!asPairs(args.slice(2)))
-    if (!ops.includes(op) || !id || (!enGrupo && (!key || (op === 'set' && !value)))) { console.error(USAGE); process.exit(2) }
-    const m = await buscarMiembro(id)
+    const asGroup = op === 'import' || (op === 'set' && !!asPairs(args.slice(2)))
+    if (!ops.includes(op) || !id || (!asGroup && (!key || (op === 'set' && !value)))) { console.error(USAGE); process.exit(2) }
+    const m = await findMember(id)
     // Se avisa aquí, con nombre y apellido, en vez de dejar que el daemon lo rechace y la
     // CLI diga «no aplicó el cambio»: quien escribe esto quiere saber POR QUÉ no vale.
     if (!m.cn) {
@@ -730,11 +730,11 @@ async function cmdSecret (rest) {
       process.exit(1)
     }
     if (op === 'import') {
-      const { items, errors } = parseEnvText(leerEnv(args[2]))
-      if (errors.length) return abortarEnv(errors)
-      return sendBatch({ pub: m.pub, items, donde: m.id })
+      const { items, errors } = parseEnvText(readEnvText(args[2]))
+      if (errors.length) return abortEnv(errors)
+      return sendBatch({ pub: m.pub, items, where: m.id })
     }
-    if (enGrupo) return sendBatch({ pub: m.pub, items: asPairs(args.slice(2)), donde: m.id })
+    if (asGroup) return sendBatch({ pub: m.pub, items: asPairs(args.slice(2)), where: m.id })
     if (key && PAIR_RE.test(key) && args.length > 3) {
       console.error('%s\n\nO todos los argumentos son CLAVE=valor, o es una sola variable.', USAGE)
       process.exit(2)
@@ -757,19 +757,19 @@ async function cmdSecret (rest) {
   // Desde un `.env`: el caso real de estrenar un servicio, y el que de una en una
   // reiniciaba al agente una vez por variable.
   if (sub === 'import') {
-    const [ns, archivo] = args
+    const [ns, file] = args
     if (!ns) { console.error(USAGE); process.exit(2) }
-    const { items, errors } = parseEnvText(leerEnv(archivo))
-    if (errors.length) return abortarEnv(errors)
-    return sendBatch({ ns, items, donde: ns })
+    const { items, errors } = parseEnvText(readEnvText(file))
+    if (errors.length) return abortEnv(errors)
+    return sendBatch({ ns, items, where: ns })
   }
 
   if (sub === 'set' || sub === 'rm' || sub === 'visibility') {
     const [ns, key, ...valueParts] = args
     const value = valueParts.join(' ')
     // `set <ns> CLAVE=valor CLAVE2=valor2` — varias de una vez, un solo aviso.
-    const pares = sub === 'set' ? asPairs(args.slice(1)) : null
-    if (ns && pares) return sendBatch({ ns, items: pares, donde: ns })
+    const pairs = sub === 'set' ? asPairs(args.slice(1)) : null
+    if (ns && pairs) return sendBatch({ ns, items: pairs, where: ns })
     // Mezclar las dos formas (`K1=v1 CLAVE valor`) no es ninguna de las dos: mejor
     // decirlo que guardar una variable llamada «K1=v1».
     if (sub === 'set' && key && PAIR_RE.test(key) && args.length > 2) {
@@ -808,7 +808,7 @@ function wantsPublic (word, usage) {
 function askPassword (prompt) {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin
-    if (!stdin.isTTY) return reject(new Error('hace falta un terminal para escribir la contraseña'))
+    if (!stdin.isTTY) return reject(new Error('a terminal is required to type the password'))
     process.stdout.write(prompt)
     stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8')
     let buf = ''
@@ -820,7 +820,7 @@ function askPassword (prompt) {
     const onData = (ch) => {
       for (const c of ch) {
         if (c === '\n' || c === '\r' || c === '\u0004') return done(null, buf) // Enter / Ctrl-D
-        if (c === '\u0003') return done(new Error('cancelado')) // Ctrl-C
+        if (c === '\u0003') return done(new Error('cancelled')) // Ctrl-C
         if (c === '\u007f' || c === '\b') { buf = buf.slice(0, -1); continue } // borrar
         buf += c
       }
@@ -838,7 +838,7 @@ async function profileRequest (op, extra = {}) {
   const s = requireDaemon()
   try { fs.rmSync(profilesFile, { force: true }) } catch (_) {}
   writeReq('profile-request.json', { op, ...extra })
-  avisar(s.pid, 'SIGUSR2')
+  sendSignal(s.pid, 'SIGUSR2')
   for (let i = 0; i < 100; i++) {
     await sleep(100)
     const d = readJson(profilesFile, null)
