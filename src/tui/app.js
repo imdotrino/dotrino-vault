@@ -801,6 +801,19 @@ async function onKeyDevices (term, st, key) {
 }
 
 /**
+ * Tira la cuenta que NACIÓ para un emparejamiento que no llegó a término y vuelve a la que
+ * estabas usando. Es una cuenta recién creada y vacía —el aparato nunca entró—, así que no
+ * hay nada dentro que perder; lo que sí molesta es que se queden acumulando.
+ */
+async function descartarCuenta (term, st, id, volverA) {
+  const i = L(st)
+  const r = await guard(term, st, i.discardingAccount, () => vc.removeProfile(id))
+  if (volverA) await guard(term, st, i.switchingVault, () => vc.useProfile(volverA))
+  await refreshAll(term, st)
+  if (r.ok) flash(st, i.accountDiscarded)
+}
+
+/**
  * Abre el emparejamiento contra `profile` y salta a la pantalla del QR. Con `service`,
  * el QR es el de un SERVICIO de ese namespace (cert limitado a sus variables).
  */
@@ -895,6 +908,7 @@ async function onKeyPairMode (term, st, key) {
       st.input = null
       const name = raw.trim()
       if (!name) { flash(st, i.nameEmpty, 'danger'); return }
+      const previa = activeId(st)
       const r = await guard(term, st, i.creatingVault, () => vc.addProfile(name))
       if (!r.ok) return
       const created = r.v?.id || (r.v?.profiles || []).find((p) => p.name === name)?.id
@@ -903,7 +917,11 @@ async function onKeyPairMode (term, st, key) {
       if (!u.ok) return
       await refreshAll(term, st)
       flash(st, i.accountCreated(name))
-      await beginPairing(term, st, created)
+      // Si el emparejamiento no llega a abrirse, la cuenta que se creó PARA él se va con
+      // él: si no, cada intento fallido dejaba una cuenta vacía —y encima activa— que
+      // luego había que ir a borrar a mano adivinando cuál era.
+      if (!await beginPairing(term, st, created)) await descartarCuenta(term, st, created, previa)
+      else st.pairing.born = { id: created, from: previa }
     },
     onCancel: () => { st.input = null }
   })
@@ -922,6 +940,9 @@ function promptApprove (term, st) {
       if (r.ok) {
         flash(st, i.deviceApproved)
         st.pending = null
+        // El aparato entró: la cuenta que se creó para esto ya es de alguien, así que deja
+        // de estar en la lista de las que se descartan al salir.
+        st.pairing = null
         st.screen = 'devices'
         // Sin lista (el volcado se perdió): se pide otra vez. El aparato ya está dentro;
         // lo único que falta es la foto, y esa se vuelve a pedir sin drama.
@@ -963,11 +984,26 @@ async function onKeyPairing (term, st, key) {
     return true
   }
   if (ch === 'r') { // restart: reiniciar el emparejamiento
+    const born = st.pairing?.born
     const r = await guard(term, st, i.restartingPairing, () => vc.startPairing({ profile: activeId(st) }))
-    if (r.ok) { st.pairing = r.v; st.pending = null; st.scroll.pairing = { value: 0 } }
+    if (r.ok) { st.pairing = { ...r.v, ...(born ? { born } : {}) }; st.pending = null; st.scroll.pairing = { value: 0 } }
     return true
   }
-  if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.pairing = null; await refreshDevices(term, st) }
+  if (key.name === 'escape' || ch === 'b') {
+    // Te vas sin que nadie haya entrado, y la cuenta se creó PARA esto: se pregunta antes
+    // de dejarla ahí. Es la otra mitad del mismo descuido — con «cuenta nueva» era fácil
+    // acabar con tres cuentas vacías y ninguna forma de saber cuál era cuál.
+    const born = st.pairing?.born
+    if (born) {
+      setConfirm(st, {
+        text: i.confirmDiscardAccount,
+        onYes: async () => { st.confirm = null; st.pairing = null; st.screen = 'devices'; await descartarCuenta(term, st, born.id, born.from) },
+        onNo: async () => { st.confirm = null; st.pairing = null; st.screen = 'devices'; await refreshDevices(term, st) }
+      })
+      return true
+    }
+    st.screen = 'devices'; st.pairing = null; await refreshDevices(term, st)
+  }
   return true
 }
 

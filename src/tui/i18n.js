@@ -218,6 +218,9 @@ const es = {
   newAccountLabel: 'Nombre de la cuenta nueva',
   newAccountHint: 'nace vacía; el dispositivo será su primer invitado',
   accountCreated: (name) => `Cuenta creada: ${name}`,
+  discardingAccount: 'Descartando la cuenta…',
+  accountDiscarded: 'Cuenta descartada: nadie llegó a entrar en ella',
+  confirmDiscardAccount: 'La cuenta se creó para este emparejamiento y quedó vacía. ¿La descarto?',
   // Cuenta + vigencia en UNA línea: cada línea de cabecera es una fila menos de QR
   // visible antes de tener que hacer scroll.
   pairAccount: (name, min) => `Cuenta que se comparte: ${name}  ·  válido ~${min} min`,
@@ -491,6 +494,9 @@ const en = {
   newAccountLabel: 'Name of the new account',
   newAccountHint: 'born empty; the device will be its first guest',
   accountCreated: (name) => `Account created: ${name}`,
+  discardingAccount: 'Discarding the account…',
+  accountDiscarded: 'Account discarded: nobody got to join it',
+  confirmDiscardAccount: 'The account was created for this pairing and is empty. Discard it?',
   pairAccount: (name, min) => `Account being shared: ${name}  ·  valid ~${min} min`,
   pairScan: 'Scan it, or open this address on the device:',
   pairUrl: 'URL: ',
