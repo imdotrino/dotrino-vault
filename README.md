@@ -694,6 +694,30 @@ secreto no se puede borrar de la memoria (los strings son inmutables, no hay
 `zeroize`) y una llave se rota casi siempre *porque se filtró*: un proceso nuevo
 empieza con el heap limpio.
 
+**Y no se fía del aviso: al conectar, COMPARA.** Un aviso es un mensaje, y los mensajes
+se pierden. Si el agente está vivo pero incomunicado —se cayó el proxio, se fue la red—
+el aviso se le encola; si el corte pasa de **5 minutos** lo descarta al llegar (ventana
+de frescura) y si pasa de **24 h** ni llega (caduca en la cola). Antes ahí se acababa:
+al reconectar volvía a *escuchar*, nunca preguntaba, y se quedaba con la configuración
+vieja para siempre mientras el log decía «ignorado» como si estuviera bien. Ahora, en
+**cada conexión**, el agente pide su bundle y compara la huella con la que tiene
+aplicada; si no coincide, reacciona igual que con el aviso. El aviso sigue siendo el
+camino rápido —de segundos—; la comparación es el que no se pierde. Cubre también los
+avisos que el propio agente descarta por la gracia de arranque o el piso entre avisos, y
+la **revocación** que ocurrió mientras estaba incomunicado (la comparación recibe *no
+autorizado: revoked* y lo apaga). Comparar tiene su propio piso —`reconcileMinMs`, 30 s—
+para que una conexión que va y viene no le pida el bundle a la bóveda cada cinco
+segundos.
+
+**Y no puede volverse un ciclo de reinicios.** Lo que se compara son **dos bundles de la
+bóveda**, nunca el `.env` contra el bundle: la referencia es lo que el agente recibió, así
+que *recibir la configuración por primera vez* —tarde, que es como la recibe el proxio—
+no es un cambio. Encima, un reinicio por comparación no puede repetirse más de una vez
+por **gracia de arranque**: dentro de esos 30 s la comparación **se aplaza** (a
+diferencia del aviso, que ahí sí se descarta), de modo que ni un fallo sistemático
+lograría más de un reinicio cada 30 s — tiempo de sobra para que el supervisor lo marque
+como inestable en vez de que la máquina se pase el día arrancando.
+
 **Modos de fallo:**
 
 - **Vault caído / proxy caído** → **espera** (reintento con backoff, para siempre).

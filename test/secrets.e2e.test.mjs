@@ -355,6 +355,140 @@ test('la bóveda avisa a ESE aparato cuando cambia una variable suya', async () 
   } finally { w.stop() }
 })
 
+test('el aviso que NO llegó no deja al agente con la configuración vieja: al conectar compara', async () => {
+  // El caso que rompía: el agente sigue vivo pero incomunicado (se cayó el proxio, se
+  // fue la red). La bóveda manda el aviso, nadie lo recoge y queda en la cola; si el
+  // corte pasa de cinco minutos, al volver lo tira la ventana de frescura, y si pasa de
+  // 24 h ni llega. Antes ahí se acababa la historia: al reconectar el agente solo volvía
+  // a ESCUCHAR, nunca preguntaba, y se quedaba con la configuración vieja para siempre
+  // mientras el log decía «ignorado» como si estuviera todo bien.
+  //
+  // Se reproduce sin tocar la red: se le dice al vigía qué configuración tiene en uso
+  // (`applied`) y se cambia el secreto ANTES de que exista — o sea, el aviso salió
+  // cuando no había nadie escuchando, que es exactamente lo que pasa estando caído.
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const running = await fetchSecretsFrom(svcDir)
+
+  vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-mientras-no-miraba')
+  await new Promise((r) => setTimeout(r, 600))   // el aviso sale y se pierde: no hay vigía
+
+  const changes = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', applied: running, reconcileMinMs: 0,
+    graceMs: 0, minIntervalMs: 999999, jitterMs: 0,
+    onChange: (i) => changes.push(i)
+  })
+  try {
+    await esperarA(() => changes.length > 0, 'la comparación al conectar')
+    assert.equal(changes[0].via, 'reconcile', 'no se enteró por un aviso: se enteró preguntando')
+    assert.equal(changes[0].ns, 'proxy')
+    // Y no se repite: lo que encontró pasa a ser la referencia.
+    assert.equal(await w.reconcile(), false, 'comparar otra vez no vuelve a disparar')
+  } finally { w.stop() }
+})
+
+test('si la configuración es la misma, comparar no reinicia a nadie', async () => {
+  // La otra mitad, y la que evita convertir el arreglo en un reinicio por reconexión:
+  // el orden de las claves no cuenta (el bundle se arma mezclando dos cajones) y una
+  // visibilidad no cambia lo que el servicio lee.
+  const { watchSecretsChanges, readServiceIdentity } = await import('../lib/src/service.js')
+  const me = readServiceIdentity(svcDir).device.publickey
+  const changes = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', applied: await fetchSecretsFrom(svcDir), reconcileMinMs: 0,
+    graceMs: 0, minIntervalMs: 999999, jitterMs: 0,
+    onChange: (i) => changes.push(i)
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 800))   // que termine la comparación del arranque
+    assert.equal(await w.reconcile(), false, 'nada cambió: nadie se muere')
+    vault.setSecretVisibility('proxy', 'TURN_KEY_ID', true)
+    assert.equal(await w.reconcile(), false, 'cambiar quién ve el valor no es cambiar el valor')
+    await new Promise((r) => setTimeout(r, 600))
+    assert.equal(changes.length, 0)
+
+    // Y con un cambio de verdad sí, aunque sea del cajón del aparato.
+    await vault.setDeviceSecret(me, 'PORT', '9999')
+    assert.equal(await w.reconcile(), true)
+  } finally {
+    w.stop()
+    vault.setSecretVisibility('proxy', 'TURN_KEY_ID', false)
+  }
+})
+
+test('el proxio arranca SIN variables y las recibe después: eso no es un cambio', async () => {
+  // El camino exacto del proxio, que es el único que no espera al vault: sirve con su
+  // `.env`, recibe el bundle tarde y lo aplica con `applyEnv`. Si la comparación tomara
+  // ese primer bundle por «configuración distinta», el proxio se reiniciaría en cada
+  // arranque — y como al volver haría lo mismo, sería un ciclo perpetuo.
+  //
+  // No puede pasar porque lo que se compara son dos bundles de la bóveda, nunca el
+  // `.env` contra el bundle: la referencia es lo que el agente recibió. Aquí se
+  // comprueba, no se argumenta.
+  const { enrollService, waitForSecrets } = await import('../lib/src/service.js')
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  const { applyEnv, watchEnv } = await import('../lib/src/env.js')
+  // Servicio propio, como un proxio recién arrancado: los otros tests dejan avisos
+  // encolados en el proxio para la llave que comparten (24 h de cola), y se drenarían
+  // aquí sin tener nada que ver con lo que se está probando.
+  const ns = 'proxio'
+  const dir = tmp('svc-proxio-')
+  vault.setSecret(ns, 'RELAY_URL', 'wss://uno.example')
+  // La configuración se deja puesta ANTES de que el servicio exista, y se espera a que
+  // pase la ventana de agrupado: así ese primer `set` no le deja un aviso en la cola
+  // (cuando sale, no hay a quién mandárselo). Es el orden real —primero se configura el
+  // servicio, después se enrola— y aquí además evita medir el eco de la preparación.
+  await new Promise((r) => setTimeout(r, 600))
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'servicio:' + ns, ttlMs: 60000 })
+  await enrollService({
+    qr: encodeInvite(qr), ns, dir,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+
+  const changes = []
+  const secrets = await waitForSecrets({ dir, ns })
+  applyEnv(secrets)                                    // …y el proxio ya estaba sirviendo
+  const w = await watchEnv({
+    ns, dir, quiet: true, reconcileMinMs: 0,
+    graceMs: 0, minIntervalMs: 999999, jitterMs: 0,
+    onUpdate: (i) => changes.push(i)                   // sin esto, `watchEnv` mataría el test
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 1200))
+    assert.deepEqual(changes, [], 'recibir la configuración por primera vez no reinicia a nadie')
+    assert.equal(await w.reconcile(), false, 'ni a la segunda, ni a la tercera')
+    // Y `applied` no hace falta cablearlo: `watchEnv` toma como referencia lo último que
+    // pasó por `applyEnv`, así que cualquier agente queda cubierto sin tocar su código.
+    vault.setSecret(ns, 'RELAY_URL', 'wss://dos.example')
+    assert.equal(await w.reconcile(), true, 'un cambio de verdad sí')
+  } finally { w.stop() }
+})
+
+test('la comparación no puede volverse un ciclo de reinicios: durante la gracia se APLAZA', async () => {
+  // El cinturón. Si algo hiciera que la comparación encontrara siempre una diferencia,
+  // sin este tope el proceso saldría a los dos segundos de arrancar, una y otra vez.
+  // Con él, como mucho una vez por gracia de arranque — y lo importante: el aviso que
+  // cae dentro de la gracia se APLAZA, no se descarta. Descartarlo era justo el defecto
+  // que todo esto vino a cerrar.
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const running = await fetchSecretsFrom(svcDir)
+  vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-durante-la-gracia')
+  await new Promise((r) => setTimeout(r, 600))
+
+  const changes = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', applied: running, reconcileMinMs: 0,
+    graceMs: 2500, minIntervalMs: 999999, jitterMs: 0,
+    onChange: (i) => changes.push(i)
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 1200))
+    assert.deepEqual(changes, [], 'recién arrancado no se reinicia por comparación')
+    await esperarA(() => changes.length > 0, 'la comparación aplazada hasta el fin de la gracia')
+    assert.equal(changes[0].via, 'reconcile', 'y cuando llega, llega entera')
+  } finally { w.stop() }
+})
+
 test('quitar el aparato se lleva sus variables', async () => {
   // Si se quedaran, serían configuración de una llave que ya no entra — y volverían a la
   // vida el día que se enrole otro aparato con esa misma llave.
