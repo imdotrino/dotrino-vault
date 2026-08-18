@@ -1,8 +1,12 @@
 # Secretos sellados por destinatario
 
-> Diseño acordado el 2026-08-17. **No implementado.** Nace de una pregunta
+> Diseño acordado el 2026-08-17, **implementado y publicado el 2026-08-18**
+> (`@dotrino/identity@0.53.0`, `@dotrino/vault@0.25.0`). Nace de una pregunta
 > concreta: el vault corre en un VPS alquilado, y el dueño de esa máquina puede
 > leer el disco. ¿Qué se hace al respecto?
+>
+> **Falta el paso de producción**: el vault del VPS sigue en v3 (sirviendo en claro)
+> hasta el primer desbloqueo administrativo. Ver §7.
 
 ## 1. El problema, acotado
 
@@ -44,22 +48,26 @@ Dos cambios que se sostienen mutuamente.
 Cada variable privada se guarda cifrada a la llave del **aparato que la va a
 consumir**. El vault pasa a ser un **cartero**: reparte sobres que no puede abrir.
 
-Falta una pieza para poder hacerlo: **el aparato no tiene hoy una llave ECDH
-duradera**. Su llave de dispositivo es ECDSA, solo firma — por eso `sealed.js`
-tiene que inventar una efímera en cada petición. Hay que registrar una ECDH
-estable **al enrolar**, y publicarla en el acta como parte del miembro.
+Faltaba una pieza: **el aparato no tenía una llave ECDH duradera**. Su llave de
+dispositivo es ECDSA, solo firma — por eso `sealed.js` inventa una efímera en cada
+petición. Ahora el servicio genera un par ECDH al enrolarse (`makeDeviceEncKey`), su
+pública viaja en el enrolamiento y queda en el acta como `encPub` del miembro.
 
-Lo que sí existe y se reusa tal cual:
+Toda la criptografía se reusó de `@dotrino/identity/content`, que ya la tenía
+escrita y probada para el contenido del usuario: `makeContentKey`, `wrapForMember`
+(ECDH **efímero**, quien abre solo necesita su privada), `openWrap`,
+`encryptWithCek` y `makeGeneration` — que además devuelve `sinLlave`, los miembros a
+los que no se les pudo envolver nada. **No se escribió criptografía nueva**; lo único
+añadido fue `decryptWithCek`, el inverso que faltaba.
 
-- `lib/src/sealed.js` — ECDH P-256 + AES-256-GCM (`seal`, `openSealed`).
-- `@dotrino/identity` — `getEncryptionPubkey()` y `encrypt(recipients, plaintext)`,
-  que ya devuelve un sobre multi-destinatario `{ v, iv, ct, wrap }`: **una llave de
-  contenido, envuelta una vez por destinatario**. Es exactamente la forma que
-  necesita el cajón `ns`, que comparten todos los aparatos de un namespace, y
-  hace barata la rotación (se re-envuelve el wrap, no se re-cifra el contenido).
+El cajón `dev` ya se indexaba por la `pub` del miembro (`secretsStore.js`), así que
+ahí el destinatario ya estaba identificado.
 
-El cajón `dev` ya se indexa por la `pub` del miembro (`secretsStore.js`), así que
-ahí el destinatario ya está identificado.
+**Repartir la llave no es opcional, y es el error que más caro salió.** Sellar sin
+envolver deja al servicio recibiendo sobres que no puede abrir: `waitForSecrets`
+reintenta **para siempre, en silencio**. Por eso se re-envuelve tras cada escritura y
+al aprobar un servicio nuevo (`spreadKey`), y por eso un miembro sin llave sale en el
+log en vez de perderse.
 
 **Las públicas se quedan en claro a propósito.** La distinción `{ v, pub }` que ya
 existe se vuelve literal: lo marcado como público sigue siendo legible —para eso
@@ -86,14 +94,18 @@ bloqueado ≠ bóveda apagada*, los agentes siguen recibiendo lo suyo. Lo único
 se bloquea es administrar, que es lo que el candado ya significa hoy
 (`vault.js:192`, `PROFILE_EDIT_METHODS`).
 
-En el store son dos cosas distintas — `schemaVersion` 4:
+En el store son dos cosas distintas — `schemaVersion` 4, como quedó:
 
 ```
 secrets.json
-  ns:  { <ns>:  { KEY: { sealed: <sobre multi-destinatario>, pub: false } } }
-  dev: { <pub>: { KEY: { sealed: <sobre>,                    pub: false } } }
-  master: <blob cifrado con la contraseña>   ← solo para re-sellar
+  ns:  { <ns>:  { vars: { KEY: { pub:false, owner:'ns:<ns>', e:{iv,ct} } | { pub:true, v:'…' } },
+                  keyring: [{ gen, createdAt, wraps: { <memberPub>: {epk,iv,ct} } }] } }
+  dev: { <pub>: { vars: {…}, keyring: [… una sola envoltura …] } }
+  master: { v:1, iv, ct, tag }   ← las CEK, cifradas con la contraseña. Solo para administrar.
 ```
+
+La CEK **nunca** se envuelve a la llave de esta bóveda: sería devolverle la capacidad
+de leerlo todo, que es justo lo que el diseño quita. Hay un test que lo afirma.
 
 ### 2.3. Cómo se desbloquea
 
@@ -135,10 +147,10 @@ Tres límites que hay que tener presentes:
    controle el VPS puede suplantar al vault frente a la consola y conseguir que se
    le selle a una llave suya. El sellado cierra el disco y la RAM, no esa puerta.
 
-## 4. Hallazgos que hay que arreglar CON esto
+## 4. Hallazgos que salieron al revisar el código
 
-Salieron al revisar el código para este diseño. Los tres son precondiciones, no
-mejoras opcionales.
+Los tres siguen siendo ciertos. **El primero está corregido**; los otros dos NO, y
+son la razón por la que la contraseña tiene que ser una frase larga (§4.3).
 
 ### 4.1. `atrest.js` promete una protección que no existe
 
@@ -148,8 +160,13 @@ hay». **Ningún llamante la pasa**: los cinco —`src/store.js:33`,
 `lib/src/service.js:185`— invocan `atRestFor(dir)` a secas. Y no podría ser de otro
 modo hoy sin romper que los agentes reciban secretos con el perfil bloqueado.
 
-Corregir el comentario. Un comentario que promete seguridad que no está puesta es
-peor que ninguno.
+**Corregido** (commit `164ce99`): el comentario ya no promete lo que no hace, y
+explica además por qué no puede hacerlo — el candado es de la consola, y un perfil
+bloqueado tiene que seguir sirviendo a sus agentes.
+
+Lo que sí se hizo en su lugar: la copia maestra (§2.2) es un cajón APARTE que solo
+se necesita al administrar, que es exactamente la forma que el comentario describía
+mal.
 
 ### 4.2. `profiles.json` se guarda EN CLARO, con el verificador dentro
 
@@ -164,45 +181,103 @@ contraseña **fuera de línea** a 300.000 iteraciones de PBKDF2-SHA256 por inten
 El contador de intentos con espera exponencial (`profiles.js:212`) no interviene:
 solo frena a quien pregunta por la red.
 
-Qué hacer:
+**PENDIENTE.** Lo que se hizo a medias: la copia maestra **no lleva verificador
+propio** — su prueba es el tag AES-GCM (`sealer.js`, `openMaster`), así que atacarla
+obliga a pasar por scrypt (`N=16384`, ~16 MB, duro con memoria). Pero el verificador
+del CANDADO sigue en `profiles.json` en claro, y con él se ataca la misma contraseña
+por el camino barato (PBKDF2-SHA256, que una GPU come rápido).
 
-- **Quitar el verificador** cuando la contraseña sea material de llave: que la
-  prueba de que es correcta sea el tag AES-GCM del propio sobre. No elimina el
-  ataque fuera de línea —el sobre también es un oráculo— pero obliga a pasar por
-  **scrypt** (`N=16384`, ~16 MB, duro con memoria) en vez de por PBKDF2-SHA256,
-  que es lo que una GPU come rápido.
-- **Cifrar `profiles.json`** como todo lo demás, aunque contra quien tiene el disco
-  entero sea cosmético: deja de ser la excepción rara.
+Queda por hacer: cifrar `profiles.json` en reposo, y separar el verificador del
+candado de la llave que abre la copia maestra (hoy son la misma contraseña, así que
+el eslabón débil manda).
 
 ### 4.3. El mínimo de contraseña son 4 caracteres
 
 `profiles.js:239`. Razonable para un tope de velocidad; nada contra alguien con el
-disco y una GPU. Si la contraseña pasa a proteger secretos de producción, hay que
-**pedir frase, no contraseña**, y subir el mínimo en consecuencia.
+disco y una GPU.
 
-## 5. Alcance del cambio
+**PENDIENTE, y es el que más importa de los tres.** Con §4.2 sin cerrar, la
+contraseña es el eslabón único: cuatro dígitos son 10.000 combinaciones y caen en
+minutos, y entonces todo lo demás de este documento no sirve de nada. **El cifrado no
+vale más que la frase que lo abre.**
 
-- `@dotrino/identity` — ECDH duradera **por aparato** (hoy solo hay por perfil,
-  `getEncryptionPubkey`), publicada en el acta al enrolar.
-- `lib/src/enroll.js` — registrar esa llave; re-sellar lo del `ns` para el miembro
-  nuevo (pide contraseña).
-- `src/vault.js` — `var.set` / `var.setMany` sellan a los destinatarios;
-  `handleSecrets` deja de re-sellar y reenvía el sobre guardado (sigue firmando el
-  cuerpo con la maestra, que es lo que da la autenticidad).
-- `src/secretsStore.js` — `schemaVersion` 4, cajón `master` bajo contraseña.
-- `src/profiles.js` — derivación de llave por operación y borrado tras usarla;
-  §4.2 y §4.3.
-- `lib/src/admin.js` + consola — pedir la contraseña al enrolar; avisar cuando el
-  perfil no tiene.
+Mientras el mínimo siga en 4, la regla es operativa y no la impone el código: la
+contraseña del vault de producción tiene que ser **cinco palabras al azar** (~71
+bits), elegidas por una máquina y no por una persona — una frase hecha (`"vete de una
+vez"`) tiene la entropía de un modismo, no la de su longitud.
 
-## 6. Decisiones abiertas
+## 5. Qué se tocó
 
-1. **¿Merece la pena?** Depende de qué perfiles tiene hoy ese VPS. Si solo hay una
-   maestra de infraestructura sobre secretos rotables, el trabajo puede no pagarse
-   y basta con acotar y rotar (ver `memoria: confianza en el VPS`). Si está la
-   maestra personal, lo primero no es esto: es sacarla de ahí.
-2. **Rotar el `ns`**: re-envolver el wrap por miembro es barato, pero hay que
-   decidir si un aparato revocado obliga a rotar el contenido o solo a quitarle el
-   wrap. Quitar el wrap no le retira lo que ya leyó.
-3. **Migración** de lo que hoy está guardado en claro: un re-sellado en el primer
-   desbloqueo, con la verificación-antes-de-reemplazar que ya usa `migrateFile()`.
+- **`@dotrino/identity@0.53.0`** — `makeDeviceEncKey`/`importDeviceEncKey`,
+  validación de forma de `encPub` en `checkShape`, la operación **`encpub`** para
+  registrar la llave de un miembro ya admitido, `profileMembers` proyectando
+  `encPub`/`canSeal`, y `decryptWithCek`.
+- **`@dotrino/vault@0.25.0`** (`lib/`) — el agente genera su par ECDH al enrolarse
+  (`service-identity` v2) y abre los sobres con él. **La llave de FIRMA no se toca**:
+  de ella sale el `nodeId` del proxio.
+- `src/sealer.js` (nuevo) — lo único que toca criptografía. El store recibe el puerto
+  inyectado y no sabe cifrar, así que se prueba con un sellador falso.
+- `src/secretsStore.js` — v4, migración verificando antes de reemplazar.
+- `src/vault.js` — sella al escribir, reparte la llave, rota al expulsar, avisa si el
+  perfil no tiene contraseña.
+
+**El protocolo de red NO cambió**, y por eso `dotrino-proxy` no cambió una línea de
+código: `fetchSecrets` sigue devolviendo el mismo objeto plano. Tampoco hubo que
+re-vendorizar `dotrino-identity/vault/vendor/vault/` — `enroll.js` ya transportaba
+`encPub` y `protocol.js` no se tocó.
+
+### Dos capas de sobre, y hacen cosas distintas
+
+Se quedan las dos, y conviene no confundirlas:
+
+| Capa | Qué tapa | Contra quién |
+|---|---|---|
+| `ek` efímera por petición | el **tramo** — ni los nombres de tus variables | el proxio |
+| sobre sellado al destinatario | el **reposo** — la bóveda reparte sin poder abrir | quien tenga el disco del VPS |
+
+## 6. Lo que falta para que esto sirva en producción
+
+Publicado ≠ puesto. **El vault del VPS sigue en v3**, sirviendo en claro, y así seguirá
+hasta que se hagan estos pasos en orden:
+
+1. **Poner una contraseña de verdad** al perfil (§4.3). Es lo primero porque la
+   migración sella con la llave derivada de ella: cambiarla después obliga a
+   re-sellar todo.
+2. Desplegar el daemon y reiniciar. Comprobar que los dos nodos siguen recibiendo su
+   configuración — hasta aquí no se ha tocado ningún dato y se deshace con un
+   reinicio.
+3. En cada nodo del proxio: subir a `@dotrino/vault@0.25.0` y **registrar su llave de
+   cifrado** con la op `encpub`. **NO re-enrolar**: re-enrolar le cambia el `nodeId`
+   y le vacía su cajón `dev` (`PROXY_PEERS`, `PROXY_PUBLIC_URL`), que va indexado por
+   su llave — la federación se apaga en silencio y no se nota hasta el siguiente
+   reinicio.
+4. Comprobar en el vault que **los dos** miembros del ns `proxy` tienen llave de
+   cifrado. Sin eso, el paso siguiente los deja sin configuración.
+5. Desbloquear el perfil → corre la migración v3→v4. Comprobar que `secrets.json` no
+   contiene ninguna cadena privada legible y que existe `secrets.json.v3.bak`. **Este
+   es el punto de no retorno**; el `.bak` es la salida.
+6. Un `secret set` de prueba en una variable inocua, y verificar que los dos nodos la
+   reciben.
+
+⚠️ **A partir de la migración, la contraseña es lo único que puede re-sellar.**
+Perderla no solo impide administrar: impide **rotar una variable o sumar un aparato
+al namespace**, porque la CEK vive cifrada bajo ella. La salida sería pedir
+credenciales nuevas a su proveedor y reconfigurar. Gestor de contraseñas **y** copia
+fuera de línea, antes del paso 5.
+
+## 7. Decisiones abiertas
+
+1. **Rotar el `ns` al expulsar: RESUELTO** — se rota (CEK nueva, valores recifrados),
+   y si el perfil está bloqueado el cajón queda marcado y la siguiente escritura
+   desbloqueada lo salda. Quitar solo la envoltura no bastaba: quien guardó la CEK
+   seguiría abriendo lo que se escriba mañana. Lo que no se deshace, y no se promete,
+   es lo que ya leyó.
+2. **La contraseña por el disco** — llega al daemon por un archivo 0600 que se borra
+   al consumirse. No es peor que hoy (`unlock` ya va por ahí), pero con la contraseña
+   convertida en material de llave el precio sube. Un socket sería mejor.
+3. **`profiles.json` en claro con el verificador dentro** (§4.2) y el **mínimo de 4
+   caracteres** (§4.3). Mientras sigan así, la fuerza de todo esto es la de la frase
+   que elija el dueño, no la del cifrado.
+4. **La maestra sigue en esa máquina.** Este trabajo protege los secretos de servicio,
+   que son rotables. No cambia que quien controle el VPS pueda suplantar al vault
+   frente a la consola (§3, límite 3).
