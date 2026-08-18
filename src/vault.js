@@ -1069,6 +1069,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // por eso es una operación con nombre propio, no algo que ocurra de refilón al
     // desbloquear: deja `secrets.json.v3.bak` para poder volver.
     migrateSecrets: (membersOf, adminKey) => secrets.migrate(membersOf, adminKey),
+    // Cambiar la contraseña del perfil obliga a volver a cerrar la copia maestra con
+    // la llave nueva, o los secretos quedarían ilegibles. No toca los sobres.
+    rekeySecrets: (oldKey, newKey) => secrets.rekeyMaster(oldKey, newKey),
     setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
     applySecrets, applyDeviceSecrets,
     listDevices: () => identity.listDelegations(),

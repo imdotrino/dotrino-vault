@@ -419,6 +419,27 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
       return keys.length
     },
 
+    /**
+     * Vuelve a cerrar la copia maestra con OTRA llave. Es lo que hay que hacer al
+     * cambiar (o quitar) la contraseña del perfil: los sobres de las variables no se
+     * tocan —siguen cifrados con la CEK de su cajón—, lo único que cambia es con qué
+     * se abre el llavero de administración.
+     *
+     * Sin esto, cambiar la contraseña dejaría los secretos ILEGIBLES: la copia maestra
+     * seguiría sellada con la llave vieja y ya nadie tendría cómo abrirla. Es barato
+     * (un solo sobre) y es obligatorio.
+     *
+     * `null` en cualquiera de las dos significa «la del perfil sin contraseña».
+     */
+    async rekeyMaster (oldKey, newKey) {
+      if (isLegacy()) return { rekeyed: false, reason: 'v3' }
+      needSealer('change the profile password')
+      const master = await sealer.openMaster(data.master, keyOr(oldKey))
+      data.master = await sealer.sealMaster(master, keyOr(newKey))
+      save()
+      return { rekeyed: true, drawers: Object.keys(master).length }
+    },
+
     // --- migración v3 → v4 -------------------------------------------------------
     /**
      * Sella un archivo v3 entero. Corre en el PRIMER desbloqueo administrativo, no al

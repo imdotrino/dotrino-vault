@@ -200,6 +200,19 @@ export async function runDaemon () {
    * 0700 del vault y se BORRA al consumirla — mismo camino que ya usan los
    * secretos, y así nunca pasa por `ps` ni por el historial de la shell.
    */
+  /**
+   * Vuelve a cerrar la copia maestra de los secretos con otra llave. Se llama al poner
+   * o quitar la contraseña del perfil: los sobres de las variables NO se tocan (siguen
+   * sellados a la llave de cada aparato), solo cambia con qué se abre el llavero de
+   * administración. Sin esto, cambiar la contraseña dejaría los secretos ilegibles.
+   */
+  async function rekey (id, vieja, nueva) {
+    const v = mgr.get(id)
+    if (!v?.rekeySecrets) return
+    const r = await v.rekeySecrets(vieja, nueva)
+    if (r?.rekeyed) console.log('[vault] secrets master re-sealed (%d drawer(s))', r.drawers)
+  }
+
   async function handleProfileRequest (req) {
     const ref = () => mgr.resolve(req.profile || mgr.currentId())
     switch (req.op) {
@@ -212,8 +225,31 @@ export async function runDaemon () {
       case 'use': { const p = mgr.profiles.setCurrent(ref()); return { done: `perfil activo: ${p.name || p.id}` } }
       case 'unlock': { await mgr.profiles.unlock(ref(), req.password); return { done: 'perfil desbloqueado' } }
       case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
-      case 'password-set': { await mgr.profiles.setPassword(ref(), req.password); return { done: 'contraseña guardada' } }
-      case 'password-rm': { mgr.profiles.removePassword(ref()); return { done: 'contraseña quitada' } }
+      // PONER contraseña: los secretos pasan de abrirse con la llave de la máquina a
+      // abrirse con la frase. Hay que volver a cerrar la copia maestra con la nueva, o
+      // quedarían ilegibles. Si el perfil YA tenía contraseña, hace falta la vieja para
+      // poder abrirla: por eso el camino normal para cambiarla es quitarla y ponerla.
+      case 'password-set': {
+        const id = ref()
+        const tenia = !!mgr.profiles.get(id)?.protected
+        if (tenia && !req.current) throw new Error('this profile already has a password: remove it first (`profile password --rm`) and then set the new one')
+        const vieja = tenia ? await mgr.profiles.adminKey(id, req.current) : null
+        await mgr.profiles.setPassword(id, req.password)
+        const nueva = await mgr.profiles.adminKey(id, req.password)
+        await rekey(id, vieja, nueva)
+        return { done: 'contraseña guardada' }
+      }
+      // QUITARLA: al revés. Se abre la copia maestra con la frase y se vuelve a cerrar
+      // con la llave de la máquina, que es la protección de siempre — el disco sigue
+      // cifrado, pero su material vive en ese mismo disco.
+      case 'password-rm': {
+        const id = ref()
+        if (!req.password) throw new Error('removing the password needs the current one: the secrets must be re-sealed before it goes')
+        const vieja = await mgr.profiles.adminKey(id, req.password)
+        await rekey(id, vieja, null)
+        mgr.profiles.removePassword(id)
+        return { done: 'contraseña quitada · los secretos ahora se abren con la llave de esta máquina' }
+      }
       default: throw new Error('unknown profile operation: ' + req.op)
     }
   }

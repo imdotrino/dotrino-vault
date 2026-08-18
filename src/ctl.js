@@ -927,14 +927,30 @@ async function cmdProfile (rest) {
     }
     case 'password': {
       const action = args[0]
-      if (action === 'rm') { reportProfiles(await profileRequest('password-rm')); return }
+      // QUITARLA pide la actual, y no por trámite: con ella se abre la copia maestra de
+      // los secretos para volver a cerrarla con la llave de esta máquina. Sin ese paso,
+      // quitar la contraseña dejaría las variables privadas ilegibles para siempre.
+      if (action === 'rm') {
+        console.log('Al quitarla, las variables privadas pasan a abrirse con la llave de ESTA')
+        console.log('máquina: siguen cifradas en el disco, pero su material vive en ese mismo')
+        console.log('disco, así que una copia del disco las abre. Los aparatos no se enteran.')
+        const cur = await askPassword('\nContraseña actual: ')
+        if (!cur) { console.error('Cancelado.'); process.exit(1) }
+        reportProfiles(await profileRequest('password-rm', { password: cur }))
+        return
+      }
       if (action && action !== 'set') { console.error('uso: dotrino-vault profile password [set|rm]'); process.exit(2) }
-      console.log('La contraseña solo se pide para EDITAR el perfil. Tus dispositivos siguen')
-      console.log('funcionando (firmando y leyendo) aunque el perfil esté bloqueado.')
-      const pwd = await askPassword('\nContraseña nueva (mínimo 4): ')
+      console.log('La contraseña se pide para EDITAR el perfil y para escribir variables')
+      console.log('privadas. Tus dispositivos siguen funcionando (firmando, leyendo y')
+      console.log('recibiendo su configuración) aunque el perfil esté bloqueado.')
+      // Si ya hay una, hace falta para poder abrir la copia maestra y re-sellarla. El
+      // camino recomendado para CAMBIARLA es quitarla y ponerla: así cada paso pide
+      // solo lo que necesita.
+      const actual = await askPassword('\nContraseña actual (vacío si no tiene): ')
+      const pwd = await askPassword('Contraseña nueva (mínimo 4): ')
       const again = await askPassword('Repítela: ')
       if (pwd !== again) { console.error('Las contraseñas no coinciden.'); process.exit(1) }
-      reportProfiles(await profileRequest('password-set', { password: pwd }))
+      reportProfiles(await profileRequest('password-set', { password: pwd, current: actual || undefined }))
       return
     }
     default:

@@ -29,14 +29,19 @@ const PWD = 'llave-de-prueba'
 function fakeSealer () {
   let n = 0
   return {
+    // La llave con la que se cerro va DENTRO del sobre: solo la abre esa misma. Asi
+    // el falso admite cualquier llave (hace falta para probar el cambio de
+    // contraseña, que usa tres distintas) sin dejar de exigir que coincida.
     openMaster (blob, adminKey) {
-      if (adminKey !== PWD) throw new Error('wrong password')
+      if (!adminKey) throw new Error('wrong password')
       if (!blob) return {}
-      return JSON.parse(blob.replace(/^SEALED\(/, '').replace(/\)$/, ''))
+      const [k, json] = JSON.parse(blob.replace(/^SEALED\(/, '').replace(/\)$/, ''))
+      if (k !== String(adminKey)) throw new Error('wrong password')
+      return JSON.parse(json)
     },
     sealMaster (obj, adminKey) {
-      if (adminKey !== PWD) throw new Error('wrong password')
-      return `SEALED(${JSON.stringify(obj)})`
+      if (!adminKey) throw new Error('wrong password')
+      return `SEALED(${JSON.stringify([String(adminKey), JSON.stringify(obj)])})`
     },
     cekFor (master, owner) {
       if (!master[owner]) master[owner] = `cek-${owner}-${++n}`
@@ -286,4 +291,38 @@ test('rotate: el que ya no esta pierde la envoltura Y la CEK cambia', async () =
   assert.equal(s.bundleFor('proxy', 'pub-B').ns, null, 'y no tiene envoltura nueva')
   // A sigue trabajando sin enterarse.
   assert.equal((await s.openBundle('proxy', null, PWD)).K, 'secreto')
+})
+
+test('cambiar la contrasena: quitar y volver a poner NO pierde los secretos', async () => {
+  // El proceso del dueño: quitar la contraseña y asignarla de nuevo. Lo que se
+  // re-cifra es la COPIA MAESTRA (el llavero de administracion), no los valores:
+  // los sobres siguen sellados a la llave de cada aparato en los tres estados.
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer())
+  const CONTRA = PWD
+  const MAQUINA = 'llave-de-la-maquina'
+
+  await s.set('proxy', 'TURN_KEY', 'no-me-pierdas', false, CONTRA)
+  await s.rewrap('ns:proxy', miembros('pub-A'), CONTRA)
+  const sobreAntes = JSON.stringify(enDisco(dir).ns.proxy.vars.TURN_KEY)
+
+  // 1) Quitar la contraseña: la maestra pasa a abrirse con la llave de la maquina.
+  await s.rekeyMaster(CONTRA, MAQUINA)
+  assert.equal((await s.openBundle('proxy', null, MAQUINA)).TURN_KEY, 'no-me-pierdas')
+  await assert.rejects(() => s.openBundle('proxy', null, CONTRA), 'la vieja ya no abre')
+
+  // 2) Asignar una nueva.
+  const NUEVA = 'otra-frase-distinta'
+  await s.rekeyMaster(MAQUINA, NUEVA)
+  assert.equal((await s.openBundle('proxy', null, NUEVA)).TURN_KEY, 'no-me-pierdas')
+  await assert.rejects(() => s.openBundle('proxy', null, MAQUINA))
+
+  // 3) Y lo que importa: el SOBRE de la variable no se toco en ningun momento, asi
+  // que los aparatos siguen abriendo lo suyo sin enterarse del cambio.
+  assert.equal(JSON.stringify(enDisco(dir).ns.proxy.vars.TURN_KEY), sobreAntes, 'el sobre no se re-cifra')
+  assert.ok(s.bundleFor('proxy', 'pub-A').ns.wrap, 'y su envoltura sigue en pie')
+
+  // 4) Se puede seguir escribiendo con la nueva.
+  await s.set('proxy', 'OTRA', 'despues-del-cambio', false, NUEVA)
+  assert.equal((await s.openBundle('proxy', null, NUEVA)).OTRA, 'despues-del-cambio')
 })
