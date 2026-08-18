@@ -268,6 +268,35 @@ al namespace**, porque la CEK vive cifrada bajo ella. La salida sería pedir
 credenciales nuevas a su proveedor y reconfigurar. Gestor de contraseñas **y** copia
 fuera de línea, antes del paso 5.
 
+### 6.1. Administrar después del sellado: TODA escritura pide la contraseña
+
+Lo que cambia en el día a día, y costó dos versiones descubrirlo entero: desde el
+sellado, guardar una variable ya no es «escribir un valor». Hay que abrir la copia
+maestra para poder envolver la nueva a cada aparato, y eso solo lo hace la contraseña.
+Las tres interfaces la piden ahora (0.39.5):
+
+| Interfaz | Cómo la pide |
+|---|---|
+| **CLI** | pregunta al vuelo, y solo si el perfil tiene contraseña. Lee de `/dev/tty`, no de la entrada estándar, para que `cat .env \| dotrino-vault secret import <ns>` siga funcionando. Por ssh hace falta `-t`. |
+| **TUI** | la de la sesión, la misma que se escribió al desbloquear |
+| **Consola web** | un campo que aparece **solo cuando la bóveda la pide**, y viaja DENTRO del mismo sobre sellado que los valores |
+
+Dos cosas que no son lo mismo y se confunden:
+
+- **El candado** (`unlock`/`lock`) decide si esta consola puede administrar. Es de la
+  consola: los aparatos siguen recibiendo su configuración con el perfil bloqueado.
+- **La contraseña en la escritura** es material de llave, no un permiso. Aunque el
+  perfil esté desbloqueado, guardar una privada la vuelve a pedir.
+
+**Borrar no la pide**: tirar un sobre no obliga a abrirlo.
+
+**Cambiar la contraseña** es quitarla y volver a ponerla (`dotrino-vault profile
+password rm`, luego `profile password`). Las dos operaciones **re-sellan** la copia
+maestra —descifrar con la vieja, cifrar con la nueva—, así que hay que dar la actual:
+sin ella los secretos quedarían ilegibles. Un perfil **sin** contraseña sigue
+funcionando y sigue sellando; lo que cambia es que la copia maestra pasa a cerrarse con
+la llave de la máquina, que es la protección de antes de todo esto.
+
 ## 7. Decisiones abiertas
 
 1. **Rotar el `ns` al expulsar: RESUELTO** — se rota (CEK nueva, valores recifrados),
