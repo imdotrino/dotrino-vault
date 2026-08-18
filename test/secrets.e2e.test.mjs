@@ -632,3 +632,42 @@ async function fetchNsWithSavedCert (ns) {
   const saved = readServiceIdentity(svcDir)
   return fetchSecrets({ ns, proxyUrl: saved.proxy, masterPubkey: saved.iss, device: saved.device, cert: saved.cert })
 }
+
+test('un agente VIEJO consigue su llave de cifrado SIN re-enrolarse', async () => {
+  // El caso de produccion: los proxios se enrolaron antes de que las llaves de cifrado
+  // existieran. Re-enrolarlos les cambiaria la pubkey y con ella perderian su cajon de
+  // variables (va indexado por ella): arrancarian sin PROXY_PEERS ni PROXY_PUBLIC_URL y
+  // la federacion se apagaria en silencio. Por eso la llave se registra en el sitio.
+  const { enrollService, registerEncKey, fetchSecrets } = await import('../lib/src/service.js')
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  const { readJson } = await import('../src/paths.js')
+  const { atRestFor } = await import('../src/atrest.js')
+
+  const ns = 'viejo'
+  const svc = tmp('svc-viejo-')
+  await vault.setSecret(ns, 'TURN_KEY', 'secreto-del-ns')
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'proxy-viejo', ttlMs: 60000 })
+  await enrollService({ qr: encodeInvite(qr), ns, dir: svc, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+
+  // Rebajar la identidad a v1 (sin `enc`): asi estan hoy los dos proxios.
+  const f = path.join(svc, 'service-identity.json')
+  const antes = readJson(f, null, atRestFor(svc))
+  const pubAntes = antes.device.publickey
+  const sinEnc = { ...antes, v: 1 }; delete sinEnc.enc
+  fs.writeFileSync(f, atRestFor(svc).encrypt(JSON.stringify(sinEnc)), { mode: 0o600 })
+  assert.equal(readJson(f, null, atRestFor(svc)).enc, undefined, 'partimos sin llave de cifrado')
+
+  // Lo que se corre en cada proxio.
+  const r = await registerEncKey({ dir: svc })
+  assert.equal(r.created, true, 'la genera')
+
+  const ahora = readJson(f, null, atRestFor(svc))
+  assert.equal(ahora.v, 2)
+  assert.equal(ahora.device.publickey, pubAntes, 'la llave de FIRMA no se toca: de ella sale el nodeId')
+
+  const m = (await vault.profileMembers()).members.find((x) => x.cn === ns)
+  assert.equal(m.canSeal, true, 'y queda registrada en el acta')
+  assert.equal(m.pub, pubAntes, 'sin cambiarle la pubkey, asi que conserva su cajon')
+
+  assert.equal((await fetchSecrets({ dir: svc })).TURN_KEY, 'secreto-del-ns', 'y sigue leyendo')
+})

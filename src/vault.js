@@ -411,8 +411,44 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // servicio verifica contra su iss pineada — un relay no puede inyectar
   // secretos falsos). Replay inerte: cada petición usa una ek nueva.
   //   data: { op:'secrets', ns, ek, publickey, ts }
+  /**
+   * Un servicio que se enroló antes de que existieran las llaves de cifrado registra la
+   * suya. Es la alternativa a re-enrolarlo: re-enrolar le cambia la pubkey, y su cajón
+   * de variables va indexado por ella — se quedaría sin configuración sin decirlo.
+   */
+  async function handleEncKey (from, p) {
+    const ns = p.data?.ns
+    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'enckey: invalid namespace' })
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'enckey')
+    try {
+      await identity.setMemberEncPub({ pub: chk.device, encPub: p.data.encPub })
+      audit('enckey', { device: await deviceIdOf(chk.device).catch(() => null), ns })
+      log(`[vault] ${ns}: encryption key registered for ${await deviceIdOf(chk.device).catch(() => '????-????')}`)
+      // Ya puede recibir sobres: se le envuelve la llave de su cajón en el acto, o
+      // seguiría sin poder abrir nada hasta la siguiente escritura.
+      await spreadKey(`ns:${ns}`, await nsMembers(ns)).catch((e) => log('[vault] could not hand it the key:', e.message))
+      const body = { op: 'secrets.result', ns, enc: null, ok: true, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+    } catch (e) {
+      reply(from, { type: MSG.ERROR, error: 'enckey: ' + e.message })
+    }
+  }
+
   async function handleSecrets (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'secrets', reason: 'stale' }); return staleReply(from) }
+    // REGISTRAR LA LLAVE DE CIFRADO de un servicio ya enrolado. Va por aquí, y no por
+    // un mensaje nuevo, para no tocar `protocol.js` — que está vendorizado en el iframe
+    // de identidad y obligaría a re-vendorizar.
+    //
+    // No exige la contraseña del perfil, y el argumento importa: registrar una llave no
+    // da acceso a nada por sí solo. Quien firma esta petición ya tiene la llave de firma
+    // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
+    if (p.data?.op === 'enckey') return handleEncKey(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
