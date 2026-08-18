@@ -5,8 +5,10 @@
 > concreta: el vault corre en un VPS alquilado, y el dueño de esa máquina puede
 > leer el disco. ¿Qué se hace al respecto?
 >
-> **Falta el paso de producción**: el vault del VPS sigue en v3 (sirviendo en claro)
-> hasta el primer desbloqueo administrativo. Ver §7.
+> **DESPLEGADO Y MIGRADO en producción el 2026-08-18.** El vault del VPS corre
+> `dotrino-vault 0.39.1` y su `secrets.json` está en v4 (sellado). Los dos proxios
+> registraron su llave de cifrado **sin re-enrolarse** y conservan su `nodeId`. Ver §6
+> para lo que se hizo y cómo volver atrás.
 
 ## 1. El problema, acotado
 
@@ -235,10 +237,11 @@ Se quedan las dos, y conviene no confundirlas:
 | `ek` efímera por petición | el **tramo** — ni los nombres de tus variables | el proxio |
 | sobre sellado al destinatario | el **reposo** — la bóveda reparte sin poder abrir | quien tenga el disco del VPS |
 
-## 6. Lo que falta para que esto sirva en producción
+## 6. El despliegue, tal como se hizo
 
-Publicado ≠ puesto. **El vault del VPS sigue en v3**, sirviendo en claro, y así seguirá
-hasta que se hagan estos pasos en orden:
+Hecho el 2026-08-18 en `74.208.234.139` (vault), `74.208.192.49` (proxy1) y
+`74.208.11.221` (proxy2). Estos fueron los pasos, y sirven de guion si hay que
+repetirlo en otra máquina:
 
 1. **Poner una contraseña de verdad** al perfil (§4.3). Es lo primero porque la
    migración sella con la llave derivada de ella: cambiarla después obliga a
