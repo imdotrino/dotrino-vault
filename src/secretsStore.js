@@ -467,7 +467,7 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
           const cek = await sealer.newCek(master, owner)
           const vars = {}
           for (const [key, e] of Object.entries(bag || {})) {
-            antes[`${owner} ${key}`] = e.v
+            antes[`${owner}\u0000${key}`] = e.v
             vars[key] = e.pub ? { v: e.v, pub: true } : { pub: false, owner, e: await sealer.encrypt(cek, e.v) }
           }
           const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, membersOf(owner) || [])
@@ -484,7 +484,7 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
           const owner = `${kind}:${k}`
           for (const [key, e] of Object.entries(bag.vars)) {
             const abierto = e.pub ? e.v : await sealer.decrypt(master, e.e, e.owner)
-            if (abierto !== antes[`${owner} ${key}`]) {
+            if (abierto !== antes[`${owner}\u0000${key}`]) {
               throw new Error(`secrets: the migration check failed on ${owner}/${key}; nothing was touched`)
             }
           }

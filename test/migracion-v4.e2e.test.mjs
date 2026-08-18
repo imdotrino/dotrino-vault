@@ -90,7 +90,43 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
   ok('con una frase EQUIVOCADA no se abre', cerrado)
   ok('con la correcta, si', (await conElDisco.openBundle('proxy', null, CLAVE)).TURN_KEY === 'la-clave-de-verdad')
   ok('rota al expulsar deja al que salio sin envoltura', (await conElDisco.rotate('ns:proxy', [], CLAVE)).gen === 2)
-
-  await proxy.stop?.()
-
 })
+
+
+test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente escritura lo salda', async () => {
+  // El hueco que costo mas caro de todos, porque no hace ruido: un servicio que estrena
+  // su llave de cifrado llega por el PROXIO, no por una consola, asi que no hay a quien
+  // pedirle la contrasena — y sin ella la boveda no puede envolverle la llave de su
+  // cajon. Antes eso se perdia en un `.catch` que solo escribia una linea de log: el
+  // servicio arrancaba sin sus variables y nadie se enteraba.
+  const dir = tmp('vault-tarde-')
+  const svcDir = tmp('svc-tarde-')
+  const CLAVE = new Uint8Array(32).fill(3)
+
+  const vault = await startVault({ dir, proxyUrl: url, log: () => {} })
+  await vault.setSecret('tarde', 'TURN_KEY', 'la-clave', false)
+
+  // Una boveda nueva NACE en v4, asi que aqui no hay migracion: lo que se imita es
+  // ponerle contrasena al perfil, que re-sella la copia maestra bajo la frase.
+  assert.equal((await vault.rekeySecrets(null, CLAVE)).rekeyed, true)
+  assert.deepEqual(vault.rotationsDue(), {}, 'recien sellado no se debe nada')
+
+  // Y AHORA llega el servicio nuevo. Se le admite sin dar la contrasena, que es lo que
+  // pasa cuando se aprueba desde vault.dotrino.com.
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:tarde'], label: 'tardon', ttlMs: 60000 })
+  await enrollService({ qr: encodeInvite(qr), ns: 'tarde', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
+
+  const debe = vault.rotationsDue()
+  assert.deepEqual(Object.keys(debe), ['ns:tarde'], 'queda ANOTADO, no perdido en un log')
+  assert.equal(debe['ns:tarde'].kind, 'rewrap')
+  // Y mientras tanto NO lee: falla en voz alta en vez de arrancar con la configuracion
+  // a medias, que es lo unico peor que no arrancar.
+  await assert.rejects(fetchSecrets({ dir: svcDir }), /no key to open/)
+
+  // La siguiente escritura CON la contrasena lo salda sola.
+  await vault.setSecret('tarde', 'OTRA', 'x', true, CLAVE)
+  assert.deepEqual(vault.rotationsDue(), {}, 'saldado')
+  assert.equal((await fetchSecrets({ dir: svcDir })).TURN_KEY, 'la-clave', 'y ya lee lo suyo')
+})
+
+test.after(() => proxy.stop?.())

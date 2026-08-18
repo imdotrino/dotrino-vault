@@ -755,6 +755,23 @@ async function cmdSecret (rest) {
     process.exit(1)
   }
   const has = (list, key) => (list || []).some((x) => x.key === key)
+  /**
+   * Los cajones que quedaron a deber un sellado. Sale ARRIBA del todo en rojo porque no
+   * es un detalle: mientras esté ahí, los aparatos de ese cajón NO están leyendo sus
+   * variables, y la bóveda no puede arreglarlo sola — necesita la contraseña.
+   */
+  const printPending = (d) => {
+    const pend = Object.entries(d?.pending || {})
+    if (!pend.length) return
+    console.error('%sHay %d cajón(es) sin sellar%s:', R, pend.length, Z)
+    for (const [owner, info] of pend) {
+      console.error('  · %s — %s', owner, info?.kind === 'rotate'
+        ? 'se fue un miembro y no se pudo rotar su llave'
+        : 'entró un aparato y no se le pudo entregar la llave')
+    }
+    console.error('Sus aparatos NO leen sus variables. Se arregla guardando una variable')
+    console.error('de ese cajón con la contraseña:  dotrino-vault secret set <ns> <CLAVE> <valor>\n')
+  }
 
   if (sub === 'migrate') return secretMigrate()
 
@@ -779,6 +796,7 @@ async function cmdSecret (rest) {
       for (const k of x.keys) printVar(k)
     }
     console.log('\n(pública) = su valor se puede ver desde la consola remota. Las demás no salen de aquí.\n')
+    printPending(d)
     return
   }
 

@@ -444,6 +444,9 @@ export async function runDaemon () {
           v: 2, at: Date.now(), req: reqId, profile: t.id,
           ns: t.vault.listSecrets(),
           dev: await t.vault.listDeviceSecrets(),
+          // Lo que quedó a deber un sellado. Va en el volcado porque si no se ve, no se
+          // salda: son cajones cuyos miembros NO están leyendo sus variables.
+          pending: t.vault.rotationsDue(),
           ...(lastSecretError ? { secretError: lastSecretError } : {})
         })
         lastSecretError = null

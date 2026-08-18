@@ -203,10 +203,35 @@ const I18N = {
     foot_eco: 'Part of the Dotrino ecosystem', foot_src: 'Source', foot_discord: 'Discord',
   },
 }
-const LANG_KEY = 'vault.lang'
-const lang = ref((localStorage.getItem(LANG_KEY) || (navigator.language || 'es').slice(0, 2)) === 'en' ? 'en' : 'es')
+/* Idioma compartido con el ecosistema: el <dotrino-topbar> persiste en
+   'dotrino.lang', así que la app usa la MISMA clave. Migramos una sola vez
+   la preferencia vieja ('vault.lang') para no resetear a quien ya eligió. */
+const LANG_KEY = 'dotrino.lang'
+const LEGACY_KEY = 'vault.lang'
+
+function readLang () {
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    if (legacy === 'es' || legacy === 'en') {
+      if (!localStorage.getItem(LANG_KEY)) localStorage.setItem(LANG_KEY, legacy)
+      localStorage.removeItem(LEGACY_KEY)
+    }
+  } catch {}
+  try {
+    const saved = localStorage.getItem(LANG_KEY)
+    if (saved === 'es' || saved === 'en') return saved
+  } catch {}
+  return (navigator.language || 'es').slice(0, 2) === 'en' ? 'en' : 'es'
+}
+
+const lang = ref(readLang())
 const t = computed(() => I18N[lang.value])
-const setLang = (l) => { lang.value = l; localStorage.setItem(LANG_KEY, l); document.documentElement.lang = l }
+const setLang = (l) => {
+  if (l !== 'es' && l !== 'en') return
+  lang.value = l
+  try { localStorage.setItem(LANG_KEY, l) } catch {}
+  document.documentElement.lang = l
+}
 
 const installCmd = 'tar xzf dotrino-vault-*-linux-x64.tar.gz\ncd dotrino-vault-*-linux-x64\nsh install.sh'
 const pairCmd = 'dotrino-vault pair'
@@ -311,7 +336,7 @@ window.addEventListener('popstate', routeNow)
  * de identidad falla con «could not be cloned».
  */
 const topbar = ref(null)
-const onTopbarLang = (e) => { if (e.detail?.lang) lang.value = e.detail.lang }
+const onTopbarLang = (e) => { if (e.detail?.lang) setLang(e.detail.lang) }
 
 onMounted(async () => {
   document.documentElement.lang = lang.value

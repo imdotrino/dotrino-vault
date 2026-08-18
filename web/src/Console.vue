@@ -154,6 +154,10 @@ const T = {
     pwd_wrong: 'Esa contraseña no es. Vuelve a intentarlo.',
     pwd_label: 'Contraseña del perfil',
     pwd_why: 'Se usa para sellar cada variable al aparato que la lee. No se guarda: al recargar hay que volver a escribirla.',
+    pend_t: 'Hay variables sin entregar',
+    pend_b: 'Estos grupos no han podido entregar su llave, así que sus aparatos no están leyendo sus variables. Se arregla guardando aquí cualquier variable de ese grupo con la contraseña.',
+    pend_rotate: 'salió un aparato del grupo',
+    pend_rewrap: 'entró un aparato al grupo',
     var_dev_t: 'Sus variables',
     var_dev_hint: 'Las variables de un aparato se ponen en su fila, arriba.',
     var_orphan: 'ya no está en el perfil',
@@ -285,6 +289,10 @@ const T = {
     pwd_wrong: 'That password is not right. Try again.',
     pwd_label: 'Profile password',
     pwd_why: 'It is used to seal each variable to the device that reads it. It is not stored: reload and you type it again.',
+    pend_t: 'Some variables are not being delivered',
+    pend_b: 'These groups could not hand out their key, so their devices are not reading their variables. Save any variable of that group here, with the password, and it is fixed.',
+    pend_rotate: 'a device left the group',
+    pend_rewrap: 'a device joined the group',
     var_dev_t: 'Its variables',
     var_dev_hint: 'A device’s variables live in its own row, above.',
     var_orphan: 'no longer in the profile',
@@ -944,6 +952,14 @@ const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)
  * Cajones de variables de aparatos que ya no están en el acta. No caben en ninguna fila, y
  * esconderlos sería dejar configuración invisible: se listan aparte, marcados.
  */
+/**
+ * Los cajones que quedaron a deber un sellado. No es un detalle de estado: mientras
+ * esté ahí, esos aparatos NO leen su configuración, y quien administra desde aquí es
+ * justo quien puede saldarlo — tiene la contraseña, la bóveda no.
+ */
+const pendingVars = computed(() => Object.entries(vars.value?.pending || {})
+  .map(([owner, info]) => ({ owner, kind: info?.kind || 'rewrap' })))
+
 const orphanVars = computed(() => (vars.value?.dev || [])
   .filter((d) => !members.value.some((m) => m.pub === d.pub)))
 
@@ -1328,6 +1344,16 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                abajo, y las variables se ponen dentro de su apartado. -->
           <!-- La contraseña aparece SOLO cuando la bóveda la pide, y una vez para toda
                la pantalla: es del perfil, no de cada variable. -->
+          <div v-if="pendingVars.length" class="pendbar" data-testid="vars-pending">
+            <strong>{{ t.pend_t }}</strong>
+            <ul>
+              <li v-for="p in pendingVars" :key="p.owner" :data-owner="p.owner">
+                <code>{{ p.owner }}</code> — {{ p.kind === 'rotate' ? t.pend_rotate : t.pend_rewrap }}
+              </li>
+            </ul>
+            <small>{{ t.pend_b }}</small>
+          </div>
+
           <div v-if="needPwd" class="pwdbar" data-testid="vars-password">
             <label>
               {{ t.pwd_label }}
@@ -1373,6 +1399,15 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 </template>
 
 <style scoped>
+/* Lo que está sin entregar se dice en rojo y arriba: es lo único de esta pantalla que
+   significa «algo tuyo no está funcionando ahora mismo». */
+.pendbar { margin: .75rem 0; padding: .6rem .75rem; border-radius: 8px;
+  border: 1px solid var(--bad, #c94f4f); background: color-mix(in srgb, var(--bad, #c94f4f) 8%, transparent); }
+.pendbar ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+.pendbar li { margin: .15rem 0; }
+.pendbar code { font-size: .92em; }
+.pendbar small { display: block; margin-top: .45rem; opacity: .8; }
+
 /* La barra de contraseña: aparece solo cuando hace falta, y se nota que es un aviso
    sin gritar — quien la ve ya sabe que le falta un dato para guardar. */
 .pwdbar { margin: .75rem 0; padding: .6rem .75rem; border-radius: 8px;

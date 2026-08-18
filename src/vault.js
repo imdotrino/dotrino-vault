@@ -666,7 +666,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // aprender cómo se llaman tus variables ni qué servicios corres.
       return {
         enc: await identity.sealContent(JSON.stringify({
-          ns: listSecrets(), dev: await listDeviceSecrets()
+          ns: listSecrets(), dev: await listDeviceSecrets(),
+          // Lo que quedó a deber un sellado: quien administra a distancia tiene que
+          // poder verlo, porque es exactamente lo que él puede saldar (escribiendo una
+          // variable con la contraseña) y la bóveda no.
+          pending: rotationsDue()
         }))
       }
     },
@@ -674,8 +678,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const payload = JSON.parse(await identity.openContent(enc))
       const value = payload?.value
       if (typeof value !== 'string' || !value) throw new Error('var.set: the sealed envelope must carry a non-empty value')
-      if (ns) await setSecret(ns, key, value, isPublic)
-      else await setDeviceSecret(pub, key, value, isPublic)
+      // La CONTRASEÑA viaja DENTRO del sobre, igual que en `setMany`: sin ella no se
+      // puede abrir la copia maestra, y guardar una privada acabaría en `wrong password`.
+      const ak = await adminKeyFrom(payload)
+      if (ns) await setSecret(ns, key, value, isPublic, ak)
+      else await setDeviceSecret(pub, key, value, isPublic, ak)
       return { ok: true, key }
     },
     /**
@@ -842,11 +849,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   }
 
-  /** Los namespaces con una rotación pendiente, para que las listas puedan decirlo. */
+  /**
+   * Lo que este perfil debe volver a sellar, para que las listas puedan DECIRLO. Son dos
+   * deudas distintas y las dos acaban igual —los miembros no leen sus variables— así que
+   * salen juntas:
+   *
+   * - `rotate`: se fue un miembro y no se pudo rotar la llave del namespace.
+   * - `rewrap`: entró uno (o registró su llave de cifrado) y no se le pudo envolver.
+   *
+   * Ambas se saldan solas en la siguiente escritura con contraseña. Mientras tanto,
+   * enseñarlas es la diferencia entre un servicio mal configurado y uno mal configurado
+   * que además nadie ve.
+   */
   function rotationsDue () {
     const out = {}
     for (const [k, v] of Object.entries(store.listSettings?.() || {})) {
-      if (k.startsWith('rotate-due:')) out[k.slice('rotate-due:'.length)] = Number(v) || 0
+      // La salida va SIEMPRE por owner (`ns:proxy`, `dev:<pub>`), aunque el ajuste de la
+      // rotación guarde solo el nombre del namespace: una sola forma para quien lo lee.
+      if (k.startsWith('rotate-due:')) out['ns:' + k.slice('rotate-due:'.length)] = { kind: 'rotate', at: Number(v) || 0 }
+      else if (k.startsWith('rewrap-due:')) out[k.slice('rewrap-due:'.length)] = { kind: 'rewrap', at: Number(v) || 0 }
     }
     return out
   }
@@ -864,12 +885,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('secret.rotate', { ns, keys: rot?.rotated ?? 0, pending: true })
       return rot
     }
-    const r = await secrets.rewrap(owner, members, adminKey)
-    if (r?.sinLlave?.length) {
-      log(`[vault] ${owner}: ${r.sinLlave.length} member(s) without an encryption key - they will NOT be able to read their variables`)
-      audit('secret.nokey', { owner, count: r.sinLlave.length })
+    try {
+      const r = await secrets.rewrap(owner, members, adminKey)
+      // Saldado: si este cajón debía un re-envoltorio, ya está hecho.
+      if (store.getSetting(`rewrap-due:${owner}`)) {
+        store.setSetting(`rewrap-due:${owner}`, undefined)
+        log(`[vault] ${owner}: pending re-seal settled`)
+        audit('secret.rewrap', { owner, pending: true })
+      }
+      if (r?.sinLlave?.length) {
+        log(`[vault] ${owner}: ${r.sinLlave.length} member(s) without an encryption key - they will NOT be able to read their variables`)
+        audit('secret.nokey', { owner, count: r.sinLlave.length })
+      }
+      return r
+    } catch (e) {
+      // SIN la contraseña no hay forma de envolverle su llave, y esto pasa por caminos
+      // donde no hay a quién pedírsela: un servicio que acaba de registrar su llave de
+      // cifrado llega por el proxio, no por una consola. Antes se perdía en un `.catch`
+      // del que llamaba y el servicio se quedaba sin variables SIN QUE NADIE SE ENTERARA
+      // — el modo de fallo que más caro sale aquí. Se anota, se dice, y la siguiente
+      // escritura con contraseña lo salda.
+      store.setSetting(`rewrap-due:${owner}`, String(Date.now()))
+      log(`[vault] ${owner}: PENDING RE-SEAL - could not hand out its key (${e.message}).`)
+      log(`[vault] ${owner}: its members will NOT read their variables until you save one with the password.`)
+      audit('secret.rewrap-due', { owner, reason: e.message })
+      throw e
     }
-    return r
   }
 
   async function setSecret (ns, key, value, isPublic, adminKey) {
