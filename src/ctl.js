@@ -23,6 +23,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import tty from 'node:tty'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
 import { assertVar } from './secretsStore.js'
@@ -601,6 +602,36 @@ async function cmdSecret (rest) {
   })
   const [sub, ...args] = rest2
   const s = requireDaemon()
+
+  /**
+   * La contraseña del perfil, y SOLO si el perfil la tiene.
+   *
+   * Desde que las privadas van selladas al aparato que las lee, escribir una variable
+   * deja de ser «guardar un valor»: hay que abrir la copia maestra de las llaves para
+   * poder envolver la nueva. Eso lo hace la contraseña, así que toda escritura la pide.
+   * Borrar no, porque tirar un sobre no obliga a abrirlo.
+   */
+  let cachedPwd
+  const adminPassword = async () => {
+    if (cachedPwd !== undefined) return cachedPwd
+    const d = await profileRequest('list')
+    const list = Array.isArray(d.profiles) ? d.profiles : []
+    const p = PROFILE
+      ? list.find((x) => x.id === PROFILE || x.name === PROFILE)
+      : (list.find((x) => x.current) || list[0])
+    if (!p?.protected) { cachedPwd = null; return null }
+    // Nunca por argumento: quedaría en `ps` y en el historial de la shell. Si no hay
+    // terminal se dice qué falta, en vez de fallar con «el daemon no aplicó el cambio».
+    let pwd
+    try { pwd = await askPassword('Contraseña del perfil: ') } catch (_) {
+      console.error('Este perfil tiene contraseña y hace falta para guardar una variable.')
+      console.error('Ejecútalo desde un terminal (por ssh, con -t).')
+      process.exit(1)
+    }
+    if (!pwd) { console.error('Cancelado.'); process.exit(1) }
+    cachedPwd = pwd
+    return pwd
+  }
   const secretsListFile = path.join(dir, 'secrets-list.json')
   const signalAndWaitList = async () => {
     try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {}
@@ -672,7 +703,9 @@ async function cmdSecret (rest) {
       process.exit(2)
     }
     const withVisibility = items.map((it) => (isPublic === undefined ? it : { ...it, public: isPublic }))
-    writeReq('secret-request.json', pub ? { op: 'batch', pub, items: withVisibility } : { op: 'batch', ns, items: withVisibility })
+    const password = await adminPassword()
+    const base = pub ? { op: 'batch', pub, items: withVisibility } : { op: 'batch', ns, items: withVisibility }
+    writeReq('secret-request.json', password ? { ...base, password } : base)
     const d = await signalAndWaitList()
     const list = pub
       ? ((Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === pub)?.keys || [])
@@ -767,7 +800,8 @@ async function cmdSecret (rest) {
       : op === 'rm'
         ? { op: 'dev-rm', pub: m.pub, key }
         : { op: 'dev-vis', pub: m.pub, key, public: wantsPublic(value, USAGE) }
-    writeReq('secret-request.json', req)
+    const password = op === 'rm' ? null : await adminPassword()
+    writeReq('secret-request.json', password ? { ...req, password } : req)
     const d = await signalAndWaitList()
     const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
     const ok = op === 'rm' ? !has(keys, key) : has(keys, key)
@@ -805,7 +839,8 @@ async function cmdSecret (rest) {
       : sub === 'rm'
         ? { op: 'rm', ns, key }
         : { op: 'vis', ns, key, public: wantsPublic(value, USAGE) }
-    writeReq('secret-request.json', req)
+    const password = sub === 'rm' ? null : await adminPassword()
+    writeReq('secret-request.json', password ? { ...req, password } : req)
     const d = await signalAndWaitList()
     const list = d.ns?.[ns] || []
     const ok = sub === 'rm' ? !has(list, key) : has(list, key)
@@ -830,13 +865,24 @@ function wantsPublic (word, usage) {
  */
 function askPassword (prompt) {
   return new Promise((resolve, reject) => {
-    const stdin = process.stdin
-    if (!stdin.isTTY) return reject(new Error('a terminal is required to type the password'))
+    // Se lee del TERMINAL, no de la entrada estándar. `secret import` ya usa stdin para
+    // el `.env` (`cat .env | dotrino-vault secret import proxy`) y aun así hay que poder
+    // escribir la contraseña; lo mismo vale para cualquier tubería.
+    let stdin = process.stdin
+    let own = null
+    if (!stdin.isTTY) {
+      try {
+        own = fs.openSync('/dev/tty', 'r')
+        stdin = new tty.ReadStream(own)
+      } catch (_) { return reject(new Error('a terminal is required to type the password')) }
+    }
     process.stdout.write(prompt)
     stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8')
     let buf = ''
     const done = (err, val) => {
-      stdin.setRawMode(false); stdin.pause(); stdin.removeListener('data', onData)
+      try { stdin.setRawMode(false) } catch (_) {}
+      stdin.removeListener('data', onData)
+      if (own !== null) { try { stdin.destroy() } catch (_) {} } else stdin.pause()
       process.stdout.write('\n')
       err ? reject(err) : resolve(val)
     }
