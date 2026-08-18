@@ -64,6 +64,8 @@ export function openStore (dir) {
       return ok
     },
     getSetting (k) { return data.settings[k] },
-    setSetting (k, v) { data.settings[k] = v; save() }
+    setSetting (k, v) { if (v === undefined) delete data.settings[k]; else data.settings[k] = v; save() },
+    /** Todos los ajustes (copia). Para quien necesita buscar por prefijo. */
+    listSettings () { return { ...data.settings } }
   }
 }

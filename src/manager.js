@@ -56,6 +56,9 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       proxyUrl,
       log: (...a) => log(`[${tag}]`, ...a),
       isLocked: () => profiles.isLocked(id),
+      // Para poder DECIR que este perfil no tiene contraseña, y por tanto que sus
+      // variables privadas se abren con material que vive en este mismo disco.
+      hasPassword: () => !!profiles.get(id)?.protected,
       // Camino A: nació para adoptar la cuenta de un aparato (ver profiles.add).
       forAdoption: !!p?.adopt,
       // Ya adoptó: la marca se consume (no vuelve a estar «a la espera»).

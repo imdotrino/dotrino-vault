@@ -268,3 +268,22 @@ test('las claves y los valores se siguen validando', async () => {
   await assert.rejects(() => s.set('proxy', 'K', '', false, PWD), /non-empty/)
   await assert.rejects(() => s.set('MAYUS', 'K', 'v', false, PWD), /invalid namespace/)
 })
+
+test('rotate: el que ya no esta pierde la envoltura Y la CEK cambia', async () => {
+  const dir = tmp()
+  const sealer = fakeSealer()
+  const s = abrir(dir, sealer)
+  await s.set('proxy', 'K', 'secreto', false, PWD)
+  await s.rewrap('ns:proxy', miembros('pub-A', 'pub-B'), PWD)
+
+  // B guarda la CEK que le tocó (es lo que haría un aparato comprometido).
+  const cekQueViaB = sealer.openMaster(enDisco(dir).master, PWD)['ns:proxy']
+
+  await s.rotate('ns:proxy', miembros('pub-A'), PWD)
+  const ahora = sealer.openMaster(enDisco(dir).master, PWD)['ns:proxy']
+
+  assert.notEqual(ahora, cekQueViaB, 'la CEK que se llevo B ya no vale')
+  assert.equal(s.bundleFor('proxy', 'pub-B').ns, null, 'y no tiene envoltura nueva')
+  // A sigue trabajando sin enterarse.
+  assert.equal((await s.openBundle('proxy', null, PWD)).K, 'secreto')
+})

@@ -38,7 +38,7 @@ import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
  *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
  *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
  */
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, forAdoption = false, onAdopted } = {}) {
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
   // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
   // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando
@@ -63,6 +63,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const store = openStore(dir)
   const threads = openThreadStore(dir)
   const secrets = openSecretsStore(dir, { sealer: makeSealer(), defaultKey: () => new Uint8Array(machineKey(dir)) })
+  // SIN CONTRASEÑA NO HAY SECRETO. Las variables privadas se sellan con una llave que
+  // sale de la copia maestra, y esa copia se abre con la contraseña del perfil. Si no
+  // hay contraseña se cae a la llave de la máquina — que es la protección de siempre,
+  // pero su material vive en este mismo disco, así que una copia del disco lo abre.
+  // Se dice en voz alta: prometer una protección que no está puesta es peor que no
+  // tenerla (docs/secretos-sellados.md §2.3).
+  try {
+    if (!hasPassword()) {
+      log('[vault] this profile has NO password: private variables are sealed with a key derived from this machine,')
+      log('[vault] so a copy of this disk opens them. Set one with `dotrino-vault profile password`.')
+    }
+  } catch (_) {}
+
   const master = await masterPubkeyOf(identity)
   const fp = (await pubkeyId(master)).slice(0, 16)
 
@@ -139,6 +152,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         const n = secrets.forgetDevice(sub)
         if (n) log(`[vault] dropped ${n} variable(s) of the removed device`)
       } catch (e) { log('[vault] could not drop the device variables:', e.message) }
+      // Su cajón propio se va entero y eso es inmediato y completo (estaba sellado solo
+      // a él). Lo que comparte —la CEK de su namespace— hay que ROTARLO, porque quitarle
+      // la envoltura no basta: si guardó la CEK sigue abriendo todo lo cifrado con ella.
+      //
+      // Pero rotar exige la contraseña, y quitar un aparato es el interruptor de
+      // emergencia: el gesto que se hace desde el teléfono cuando se perdió una máquina.
+      // Un interruptor que pide una frase que quizá no tienes a mano no es un
+      // interruptor. Así que se INTENTA, y si no se puede queda anotado y a la vista.
+      markRotationDue(sub).catch((e) => log('[vault] could not rotate after the removal:', e.message))
     },
     defaultScope: [SCOPE.READ],
     onChallenge ({ deviceId, scope }) {
@@ -739,8 +761,55 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * No avisa de cambio a nadie: el texto cifrado de los valores no se mueve, y avisar
    * reiniciaría a todos los nodos del ns para nada.
    */
+  /**
+   * Se fue un miembro de un namespace: su CEK deja de ser de fiar. Se intenta rotar en
+   * el acto y, si no se puede (perfil sin desbloquear), el cajón queda MARCADO — la
+   * consola y el CLI lo enseñan, y la siguiente escritura desbloqueada lo salda.
+   *
+   * Una deuda que no se ve es una deuda que no se paga, y aquí la deuda es que alguien
+   * que ya no está podría abrir lo que se escriba mañana.
+   */
+  async function markRotationDue (sub) {
+    const m = await memberOf(sub)
+    const ns = m?.cn
+    if (!ns) return
+    try {
+      const r = await secrets.rotate(`ns:${ns}`, await nsMembers(ns))
+      if (r?.rotated != null) {
+        log(`[vault] ns:${ns}: key rotated after removing a member (${r.rotated} variable(s) re-encrypted)`)
+        audit('secret.rotate', { ns, keys: r.rotated })
+        scheduleNotice(ns)
+        return
+      }
+    } catch (e) {
+      store.setSetting(`rotate-due:${ns}`, String(Date.now()))
+      log(`[vault] ns:${ns}: PENDING ROTATION - a member left and its key could not be rotated (${e.message})`)
+      audit('secret.rotate-due', { ns, reason: e.message })
+    }
+  }
+
+  /** Los namespaces con una rotación pendiente, para que las listas puedan decirlo. */
+  function rotationsDue () {
+    const out = {}
+    for (const [k, v] of Object.entries(store.listSettings?.() || {})) {
+      if (k.startsWith('rotate-due:')) out[k.slice('rotate-due:'.length)] = Number(v) || 0
+    }
+    return out
+  }
+
   async function spreadKey (owner, members, adminKey) {
     if (secrets.isLegacy()) return null
+    // Si este cajón quedó a deber una rotación (se fue alguien y no se pudo rotar),
+    // se salda AHORA, que es cuando hay con qué. Rotar incluye re-envolver, así que
+    // sustituye al reparto en vez de sumarse.
+    const ns = owner.startsWith('ns:') ? owner.slice(3) : null
+    if (ns && store.getSetting(`rotate-due:${ns}`)) {
+      const rot = await secrets.rotate(owner, members, adminKey)
+      store.setSetting(`rotate-due:${ns}`, undefined)
+      log(`[vault] ns:${ns}: pending rotation settled (${rot?.rotated ?? 0} variable(s) re-encrypted)`)
+      audit('secret.rotate', { ns, keys: rot?.rotated ?? 0, pending: true })
+      return rot
+    }
     const r = await secrets.rewrap(owner, members, adminKey)
     if (r?.sinLlave?.length) {
       log(`[vault] ${owner}: ${r.sinLlave.length} member(s) without an encryption key - they will NOT be able to read their variables`)
@@ -966,6 +1035,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.
     profileMembers: () => identity.profileMembers(),
+    // Los namespaces que quedaron a deber una rotación (se fue un miembro y no se pudo
+    // rotar su llave). Lo enseñan `secret list` y la consola: si no se ve, no se salda.
+    rotationsDue,
     // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
     isMaster: () => identity.isMaster(),
     setCaps: async (pub, caps) => {
