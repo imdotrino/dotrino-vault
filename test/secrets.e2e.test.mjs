@@ -672,3 +672,26 @@ test('un agente VIEJO consigue su llave de cifrado SIN re-enrolarse', async () =
   assert.equal((await fetchSecrets({ dir: svc })).TURN_KEY, 'secreto-del-ns', 'y sigue leyendo')
 })
 
+
+test('la consola remota escribe una privada mandando la contrasena en el sobre', async () => {
+  // Regresion: cuando los secretos pasaron a sellarse, `varsDesk` seguia llamando a
+  // setSecret sin llave y caia a la de la maquina — que no abre la copia maestra de un
+  // perfil con contraseña. Escribir desde vault.dotrino.com dejo de funcionar.
+  //
+  // La contraseña viaja DENTRO del mismo sobre que los valores, nunca en claro por el
+  // proxio. Aqui el perfil no tiene contraseña, asi que lo que se comprueba es que el
+  // camino acepta el campo y sigue guardando.
+  const ns = 'consola'
+  const enc = await vault.identity.sealContent(JSON.stringify({
+    items: [{ key: 'DESDE_LA_CONSOLA', value: 'valor-remoto' }],
+    password: undefined
+  }))
+  const r = await vault.vars.setMany({ ns, enc, by: 'test' })
+  assert.deepEqual(r.keys, ['DESDE_LA_CONSOLA'])
+
+  // Y de verdad quedo guardada: sin el `await` que faltaba, la respuesta salia antes
+  // de escribir y esto encontraba el cajon vacio.
+  const lista = vault.listSecrets()[ns] || []
+  assert.ok(lista.some((k) => k.key === 'DESDE_LA_CONSOLA'), 'la variable tiene que estar ya en el disco')
+  assert.equal((await vault.openSecrets(ns)).DESDE_LA_CONSOLA, 'valor-remoto')
+})

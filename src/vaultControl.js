@@ -224,8 +224,12 @@ export const renameProfile = (profile, name) => profileOp('rename', { profile, n
 export const removeProfile = (profile) => profileOp('rm', { profile })
 export const unlockProfile = (profile, password) => profileOp('unlock', { profile, password })
 export const lockProfile = (profile) => profileOp('lock', { profile })
-export const setProfilePassword = (profile, password) => profileOp('password-set', { profile, password })
-export const removeProfilePassword = (profile) => profileOp('password-rm', { profile })
+// `current`: la contraseña que YA tenía el perfil. Hace falta para abrir la copia
+// maestra de los secretos y volver a cerrarla con la nueva — sin ese paso, cambiar la
+// contraseña dejaría las variables privadas ilegibles.
+export const setProfilePassword = (profile, password, current) => profileOp('password-set', { profile, password, ...(current ? { current } : {}) })
+// Quitarla también la pide: se re-sella a la llave de la máquina antes de que se vaya.
+export const removeProfilePassword = (profile, password) => profileOp('password-rm', { profile, password })
 
 // ---------------------------------------------------------------------------
 // Volcado de dispositivos + secretos de un perfil
@@ -431,6 +435,9 @@ export async function listSecrets (profile) {
  * callado, y un «guardado» que no guardó nada es la peor forma de fallar en esto.
  */
 async function secretOp (req, profile, check) {
+  // `req` puede llevar la CONTRASEÑA del perfil (las operaciones que sellan la
+  // necesitan para abrir la copia maestra). Vive un instante en un archivo 0600 del
+  // dir del vault y el daemon lo borra al consumirlo.
   requireAlive() // el VALOR es secreto: no escribirlo si el daemon está caído
   rm(F.secretsList)
   await writeReq(F.secretReq, req, profile)
@@ -455,8 +462,8 @@ const visibilityOf = (list, key) => !!(list || []).find((x) => x.key === key)?.p
  * `isPublic` opcional: sin decir nada conserva la visibilidad que ya tenía (y una nueva
  * nace privada, o sea que su valor no sale de la máquina de la bóveda).
  */
-export function setSecret (ns, key, value, profile, isPublic) {
-  return secretOp({ op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
+export function setSecret (ns, key, value, profile, isPublic, password) {
+  return secretOp({ op: 'set', ns, key, value, ...(password ? { password } : {}), ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
     if (!has(out.ns[ns], key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
@@ -472,14 +479,14 @@ export function deleteSecret (ns, key, profile) {
  * Cambia SOLO quién puede ver el valor: `public` deja que la consola remota lo vea,
  * `private` lo encierra en esta máquina. No toca el valor (ni hace falta conocerlo).
  */
-export function setSecretVisibility (ns, key, isPublic, profile) {
-  return secretOp({ op: 'vis', ns, key, public: !!isPublic }, profile, (out) => {
+export function setSecretVisibility (ns, key, isPublic, profile, password) {
+  return secretOp({ op: 'vis', ns, key, public: !!isPublic, ...(password ? { password } : {}) }, profile, (out) => {
     if (visibilityOf(out.ns[ns], key) !== !!isPublic) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
-export function setDeviceSecretVisibility (pub, key, isPublic, profile) {
-  return secretOp({ op: 'dev-vis', pub, key, public: !!isPublic }, profile, (out) => {
+export function setDeviceSecretVisibility (pub, key, isPublic, profile, password) {
+  return secretOp({ op: 'dev-vis', pub, key, public: !!isPublic, ...(password ? { password } : {}) }, profile, (out) => {
     if (visibilityOf(keysOf(out, pub), key) !== !!isPublic) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
@@ -495,16 +502,16 @@ export function setDeviceSecretVisibility (pub, key, isPublic, profile) {
  *
  * @param {Array<{op:'set'|'rm', key:string, value?:string, public?:boolean}>} items
  */
-export function applySecrets (ns, items, profile) {
-  return secretOp({ op: 'batch', ns, items }, profile, (out) => {
+export function applySecrets (ns, items, profile, password) {
+  return secretOp({ op: 'batch', ns, items, ...(password ? { password } : {}) }, profile, (out) => {
     const missing = items.find((it) => (it.op === 'rm' ? has(out.ns[ns], it.key) : !has(out.ns[ns], it.key)))
     if (missing) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }
 
 /** Lo mismo para el cajón de UN aparato. */
-export function applyDeviceSecrets (pub, items, profile) {
-  return secretOp({ op: 'batch', pub, items }, profile, (out) => {
+export function applyDeviceSecrets (pub, items, profile, password) {
+  return secretOp({ op: 'batch', pub, items, ...(password ? { password } : {}) }, profile, (out) => {
     const missing = items.find((it) => (it.op === 'rm' ? has(keysOf(out, pub), it.key) : !has(keysOf(out, pub), it.key)))
     if (missing) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
@@ -523,8 +530,8 @@ export async function deleteScope (ns, profile) {
  * misma que trae el acta). Solo la lee ese aparato, y le gana a la del scope con el
  * mismo nombre.
  */
-export function setDeviceSecret (pub, key, value, profile, isPublic) {
-  return secretOp({ op: 'dev-set', pub, key, value, ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
+export function setDeviceSecret (pub, key, value, profile, isPublic, password) {
+  return secretOp({ op: 'dev-set', pub, key, value, ...(password ? { password } : {}), ...(isPublic === undefined ? {} : { public: !!isPublic }) }, profile, (out) => {
     if (!has(keysOf(out, pub), key)) throw coded('the daemon did not apply the change (check the service logs)', 'NOT_APPLIED')
   })
 }

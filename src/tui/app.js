@@ -138,6 +138,13 @@ function activeProfile (st) {
   return list.find((p) => p.current) || list[0] || null
 }
 const activeId = (st) => activeProfile(st)?.id || undefined
+/**
+ * La contraseña del perfil ACTIVO, que la TUI ya guarda para toda la sesión al
+ * desbloquear (ver `reunlockSilently`). Las operaciones que SELLAN una variable la
+ * necesitan: sin ella el daemon cae a la llave de la máquina, que no abre la copia
+ * maestra de un perfil con contraseña, y la escritura falla con «wrong password».
+ */
+const activePwd = (st) => st.sessionPwd?.get(activeId(st)) || undefined
 
 function lockGlyph (p) {
   if (!p?.protected) return ''
@@ -696,7 +703,7 @@ async function onKeyProfiles (term, st, key) {
           onSubmit: async (again) => {
             st.input = null
             if (again !== pwd) { flash(st, i.passwordMismatch, 'danger'); return }
-            const r = await guard(term, st, i.savingPassword, () => vc.setProfilePassword(p.id, pwd))
+            const r = await guard(term, st, i.savingPassword, () => vc.setProfilePassword(p.id, pwd, st.sessionPwd?.get(p.id)))
             // La nueva es la que vale para el resto de la sesión: guardar la vieja dejaría
             // a la TUI reabriendo con una contraseña que ya no existe.
             if (r.ok) { st.sessionPwd?.set(p.id, pwd); flash(st, i.passwordSaved); await refreshProfiles(term, st) }
@@ -709,7 +716,7 @@ async function onKeyProfiles (term, st, key) {
   } else if (ch === 'x' && cur) { // quitar contraseña
     if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
     await ensureUnlocked(term, st, cur, async (p = cur) => {
-      const r = await guard(term, st, i.removingPassword, () => vc.removeProfilePassword(p.id))
+      const r = await guard(term, st, i.removingPassword, () => vc.removeProfilePassword(p.id, st.sessionPwd?.get(p.id)))
       if (r.ok) { st.sessionPwd?.delete(p.id); flash(st, i.passwordRemoved); await refreshProfiles(term, st) }
     })
   } else if (ch === 'u' && cur) {
@@ -1052,7 +1059,7 @@ async function onKeySecrets (term, st, key) {
       })
     }
   } else if (ch === 't' && cur?.key) {
-    await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st)))
+    await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st), activePwd(st)))
   } else if (key.name === 'f5') {
     await refreshSecrets(term, st)
   }
@@ -1095,7 +1102,7 @@ async function onKeyDevVars (term, st, key) {
   if (ch === 'n') { promptNewDeviceVariable(term, st); return true }
   if (ch === 'i' && target) { promptLoadVars(term, st, { pub: target.pub, where: target.deviceId }); return true }
   if (ch === 't' && cur && target) {
-    await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st)))
+    await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st), activePwd(st)))
     return true
   }
   if ((ch === 'x' || key.name === 'delete') && cur && target) {
@@ -1146,7 +1153,7 @@ function promptNewDeviceVariable (term, st) {
           st.input = null
           if (!value) { flash(st, i.valueEmpty, 'danger'); return }
           askVisibility(term, st, async (isPublic) => {
-            const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st), isPublic))
+            const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st), isPublic, activePwd(st)))
             if (r.ok) { flash(st, i.varSaved(target.deviceId, kv)); st.secrets = r.v }
           })
         },
@@ -1189,8 +1196,8 @@ function promptLoadVars (term, st, { ns = null, pub = null, where }) {
       askVisibility(term, st, async (isPublic) => {
         const withVisibility = items.map((it) => ({ ...it, public: isPublic }))
         const r = await guard(term, st, i.loadingVars, () => (pub
-          ? vc.applyDeviceSecrets(pub, withVisibility, activeId(st))
-          : vc.applySecrets(ns, withVisibility, activeId(st))))
+          ? vc.applyDeviceSecrets(pub, withVisibility, activeId(st), activePwd(st))
+          : vc.applySecrets(ns, withVisibility, activeId(st), activePwd(st))))
         if (r.ok) { flash(st, i.loadedVars(items.length, where)); st.secrets = r.v }
       })
     },
@@ -1240,7 +1247,7 @@ function promptNewVariable (term, st) {
               st.input = null
               if (!value) { flash(st, i.valueEmpty, 'danger'); return }
               askVisibility(term, st, async (isPublic) => {
-                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsName, kv, value, activeId(st), isPublic))
+                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsName, kv, value, activeId(st), isPublic, activePwd(st)))
                 if (r.ok) { flash(st, i.varSaved(nsName, kv)); st.secrets = r.v }
               })
             },

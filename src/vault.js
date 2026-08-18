@@ -38,7 +38,7 @@ import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
  *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
  *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
  */
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, forAdoption = false, onAdopted } = {}) {
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, deriveAdminKey = null, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
   // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
   // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando
@@ -644,6 +644,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *   2. **Lo que sale, sale CIFRADO** con la clave de contenido del perfil: el proxy
    *      transporta el sobre y no ve nada. Igual que el contenido del usuario (`store`).
    */
+  /**
+   * La llave de administración a partir de lo que venga en el sobre de la consola
+   * remota. `undefined` si no trae contraseña — entonces el store cae a la de la
+   * máquina, que es lo correcto para un perfil que no tiene ninguna.
+   *
+   * La contraseña no se guarda: se deriva, se usa y se suelta con el sobre.
+   */
+  async function adminKeyFrom (payload) {
+    const pwd = payload?.password
+    if (typeof pwd !== 'string' || !pwd) return undefined
+    if (typeof deriveAdminKey !== 'function') return undefined
+    return deriveAdminKey(pwd)
+  }
+
   const varsDesk = {
     async list () {
       // `listSecrets`/`listDeviceSecrets` ya traen el valor de las públicas y solo de esas:
@@ -687,7 +701,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         value: it?.value,
         ...(typeof it?.public === 'boolean' ? { public: it.public } : (isPublic === undefined ? {} : { public: isPublic }))
       }))
-      const keys = ns ? applySecrets(ns, list) : await applyDeviceSecrets(pub, list)
+      // La CONTRASEÑA viaja DENTRO del sobre (nunca en claro por el proxio): hace falta
+      // para abrir la copia maestra y sellar. Y sí, `applySecrets` va con `await` — sin
+      // él la escritura quedaba al aire y la respuesta salía antes de guardar nada.
+      const ak = await adminKeyFrom(payload)
+      const keys = ns ? await applySecrets(ns, list, ak) : await applyDeviceSecrets(pub, list, ak)
       return { ok: true, keys }
     }
   }

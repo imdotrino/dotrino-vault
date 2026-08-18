@@ -59,6 +59,9 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       // Para poder DECIR que este perfil no tiene contraseña, y por tanto que sus
       // variables privadas se abren con material que vive en este mismo disco.
       hasPassword: () => !!profiles.get(id)?.protected,
+      // Para la consola remota: la contraseña llega dentro del sobre firmado y hay que
+      // convertirla en la llave que abre la copia maestra de los secretos.
+      deriveAdminKey: (password) => profiles.adminKey(id, password),
       // Camino A: nació para adoptar la cuenta de un aparato (ver profiles.add).
       forAdoption: !!p?.adopt,
       // Ya adoptó: la marca se consume (no vuelve a estar «a la espera»).
