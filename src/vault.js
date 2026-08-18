@@ -670,7 +670,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           // Lo que quedó a deber un sellado: quien administra a distancia tiene que
           // poder verlo, porque es exactamente lo que él puede saldar (escribiendo una
           // variable con la contraseña) y la bóveda no.
-          pending: rotationsDue()
+          pending: rotationsDue(),
+          // Y si el perfil NO tiene contraseña, decirlo: sus privadas se abren con la
+          // llave de la máquina de la bóveda, cuyo material vive en ese mismo disco.
+          // El comentario de aquí decía «la consola lo dice en voz alta» y la consola
+          // no decía nada — el mismo error que el comentario mentiroso de `atrest.js`.
+          hasPassword: (() => { try { return !!hasPassword() } catch (_) { return true } })()
         }))
       }
     },

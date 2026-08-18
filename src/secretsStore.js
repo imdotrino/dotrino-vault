@@ -163,6 +163,26 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
     return kr.reduce((best, g) => (!best || (g.gen || 0) > (best.gen || 0) ? g : best), null)
   }
 
+  /**
+   * UN CAMBIO A LA VEZ.
+   *
+   * Todo lo que toca la copia maestra es leer-modificar-escribir con un `await` en
+   * medio (`openMaster` … sellar … `sealMaster`), así que dos operaciones en vuelo se
+   * pisan la una a la otra. No es teórico: un `rewrap` lanzado al aprobar un aparato
+   * —que va sin contraseña y sin `await`, a propósito— volvía a sellar la maestra **con
+   * la llave vieja** justo después de cambiarle la contraseña al perfil. El vault
+   * quedaba abierto para cualquiera con una copia del disco, con todo pareciendo
+   * sellado y sin un solo mensaje de error. Reproducido antes de arreglarlo.
+   *
+   * La cola es de este proceso, que es el único que escribe este archivo.
+   */
+  let cola = Promise.resolve()
+  const enFila = (fn) => {
+    const r = cola.then(fn, fn)
+    cola = r.then(() => {}, () => {})
+    return r
+  }
+
   return {
     /** `true` mientras el archivo siga en v3 (sin sellar), a la espera del primer desbloqueo. */
     isLegacy,
@@ -240,7 +260,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
     },
 
     /** @private Común a los dos cajones: la única diferencia es de dónde sale la CEK. */
-    async _put (bag, k, owner, key, value, isPublic, adminKey) {
+    async _put (...a) { return enFila(() => this._putRaw(...a)) },
+    /** @private El cuerpo, ya en fila (ver `enFila`). */
+    async _putRaw (bag, k, owner, key, value, isPublic, adminKey) {
       assertKeyValue(key, value)
       const vars = ensureBag(bag, k)
       const before = vars[key]
@@ -298,7 +320,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
       return this._setVis(data.dev, pub, `dev:${pub}`, key, isPublic, adminKey)
     },
     /** @private */
-    async _setVis (bag, k, owner, key, isPublic, adminKey) {
+    async _setVis (...a) { return enFila(() => this._setVisRaw(...a)) },
+    /** @private El cuerpo, ya en fila. */
+    async _setVisRaw (bag, k, owner, key, isPublic, adminKey) {
       const vars = varsOf(bag, k)
       const e = vars[key]
       if (!e) return false
@@ -354,7 +378,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
      * quien administra tiene que poder VERLO, porque el síntoma sería un servicio que
      * arranca sin configuración y no dice por qué.
      */
-    async rewrap (owner, members, adminKey = null) {
+    async rewrap (...a) { return enFila(() => this._rewrap(...a)) },
+    /** @private */
+    async _rewrap (owner, members, adminKey = null) {
       needSealer('re-wrap the key of a drawer')
       const [kind, k] = splitOwner(owner)
       const bag = kind === 'ns' ? data.ns : data.dev
@@ -377,7 +403,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
      *
      * No devuelve lo que el expulsado ya leyó. Eso no se puede deshacer y no se promete.
      */
-    async rotate (owner, members, adminKey = null) {
+    async rotate (...a) { return enFila(() => this._rotate(...a)) },
+    /** @private */
+    async _rotate (owner, members, adminKey = null) {
       needSealer('rotate the key of a drawer')
       const [kind, k] = splitOwner(owner)
       const bag = kind === 'ns' ? data.ns : data.dev
@@ -431,7 +459,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
      *
      * `null` en cualquiera de las dos significa «la del perfil sin contraseña».
      */
-    async rekeyMaster (oldKey, newKey) {
+    async rekeyMaster (...a) { return enFila(() => this._rekeyMaster(...a)) },
+    /** @private */
+    async _rekeyMaster (oldKey, newKey) {
       if (isLegacy()) return { rekeyed: false, reason: 'v3' }
       needSealer('change the profile password')
       const master = await sealer.openMaster(data.master, keyOr(oldKey))
@@ -452,7 +482,9 @@ export function openSecretsStore (dir, { sealer = null, defaultKey = null } = {}
      *
      * `membersOf(owner)` dice a quién hay que envolverle la CEK de cada cajón.
      */
-    async migrate (membersOf, adminKey = null) {
+    async migrate (...a) { return enFila(() => this._migrate(...a)) },
+    /** @private */
+    async _migrate (membersOf, adminKey = null) {
       if (!isLegacy()) return { migrated: false, reason: 'already-v4' }
       needSealer('seal the store')
 

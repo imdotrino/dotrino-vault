@@ -370,6 +370,10 @@ async function cmdMembers () {
     ].filter(Boolean)
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
     console.log('  %s  %s%s\n      %s', m.id, who, marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
+    // Un servicio SIN llave de cifrado no puede leer ninguna variable privada: van
+    // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
+    // se mira quién es quién — y en la lista de variables ya seria tarde.
+    if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
   console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
@@ -760,6 +764,21 @@ async function cmdSecret (rest) {
    * es un detalle: mientras esté ahí, los aparatos de ese cajón NO están leyendo sus
    * variables, y la bóveda no puede arreglarlo sola — necesita la contraseña.
    */
+  /**
+   * Un perfil SIN contraseña abre sus variables privadas con la llave de esta máquina,
+   * cuyo material vive en este mismo disco: una copia del disco las abre. Es un default
+   * deliberado —tiene que seguir funcionando— pero NO es lo mismo, y callarlo es
+   * exactamente el error del comentario mentiroso de `atrest.js`.
+   */
+  const printNoPassword = async () => {
+    const d = await profileRequest('list')
+    const list = Array.isArray(d.profiles) ? d.profiles : []
+    const p = PROFILE ? list.find((x) => x.id === PROFILE || x.name === PROFILE) : (list.find((x) => x.current) || list[0])
+    if (!p || p.protected) return
+    console.log('%sEste perfil no tiene contraseña%s: las privadas se abren con la llave de ESTA', B, Z)
+    console.log('máquina, cuyo material vive en este mismo disco — o sea que una copia del disco')
+    console.log('las abre. Ponle una con:  dotrino-vault profile password\n')
+  }
   const printPending = (d) => {
     const pend = Object.entries(d?.pending || {})
     if (!pend.length) return
@@ -797,6 +816,7 @@ async function cmdSecret (rest) {
     }
     console.log('\n(pública) = su valor se puede ver desde la consola remota. Las demás no salen de aquí.\n')
     printPending(d)
+    await printNoPassword()
     return
   }
 
@@ -1023,7 +1043,14 @@ async function cmdProfile (rest) {
       // camino recomendado para CAMBIARLA es quitarla y ponerla: así cada paso pide
       // solo lo que necesita.
       const actual = await askPassword('\nContraseña actual (vacío si no tiene): ')
-      const pwd = await askPassword('Contraseña nueva (mínimo 4): ')
+      // Se pide una FRASE, y se dice cómo sacarla, porque lo que da fuerza es la
+      // longitud y que no la elija un humano: un modismo tiene la entropía de un
+      // modismo, no la de su longitud. Desde el sellado, esta frase es lo único que
+      // separa una copia del disco de las variables privadas.
+      console.log('\nUsa VARIAS PALABRAS AL AZAR (mínimo 12 caracteres). Para que las elija')
+      console.log('la máquina y no tú:')
+      console.log("  grep -x '[a-z]\\{4,8\\}' /usr/share/dict/words | shuf -n5 | paste -sd-")
+      const pwd = await askPassword('\nContraseña nueva: ')
       const again = await askPassword('Repítela: ')
       if (pwd !== again) { console.error('Las contraseñas no coinciden.'); process.exit(1) }
       reportProfiles(await profileRequest('password-set', { password: pwd, current: actual || undefined }))

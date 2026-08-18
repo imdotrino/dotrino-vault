@@ -695,3 +695,48 @@ test('la consola remota escribe una privada mandando la contrasena en el sobre',
   assert.ok(lista.some((k) => k.key === 'DESDE_LA_CONSOLA'), 'la variable tiene que estar ya en el disco')
   assert.equal((await vault.openSecrets(ns)).DESDE_LA_CONSOLA, 'valor-remoto')
 })
+
+
+test('el servicio descifra AL VUELO: el valor no toca el disco en ningun momento', async () => {
+  // Regla del ecosistema: un servicio no guarda sus variables, las abre cada vez. Lo
+  // unico que persiste es su IDENTIDAD (llave del aparato + cert + llave de cifrado),
+  // que es lo que se revoca si la maquina cae — no habia nada que robar.
+  //
+  // Esto ya era cierto, pero nada lo IMPEDIA: una cache «para no pedirlas en cada
+  // arranque» es exactamente el atajo que alguien anadiria de buena fe, y desharia el
+  // sellado entero. El test lo fija.
+  const { enrollService, fetchSecrets, watchSecretsChanges } = await import('../lib/src/service.js')
+  const { encodeInvite } = await import('../lib/src/invite.js')
+
+  const ns = 'alvuelo'
+  const svc = tmp('svc-alvuelo-')
+  const VALOR = 'esto-no-puede-aparecer-en-ningun-archivo'
+  await vault.setSecret(ns, 'SECRETO', VALOR)
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'alvuelo', ttlMs: 60000 })
+  await enrollService({ qr: encodeInvite(qr), ns, dir: svc, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+
+  assert.equal((await fetchSecrets({ dir: svc })).SECRETO, VALOR, 'lo lee')
+
+  // Y otra vez, y mirando cambios: los caminos por los que entraria una cache.
+  assert.equal((await fetchSecrets({ dir: svc })).SECRETO, VALOR)
+  const stop = await watchSecretsChanges({ dir: svc, onChange: () => {}, onError: () => {} }).catch(() => null)
+  try { await new Promise((r) => setTimeout(r, 150)) } finally { try { await stop?.() } catch (_) {} }
+
+  // TODO el arbol del servicio, byte a byte: ni en claro ni en base64.
+  const enB64 = Buffer.from(VALOR, 'utf8').toString('base64')
+  const vistos = []
+  const andar = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const f = path.join(d, e.name)
+      if (e.isDirectory()) { andar(f); continue }
+      const b = fs.readFileSync(f)
+      vistos.push(e.name)
+      assert.ok(!b.includes(VALOR), `${e.name} tiene el valor EN CLARO`)
+      assert.ok(!b.includes(enB64), `${e.name} tiene el valor en base64`)
+    }
+  }
+  andar(svc)
+  // Lo unico que persiste: su identidad, y la sal del cifrado en reposo que la protege.
+  assert.deepEqual(vistos.sort(), ['atrest.salt', 'service-identity.json'],
+    'un archivo NUEVO en el directorio del servicio es sospechoso: revisa que no sea una cache')
+})

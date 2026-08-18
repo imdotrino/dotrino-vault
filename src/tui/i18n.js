@@ -83,6 +83,8 @@ const es = {
 
   // bóvedas (perfiles)
   noPassword: 'sin clave',
+  noPasswordWarn: 'Este perfil no tiene contraseña: una copia de este disco abre las variables privadas.',
+  pendingSeal: (owner, kind) => `${owner}: sin sellar (${kind === 'rotate' ? 'salió un aparato' : 'entró un aparato'}). Sus aparatos NO leen sus variables; guarda una con la contraseña.`,
   locked: '🔒 bloqueada',
   unlocked: '🔓 abierta',
   passwordOf: (name) => `Contraseña de "${name}"`,
@@ -109,7 +111,7 @@ const es = {
   deletingVault: 'Borrando bóveda…',
   vaultDeleted: 'Bóveda borrada',
   newPasswordLabel: (name) => `Contraseña nueva para "${name}" (mín. 4)`,
-  passwordTooShort: 'La contraseña debe tener al menos 4 caracteres',
+  passwordTooShort: 'La contraseña debe tener al menos 12 caracteres: usa varias palabras al azar',
   repeatPassword: 'Repite la contraseña',
   passwordMismatch: 'Las contraseñas no coinciden',
   savingPassword: 'Guardando contraseña…',
@@ -366,6 +368,8 @@ const en = {
   titlePairMode: 'Pairing: which account does it join?',
 
   noPassword: 'no password',
+  noPasswordWarn: 'This profile has no password: a copy of this disk opens the private variables.',
+  pendingSeal: (owner, kind) => `${owner}: not sealed (${kind === 'rotate' ? 'a device left' : 'a device joined'}). Its devices are NOT reading their variables; save one with the password.`,
   locked: '🔒 locked',
   unlocked: '🔓 unlocked',
   passwordOf: (name) => `Password for "${name}"`,
@@ -392,7 +396,7 @@ const en = {
   deletingVault: 'Deleting vault…',
   vaultDeleted: 'Vault deleted',
   newPasswordLabel: (name) => `New password for "${name}" (min. 4)`,
-  passwordTooShort: 'The password must be at least 4 characters',
+  passwordTooShort: 'The password must be at least 12 characters: use several random words',
   repeatPassword: 'Repeat the password',
   passwordMismatch: 'The passwords do not match',
   savingPassword: 'Saving password…',

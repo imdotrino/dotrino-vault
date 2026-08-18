@@ -326,3 +326,24 @@ test('cambiar la contrasena: quitar y volver a poner NO pierde los secretos', as
   await s.set('proxy', 'OTRA', 'despues-del-cambio', false, NUEVA)
   assert.equal((await s.openBundle('proxy', null, NUEVA)).OTRA, 'despues-del-cambio')
 })
+
+test('cambiar la contraseña con un re-envoltorio EN VUELO no la pierde', async () => {
+  // Encontrado probando, no leyendo: aprobar un aparato lanza un `rewrap` SIN esperarlo
+  // y SIN contraseña (a propósito: llega por el proxio y no hay a quién pedírsela). Si
+  // cae justo después de cambiar la contraseña, volvía a sellar la copia maestra con la
+  // llave VIEJA — y el vault quedaba abierto para cualquiera con el disco, con todo
+  // pareciendo sellado y sin un solo error. Todo lo que toca la maestra va en fila.
+  const dir = tmp()
+  const MAQUINA = 'la-de-la-maquina'
+  const FRASE = 'la-frase-nueva-del-perfil'
+  const st = openSecretsStore(dir, { sealer: fakeSealer(), defaultKey: () => MAQUINA })
+  await st.set('ns1', 'K', 'valor', false)
+
+  const enVuelo = st.rewrap('ns:ns1', [])          // sin await, como en el enrolamiento real
+  await st.rekeyMaster(null, FRASE)
+  await enVuelo.catch(() => {})
+
+  await assert.rejects(st.openBundle('ns1', null), /password/i,
+    'con la llave de la máquina ya NO se abre: la contraseña nueva es la que manda')
+  assert.deepEqual(await st.openBundle('ns1', null, FRASE), { K: 'valor' })
+})

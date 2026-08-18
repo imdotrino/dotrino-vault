@@ -348,7 +348,18 @@ function secretRows (st, t) {
   // El puntero a la otra pantalla va SIEMPRE, con scopes y sin ellos: es la mitad de la
   // función y quien la busca no tiene por qué adivinar que vive en Dispositivos.
   const footer = [{ text: '', sel: false }, { text: t.muted(' ' + i.devVarsElsewhere), sel: false }]
-  if (!names.length) return [{ text: t.muted(i.noScopes), sel: false }, ...footer]
+  // ARRIBA DEL TODO, antes que las variables: lo que está sin sellar significa que esos
+  // aparatos NO están leyendo su configuración ahora mismo, y que solo la contraseña lo
+  // arregla. Un aviso que hay que buscar no es un aviso.
+  const head = []
+  for (const [owner, info] of Object.entries(st.secrets?.pending || {})) {
+    head.push({ text: t.warn(' ' + i.pendingSeal(owner, info?.kind)), sel: false })
+  }
+  const p = activeProfile(st)
+  if (p && !p.protected) head.push({ text: t.warn(' ' + i.noPasswordWarn), sel: false })
+  if (head.length) head.push({ text: '', sel: false })
+  if (!names.length) return [...head, { text: t.muted(i.noScopes), sel: false }, ...footer]
+  rows.push(...head)
   for (const n of names) {
     rows.push({ text: t.accent(` ▸ ${n}`) + t.muted(i.scopeOf(n)), sel: true, meta: { ns: n, key: null } })
     for (const k of sortByKey(ns[n])) {

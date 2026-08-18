@@ -158,6 +158,8 @@ const T = {
     pend_b: 'Estos grupos no han podido entregar su llave, así que sus aparatos no están leyendo sus variables. Se arregla guardando aquí cualquier variable de ese grupo con la contraseña.',
     pend_rotate: 'salió un aparato del grupo',
     pend_rewrap: 'entró un aparato al grupo',
+    nopwd_t: 'Esta bóveda no tiene contraseña',
+    nopwd_b: 'Sus variables privadas se abren con una llave de la computadora donde vive la bóveda, y esa llave está en ese mismo disco: quien copie el disco las abre. Ponle una contraseña en esa computadora.',
     var_dev_t: 'Sus variables',
     var_dev_hint: 'Las variables de un aparato se ponen en su fila, arriba.',
     var_orphan: 'ya no está en el perfil',
@@ -293,6 +295,8 @@ const T = {
     pend_b: 'These groups could not hand out their key, so their devices are not reading their variables. Save any variable of that group here, with the password, and it is fixed.',
     pend_rotate: 'a device left the group',
     pend_rewrap: 'a device joined the group',
+    nopwd_t: 'This vault has no password',
+    nopwd_b: 'Its private variables open with a key from the computer where the vault lives, and that key sits on the same disk: whoever copies the disk opens them. Set a password on that computer.',
     var_dev_t: 'Its variables',
     var_dev_hint: 'A device’s variables live in its own row, above.',
     var_orphan: 'no longer in the profile',
@@ -960,6 +964,10 @@ const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)
 const pendingVars = computed(() => Object.entries(vars.value?.pending || {})
   .map(([owner, info]) => ({ owner, kind: info?.kind || 'rewrap' })))
 
+/** La bóveda dice si su perfil tiene contraseña. Sin ella, el sellado no protege de
+    una copia del disco, y eso se dice — no se calla por incómodo. */
+const noPassword = computed(() => vars.value ? vars.value.hasPassword === false : false)
+
 const orphanVars = computed(() => (vars.value?.dev || [])
   .filter((d) => !members.value.some((m) => m.pub === d.pub)))
 
@@ -1344,6 +1352,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                abajo, y las variables se ponen dentro de su apartado. -->
           <!-- La contraseña aparece SOLO cuando la bóveda la pide, y una vez para toda
                la pantalla: es del perfil, no de cada variable. -->
+          <div v-if="noPassword" class="pendbar" data-testid="vars-nopassword">
+            <strong>{{ t.nopwd_t }}</strong>
+            <small>{{ t.nopwd_b }}</small>
+          </div>
+
           <div v-if="pendingVars.length" class="pendbar" data-testid="vars-pending">
             <strong>{{ t.pend_t }}</strong>
             <ul>

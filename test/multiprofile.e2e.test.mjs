@@ -92,7 +92,7 @@ test('con el profile locked: NO se edita el perfil, pero sí se firma y se guard
   await store(dev, 'profileSet', { me: { nickname: 'Antes' } })
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
-  await mgr.profiles.setPassword(a.id, 'secreta')
+  await mgr.profiles.setPassword(a.id, 'frase-de-prueba-larga')
   mgr.profiles.lock(a.id)
 
   // Bloqueado: editar el perfil se rechaza y el dato NO cambia.
@@ -110,7 +110,7 @@ test('con el profile locked: NO se edita el perfil, pero sí se firma y se guard
   assert.equal(signed.publickey, vault.master)
 
   // Desbloqueado: se vuelve a poder editar.
-  await mgr.profiles.unlock(a.id, 'secreta')
+  await mgr.profiles.unlock(a.id, 'frase-de-prueba-larga')
   await store(dev, 'profileSet', { me: { nickname: 'Después' } })
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Después')
 })

@@ -11,8 +11,8 @@
  *   <root>/transport.json     keypair del proxy-client (a nivel PROCESO, no por perfil)
  *   <root>/p/<id>/…           los datos de cada perfil (incluida su maestra)
  *
- * CONTRASEÑA (opcional, por perfil): es un VERIFICADOR PBKDF2 —mismo modelo que el
- * candado del navegador (`@dotrino/identity` vault/core.js)— NO cifra nada en reposo.
+ * CONTRASEÑA (opcional, por perfil): es un VERIFICADOR scrypt (v2; v1 era PBKDF2 y se
+ * asciende al desbloquear) que NO cifra nada en reposo.
  * Y solo bloquea EDITAR el perfil: el daemon sigue firmando y sirviendo a los
  * dispositivos ya enrolados aunque el perfil esté bloqueado, para que un reinicio
  * del PC no deje las apps muertas hasta que alguien teclee la contraseña.
@@ -24,10 +24,24 @@ import fs from 'node:fs'
 import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
+import { atRestFor, migrateFile, machineKey } from './atrest.js'
 
 const REGISTRY = 'profiles.json'
-const PWD_ITER = 300000 // mismo coste que el candado del navegador
+const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
 const MAX_NAME = 40
+/**
+ * Lo MÍNIMO que se acepta al poner una contraseña.
+ *
+ * Eran 4 caracteres, y eso se quedó corto el día que los secretos pasaron a sellarse:
+ * desde entonces la contraseña no bloquea una consola, **es la llave** que abre la
+ * copia maestra, y todo el cifrado vale lo que valga ella. Cuatro dígitos son 10.000
+ * combinaciones — se prueban enteras en un rato aunque la derivación sea cara.
+ *
+ * No se piden mayúsculas ni símbolos a propósito: hacen la frase difícil de recordar
+ * y fácil de adivinar. Lo que da fuerza es la LONGITUD y que no la elija un humano;
+ * por eso lo que se pide en pantalla son varias palabras al azar.
+ */
+const PWD_MIN = 12
 
 /**
  * Cuánto tarda el freno en OLVIDAR los fallos. Sin esto la cuenta solo subía —solo la
@@ -49,7 +63,24 @@ const LEGACY_FILES = ['identity.json', 'peers.json', 'vault.json', 'threads.json
 
 const b64 = (buf) => Buffer.from(new Uint8Array(buf)).toString('base64')
 
-/** PBKDF2-SHA256 → verificador base64 (byte-idéntico al del navegador). */
+/**
+ * El verificador del candado.
+ *
+ * v2 es **scrypt, con el mismo coste que `adminKey`**, y no por gusto: este valor vive
+ * EN CLARO en `profiles.json`, así que quien tenga el disco lo ataca fuera de línea. Si
+ * es más barato que la llave de verdad, se convierte en el camino corto para llegar a
+ * ella — que es exactamente lo que pasaba con PBKDF2 al lado de un scrypt.
+ *
+ * v1 (PBKDF2) se sigue aceptando porque hay perfiles con él en el disco, y se ASCIENDE
+ * a v2 en el primer desbloqueo correcto: es el único momento en que se tiene la
+ * contraseña en la mano.
+ */
+function deriveScryptPwd (password, saltB64) {
+  const salt = Buffer.from(saltB64, 'base64')
+  return b64(crypto2.scryptSync(String(password || ''), salt, 32, { N: 16384, r: 8, p: 1 }))
+}
+
+/** PBKDF2-SHA256 → verificador base64 (v1, heredado). */
 async function derivePwd (password, saltB64, iter) {
   const salt = Buffer.from(saltB64, 'base64')
   const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(password)), 'PBKDF2', false, ['deriveBits'])
@@ -62,9 +93,18 @@ const cleanName = (name) => String(name || '').slice(0, MAX_NAME)
 
 export function openProfiles (root = dataDir()) {
   const file = path.join(root, REGISTRY)
-  let data = readJson(file, null)
+  // CIFRADO EN REPOSO, como todo lo demás. Era el único archivo del vault sin códec, y
+  // lleva dentro el verificador del candado. No protege de quien tenga el disco entero
+  // —el material de la llave vive en ese mismo disco, y eso está dicho en voz alta en
+  // `docs/secretos-sellados.md`— pero sí de que el registro viaje en claro en un
+  // respaldo o en una carpeta compartida por descuido, que es lo que el códec cubre
+  // para el resto. La migración verifica antes de reemplazar y es de una sola vez.
+  ensureDir(root)
+  try { migrateFile(file, machineKey(root)) } catch (_) {}
+  const atRest = atRestFor(root)
+  let data = readJson(file, null, atRest)
   if (!data || !Array.isArray(data.profiles)) data = { v: 1, current: null, profiles: [] }
-  const save = () => writeJson(file, data)
+  const save = () => writeJson(file, data, atRest)
 
   // Perfiles DESBLOQUEADOS en esta ejecución del daemon (en memoria: un reinicio
   // vuelve a bloquear, igual que cerrar la pestaña en el navegador).
@@ -239,11 +279,20 @@ export function openProfiles (root = dataDir()) {
         throw Object.assign(new Error(`too many tries: wait ${Math.ceil(left / 1000)} s`),
           { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
       }
-      const proof = await derivePwd(password, p.pwd.salt, p.pwd.iter)
+      const proof = p.pwd.v === 2
+        ? deriveScryptPwd(password, p.pwd.salt)
+        : await derivePwd(password, p.pwd.salt, p.pwd.iter)
       if (proof !== p.pwd.verifier) {
         p.tries = { n: tries.n + 1, at: Date.now() }
         save()
         throw Object.assign(new Error('wrong password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
+      }
+      // ASCENSO v1 → v2. Aquí, y solo aquí, se tiene la contraseña correcta en la mano:
+      // es el momento de dejar de guardar el verificador barato. No cambia la
+      // contraseña ni toca los secretos — el `adminKey` sale de `p.kdf`, que es otro.
+      if (p.pwd.v !== 2) {
+        const salt = b64(crypto.getRandomValues(new Uint8Array(16)))
+        p.pwd = { v: 2, salt, verifier: deriveScryptPwd(password, salt) }
       }
       delete p.tries
       save()
@@ -257,9 +306,12 @@ export function openProfiles (root = dataDir()) {
     async setPassword (id, password) {
       const p = assertExists(id)
       api.assertUnlocked(id)
-      if (!password || String(password).length < 4) throw new Error('password must be at least 4 characters')
+      if (!password || String(password).length < PWD_MIN) {
+        throw Object.assign(new Error(`password must be at least ${PWD_MIN} characters: use several random words`),
+          { code: 'PASSWORD_TOO_SHORT', min: PWD_MIN })
+      }
       const salt = b64(crypto.getRandomValues(new Uint8Array(16)))
-      p.pwd = { v: 1, salt, iter: PWD_ITER, verifier: await derivePwd(password, salt, PWD_ITER) }
+      p.pwd = { v: 2, salt, verifier: deriveScryptPwd(password, salt) }
       delete p.tries
       save()
       unlocked.add(id)

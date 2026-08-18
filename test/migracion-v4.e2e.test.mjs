@@ -130,3 +130,34 @@ test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente esc
 })
 
 test.after(() => proxy.stop?.())
+
+
+test('con el perfil BLOQUEADO la boveda sirve, y aun asi no puede leer una privada', async () => {
+  // Las dos mitades de la promesa, juntas, porque por separado cada una se puede
+  // cumplir mal: si dejara de servir, un reinicio del PC apagaria los servicios del
+  // dueño (el candado es de la CONSOLA, no de la boveda); y si pudiera leer, el
+  // sellado no serviria de nada, que es justo de lo que se venia.
+  const dir = tmp('vault-candado-')
+  const svcDir = tmp('svc-candado-')
+  const CLAVE = new Uint8Array(32).fill(11)
+
+  let bloqueado = false
+  const vault = await startVault({ dir, proxyUrl: url, log: () => {}, isLocked: () => bloqueado })
+  await vault.setSecret('candado', 'TURN_KEY', 'lo-que-hay-que-proteger', false)
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:candado'], label: 'svc', ttlMs: 60000 })
+  await enrollService({ qr: encodeInvite(qr), ns: 'candado', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
+
+  // Se le pone contraseña al perfil: la copia maestra pasa a cerrarse con la frase.
+  assert.equal((await vault.rekeySecrets(null, CLAVE)).rekeyed, true)
+  bloqueado = true
+
+  // 1) SIRVE. Es lo que no se puede romper: los aparatos ya enrolados siguen leyendo.
+  assert.equal((await fetchSecrets({ dir: svcDir })).TURN_KEY, 'lo-que-hay-que-proteger',
+    'con el perfil bloqueado, el servicio sigue recibiendo su configuracion')
+
+  // 2) Y NO PUEDE LEERLA ella misma sin la frase, aunque tenga el disco entero delante.
+  await assert.rejects(vault.openSecrets('candado'), /password|decrypt|open/i,
+    'la boveda no abre sus propias privadas sin la contraseña')
+  assert.deepEqual(await vault.openSecrets('candado', null, CLAVE), { TURN_KEY: 'lo-que-hay-que-proteger' },
+    'con la frase, si')
+})

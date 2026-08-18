@@ -8,6 +8,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { openProfiles } from '../src/profiles.js'
+import { readJson, writeJson } from '../src/paths.js'
+import { atRestFor } from '../src/atrest.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-vault-test-'))
 
@@ -71,7 +73,7 @@ test('sin contraseña, el perfil nunca está bloqueado', () => {
 test('la contraseña bloquea, y la correcta desbloquea', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   assert.equal(p.isProtected(id), true)
   assert.equal(p.isLocked(id), false, 'ponerla deja el perfil abierto en esta sesión')
 
@@ -79,7 +81,7 @@ test('la contraseña bloquea, y la correcta desbloquea', async () => {
   assert.equal(p.isLocked(id), true)
   await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   assert.equal(p.isLocked(id), true)
-  await p.unlock(id, 'secreta')
+  await p.unlock(id, 'frase-de-prueba-larga')
   assert.equal(p.isLocked(id), false)
 })
 
@@ -87,12 +89,12 @@ test('el candado se relee del disco: un daemon nuevo arranca bloqueado', async (
   const root = tmp()
   const p = openProfiles(root)
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
 
   const reopened = openProfiles(root) // = reiniciar el servicio
   assert.equal(reopened.isProtected(id), true)
   assert.equal(reopened.isLocked(id), true, 'el desbloqueo vive en memoria, no en disco')
-  await reopened.unlock(id, 'secreta')
+  await reopened.unlock(id, 'frase-de-prueba-larga')
   assert.equal(reopened.isLocked(id), false)
 })
 
@@ -100,23 +102,29 @@ test('la contraseña no se guarda: solo un verificador con sal', async () => {
   const root = tmp()
   const p = openProfiles(root)
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   const raw = fs.readFileSync(path.join(root, 'profiles.json'), 'utf8')
-  assert.ok(!raw.includes('secreta'), 'la contraseña en claro nunca toca el disco')
-  const entry = JSON.parse(raw).profiles.find((x) => x.id === id)
-  assert.ok(entry.pwd.salt && entry.pwd.verifier && entry.pwd.iter >= 300000)
+  assert.ok(!raw.includes('frase-de-prueba-larga'), 'la contraseña en claro nunca toca el disco')
+  // El registro va CIFRADO en reposo, como el resto de los archivos del vault: era el
+  // único que quedaba en claro, y lleva dentro el verificador del candado.
+  assert.ok(!raw.includes('profiles'), 'y el registro tampoco queda legible')
+  const entry = readJson(path.join(root, 'profiles.json'), null, atRestFor(root)).profiles.find((x) => x.id === id)
+  // v2 = scrypt. El verificador vive en claro DENTRO del archivo, así que tiene que
+  // costar lo mismo que la llave de verdad, o es el camino barato para atacarla.
+  assert.equal(entry.pwd.v, 2)
+  assert.ok(entry.pwd.salt && entry.pwd.verifier && !entry.pwd.iter)
 })
 
 test('con el profile locked no se puede editar ni quitar la contraseña', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
   p.add('Otro') // que borrar no choque antes con «no se puede borrar el único perfil»
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   assert.throws(() => p.rename(id, 'otro'), /profile locked/)
   assert.throws(() => p.removePassword(id), /profile locked/)
   assert.throws(() => p.remove(id), /profile locked/)
-  await p.unlock(id, 'secreta')
+  await p.unlock(id, 'frase-de-prueba-larga')
   assert.equal(p.rename(id, 'otro').name, 'otro')
 })
 
@@ -124,7 +132,7 @@ test('la contraseña es por perfil: bloquear uno no toca al otro', async () => {
   const p = openProfiles(tmp())
   const { id: a } = p.migrate()
   const b = p.add('Personal').id
-  await p.setPassword(a, 'secreta')
+  await p.setPassword(a, 'frase-de-prueba-larga')
   p.lock(a)
   assert.equal(p.isLocked(a), true)
   assert.equal(p.isLocked(b), false)
@@ -155,16 +163,19 @@ test('borrar el perfil activo pasa el activo a otro', () => {
 test('tras 5 fallos, el freno de fuerza bruta hace esperar', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
-  await assert.rejects(() => p.unlock(id, 'secreta'), /too many tries/, 'ni con la buena, hasta que pase la espera')
+  await assert.rejects(() => p.unlock(id, 'frase-de-prueba-larga'), /too many tries/, 'ni con la buena, hasta que pase la espera')
 })
 
 test('la contraseña exige un mínimo', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
-  await assert.rejects(() => p.setPassword(id, '123'), /at least 4/)
+  await assert.rejects(() => p.setPassword(id, '123'), /at least 12/)
+  // Y cuatro dígitos tampoco, que es de donde se viene: eran 10.000 combinaciones
+  // protegiendo TODO el sellado.
+  await assert.rejects(() => p.setPassword(id, '1113'), { code: 'PASSWORD_TOO_SHORT' })
 })
 
 test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda cerrada hoy', async () => {
@@ -176,30 +187,64 @@ test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda 
   const root = tmp()
   const p = openProfiles(root)
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
 
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   // Con cinco fallos ya hay espera: ni la buena llega a comprobarse.
-  await assert.rejects(() => p.unlock(id, 'secreta'), /too many tries/)
+  await assert.rejects(() => p.unlock(id, 'frase-de-prueba-larga'), /too many tries/)
 
   // Los fallos envejecen (se retrasa el último a hace una hora, como si fuera ayer).
   const file = path.join(root, 'profiles.json')
-  const reg = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const reg = readJson(file, null, atRestFor(root))
   reg.profiles[0].tries.at = Date.now() - 60 * 60 * 1000
-  fs.writeFileSync(file, JSON.stringify(reg))
+  writeJson(file, reg, atRestFor(root))
 
   const tomorrow = openProfiles(root)
-  await tomorrow.unlock(id, 'secreta') // sin espera: se olvidaron los de ayer
+  await tomorrow.unlock(id, 'frase-de-prueba-larga') // sin espera: se olvidaron los de ayer
   assert.equal(tomorrow.isLocked(id), false)
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).profiles[0].tries, undefined)
+  assert.equal(readJson(file, null, atRestFor(root)).profiles[0].tries, undefined)
 })
 
 test('el freno SIGUE frenando una ráfaga: fallos seguidos hacen esperar', async () => {
   const p = openProfiles(tmp())
   const { id } = p.migrate()
-  await p.setPassword(id, 'secreta')
+  await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
   await assert.rejects(() => p.unlock(id, 'mala'), (e) => e.code === 'TOO_MANY_TRIES' && e.waitSec > 0)
+})
+
+test('un perfil VIEJO (verificador PBKDF2) se abre igual y asciende a scrypt', async () => {
+  // Es el camino que recorre el vault de producción al actualizar: su `profiles.json`
+  // trae el verificador barato, y hay que seguir abriéndolo — si no, la contraseña deja
+  // de valer y con ella los secretos sellados. El ascenso ocurre al desbloquear, que es
+  // el único momento en que se tiene la contraseña en la mano.
+  const root = tmp()
+  const p = openProfiles(root)
+  const { id } = p.migrate()
+  await p.setPassword(id, 'frase-de-prueba-larga')
+
+  // Se rebaja a mano a v1, tal como lo dejó la versión anterior.
+  const file = path.join(root, 'profiles.json')
+  const reg = readJson(file, null, atRestFor(root))
+  const salt = Buffer.from('0123456789abcdef', 'utf8').toString('base64')
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode('frase-de-prueba-larga'), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: Buffer.from(salt, 'base64'), iterations: 300000 }, km, 256)
+  reg.profiles[0].pwd = { v: 1, salt, iter: 300000, verifier: Buffer.from(new Uint8Array(bits)).toString('base64') }
+  writeJson(file, reg, atRestFor(root))
+
+  const viejo = openProfiles(root)
+  await viejo.unlock(id, 'frase-de-prueba-larga')
+  assert.equal(viejo.isLocked(id), false, 'la contraseña de siempre sigue abriendo')
+
+  const tras = readJson(file, null, atRestFor(root)).profiles[0]
+  assert.equal(tras.pwd.v, 2, 'y queda ascendido, sin pedirle nada al dueño')
+  assert.equal(tras.pwd.iter, undefined)
+
+  // Y sigue abriendo con el verificador nuevo (y solo con la correcta).
+  const otra = openProfiles(root)
+  await otra.unlock(id, 'frase-de-prueba-larga')
+  assert.equal(otra.isLocked(id), false)
+  await assert.rejects(() => openProfiles(root).unlock(id, 'otra-cosa-cualquiera'), { code: 'WRONG_PASSWORD' })
 })
