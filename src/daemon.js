@@ -181,6 +181,13 @@ export async function runDaemon () {
   const revokeReqFile = path.join(dir, 'revoke-request.json')
   const secretReqFile = path.join(dir, 'secret-request.json')
   const secretsListFile = path.join(dir, 'secrets-list.json')
+  /**
+   * Por qué falló la última orden de variables. La consola pide el cambio y el volcado
+   * por señales distintas, así que el motivo no cabe en la respuesta: se guarda aquí y
+   * viaja en el volcado siguiente. Sin esto, una contraseña equivocada se leía como
+   * «El daemon no aplicó el cambio», que no dice qué hacer.
+   */
+  let lastSecretError = null
   const profileReqFile = path.join(dir, 'profile-request.json')
   const dumpReqFile = path.join(dir, 'dump-request.json')
   const meReqFile = path.join(dir, 'me-request.json')
@@ -315,6 +322,7 @@ export async function runDaemon () {
       const sec = readJsonSafe(secretReqFile)
       if (sec?.op) {
         rm(secretReqFile) // puede llevar la contraseña: fuera del disco cuanto antes
+        lastSecretError = null
         try {
           const vault = targetOf(sec)
           // Carga en GRUPO (`secret set ns K=v K2=v2`, `secret import`): todas las
@@ -349,7 +357,13 @@ export async function runDaemon () {
           // Visibilidad: si el valor puede salir hacia la consola remota. No toca el valor.
           else if (sec.op === 'vis') { await vault.setSecretVisibility(sec.ns, sec.key, sec.public, ak); console.log('[vault] secret visibility: %s/%s → %s', sec.ns, sec.key, sec.public ? 'public' : 'private') }
           else if (sec.op === 'dev-vis') { await vault.setDeviceSecretVisibility(sec.pub, sec.key, sec.public, ak); console.log('[vault] device secret visibility: %s → %s', sec.key, sec.public ? 'public' : 'private') }
-        } catch (e) { console.error('[vault] secret failed:', e.message) }
+        } catch (e) {
+          lastSecretError = {
+            error: e.message,
+            code: e.code || (/wrong password/i.test(e.message) ? 'WRONG_PASSWORD' : 'SECRET_FAILED')
+          }
+          console.error('[vault] secret failed:', e.message)
+        }
       }
       // Perfiles / candado.
       const preq = readJsonSafe(profileReqFile)
@@ -429,8 +443,10 @@ export async function runDaemon () {
         writeJson(secretsListFile, {
           v: 2, at: Date.now(), req: reqId, profile: t.id,
           ns: t.vault.listSecrets(),
-          dev: await t.vault.listDeviceSecrets()
+          dev: await t.vault.listDeviceSecrets(),
+          ...(lastSecretError ? { secretError: lastSecretError } : {})
         })
+        lastSecretError = null
         writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
         // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
         try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}

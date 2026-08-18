@@ -712,6 +712,7 @@ async function cmdSecret (rest) {
       : (d.ns?.[ns] || [])
     const missing = items.filter((it) => !has(list, it.key)).map((it) => it.key)
     if (missing.length) {
+      if (d?.secretError) return noSeAplico(d)
       console.error('El daemon no guardó: %s (revisa: dotrino-vault logs)', missing.join(', '))
       process.exit(1)
     }
@@ -742,6 +743,17 @@ async function cmdSecret (rest) {
    * dueño, era lo único que la marca no significaba). La privada no se muestra.
    */
   const printVar = (k) => console.log('  · %s   %s', k.key, k.public ? `${k.value ?? ''}   (pública)` : '••••••')
+  /**
+   * Por qué no se aplicó. El daemon deja el motivo en el volcado siguiente; sin él lo
+   * único que se podía decir era «revisa los logs», que no ayuda a quien acaba de
+   * escribir mal la contraseña.
+   */
+  const noSeAplico = (d) => {
+    if (d?.secretError?.code === 'WRONG_PASSWORD') console.error('Contraseña incorrecta.')
+    else if (d?.secretError?.error) console.error('No se aplicó: %s', d.secretError.error)
+    else console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)')
+    process.exit(1)
+  }
   const has = (list, key) => (list || []).some((x) => x.key === key)
 
   if (sub === 'migrate') return secretMigrate()
@@ -805,7 +817,7 @@ async function cmdSecret (rest) {
     const d = await signalAndWaitList()
     const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
     const ok = op === 'rm' ? !has(keys, key) : has(keys, key)
-    if (!ok) { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    if (!ok) return noSeAplico(d)
     if (op === 'rm') console.log('Variable borrada: %s/%s', m.id, key)
     else console.log('Variable guardada: %s/%s%s', m.id, key, (keys.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
@@ -844,7 +856,7 @@ async function cmdSecret (rest) {
     const d = await signalAndWaitList()
     const list = d.ns?.[ns] || []
     const ok = sub === 'rm' ? !has(list, key) : has(list, key)
-    if (!ok) { console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)'); process.exit(1) }
+    if (!ok) return noSeAplico(d)
     if (sub === 'rm') console.log('Secreto borrado: %s/%s', ns, key)
     else console.log('Secreto guardado: %s/%s%s', ns, key, (list.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
