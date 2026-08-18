@@ -21,6 +21,7 @@
  * cifrado en reposo, ver `paths.js`).
  */
 import fs from 'node:fs'
+import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
 
@@ -193,6 +194,26 @@ export function openProfiles (root = dataDir()) {
     isLocked: (id) => { const p = find(id); return !!p?.pwd && !unlocked.has(id) },
     assertUnlocked (id) {
       if (api.isLocked(id)) throw new Error('profile locked: unlock it with your password (dotrino-vault unlock)')
+    },
+
+    /**
+     * La llave con la que se abre la copia MAESTRA de los secretos, derivada de la
+     * contraseña del perfil. Va por operación: quien la pide la usa y la suelta.
+     *
+     * Es scrypt (mismo coste que `machineKey`) y NO reusa el verificador del candado:
+     * ese es PBKDF2 y vive en claro en este mismo archivo, así que sería el camino
+     * barato para atacarla. Aquí la prueba de que es correcta es el tag AES-GCM del
+     * propio sobre — si no cuadra, la contraseña no era.
+     */
+    async adminKey (id, password) {
+      const p = find(id)
+      if (!p) throw new Error('profile not found')
+      if (!p.kdf) {
+        p.kdf = { v: 1, salt: b64(crypto.getRandomValues(new Uint8Array(32))) }
+        save()
+      }
+      const salt = Buffer.from(p.kdf.salt, 'base64')
+      return new Uint8Array(crypto2.scryptSync(String(password || ''), salt, 32, { N: 16384, r: 8, p: 1 }))
     },
 
     async unlock (id, password) {

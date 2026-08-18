@@ -1042,7 +1042,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   return {
-    identity, client, store, threads, secrets, master, fingerprint: fp,
+    identity, client, store, threads, secrets, master, fingerprint: fp, dir,
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
@@ -1065,6 +1065,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // frontera de verdad (que el valor de una privada no salga ni dentro del sobre).
     vars: varsDesk,
     setSecret, deleteSecret, listSecrets, setSecretVisibility, openSecrets,
+    // Sella un `secrets.json` v3 entero. Es el punto de no retorno del despliegue y
+    // por eso es una operación con nombre propio, no algo que ocurra de refilón al
+    // desbloquear: deja `secrets.json.v3.bak` para poder volver.
+    migrateSecrets: (membersOf, adminKey) => secrets.migrate(membersOf, adminKey),
     setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
     applySecrets, applyDeviceSecrets,
     listDevices: () => identity.listDelegations(),

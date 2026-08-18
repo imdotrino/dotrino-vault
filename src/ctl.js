@@ -615,6 +615,26 @@ async function cmdSecret (rest) {
     }
     console.error('El daemon no respondió.'); process.exit(1)
   }
+  /**
+   * SELLA el almacén: pasa un `secrets.json` v3 (valores que esta bóveda puede leer) a
+   * v4 (cada privada cifrada a la llave de su destinatario). Corre UNA vez.
+   *
+   * Es una operación con nombre propio y no un efecto de desbloquear, porque es el
+   * punto de no retorno: a partir de aquí la contraseña es lo ÚNICO que puede
+   * re-sellar, y perderla impide rotar una variable o sumar un aparato al namespace.
+   * Deja `secrets.json.v3.bak` al lado para poder volver.
+   */
+  async function secretMigrate () {
+    console.log('Esto SELLA las variables privadas a la llave de cada aparato.')
+    console.log('A partir de aquí, esta contraseña es lo único que puede volver a sellarlas:')
+    console.log('si la pierdes no podrás rotar una variable ni sumar un aparato al namespace.')
+    console.log('Se deja una copia en secrets.json.v3.bak por si hay que volver.\n')
+    const pwd = await askPassword('Contraseña del perfil: ')
+    if (!pwd) { console.error('Cancelado.'); process.exit(1) }
+    writeReq('secret-request.json', { op: 'migrate', password: pwd })
+    console.log('\nPedido enviado. Mira el resultado con:  journalctl --user -u dotrino-vault -n 20')
+  }
+
   const USAGE = [
     'uso: dotrino-vault secret set <ns> <CLAVE> <valor> [--public|--private]',
     '                                                  (la comparten todos los aparatos del ns)',
@@ -627,6 +647,7 @@ async function cmdSecret (rest) {
     '     dotrino-vault secret device import <ID> [archivo.env]',
     '     dotrino-vault secret device rm  <ID> <CLAVE>',
     '     dotrino-vault secret list',
+    '     dotrino-vault secret migrate                                 SELLA los secretos (una vez)',
     '',
     'CARGA LA CONFIGURACIÓN DE UN SERVICIO DE UNA VEZ (`set` con varios pares, o `import`):',
     'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
@@ -689,6 +710,8 @@ async function cmdSecret (rest) {
    */
   const printVar = (k) => console.log('  · %s   %s', k.key, k.public ? `${k.value ?? ''}   (pública)` : '••••••')
   const has = (list, key) => (list || []).some((x) => x.key === key)
+
+  if (sub === 'migrate') return secretMigrate()
 
   if (sub === 'list') {
     const d = await signalAndWaitList()

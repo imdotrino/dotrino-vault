@@ -278,24 +278,41 @@ export async function runDaemon () {
       // 0700 del vault y se borra al consumir.
       const sec = readJsonSafe(secretReqFile)
       if (sec?.op) {
-        rm(secretReqFile)
+        rm(secretReqFile) // puede llevar la contraseña: fuera del disco cuanto antes
         try {
           const vault = targetOf(sec)
           // Carga en GRUPO (`secret set ns K=v K2=v2`, `secret import`): todas las
           // variables entran de una vez y sale UN solo aviso de cambio, para que el
           // servicio no se reinicie a media carga y arranque con la mitad puesta.
-          if (sec.op === 'batch') {
+          // La CONTRASEÑA, si vino, se convierte en la llave que abre la copia maestra
+          // de los secretos, y no se guarda en ningún sitio: se usa y se suelta. Sin
+          // ella se cae a la llave de la máquina, que es la protección de antes de
+          // esto (y el vault lo avisa al arrancar).
+          const ak = sec.password ? await mgr.profiles.adminKey(sec.profile ? mgr.resolve(sec.profile) : mgr.currentId(), sec.password) : undefined
+          if (sec.op === 'migrate') {
+            const { members } = await vault.profileMembers()
+            const r = await vault.migrateSecrets((owner) => (
+              owner.startsWith('ns:') ? members.filter((m) => m.cn === owner.slice(3)) : members.filter((m) => m.pub === owner.slice(4))
+            ), ak)
+            if (!r.migrated) console.log('[vault] nothing to migrate: %s', r.reason)
+            else {
+              console.log('[vault] secrets SEALED (v3 -> v4). Backup left at secrets.json.v3.bak')
+              for (const [owner, sin] of Object.entries(r.sinLlave || {})) {
+                console.log('[vault] WARNING %s: %d member(s) without an encryption key will NOT read their variables', owner, sin.length)
+              }
+            }
+          } else if (sec.op === 'batch') {
             const changed = sec.pub
-              ? await vault.applyDeviceSecrets(sec.pub, sec.items)
-              : vault.applySecrets(sec.ns, sec.items)
+              ? await vault.applyDeviceSecrets(sec.pub, sec.items, ak)
+              : await vault.applySecrets(sec.ns, sec.items, ak)
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
-          } else if (sec.op === 'set') { vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'rm') { vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
+          } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public, ak); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public, ak); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
           // Visibilidad: si el valor puede salir hacia la consola remota. No toca el valor.
-          else if (sec.op === 'vis') { vault.setSecretVisibility(sec.ns, sec.key, sec.public); console.log('[vault] secret visibility: %s/%s → %s', sec.ns, sec.key, sec.public ? 'public' : 'private') }
-          else if (sec.op === 'dev-vis') { await vault.setDeviceSecretVisibility(sec.pub, sec.key, sec.public); console.log('[vault] device secret visibility: %s → %s', sec.key, sec.public ? 'public' : 'private') }
+          else if (sec.op === 'vis') { await vault.setSecretVisibility(sec.ns, sec.key, sec.public, ak); console.log('[vault] secret visibility: %s/%s → %s', sec.ns, sec.key, sec.public ? 'public' : 'private') }
+          else if (sec.op === 'dev-vis') { await vault.setDeviceSecretVisibility(sec.pub, sec.key, sec.public, ak); console.log('[vault] device secret visibility: %s → %s', sec.key, sec.public ? 'public' : 'private') }
         } catch (e) { console.error('[vault] secret failed:', e.message) }
       }
       // Perfiles / candado.

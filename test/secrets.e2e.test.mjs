@@ -671,3 +671,4 @@ test('un agente VIEJO consigue su llave de cifrado SIN re-enrolarse', async () =
 
   assert.equal((await fetchSecrets({ dir: svc })).TURN_KEY, 'secreto-del-ns', 'y sigue leyendo')
 })
+

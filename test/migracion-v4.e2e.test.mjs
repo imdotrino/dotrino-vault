@@ -73,6 +73,13 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
   ok('el agente abre los sobres y lee IGUAL que antes', leido.TURN_KEY === 'la-clave-de-verdad')
   ok('y la publica tambien', leido.PUBLIC_URL === 'wss://proxy.dotrino.com')
 
+  // --- 4b) Y SE PUEDE SEGUIR ESCRIBIENDO. Si esto fallara, migrar dejaria el vault
+  // de solo lectura: es el camino que recorre `secret set` despues del despliegue.
+  const tras = openSecretsStore(dir, { sealer: makeSealer() })
+  await tras.set('proxy', 'NUEVA', 'puesta-despues-de-sellar', false, CLAVE)
+  ok('se sigue escribiendo tras sellar', (await tras.openBundle('proxy', null, CLAVE)).NUEVA === 'puesta-despues-de-sellar')
+  ok('y lo de antes sigue ahi', (await tras.openBundle('proxy', null, CLAVE)).TURN_KEY === 'la-clave-de-verdad')
+
   // --- 5) La propiedad de fondo: quien tenga el disco NO puede abrir sin la frase.
   // (Se prueba contra el store directo, que es lo que veria alguien con una copia:
   // el `openSecrets` del vault cae a la llave de la maquina cuando el perfil no
