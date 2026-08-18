@@ -43,8 +43,8 @@ after(async () => {
 })
 
 test('flujo completo: set → pair --service → enroll → fetchSecrets', async () => {
-  vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123')
-  vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 't-456')
+  await vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123')
+  await vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 't-456')
   // Se nace privada: el valor no sale de esta máquina mientras nadie diga lo contrario,
   // así que de estas dos la lista solo da el nombre.
   assert.deepEqual(vault.listSecrets(), {
@@ -72,8 +72,8 @@ test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', asy
   // justo aquí —en la lista que mira su dueño desde la terminal de la propia bóveda—
   // era lo único que la marca no significaba, y obligaba a abrir `secrets.json` a mano
   // para comprobar una URL. La privada sigue sin salir ni a esta lista.
-  vault.setSecret('escaparate', 'PUBLIC_URL', 'https://ejemplo.com', true)
-  vault.setSecret('escaparate', 'API_KEY', 's3cr3t')
+  await vault.setSecret('escaparate', 'PUBLIC_URL', 'https://ejemplo.com', true)
+  await vault.setSecret('escaparate', 'API_KEY', 's3cr3t')
   assert.deepEqual(vault.listSecrets().escaparate, [
     { key: 'PUBLIC_URL', public: true, value: 'https://ejemplo.com' },
     { key: 'API_KEY', public: false }
@@ -81,8 +81,8 @@ test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', asy
 
   // El cajón por aparato va por la misma regla, y por el mismo camino.
   const pub = 'PUB-DE-UN-APARATO'
-  vault.secrets.setDevice(pub, 'PORT', '8443', true)
-  vault.secrets.setDevice(pub, 'DB_PASSWORD', 'nope')
+  await vault.secrets.setDevice(pub, 'PORT', '8443', true)
+  await vault.secrets.setDevice(pub, 'DB_PASSWORD', 'nope')
   const row = (await vault.listDeviceSecrets()).find((d) => d.pub === pub)
   assert.deepEqual(row.keys, [
     { key: 'PORT', public: true, value: '8443' },
@@ -131,7 +131,7 @@ test('enrolar acepta la invitación TAL COMO la imprime el vault (no JSON)', asy
 
   for (const [nombre, comoLoDa] of [['código compacto', encodeInvite], ['URL del QR', inviteUrl]]) {
     const ns = nombre === 'código compacto' ? 'compacto' : 'urlqr'
-    vault.setSecret(ns, 'API_KEY', 'v-' + ns)
+    await vault.setSecret(ns, 'API_KEY', 'v-' + ns)
     const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
     const dir = tmp('svc-' + ns + '-')
 
@@ -156,7 +156,7 @@ test('un agente tiene UNA identidad: re-enrolar reemplaza y avisa qué descarta'
   const { enrollService, readServiceIdentity } = await import('../lib/src/service.js')
   const { encodeInvite } = await import('../lib/src/invite.js')
   const ns = 'rotable'
-  vault.setSecret(ns, 'API_KEY', 'v1')
+  await vault.setSecret(ns, 'API_KEY', 'v1')
   const dir = tmp('svc-rot-')
 
   const enroll = async (onReplace) => {
@@ -221,10 +221,10 @@ test('la bóveda AVISA al agente cuando su configuración cambia (agrupado)', as
     await new Promise((r) => setTimeout(r, 4000))
     notices.length = 0
 
-    vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-1')
+    await vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-1')
     // AGRUPADO: tres escrituras seguidas son UN cambio de configuración, no tres.
-    vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 'rotada-2')
-    vault.setSecret('proxy', 'OTRA', 'rotada-3')
+    await vault.setSecret('proxy', 'TURN_KEY_API_TOKEN', 'rotada-2')
+    await vault.setSecret('proxy', 'OTRA', 'rotada-3')
 
     await waitFor(() => notices.length > 0, 'el aviso de cambio')
     await new Promise((r) => setTimeout(r, 1500))
@@ -243,7 +243,7 @@ test('el aviso de otro namespace no le llega a este agente', async () => {
   try {
     // El aviso dice QUÉ ns cambió, así que mandárselo a un agente ajeno sería
     // contarle que ese namespace existe. Se manda solo a los del ns.
-    vault.setSecret('geo', 'DB_URL', 'nada-que-ver')
+    await vault.setSecret('geo', 'DB_URL', 'nada-que-ver')
     await new Promise((r) => setTimeout(r, 1500))
     assert.equal(notices.length, 0, 'el agente del ns «proxy» no se entera de lo de «geo»')
   } finally { w.stop() }
@@ -369,7 +369,7 @@ test('el aviso que NO llegó no deja al agente con la configuración vieja: al c
   const { watchSecretsChanges } = await import('../lib/src/service.js')
   const running = await fetchSecretsFrom(svcDir)
 
-  vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-mientras-no-miraba')
+  await vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-mientras-no-miraba')
   await new Promise((r) => setTimeout(r, 600))   // el aviso sale y se pierde: no hay vigía
 
   const changes = []
@@ -402,7 +402,7 @@ test('si la configuración es la misma, comparar no reinicia a nadie', async () 
   try {
     await new Promise((r) => setTimeout(r, 800))   // que termine la comparación del arranque
     assert.equal(await w.reconcile(), false, 'nada cambió: nadie se muere')
-    vault.setSecretVisibility('proxy', 'TURN_KEY_ID', true)
+    await vault.setSecretVisibility('proxy', 'TURN_KEY_ID', true)
     assert.equal(await w.reconcile(), false, 'cambiar quién ve el valor no es cambiar el valor')
     await new Promise((r) => setTimeout(r, 600))
     assert.equal(changes.length, 0)
@@ -412,7 +412,7 @@ test('si la configuración es la misma, comparar no reinicia a nadie', async () 
     assert.equal(await w.reconcile(), true)
   } finally {
     w.stop()
-    vault.setSecretVisibility('proxy', 'TURN_KEY_ID', false)
+    await vault.setSecretVisibility('proxy', 'TURN_KEY_ID', false)
   }
 })
 
@@ -433,7 +433,7 @@ test('el proxio arranca SIN variables y las recibe después: eso no es un cambio
   // aquí sin tener nada que ver con lo que se está probando.
   const ns = 'proxio'
   const dir = tmp('svc-proxio-')
-  vault.setSecret(ns, 'RELAY_URL', 'wss://uno.example')
+  await vault.setSecret(ns, 'RELAY_URL', 'wss://uno.example')
   // La configuración se deja puesta ANTES de que el servicio exista, y se espera a que
   // pase la ventana de agrupado: así ese primer `set` no le deja un aviso en la cola
   // (cuando sale, no hay a quién mandárselo). Es el orden real —primero se configura el
@@ -459,7 +459,7 @@ test('el proxio arranca SIN variables y las recibe después: eso no es un cambio
     assert.equal(await w.reconcile(), false, 'ni a la segunda, ni a la tercera')
     // Y `applied` no hace falta cablearlo: `watchEnv` toma como referencia lo último que
     // pasó por `applyEnv`, así que cualquier agente queda cubierto sin tocar su código.
-    vault.setSecret(ns, 'RELAY_URL', 'wss://dos.example')
+    await vault.setSecret(ns, 'RELAY_URL', 'wss://dos.example')
     assert.equal(await w.reconcile(), true, 'un cambio de verdad sí')
   } finally { w.stop() }
 })
@@ -472,7 +472,7 @@ test('la comparación no puede volverse un ciclo de reinicios: durante la gracia
   // que todo esto vino a cerrar.
   const { watchSecretsChanges } = await import('../lib/src/service.js')
   const running = await fetchSecretsFrom(svcDir)
-  vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-durante-la-gracia')
+  await vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-durante-la-gracia')
   await new Promise((r) => setTimeout(r, 600))
 
   const changes = []
@@ -511,8 +511,8 @@ test('quitar el aparato se lleva sus variables', async () => {
 test('la consola remota ve el valor de una PÚBLICA y jamás el de una privada', async () => {
   // Es la frontera entera de `docs/consola-remota.md` para variables: lo que cruza no es
   // «los secretos», son los que su dueño marcó como mostrables.
-  vault.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', true)
-  vault.setSecret('web', 'API_KEY', 'sk-esta-no-sale')
+  await vault.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', true)
+  await vault.setSecret('web', 'API_KEY', 'sk-esta-no-sale')
 
   const { enc } = await vault.vars.list({ by: 'TEST' })
   const payload = JSON.parse(await vault.identity.openContent(enc))
@@ -536,7 +536,7 @@ test('la consola remota CREA variables (scope nuevo o aparato) y rota las privad
 
   // Rotar una privada SIN haberla podido leer: es justo para lo que sirve.
   await vault.vars.set({ ns: 'web', key: 'API_KEY', enc: await sealed('sk-rotada') })
-  assert.equal(vault.secrets.get('web').API_KEY, 'sk-rotada')
+  assert.equal((await vault.openSecrets('web')).API_KEY, 'sk-rotada')
   assert.equal(vault.listSecrets().web.find((x) => x.key === 'API_KEY').public, false,
     'y rotarla no la vuelve visible por accidente')
 
@@ -549,7 +549,7 @@ test('la consola remota CREA variables (scope nuevo o aparato) y rota las privad
 })
 
 test('el scope corta el acceso a otro namespace', async () => {
-  vault.setSecret('geo', 'DB_PASSWORD', 'nope')
+  await vault.setSecret('geo', 'DB_PASSWORD', 'nope')
   await assert.rejects(
     fetchNsWithSavedCert('geo'),
     /unauthorized: scope/
@@ -579,7 +579,7 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
   // que comparten (uno de ellos le revoca el certificado).
   const ns = 'lote'
   const svcDir = tmp('svc-lote-')
-  vault.setSecret(ns, 'YA_ESTABA', '0')
+  await vault.setSecret(ns, 'YA_ESTABA', '0')
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   await enrollService({
     qr: encodeInvite(qr), ns, dir: svcDir,
@@ -595,7 +595,12 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
   try {
-    vault.applySecrets(ns, [
+    // Que el vigilante ASIENTE antes de medir: al conectar hace su propia comparación,
+    // y contarla aquí sería contar el arranque, no el lote. Antes no hacía falta por
+    // puro azar de tiempos — el enrolamiento era más rápido que la ventana de agrupado.
+    await wait(400)
+    notices.length = 0
+    await vault.applySecrets(ns, [
       { op: 'set', key: 'LOTE_UNO', value: '1' },
       { op: 'set', key: 'LOTE_DOS', value: '2' },
       { op: 'set', key: 'LOTE_TRES', value: '3' }
@@ -610,7 +615,7 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
     // por variable — o sea, un reinicio por variable.
     notices.length = 0
     for (const [k, v] of [['SUELTA_UNA', 'a'], ['SUELTA_DOS', 'b']]) {
-      vault.setSecret(ns, k, v)
+      await vault.setSecret(ns, k, v)
       await wait(400)
     }
     assert.equal(notices.length, 2)

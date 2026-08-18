@@ -22,6 +22,7 @@ import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar } from './secretsStore.js'
+import { makeSealer } from './sealer.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
 import { atRestFor, machineKey, migrateFile } from './atrest.js'
@@ -61,7 +62,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const store = openStore(dir)
   const threads = openThreadStore(dir)
-  const secrets = openSecretsStore(dir)
+  const secrets = openSecretsStore(dir, { sealer: makeSealer(), defaultKey: () => new Uint8Array(machineKey(dir)) })
   const master = await masterPubkeyOf(identity)
   const fp = (await pubkeyId(master)).slice(0, 16)
 
@@ -408,7 +409,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     let enc
     try {
-      enc = await seal({ ek: p.data.ek, payload: { secrets: secrets.get(ns, chk.device) } })
+      // Mientras el archivo siga en v3 el cable NO cambia: se mandan los valores como
+      // siempre. Solo tras la migración viajan sobres, y entonces quien los abre es el
+      // agente con su llave. Así el despliegue del daemon se deshace con un reinicio,
+      // porque hasta el primer desbloqueo no ha cambiado nada de lo que ve nadie.
+      const b = secrets.bundleFor(ns, chk.device)
+      const payload = b.legacy
+        ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])) }
+        : { sealed: b }
+      enc = await seal({ ek: p.data.ek, payload })
     } catch (e) {
       return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
     }
@@ -593,7 +602,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const payload = JSON.parse(await identity.openContent(enc))
       const value = payload?.value
       if (typeof value !== 'string' || !value) throw new Error('var.set: the sealed envelope must carry a non-empty value')
-      if (ns) setSecret(ns, key, value, isPublic)
+      if (ns) await setSecret(ns, key, value, isPublic)
       else await setDeviceSecret(pub, key, value, isPublic)
       return { ok: true, key }
     },
@@ -694,8 +703,58 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   // API local de secretos (CLI/UI del dueño; audita cada cambio). `isPublic` es opcional:
   // sin decir nada, la variable conserva su visibilidad (y una nueva nace privada).
-  function setSecret (ns, key, value, isPublic) { secrets.set(ns, key, value, isPublic); audit('secret.set', { ns, key }); scheduleNotice(ns) }
-  function deleteSecret (ns, key) { const ok = secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
+  /**
+   * La llave con la que se abre la copia maestra.
+   *
+   * Con contraseña, la deriva quien llama y llega aquí por operación. **Sin
+   * contraseña se cae a la llave de la máquina**, que es exactamente la protección
+   * que había antes de todo esto: el disco sigue cifrado, pero su material vive en
+   * ese mismo disco, así que una copia del disco lo abre.
+   *
+   * Es un default deliberado —un perfil sin contraseña tiene que seguir funcionando—
+   * pero NO es equivalente, y por eso la consola lo dice en voz alta (§2.3 del
+   * diseño). Prometer una protección que no está puesta es peor que no tenerla.
+   */
+  const adminKeyOr = (adminKey) => adminKey || new Uint8Array(machineKey(dir))
+
+  // `adminKey` es la llave derivada de la contraseña del perfil, y va POR OPERACIÓN: se
+  // usa para sellar y se suelta. Solo hace falta para escribir una privada — servir,
+  // listar y borrar no la piden (ver `secretsStore.js`).
+  /**
+   * Los miembros que deben poder abrir un cajón: los SERVICIOS de ese namespace
+   * (miembros del acta con ese `cn`). La bóveda NO entra en la lista — envolverle la
+   * CEK a ella misma sería devolverle la capacidad de leerlo todo, que es justo lo
+   * que este diseño quita.
+   */
+  async function nsMembers (ns) {
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    return (record?.members || []).filter((m) => m.cn === ns)
+  }
+
+  /**
+   * Sellar no basta: hay que REPARTIR la llave. Tras cada escritura se envuelve la CEK
+   * del cajón a sus miembros actuales — si no, el servicio recibe sobres que no puede
+   * abrir y se queda reintentando para siempre, sin decir por qué.
+   *
+   * No avisa de cambio a nadie: el texto cifrado de los valores no se mueve, y avisar
+   * reiniciaría a todos los nodos del ns para nada.
+   */
+  async function spreadKey (owner, members, adminKey) {
+    if (secrets.isLegacy()) return null
+    const r = await secrets.rewrap(owner, members, adminKey)
+    if (r?.sinLlave?.length) {
+      log(`[vault] ${owner}: ${r.sinLlave.length} member(s) without an encryption key - they will NOT be able to read their variables`)
+      audit('secret.nokey', { owner, count: r.sinLlave.length })
+    }
+    return r
+  }
+
+  async function setSecret (ns, key, value, isPublic, adminKey) {
+    await secrets.set(ns, key, value, isPublic, adminKey)
+    await spreadKey(`ns:${ns}`, await nsMembers(ns), adminKey)
+    audit('secret.set', { ns, key }); scheduleNotice(ns)
+  }
+  async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
 
   /**
    * CARGAR CONFIGURACIÓN ES UNA TRANSACCIÓN: muchas variables, UN aviso.
@@ -716,40 +775,44 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * @returns {string[]} las claves que efectivamente cambiaron (un `rm` de lo que no
    *   estaba no cambia nada, y no tiene por qué reiniciar a nadie).
    */
-  function applySecrets (ns, items) {
+  async function applySecrets (ns, items, adminKey) {
     const list = assertItems(items)
     const changed = []
-    secrets.batch(() => {
+    await secrets.batch(async () => {
       for (const it of list) {
         if (it.op === 'rm') {
-          if (secrets.delete(ns, it.key)) { audit('secret.rm', { ns, key: it.key }); changed.push(it.key) }
+          if (await secrets.delete(ns, it.key)) { audit('secret.rm', { ns, key: it.key }); changed.push(it.key) }
         } else {
-          secrets.set(ns, it.key, it.value, it.public)
+          await secrets.set(ns, it.key, it.value, it.public, adminKey)
           audit('secret.set', { ns, key: it.key })
           changed.push(it.key)
         }
       }
     })
-    if (changed.length) scheduleNotice(ns)
+    if (changed.length) {
+      await spreadKey(`ns:${ns}`, await nsMembers(ns), adminKey)
+      scheduleNotice(ns)
+    }
     return changed
   }
 
   /** Lo mismo para el cajón de UN aparato (el aviso va solo a él). */
-  async function applyDeviceSecrets (pub, items) {
+  async function applyDeviceSecrets (pub, items, adminKey) {
     const list = assertItems(items)
     const m = await requireService(pub)
     const changed = []
-    secrets.batch(() => {
+    await secrets.batch(async () => {
       for (const it of list) {
         if (it.op === 'rm') {
-          if (secrets.deleteDevice(pub, it.key)) changed.push(it.key)
+          if (await secrets.deleteDevice(pub, it.key)) changed.push(it.key)
         } else {
-          secrets.setDevice(pub, it.key, it.value, it.public)
+          await secrets.setDevice(pub, it.key, it.value, it.public, adminKey)
           changed.push(it.key)
         }
       }
     })
     if (changed.length) {
+      await spreadKey(`dev:${pub}`, [m].filter(Boolean), adminKey)
       const device = await deviceIdOf(pub).catch(() => null)
       for (const it of list) {
         if (!changed.includes(it.key)) continue
@@ -786,10 +849,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return out
   }
   /** Cambiar SOLO quién puede ver el valor (no toca el valor ni avisa: el servicio lee lo mismo). */
-  function setSecretVisibility (ns, key, isPublic) {
-    const ok = secrets.setVisibility(ns, key, isPublic)
+  async function setSecretVisibility (ns, key, isPublic, adminKey) {
+    const ok = await secrets.setVisibility(ns, key, isPublic, adminKey)
     if (ok) audit('secret.visibility', { ns, key, public: !!isPublic })
     return ok
+  }
+
+  /**
+   * El bundle de un ns ABIERTO, para diagnosticar y para las pruebas. No lo usa el
+   * camino de servir —ahí los sobres salen cerrados y los abre el agente—, y por eso
+   * este sí pide poder abrir la copia maestra.
+   */
+  async function openSecrets (ns, devicePub = null, adminKey) {
+    return secrets.openBundle(ns, devicePub, adminKey)
   }
 
   /** El miembro del acta con esa llave, o `null` (también si la bóveda todavía no tiene acta). */
@@ -816,16 +888,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return m
   }
 
-  async function setDeviceSecret (pub, key, value, isPublic) {
+  async function setDeviceSecret (pub, key, value, isPublic, adminKey) {
     const m = await requireService(pub)
-    secrets.setDevice(pub, key, value, isPublic)
+    await secrets.setDevice(pub, key, value, isPublic, adminKey)
+    await spreadKey(`dev:${pub}`, [await memberOf(pub)].filter(Boolean), adminKey)
     audit('secret.set', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
     scheduleDeviceNotice(pub)
   }
 
   async function deleteDeviceSecret (pub, key) {
     const m = await memberOf(pub)
-    const ok = secrets.deleteDevice(pub, key)
+    const ok = await secrets.deleteDevice(pub, key)
     if (ok) {
       audit('secret.rm', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
       scheduleDeviceNotice(pub)
@@ -833,8 +906,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return ok
   }
 
-  async function setDeviceSecretVisibility (pub, key, isPublic) {
-    const ok = secrets.setDeviceVisibility(pub, key, isPublic)
+  async function setDeviceSecretVisibility (pub, key, isPublic, adminKey) {
+    const ok = await secrets.setDeviceVisibility(pub, key, isPublic, adminKey)
     if (ok) audit('secret.visibility', { device: await deviceIdOf(pub).catch(() => null), key, public: !!isPublic, scope: 'device' })
     return ok
   }
@@ -870,8 +943,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     listPending: desk.listPending,
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
     // dispositivos se entera de que entró alguien, venga de donde venga.
-    approveDevice: async (code) => {
+    approveDevice: async (code, adminKey) => {
       const r = await desk.approve(code)
+      // Un servicio que ENTRA a un namespace que ya tiene variables necesita su
+      // envoltura de la CEK, o recibirá sobres que no puede abrir y se quedará
+      // reintentando en silencio. Se reparte aquí, que es por donde pasan las dos
+      // puertas de aprobar (el PC y la consola remota), y no en `enroll.js`, que es
+      // el archivo vendorizado en el iframe de identidad.
+      const m = r?.cert?.sub ? await memberOf(r.cert.sub) : null
+      if (m?.cn) await spreadKey(`ns:${m.cn}`, await nsMembers(m.cn), adminKey).catch((e) => log('[vault] could not hand the key to the new service:', e.message))
       await notifyMembers('enrolled', { deviceId: r?.deviceId || null, by: 'pc' })
       return r
     },
@@ -879,7 +959,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // El mostrador que atiende a la consola remota. Se expone para poder probar la
     // frontera de verdad (que el valor de una privada no salga ni dentro del sobre).
     vars: varsDesk,
-    setSecret, deleteSecret, listSecrets, setSecretVisibility,
+    setSecret, deleteSecret, listSecrets, setSecretVisibility, openSecrets,
     setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
     applySecrets, applyDeviceSecrets,
     listDevices: () => identity.listDelegations(),
