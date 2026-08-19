@@ -51,5 +51,12 @@
     "type": "git",
     "url": "git+https://github.com/imdotrino/dotrino-vault.git",
     "directory": "lib"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "^22.0.0"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit"
   }
 }
