@@ -43,7 +43,7 @@
     "!lib/src/types.d.ts"
   ],
   "devDependencies": {
-    "@dotrino/remote-agent": "^0.3.0",
+    "@dotrino/remote-agent": "^0.3.2",
     "@types/node": "^22.0.0",
     "typescript": "5.9.3"
   }
