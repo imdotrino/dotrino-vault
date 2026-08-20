@@ -45,8 +45,19 @@ const props = defineProps({
   // Si a este destino se le pueden AÑADIR variables. Falso para un aparato que no es un
   // servicio: la bóveda solo se las guarda a quien las lee, así que ofrecer el formulario
   // sería un botón que siempre falla. Lo que ya tuviera se sigue viendo y se puede cambiar.
-  add: { type: Boolean, default: true }
+  add: { type: Boolean, default: true },
+  // VER y VOLVER ATRÁS. Los pone la consola porque necesitan la llave de ESTE aparato:
+  // la bóveda entrega el sobre y su envoltura, y quien abre es el navegador (§8.2). Si no
+  // vienen, la fila se queda como estaba — una bóveda vieja no sabe hacerlo.
+  reveal: { type: Function, default: null },   // (key) → Promise<string>
+  history: { type: Function, default: null },  // (key) → Promise<Array<{ts, by, signed}>>
+  restore: { type: Function, default: null }   // (key, ts) → Promise<void>
 })
+
+const shown = ref({})   // valores destapados: { CLAVE: 'valor' }
+const versions = ref({}) // versiones anteriores abiertas: { CLAVE: [...] }
+const busyRow = ref('')
+const rowError = ref('')
 
 const draft = ref([])   // las que ya existen, con lo tecleado encima
 const added = ref([])     // las que se están añadiendo, aún sin confirmar
@@ -139,6 +150,29 @@ function onPaste (ev, idx) {
   added.value = next
 }
 
+/**
+ * VER el valor. No se copia al campo de edición a propósito: eso lo marcaría como
+ * cambiado y el botón de guardar se encendería solo por haber mirado.
+ */
+async function verValor (key) {
+  if (shown.value[key] != null) { const { [key]: _, ...resto } = shown.value; shown.value = resto; return }
+  busyRow.value = key; rowError.value = ''
+  try { shown.value = { ...shown.value, [key]: await props.reveal(key) } } catch (e) { rowError.value = e?.message || String(e) } finally { busyRow.value = '' }
+}
+
+async function verVersiones (key) {
+  if (versions.value[key]) { const { [key]: _, ...resto } = versions.value; versions.value = resto; return }
+  busyRow.value = key; rowError.value = ''
+  try { versions.value = { ...versions.value, [key]: await props.history(key) } } catch (e) { rowError.value = e?.message || String(e) } finally { busyRow.value = '' }
+}
+
+async function restaurar (key, ts) {
+  busyRow.value = key; rowError.value = ''
+  try { await props.restore(key, ts) } catch (e) { rowError.value = e?.message || String(e) } finally { busyRow.value = '' }
+}
+
+const cuando = (ts) => new Date(ts).toLocaleString()
+
 /** UNA llamada con todo dentro: la bóveda las guarda juntas y avisa una sola vez. */
 const submit = () => props.save({
   target: props.target,
@@ -159,7 +193,24 @@ const submit = () => props.save({
         {{ t.var_private_ask }}
       </label>
       <span v-if="changed(d)" class="tag">{{ t.var_pending }}</span>
+      <!-- VER no pide ninguna contraseña: lo abre este aparato con su propia llave. -->
+      <button v-if="reveal" class="btn sm ghost" :data-testid="'var-show-' + tid + '-' + d.key"
+              :disabled="busyRow === d.key" @click="verValor(d.key)">
+        {{ shown[d.key] != null ? t.var_hide : t.var_show }}
+      </button>
+      <button v-if="history" class="btn sm ghost" :data-testid="'var-history-' + tid + '-' + d.key"
+              :disabled="busyRow === d.key" @click="verVersiones(d.key)">{{ t.var_versions }}</button>
+      <code v-if="shown[d.key] != null" class="shown" :data-testid="'var-shown-' + tid + '-' + d.key">{{ shown[d.key] }}</code>
     </div>
+    <ul v-if="versions[d.key]" :key="d.key + '-h'" class="versions" :data-testid="'var-versions-' + tid + '-' + d.key">
+      <li v-if="!versions[d.key].length" class="hint">{{ t.var_no_versions }}</li>
+      <li v-for="h in versions[d.key]" :key="h.ts">
+        <span class="hint">{{ cuando(h.ts) }}</span>
+        <span class="hint">{{ h.by ? t.var_by(h.by) : t.var_by_vault }}</span>
+        <button class="btn sm ghost" :data-testid="'var-restore-' + tid + '-' + d.key + '-' + h.ts"
+                :disabled="busyRow === d.key" @click="restaurar(d.key, h.ts)">{{ t.var_restore }}</button>
+      </li>
+    </ul>
 
     <template v-if="add">
       <div v-for="(n, idx) in added" :key="'n' + idx" class="varrow added" :data-testid="'var-new-' + tid + '-' + idx">
@@ -190,6 +241,7 @@ const submit = () => props.save({
       <button class="btn" :data-testid="'var-save-' + tid" :disabled="!canConfirm" @click="submit">
         {{ ready.length ? t.var_save_n(ready.length) : t.var_save }}
       </button>
+      <span v-if="rowError" class="err" :data-testid="'var-row-error-' + tid">{{ rowError }}</span>
       <span v-if="incomplete" class="hint">{{ t.var_incomplete }}</span>
       <span v-else-if="ready.length" class="hint">{{ t.var_save_hint }}</span>
     </div>
@@ -211,6 +263,9 @@ const submit = () => props.save({
 .paste-hint { margin: 6px 0 0 12px; }
 .err { margin: 6px 0 0 12px; font-size: 13px; color: #ffb4a2; }
 .tag { font-size: 12px; color: #ffd79a; }
+.shown { font-size: 13px; color: #dbe7f7; background: #0d1521; border: 1px solid #223047; border-radius: 6px; padding: 2px 8px; word-break: break-all; }
+.versions { list-style: none; margin: 4px 0 0 24px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.versions li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 input[type="text"], input[type="password"] {
   background: #0d1521; color: #dbe7f7; border: 1px solid #223047;
   border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; min-width: 0; flex: 1 1 160px;

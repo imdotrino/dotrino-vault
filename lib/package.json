@@ -43,7 +43,7 @@
     "pairing"
   ],
   "peerDependencies": {
-    "@dotrino/identity": ">=0.53.0",
+    "@dotrino/identity": ">=0.54.0",
     "@dotrino/proxy-client": ">=0.9.0"
   },
   "license": "MIT",
@@ -53,8 +53,8 @@
     "directory": "lib"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.3"
   },
   "scripts": {
     "type-check": "tsc --noEmit"

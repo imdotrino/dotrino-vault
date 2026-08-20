@@ -262,14 +262,21 @@ const es = {
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable', 'i cargar varias',
-    ...(hasSecrets ? ['t pública/privada', 'x quitar (variable/scope)'] : []),
+    ...(hasSecrets ? ['v ver valor', 't pública/privada', 'x quitar (variable/scope)'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   helpDevVars: ({ hasVars } = {}) => [
     '↑↓', 'n nueva variable', 'i cargar varias',
-    ...(hasVars ? ['t pública/privada', 'x quitar'] : []),
+    ...(hasVars ? ['v ver valor', 't pública/privada', 'x quitar'] : []),
     'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'
   ],
+  // Ver el valor de una privada: lo único que la contraseña guarda en esta máquina.
+  revealTitle: 'Ver el valor',
+  revealAsk: 'Contraseña del perfil (para ver el valor)',
+  revealHint: 'sin ella no se puede abrir: es lo único que la guarda (Esc cancela)',
+  revealing: 'abriendo…',
+  revealed: (k, v) => `${k} = ${v}`,
+  revealNoPwd: 'Este perfil no tiene contraseña: se abre con la llave de esta máquina.',
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
 
@@ -528,14 +535,20 @@ const en = {
   deviceRenamed: (n) => `Now called "${n}"`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ tab', '↑↓', 'n new variable', 'i load several',
-    ...(hasSecrets ? ['t public/private', 'x remove (variable/scope)'] : []),
+    ...(hasSecrets ? ['v show value', 't public/private', 'x remove (variable/scope)'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   helpDevVars: ({ hasVars } = {}) => [
     '↑↓', 'n new variable', 'i load several',
-    ...(hasVars ? ['t public/private', 'x remove'] : []),
+    ...(hasVars ? ['v show value', 't public/private', 'x remove'] : []),
     'F5 refresh', 'Esc devices', 'l Español', 'q quit'
   ],
+  revealTitle: 'Show the value',
+  revealAsk: 'Profile password (to show the value)',
+  revealHint: 'without it there is no way to open it: it is the only thing guarding it (Esc cancels)',
+  revealing: 'opening…',
+  revealed: (k, v) => `${k} = ${v}`,
+  revealNoPwd: 'This profile has no password: it opens with this machine key.',
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
 

@@ -11,7 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@dotrino/identity": "0.53.0",
+    "@dotrino/identity": "0.55.0",
     "@dotrino/install": "0.3.1",
     "@dotrino/support": "0.8.1",
     "@dotrino/topbar": "0.8.1",

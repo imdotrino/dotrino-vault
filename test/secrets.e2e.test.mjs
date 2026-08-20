@@ -673,18 +673,14 @@ test('un agente VIEJO consigue su llave de cifrado SIN re-enrolarse', async () =
 })
 
 
-test('la consola remota escribe una privada mandando la contrasena en el sobre', async () => {
-  // Regresion: cuando los secretos pasaron a sellarse, `varsDesk` seguia llamando a
-  // setSecret sin llave y caia a la de la maquina — que no abre la copia maestra de un
-  // perfil con contraseña. Escribir desde vault.dotrino.com dejo de funcionar.
-  //
-  // La contraseña viaja DENTRO del mismo sobre que los valores, nunca en claro por el
-  // proxio. Aqui el perfil no tiene contraseña, asi que lo que se comprueba es que el
-  // camino acepta el campo y sigue guardando.
+test('la consola remota escribe SIN contrasena (§8.1)', async () => {
+  // El cambio entero: sellar solo necesita las PUBLICAS de quien va a leer, asi que
+  // guardar una variable nunca necesito la frase del perfil. Lo que la pedia era la copia
+  // maestra de v4, y eso obligaba a teclear en un navegador la llave que abre TODOS los
+  // cajones. Ya no viaja ninguna contraseña por este camino.
   const ns = 'consola'
   const enc = await vault.identity.sealContent(JSON.stringify({
-    items: [{ key: 'DESDE_LA_CONSOLA', value: 'valor-remoto' }],
-    password: undefined
+    items: [{ key: 'DESDE_LA_CONSOLA', value: 'valor-remoto' }]
   }))
   const r = await vault.vars.setMany({ ns, enc, by: 'test' })
   assert.deepEqual(r.keys, ['DESDE_LA_CONSOLA'])
@@ -739,4 +735,83 @@ test('el servicio descifra AL VUELO: el valor no toca el disco en ningun momento
   // Lo unico que persiste: su identidad, y la sal del cifrado en reposo que la protege.
   assert.deepEqual(vistos.sort(), ['atrest.salt', 'service-identity.json'],
     'un archivo NUEVO en el directorio del servicio es sospechoso: revisa que no sea una cache')
+})
+
+
+test('un sobre con la firma cambiada NO se abre: el agente comprueba la procedencia', async () => {
+  // Envolver una llave solo necesita PUBLICAS, asi que cualquiera puede fabricar un sobre
+  // valido para este servicio: abrirlo prueba que es para mi, no que lo escribio quien
+  // debia. Lo que lo prueba es la firma de la llave de sellado que nombra el acta (§8.8).
+  //
+  // Se prueba sobre la comprobacion misma —no moviendo el archivo del disco— porque la
+  // boveda sirve lo que tiene EN MEMORIA: tocarle el archivo por detras no simula a nadie.
+  const { makeSealCheck } = await import('../lib/src/service.js')
+  const { genesisActa, sealActa } = await import('@dotrino/identity/acta')
+  const { signWithDevice } = await import('@dotrino/identity/capabilities')
+
+  const par = async () => {
+    const p = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    return {
+      pub: JSON.stringify(await crypto.subtle.exportKey('jwk', p.publicKey)),
+      privateJwk: await crypto.subtle.exportKey('jwk', p.privateKey)
+    }
+  }
+  const maestra = await par()
+  const sello = await par()
+  const acta = await sealActa({
+    acta: genesisActa({ pub: maestra.pub, sealPub: sello.pub }), privateJwk: maestra.privateJwk
+  })
+
+  const e = { iv: 'aXY=', ct: 'Y3Q=' }
+  const body = { owner: 'ns:x', key: 'TOKEN', gen: 1, iv: e.iv, ct: e.ct }
+  const { signature } = await signWithDevice({ privateJwk: sello.privateJwk, publickey: sello.pub, data: body })
+
+  const comprobar = await makeSealCheck(acta, maestra.pub, () => {})
+  await comprobar('ns:x', 'TOKEN', 1, e, { seq: 1, sig: signature })   // la buena pasa
+
+  await assert.rejects(
+    () => comprobar('ns:x', 'TOKEN', 1, { iv: e.iv, ct: 'b3Ry' }, { seq: 1, sig: signature }),
+    /signature does not check out/, 'un sobre cambiado con la firma vieja NO se usa')
+  await assert.rejects(
+    () => comprobar('ns:x', 'TOKEN', 1, e, { seq: 9, sig: signature }),
+    /no sealing key/, 'ni uno que dice venir de un acta que no existe')
+
+  // Y si el acta no la firmo la maestra que este agente conoce, no se finge que se
+  // comprobo: se avisa y se sigue (no se puede establecer procedencia).
+  const otra = await par()
+  const ajena = await sealActa({ acta: genesisActa({ pub: otra.pub, sealPub: sello.pub }), privateJwk: otra.privateJwk })
+  let aviso = ''
+  const laxo = await makeSealCheck(ajena, maestra.pub, (m) => { aviso = m })
+  await laxo('ns:x', 'TOKEN', 1, e, { seq: 1, sig: 'basura' })
+  assert.match(aviso, /provenance NOT checked/)
+})
+
+
+test('un aparato de administracion VE el valor sin ninguna contrasena (§8.2)', async () => {
+  // El motivo de todo esto: la capacidad de leer deja de ser una frase que se teclea en
+  // cualquier parte y pasa a ser una llave que no sale del aparato. La boveda entrega el
+  // sobre y la envoltura dirigida a ESE aparato; abrirlo es cosa suya, y ella no puede.
+  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
+
+  // Un aparato del dueño (sin CN: no es un servicio) con su llave de cifrado.
+  const par = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits'])
+  const encPub = JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey))
+  const firma = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const pub = JSON.stringify(await crypto.subtle.exportKey('jwk', firma.publicKey))
+  await vault.identity.admitMember({ pub, encPub, label: 'Consola', caps: ['store', 'read', 'admin'] })
+
+  const ns = 'verlo'
+  await vault.setSecret(ns, 'TOKEN', 'lo-que-quiero-ver')
+
+  const r = await vault.vars.reveal({ ns, key: 'TOKEN', device: pub })
+  assert.equal(r.pub, false, 'es privada: viene sellada, no en claro')
+  assert.ok(r.wrap, 'y con la envoltura dirigida a este aparato')
+
+  const cek = await openWrap({ wrap: r.wrap, myEncPrivateKey: par.privateKey })
+  assert.equal(await decryptWithCek({ cek, envelope: r.e }), 'lo-que-quiero-ver')
+
+  // Y a un aparato que NO esta en la lista no se le entrega ninguna envoltura.
+  const ajeno = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const ajenoPub = JSON.stringify(await crypto.subtle.exportKey('jwk', ajeno.publicKey))
+  await assert.rejects(() => vault.vars.reveal({ ns, key: 'TOKEN', device: ajenoPub }), /no wrapping/)
 })

@@ -14,3 +14,5 @@ dist/
 .DS_Store
 .claude/
 usage-stats.json
+# El lockfile de lib/: ahí solo hay peer y dev deps (las de verdad las fija el repo raíz)
+lib/package-lock.json

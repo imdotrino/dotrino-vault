@@ -150,10 +150,6 @@ const T = {
     var_t: 'Variables de tus aplicaciones',
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
     var_shared: 'la usan todas las máquinas',
-    pwd_needed: 'Este perfil tiene contraseña: escríbela para poder guardar.',
-    pwd_wrong: 'Esa contraseña no es. Vuelve a intentarlo.',
-    pwd_label: 'Contraseña del perfil',
-    pwd_why: 'Se usa para sellar cada variable al aparato que la lee. No se guarda: al recargar hay que volver a escribirla.',
     pend_t: 'Hay variables sin entregar',
     pend_b: 'Estos grupos no han podido entregar su llave, así que sus aparatos no están leyendo sus variables. Se arregla guardando aquí cualquier variable de ese grupo con la contraseña.',
     pend_rotate: 'salió un aparato del grupo',
@@ -172,6 +168,13 @@ const T = {
     var_save_hint: 'Se guardan juntas: la aplicación se reinicia una sola vez.',
     var_pending: 'sin guardar',
     var_incomplete: 'Hay una fila sin nombre o sin valor.',
+    var_show: 'Ver',
+    var_hide: 'Ocultar',
+    var_versions: 'Versiones',
+    var_no_versions: 'No hay versiones anteriores.',
+    var_restore: 'Restaurar',
+    var_by: (id) => `desde ${id}`,
+    var_by_vault: 'desde la máquina de la bóveda',
     var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
     var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
@@ -287,10 +290,6 @@ const T = {
     var_t: 'Your apps\u2019 variables',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
-    pwd_needed: 'This profile has a password: type it in order to save.',
-    pwd_wrong: 'That password is not right. Try again.',
-    pwd_label: 'Profile password',
-    pwd_why: 'It is used to seal each variable to the device that reads it. It is not stored: reload and you type it again.',
     pend_t: 'Some variables are not being delivered',
     pend_b: 'These groups could not hand out their key, so their devices are not reading their variables. Save any variable of that group here, with the password, and it is fixed.',
     pend_rotate: 'a device left the group',
@@ -306,6 +305,13 @@ const T = {
     var_save_hint: 'They are saved together: the app restarts only once.',
     var_pending: 'unsaved',
     var_incomplete: 'A row has no name or no value.',
+    var_show: 'Show',
+    var_hide: 'Hide',
+    var_versions: 'Versions',
+    var_no_versions: 'No earlier versions.',
+    var_restore: 'Restore',
+    var_by: (id) => `from ${id}`,
+    var_by_vault: 'from the vault machine',
     var_paste_err: (e) => ({
       shape: `line ${e.line}: not in the form NAME=value`,
       key: `line ${e.line}: "${e.key}" must be UPPERCASE_WITH_UNDERSCORES`,
@@ -620,8 +626,7 @@ const confirming = ref(null) // { kind, pub }
  * Hace falta para escribir variables privadas: la bóveda la usa para abrir la copia
  * maestra y sellar cada valor a su destinatario. No se guarda en ningún sitio.
  */
-const adminPwd = ref('')
-const needPwd = ref(false)
+
 
 async function run (key, fn) {
   busy.value = key; msg.value = null
@@ -985,25 +990,42 @@ const orphanVars = computed(() => (vars.value?.dev || [])
  */
 function saveVars ({ target, items }) {
   return run('var-' + target, async () => {
-    // La CONTRASEÑA del perfil va DENTRO del mismo sobre que los valores: la bóveda la
-    // necesita para abrir su copia maestra y sellar cada variable a los aparatos que
-    // deben leerla. Nunca viaja en claro, y aquí solo vive en memoria — al recargar la
-    // página hay que volver a escribirla, que es lo correcto para algo así.
-    const enc = await id.value.sealContent(JSON.stringify({ items, password: adminPwd.value || undefined }))
-    try {
-      await id.value.vaultAdmin('var.setMany', { ...targetOf(target), enc })
-    } catch (e) {
-      // Un perfil con contraseña la exige para escribir una privada. Se pide y se
-      // reintenta, en vez de dejar un error que no dice qué hacer.
-      if (/password/i.test(e?.message || '')) {
-        needPwd.value = true
-        throw new Error(adminPwd.value ? t.value.pwd_wrong : t.value.pwd_needed)
-      }
-      throw e
-    }
-    needPwd.value = false
+    // GUARDAR NO PIDE LA CONTRASEÑA, y ese es el cambio entero: sellar solo necesita las
+    // llaves PÚBLICAS de quien va a leer, así que la bóveda puede hacerlo sin ningún
+    // secreto (`docs/secretos-sellados.md` §8.1). Antes había que teclear aquí la frase
+    // del perfil —la que abre TODOS los cajones— y eso es justo lo que no debe pasar en
+    // un navegador. Los valores siguen viajando dentro del sobre cifrado.
+    const enc = await id.value.sealContent(JSON.stringify({ items }))
+    await id.value.vaultAdmin('var.setMany', { ...targetOf(target), enc })
     await loadVars()
   })
+}
+
+/**
+ * VER el valor de una variable. La bóveda entrega el sobre y **la envoltura dirigida a
+ * este aparato**; abrirlo lo hace el navegador con su propia llave de cifrado, que no
+ * sale de aquí (§8.2). Ninguna contraseña de por medio, en ningún momento.
+ */
+async function revealVar (target, key, ts = null) {
+  const r = await id.value.vaultAdmin('var.reveal', { ...targetOf(target), key, ...(ts ? { ts } : {}) })
+  if (r?.pub) return r.v                       // una pública no está cerrada
+  return id.value.openSealedValue(r.wrap, r.e)
+}
+
+/** Las versiones anteriores de una variable (sin valores: son sobres). */
+async function historyVar (target, key) {
+  const r = await id.value.vaultAdmin('var.history', { ...targetOf(target), key })
+  return r?.items || []
+}
+
+/**
+ * VOLVER A UNA VERSIÓN ANTERIOR: se abre aquí y se vuelve a guardar. No es un modo
+ * especial de nada — es ver + escribir—, así que hereda las dos reglas: abrir lo hace
+ * este aparato con su llave, y escribir no pide nada.
+ */
+async function restoreVar (target, key, ts) {
+  const value = await revealVar(target, key, ts)
+  await saveVars({ target, items: [{ key, value, public: false }] })
 }
 
 /** Crear un grupo es solo abrirle su apartado: existe de verdad con la primera variable. */
@@ -1228,7 +1250,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                :data-testid="'devvars-' + m.id">
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
-                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn" />
+                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn"
+                  :reveal="(k) => revealVar('dev:' + m.pub, k)"
+                  :history="(k) => historyVar('dev:' + m.pub, k)"
+                  :restore="(k, ts) => restoreVar('dev:' + m.pub, k, ts)" />
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
@@ -1367,20 +1392,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <small>{{ t.pend_b }}</small>
           </div>
 
-          <div v-if="needPwd" class="pwdbar" data-testid="vars-password">
-            <label>
-              {{ t.pwd_label }}
-              <input v-model="adminPwd" type="password" autocomplete="off"
-                     data-testid="vars-password-input" :placeholder="t.pwd_label" />
-            </label>
-            <small>{{ t.pwd_why }}</small>
-          </div>
-
           <ul class="vars" data-testid="vars">
             <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
               <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
               <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
-                    :t="t" :busy="busy" :save="saveVars" />
+                    :t="t" :busy="busy" :save="saveVars"
+                    :reveal="(k) => revealVar('ns:' + ns, k)"
+                    :history="(k) => historyVar('ns:' + ns, k)"
+                    :restore="(k, ts) => restoreVar('ns:' + ns, k, ts)" />
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->
@@ -1420,14 +1439,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 .pendbar li { margin: .15rem 0; }
 .pendbar code { font-size: .92em; }
 .pendbar small { display: block; margin-top: .45rem; opacity: .8; }
-
-/* La barra de contraseña: aparece solo cuando hace falta, y se nota que es un aviso
-   sin gritar — quien la ve ya sabe que le falta un dato para guardar. */
-.pwdbar { margin: .75rem 0; padding: .6rem .75rem; border-radius: 8px;
-  border: 1px solid var(--warn, #b58900); background: color-mix(in srgb, var(--warn, #b58900) 8%, transparent); }
-.pwdbar label { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-weight: 600; }
-.pwdbar input { flex: 1 1 14rem; min-width: 0; }
-.pwdbar small { display: block; margin-top: .4rem; opacity: .75; font-weight: 400; }
 
 /* Botón (i): pequeño, al lado del título, sin robarle protagonismo a lo que se administra. */
 .i {

@@ -1069,6 +1069,8 @@ async function onKeySecrets (term, st, key) {
         onNo: () => { st.confirm = null }
       })
     }
+  } else if (ch === 'v' && cur?.key) {
+    await revealValue(term, st, `ns:${cur.ns}`, cur.key, cur.public)
   } else if (ch === 't' && cur?.key) {
     await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st), activePwd(st)))
   } else if (key.name === 'f5') {
@@ -1081,6 +1083,38 @@ async function onKeySecrets (term, st, key) {
  * Hacer pública una variable es dejar que su valor SALGA de esta máquina, así que se
  * pregunta; volverla privada no expone nada y se aplica directo.
  */
+/**
+ * VER el valor de una variable. Es lo único que la contraseña guarda desde v5, y en la
+ * máquina de la bóveda no hay otro camino: la llave de este aparato vive en este mismo
+ * disco, así que si abriera sin frase una copia del disco abriría todo.
+ *
+ * Si el perfil no tiene contraseña se abre con la llave de la máquina y no se pregunta
+ * nada — pero se dice, para que no parezca una protección que no está puesta.
+ */
+async function revealValue (term, st, owner, key, isPublic) {
+  const i = L(st)
+  const p = activeProfile(st)
+  const mostrar = async (pwd) => {
+    const r = await guard(term, st, i.revealing, () => vc.revealSecret(owner, key, activeId(st), pwd))
+    if (r.ok) flash(st, i.revealed(key, r.v), 'ok')
+  }
+  if (isPublic) return mostrar(undefined)             // una pública no está cerrada
+  if (!p?.protected) { flash(st, i.revealNoPwd, 'warn'); return mostrar(undefined) }
+  const guardada = activePwd(st)
+  if (guardada) return mostrar(guardada)
+  setInput(st, {
+    label: i.revealAsk,
+    hint: i.revealHint,
+    mask: true,
+    onSubmit: async (pwd) => {
+      st.input = null
+      if (!pwd) return
+      await mostrar(pwd)
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
 async function toggleVisibility (term, st, wasPublic, apply) {
   const i = L(st)
   const run = async () => {
@@ -1114,6 +1148,8 @@ async function onKeyDevVars (term, st, key) {
   if (ch === 'i' && target) { promptLoadVars(term, st, { pub: target.pub, where: target.deviceId }); return true }
   if (ch === 't' && cur && target) {
     await toggleVisibility(term, st, cur.public, () => vc.setDeviceSecretVisibility(target.pub, cur.key, !cur.public, activeId(st), activePwd(st)))
+  } else if (ch === 'v' && cur?.key) {
+    await revealValue(term, st, `dev:${target.pub}`, cur.key, cur.public)
     return true
   }
   if ((ch === 'x' || key.name === 'delete') && cur && target) {
@@ -1164,7 +1200,7 @@ function promptNewDeviceVariable (term, st) {
           st.input = null
           if (!value) { flash(st, i.valueEmpty, 'danger'); return }
           askVisibility(term, st, async (isPublic) => {
-            const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st), isPublic, activePwd(st)))
+            const r = await guard(term, st, i.savingVar, () => vc.setDeviceSecret(target.pub, kv, value, activeId(st), isPublic))
             if (r.ok) { flash(st, i.varSaved(target.deviceId, kv)); st.secrets = r.v }
           })
         },
@@ -1207,8 +1243,8 @@ function promptLoadVars (term, st, { ns = null, pub = null, where }) {
       askVisibility(term, st, async (isPublic) => {
         const withVisibility = items.map((it) => ({ ...it, public: isPublic }))
         const r = await guard(term, st, i.loadingVars, () => (pub
-          ? vc.applyDeviceSecrets(pub, withVisibility, activeId(st), activePwd(st))
-          : vc.applySecrets(ns, withVisibility, activeId(st), activePwd(st))))
+          ? vc.applyDeviceSecrets(pub, withVisibility, activeId(st))
+          : vc.applySecrets(ns, withVisibility, activeId(st))))
         if (r.ok) { flash(st, i.loadedVars(items.length, where)); st.secrets = r.v }
       })
     },
@@ -1258,7 +1294,7 @@ function promptNewVariable (term, st) {
               st.input = null
               if (!value) { flash(st, i.valueEmpty, 'danger'); return }
               askVisibility(term, st, async (isPublic) => {
-                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsName, kv, value, activeId(st), isPublic, activePwd(st)))
+                const r = await guard(term, st, i.savingVar, () => vc.setSecret(nsName, kv, value, activeId(st), isPublic))
                 if (r.ok) { flash(st, i.varSaved(nsName, kv)); st.secrets = r.v }
               })
             },
