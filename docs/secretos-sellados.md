@@ -429,3 +429,42 @@ mismo barrido que el tope del §8.4.
 
 **Leer va al revés**: la bóveda reenvía el sobre y la envoltura de ese aparato, y abre
 el aparato. Ni una llave privada viaja en ninguna dirección.
+
+### 8.8. Una llave propia para FIRMAR los sellados
+
+La bóveda firma cada sobre con una llave **suya, dedicada a eso**, y no con la maestra.
+La clave del asunto es que **firmar no es leer**: una llave de firma no abre ningún
+valor, así que puede vivir cifrada en reposo con la llave de la máquina y usarse **sin
+la frase y sin abrir la copia maestra**. No hay nada que desbloquear para sellar, que
+es justo lo que pide el §8.
+
+**De dónde saca su autoridad: un certificado emitido UNA vez por la maestra.** Es la
+misma maquinaria que ya valida a cualquier aparato (`verifyChain` con
+`trustedIssuer: master`), así que no hay que tocar el esquema del acta ni subirle la
+versión, y la renovación y la revocación ya existen. Se descarta meterla como miembro
+con CN: `checkShape` reserva los CN para servicios y no le dejaría capacidades de
+aparato.
+
+Lo que se gana:
+
+1. **Higiene de la maestra.** La raíz de confianza deja de firmar una operación
+   rutinaria y frecuente. Firma el acta y el certificado del sellador, y poco más.
+2. **Procedencia en reposo.** Hoy un sobre tiene integridad (AES-GCM) pero **no
+   origen**: como envolver solo necesita públicas, *cualquiera* puede fabricar un sobre
+   válido para un servicio. La firma dice cuáles salieron del flujo de administración
+   de esta bóveda.
+3. **Histórico verificable**, que es lo que hace que revertir sea de fiar: cada versión
+   guardada viene firmada y se comprueba antes de restaurarla.
+4. **Rotación barata**: si la llave de sellado se compromete, se rota su certificado sin
+   tocar la identidad del perfil.
+
+Y lo que **no** da, dicho antes de que alguien lo suponga: la llave vive en la máquina
+de la bóveda, así que quien controle esa máquina también puede firmar. Una firma suelta
+no impide inyectar configuración (§8.6, punto 2). Lo que la convierte en **detección**
+es **encadenar**: `seq` monotónico y hash de la entrada anterior, y el aparato de
+administración recordando el último `seq` que vio. Entonces una reescritura silenciosa
+sale como un hueco o como una bifurcación, en vez de no salir. Sin cadena, esto es
+higiene y procedencia; con cadena, además, se nota.
+
+Alcance: además del daemon, el agente (`@dotrino/vault`) tiene que **verificar** la
+firma del sobre que recibe, no solo la del cuerpo del bundle.
