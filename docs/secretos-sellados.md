@@ -313,3 +313,86 @@ la llave de la máquina, que es la protección de antes de todo esto.
 4. **La maestra sigue en esa máquina.** Este trabajo protege los secretos de servicio,
    que son rotables. No cambia que quien controle el VPS pueda suplantar al vault
    frente a la consola (§3, límite 3).
+
+## 8. La frase, solo para VER (acordado 2026-08-20 — sin implementar)
+
+> Pedido del dueño: **no teclear la contraseña del perfil en el navegador**, y poder
+> administrar sin ella también desde la TUI. La frase deja de ser un requisito para
+> escribir y pasa a significar **una sola cosa: ver los valores**.
+
+El §6.1 de arriba describe lo contrario («TODA escritura pide la contraseña»). Esta
+sección lo deroga en cuanto se implemente; hasta entonces, manda el §6.1.
+
+### 8.1. Por qué se puede: cifrar es una capacidad PÚBLICA
+
+Sellar no necesita ningún secreto de la bóveda. `sealer.wrapFor` es `makeGeneration`
+de `@dotrino/identity` (`vault/content.js:84`): recorre los miembros y de cada uno usa
+**solo su `encPub`**, que vive en claro en el acta; y la CEK la fabrica ella misma con
+`makeContentKey`. Ni una línea toca la frase.
+
+Lo que la exige hoy es **la copia maestra**, que es AES simétrico bajo la llave
+derivada de la contraseña (`sealer.js`, `openMaster`/`sealMaster`): `_putRaw`
+(`secretsStore.js:278-282`) la abre para sacar la CEK del cajón y la vuelve a cerrar.
+O sea, la frase la pide **el almacén de CEK**, no el sellado. Es una decisión del
+§2.2, no una necesidad criptográfica.
+
+### 8.2. Tres destinatarios en vez de dos
+
+La CEK de cada cajón se envuelve a:
+
+| Destinatario | Para qué | Abre con |
+|---|---|---|
+| los **servicios** del `ns` | consumir su configuración | su propia privada |
+| los **aparatos de administración** — miembros sin CN y con `encPub` (`acta.js:455`) | leer, auditar y **revertir** desde la consola | la llave del aparato, que **no sale de él** |
+| la **copia de recuperación**, bajo la frase | el día que no quede ningún aparato | la frase, en la máquina del dueño |
+
+La regla de siempre no cambia y es la que sostiene todo: **la CEK nunca se envuelve a
+la llave de esta bóveda** (`test/sealer.test.mjs:100`).
+
+### 8.3. Qué pide qué, y por qué no es lo mismo en cada sitio
+
+| | Poner / cambiar una variable | Ver su valor |
+|---|---|---|
+| **Consola** (tu aparato) | sin frase | **sin frase**: la abre la llave del aparato |
+| **TUI / CLI** (la máquina de la bóveda) | sin frase | **con frase**, y no hay otra manera |
+
+Esa asimetría no es una inconsistencia, es la definición del diseño: en la máquina de
+la bóveda, «la llave del aparato» y «una llave que vive en ese disco» son la misma
+cosa. Si desde ahí se pudiera ver sin frase, una instantánea del disco vería todo y
+esto no valdría nada. Por eso ahí la frase es el único camino a los valores — y solo a
+eso.
+
+### 8.4. El histórico, para revertir
+
+Cada escritura conserva el **sobre anterior** en una lista append-only con quién y
+cuándo, firmada. Tres consecuencias:
+
+- La bóveda **escribe el histórico sin poder leerlo**. Auditar no lo hace ella: lo hace
+  el aparato que puede abrir. Ella solo garantiza que la lista está completa y firmada.
+- **Revertir es una escritura normal**: el aparato abre el sobre viejo con su llave y lo
+  vuelve a guardar. Tampoco pide frase.
+- Un histórico de secretos es también un **pasivo** —mantiene vivas credenciales
+  viejas—, así que lleva tope (N versiones o M días) y un «purgar» explícito.
+
+### 8.5. Lo que se arregla de paso
+
+- Desaparece `sessionPwd` (`src/tui/app.js:141-146`), que hoy guarda la contraseña en
+  RAM **toda la sesión de la TUI** solo para poder sellar. Contradice al §2.3 («por
+  operación, no una sesión») y era el precio de exigir la frase al escribir.
+- Se cae casi entero el punto 2 de §7 (la frase llegando al daemon por un archivo
+  0600): con la escritura sin frase, solo queda el camino de *ver*.
+
+### 8.6. El precio, dicho claro
+
+1. **El aparato de administración pasa a poder LEER.** Hoy no puede
+   (`docs/consola-remota.md:50`: valor nuevo «sí, **a ciegas**»). Es el cambio, no un
+   descuido: la capacidad de leer se muda de *una frase que se teclea en cualquier
+   parte* a *una llave que no sale del aparato*. Consecuencia: **perder un aparato de
+   administración pasa a equivaler a perder los secretos**, así que revocarlo tiene que
+   rotar de verdad — que ya es la regla desde 0.39.
+2. **Escribir sin frase** deja que quien controle la máquina de la bóveda **inyecte**
+   configuración a un servicio (no que lea la vieja). No es una puerta nueva —§3,
+   límite 3, ya dice que con la maestra ahí se puede suplantar a la bóveda— pero queda
+   escrito.
+3. **Rotar recifrando lo existente** y **pasar una privada a pública** siguen exigiendo
+   leer: sin frase, solo desde un aparato de administración.
