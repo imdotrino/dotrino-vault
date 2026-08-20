@@ -396,3 +396,36 @@ cuándo, firmada. Tres consecuencias:
    escrito.
 3. **Rotar recifrando lo existente** y **pasar una privada a pública** siguen exigiendo
    leer: sin frase, solo desde un aparato de administración.
+
+### 8.7. Los sobres los hace la BÓVEDA, no la consola
+
+Lo que viaja no cambia: la consola manda el valor **sellado con la llave de contenido
+del perfil**, como hoy (`identity.sealContent` → `openContent` en la bóveda), y es la
+bóveda la que abre ese sobre y **sella al destinatario**. Las `encPub` de los miembros
+**no salen del acta** y la consola nunca recibe una lista de a quién hay que sellarle.
+
+Por qué se queda así:
+
+- **Un solo sitio con criptografía** (`sealer.js`), que es lo que hace que se pueda leer
+  entero y probar con un sellador falso.
+- **La consola no elige destinatarios.** Si sellara ella, podría envolver a una llave
+  suya —o a una ajena— y la bóveda no tendría cómo notarlo. Sellando la bóveda, la
+  lista sale siempre del acta vigente, con las revocaciones ya aplicadas.
+- **Repartir, rotar y re-envolver** siguen del lado de la bóveda, que es donde está el
+  estado (miembros, generaciones, deudas pendientes).
+
+Y el límite honesto, que ya existe hoy (§1, primera fila de la tabla): **la bóveda ve
+en claro el valor NUEVO en el momento de escribirlo** — tiene que verlo para poder
+sellarlo. Lo que el sellado protege es el **reposo** y lo **ya guardado**, no ese
+instante. Quien no quiera ni eso está pidiendo la tercera fila del §3 (claro solo en la
+consola), que es otro diseño.
+
+**Consecuencia técnica: una generación por escritura.** La bóveda no puede reutilizar
+la CEK de un cajón, porque no puede abrir ninguna envoltura para recuperarla. Así que
+cada escritura crea una CEK nueva, la envuelve a los destinatarios del §8.2 y cifra el
+valor con ella; el llavero crece una entrada por escritura. Hay que **recoger las
+generaciones** que ya no referencia ningún valor ni ninguna entrada del histórico —el
+mismo barrido que el tope del §8.4.
+
+**Leer va al revés**: la bóveda reenvía el sobre y la envoltura de ese aparato, y abre
+el aparato. Ni una llave privada viaja en ninguna dirección.
