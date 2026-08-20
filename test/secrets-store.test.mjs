@@ -1,7 +1,9 @@
 /**
- * El store de secretos v4: dos cajones, la mezcla con el aparato encima, la
- * visibilidad, y —lo nuevo— que **el archivo no contenga ningún valor privado en
- * claro**, que es la propiedad entera de este trabajo.
+ * El store de secretos v5: dos cajones, la mezcla con el aparato encima, la visibilidad,
+ * el histórico — y las dos propiedades que sostienen todo el trabajo:
+ *
+ *   1. **el archivo no contiene ningún valor privado en claro**, y
+ *   2. **escribir no pide la frase**; lo que la pide es VER.
  *
  * Se prueba con un SELLADOR FALSO, determinista y legible. El store no hace
  * criptografía (recibe el puerto inyectado), así que aquí se comprueba la FORMA y las
@@ -12,7 +14,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openSecretsStore, NeedsPassword } from '../src/secretsStore.js'
+import { openSecretsStore, NeedsPassword, NeedsMigration, RECOVERY } from '../src/secretsStore.js'
 import { readJson, writeJson } from '../src/paths.js'
 import { atRestFor } from '../src/atrest.js'
 
@@ -20,22 +22,25 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-secrets-'))
 
 /** Contraseña de mentira: el sellador falso solo comprueba que sea la misma. */
 const PWD = 'llave-de-prueba'
+/** Con la que se cierra la copia de recuperación cuando el perfil NO tiene contraseña. */
+const MAQUINA = 'llave-de-esta-maquina'
 
 /**
  * Sellador falso: «cifrar» es envolver en un marcador reconocible. Determinista, para
- * que un test pueda afirmar exactamente qué quedó escrito. Lo importante es que
- * respete el contrato: sin la contraseña correcta no se abre nada.
+ * que un test pueda afirmar exactamente qué quedó escrito. Lo importante es que respete
+ * el contrato: una envoltura solo se abre con la privada que le toca, y la copia de
+ * recuperación solo con la llave con la que se cerró.
  */
 function fakeSealer () {
   let n = 0
   return {
-    // La llave con la que se cerro va DENTRO del sobre: solo la abre esa misma. Asi
-    // el falso admite cualquier llave (hace falta para probar el cambio de
-    // contraseña, que usa tres distintas) sin dejar de exigir que coincida.
+    // La llave con la que se cerró va DENTRO del sobre: solo la abre esa misma. Así el
+    // falso admite cualquier llave (hace falta para probar el cambio de contraseña, que
+    // usa tres distintas) sin dejar de exigir que coincida.
     openMaster (blob, adminKey) {
       if (!adminKey) throw new Error('wrong password')
       if (!blob) return {}
-      const [k, json] = JSON.parse(blob.replace(/^SEALED\(/, '').replace(/\)$/, ''))
+      const [k, json] = JSON.parse(String(blob).replace(/^SEALED\(/, '').replace(/\)$/, ''))
       if (k !== String(adminKey)) throw new Error('wrong password')
       return JSON.parse(json)
     },
@@ -43,20 +48,24 @@ function fakeSealer () {
       if (!adminKey) throw new Error('wrong password')
       return `SEALED(${JSON.stringify([String(adminKey), JSON.stringify(obj)])})`
     },
-    cekFor (master, owner) {
-      if (!master[owner]) master[owner] = `cek-${owner}-${++n}`
-      return master[owner]
+    // Un par de recuperación de mentira: la pública es `rec-pub-N` y su privada
+    // `rec-priv-N`. Emparejan por el número, igual que uno de verdad por la curva.
+    makeRecoveryPair () {
+      const i = ++n
+      return { pub: `rec-pub-${i}`, priv: { d: `rec-priv-${i}` } }
     },
-    newCek (master, owner) {
-      master[owner] = `cek-${owner}-${++n}`
-      return master[owner]
+    newKey () { return `cek-${++n}` },
+    wrapForKey (cek, encPub) { return { epk: encPub, ct: `wrap(${cek})` } },
+    openWrapWith (priv, wrap) {
+      const esperado = String(priv?.d || priv).replace('priv', 'pub')
+      if (wrap?.epk !== esperado) throw new Error('cannot open: not for this key')
+      return String(wrap.ct).replace(/^wrap\(/, '').replace(/\)$/, '')
     },
     // El «cifrado» tiene que ESCONDER de verdad, aunque sea de mentira: si el falso
     // dejara el texto a la vista, los tests que afirman que el archivo no contiene
     // ningún valor privado pasarían a ser una comprobación de nada.
-    encrypt (cek, value) { return { k: cek, ct: Buffer.from(value, 'utf8').toString('base64') } },
-    decrypt (master, sobre, owner) {
-      const cek = master[owner]
+    encrypt (cek, value, gen = 0) { return { k: cek, gen, ct: Buffer.from(value, 'utf8').toString('base64') } },
+    openValue (cek, sobre) {
       if (!cek || sobre.k !== cek) throw new Error('cannot open: wrong key')
       return Buffer.from(sobre.ct, 'base64').toString('utf8')
     },
@@ -67,283 +76,309 @@ function fakeSealer () {
         wraps[m.pub] = { epk: m.encPub, ct: `wrap(${cek})` }
       }
       return { wraps, sinLlave }
+    },
+    // Solo lo usa la conversión desde v4, que sí tenía copia maestra.
+    cekFor (master, owner) {
+      if (!master[owner]) master[owner] = `cek-${owner}-${++n}`
+      return master[owner]
+    },
+    decrypt (master, sobre, owner) {
+      const cek = master[owner]
+      if (!cek || sobre.k !== cek) throw new Error('cannot open: wrong key')
+      return Buffer.from(sobre.ct, 'base64').toString('utf8')
     }
   }
 }
 
 const miembros = (...pubs) => pubs.map((p) => ({ pub: p, encPub: `enc-${p}` }))
-const abrir = (dir, sealer) => openSecretsStore(dir, { sealer })
+/** Una privada de miembro para el falso: `enc-A` ↔ `A`. */
+const privDe = (pub) => ({ d: `enc-${pub}`.replace('enc-', 'enc-') })
+
+const abrir = (dir, sealer, opts = {}) => openSecretsStore(dir, {
+  sealer, defaultKey: () => MAQUINA, ...opts
+})
 
 /** El archivo tal cual quedó en el disco (descifrando solo el cifrado en reposo). */
 const enDisco = (dir) => readJson(path.join(dir, 'secrets.json'), null, atRestFor(dir))
 
-test('v4: la privada queda SELLADA en el disco y la pública en claro', async () => {
+test('escribir NO pide la frase, y el valor no queda en claro en el disco', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
 
-  await s.set('proxy', 'TURN_KEY', 'secreto-de-verdad', false, PWD)
-  await s.set('proxy', 'PUBLIC_URL', 'wss://proxy.dotrino.com', true, PWD)
+  await s.set('proxy', 'TURN_KEY', 'secreto-de-verdad')          // sin llave ninguna
+  await s.set('proxy', 'PUBLIC_URL', 'wss://proxy', true)
 
-  const raw = JSON.stringify(enDisco(dir))
-  assert.equal(raw.includes('secreto-de-verdad'), false, 'una privada NO puede aparecer en claro en el archivo')
-  assert.equal(raw.includes('wss://proxy.dotrino.com'), true, 'una publica si: para eso se marco')
-
-  // Y con la contraseña se vuelve a leer igual.
-  const abierto = await s.openBundle('proxy', null, PWD)
-  assert.equal(abierto.TURN_KEY, 'secreto-de-verdad')
-  assert.equal(abierto.PUBLIC_URL, 'wss://proxy.dotrino.com')
+  const disco = enDisco(dir)
+  assert.equal(disco.schemaVersion, 5)
+  assert.equal(JSON.stringify(disco).includes('secreto-de-verdad'), false, 'ni rastro del valor privado')
+  assert.equal(disco.ns.proxy.vars.PUBLIC_URL.v, 'wss://proxy', 'la pública sí, para eso se marcó')
+  assert.equal(disco.ns.proxy.vars.TURN_KEY.pub, false)
+  assert.ok(disco.ns.proxy.vars.TURN_KEY.e.ct, 'la privada es un sobre')
+  assert.equal(disco.master, undefined, 'ya NO hay copia maestra: eso era lo que pedía la frase')
+  assert.ok(disco.recovery.pub, 'y sí una pública de recuperación, en claro a propósito')
 })
 
-test('sin contraseña: se sirve y se lista, pero no se escribe una privada', async () => {
+test('la llave va a los destinatarios Y a la copia de recuperación, a nadie más', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.set('proxy', 'TURN_KEY', 'k', false, PWD)
-  await s.set('proxy', 'URL', 'https://x', true, PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A', 'B') })
+  await s.set('proxy', 'K', 'v')
 
-  // Servir es lo que tiene que seguir funcionando con el perfil bloqueado.
-  const sinSellador = openSecretsStore(dir)
-  const b = sinSellador.bundleFor('proxy')
-  assert.deepEqual(Object.keys(b.entries).sort(), ['TURN_KEY', 'URL'])
-  assert.equal(b.entries.TURN_KEY.pub, false)
-  assert.equal(b.entries.URL.v, 'https://x')
-  assert.deepEqual(sinSellador.publicOf('proxy'), { URL: 'https://x' }, 'las publicas se leen sin contrasena')
-  assert.equal(sinSellador.list().proxy.length, 2, 'los nombres tambien')
+  const g = enDisco(dir).ns.proxy.keyring[0]
+  assert.deepEqual(Object.keys(g.wraps).sort(), ['A', 'B', RECOVERY].sort())
+})
 
-  // Escribir una privada, no.
-  await assert.rejects(() => sinSellador.set('proxy', 'OTRA', 'x', false), NeedsPassword)
-  // Pero una pública sí: no hay nada que sellar.
-  await sinSellador.set('proxy', 'OTRA_PUB', 'v', true)
-  assert.equal(sinSellador.publicOf('proxy').OTRA_PUB, 'v')
-  // Y borrar tampoco pide nada: quitar algo no exige poder leerlo.
-  assert.equal(await sinSellador.delete('proxy', 'OTRA_PUB'), true)
+test('UNA GENERACION POR ESCRITURA, y el llavero recoge lo que ya no abre nada', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+
+  await s.set('proxy', 'K', 'uno')
+  const gen1 = enDisco(dir).ns.proxy.vars.K.gen
+  await s.set('proxy', 'K', 'dos')
+  const disco = enDisco(dir)
+  assert.equal(disco.ns.proxy.vars.K.gen, gen1 + 1, 'no se reutiliza la CEK: no se puede abrir')
+  // La primera generación sigue viva porque el HISTÓRICO la referencia.
+  assert.deepEqual(disco.ns.proxy.keyring.map((g) => g.gen), [gen1, gen1 + 1])
+  assert.equal(disco.history.length, 1)
+
+  // Y al borrar la variable se van las dos, con su histórico: ya no las abre nadie, y
+  // dejar guardadas las versiones anteriores de algo borrado sería no haberlo borrado.
+  await s.delete('proxy', 'K')
+  assert.equal((enDisco(dir).ns.proxy || { keyring: [] }).keyring.length, 0)
+})
+
+test('VER un valor sí pide la frase, y con la equivocada no se abre', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'K', 'lo-mio')
+
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'lo-mio')
+  await assert.rejects(() => s.reveal('ns:proxy', 'K', 'otra-cosa'), /wrong password/)
+})
+
+test('el HISTORICO guarda la version anterior, y revertir la devuelve', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+
+  await s.set('proxy', 'K', 'vieja', undefined, { by: 'PCX' })
+  await s.set('proxy', 'K', 'nueva', undefined, { by: 'PCX' })
+
+  const h = s.history('ns:proxy', 'K')
+  assert.equal(h.length, 1)
+  assert.equal(h[0].by, 'PCX', 'quién la pisó')
+  assert.equal(await s.revealHistory('ns:proxy', 'K', h[0].ts, MAQUINA), 'vieja')
+
+  assert.equal(await s.revert('ns:proxy', 'K', h[0].ts, { adminKey: MAQUINA }), true)
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'vieja')
+  assert.equal(JSON.stringify(enDisco(dir)).includes('vieja'), false, 'y sigue sin haber nada en claro')
+})
+
+test('la FIRMA del sobre dice de que acta salio; sin firmante, sale sin firma', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), {
+    recipients: () => miembros('A'),
+    signer: (body) => ({ seq: 7, sig: `firma(${body.owner}/${body.key}/${body.gen})` })
+  })
+  await s.set('proxy', 'K', 'v')
+  assert.deepEqual(enDisco(dir).ns.proxy.vars.K.seal, { seq: 7, sig: 'firma(ns:proxy/K/1)' })
+
+  const dir2 = tmp()
+  const s2 = abrir(dir2, fakeSealer(), { recipients: () => miembros('A') })
+  await s2.set('proxy', 'K', 'v')
+  assert.equal(enDisco(dir2).ns.proxy.vars.K.seal, null, 'guardar es más importante que poder firmar')
 })
 
 test('la mezcla no cambia: el cajon del APARATO pisa al del scope', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.set('proxy', 'PUERTO', '8080', true, PWD)
-  await s.set('proxy', 'TURN_KEY', 'del-scope', false, PWD)
-  await s.setDevice('pub-A', 'PUERTO', '9090', true, PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'PORT', '1', true)
+  await s.setDevice('A', 'PORT', '2', true)
 
-  const b = s.bundleFor('proxy', 'pub-A')
-  assert.equal(b.entries.PUERTO.v, '9090', 'manda el aparato')
-  assert.equal(b.entries.TURN_KEY.pub, false, 'y lo del scope sigue llegando')
-
-  // Otro aparato no ve lo del primero.
-  assert.equal(s.bundleFor('proxy', 'pub-B').entries.PUERTO.v, '8080')
+  const b = s.bundleFor('proxy', 'A')
+  assert.equal(b.entries.PORT.v, '2', 'lo específico gana')
 })
 
-test('el bundle lleva SOLO la envoltura de quien pregunta', async () => {
+test('el bundle lleva SOLO las envolturas de quien pregunta', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.set('proxy', 'K', 'v', false, PWD)
-  await s.rewrap('ns:proxy', miembros('pub-A', 'pub-B'), PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A', 'B') })
+  await s.set('proxy', 'K', 'v')
 
-  const a = s.bundleFor('proxy', 'pub-A')
-  assert.ok(a.ns.wrap, 'A recibe la suya')
-  assert.equal(a.ns.wrap.epk, 'enc-pub-A')
-  // Las de sus companeros no salen de la maquina: son llaves de otros.
-  assert.equal(JSON.stringify(a).includes('enc-pub-B'), false)
+  const b = s.bundleFor('proxy', 'A')
+  assert.equal(b.wraps.ns.length, 1)
+  assert.equal(b.wraps.ns[0].wrap.epk, 'enc-A')
+  assert.equal(JSON.stringify(b).includes('enc-B'), false, 'las llaves de sus compañeros no le hacen falta')
+  assert.equal(JSON.stringify(b).includes(RECOVERY), false, 'ni la copia del dueño')
 })
 
-test('rewrap avisa de los miembros SIN llave de cifrado en vez de fallar callado', async () => {
+test('rewrap: heredar lo YA guardado sí pide la frase, y avisa de quien no tiene llave', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.set('proxy', 'K', 'v', false, PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'K', 'v')
 
-  const r = await s.rewrap('ns:proxy', [
-    { pub: 'pub-A', encPub: 'enc-pub-A' },
-    { pub: 'pub-viejo', encPub: null }
-  ], PWD)
-  assert.equal(r.wrapped, 1)
-  assert.deepEqual(r.sinLlave, ['pub-viejo'], 'hay que poder DECIRLO: si no, arranca sin config y nadie sabe por que')
+  // Entra B (con llave) y C (sin llave, todavía no la registró).
+  const r = await s.rewrap('ns:proxy', [...miembros('A', 'B'), { pub: 'C' }], MAQUINA)
+  assert.deepEqual(r.sinLlave, ['C'])
+  assert.ok(enDisco(dir).ns.proxy.keyring[0].wraps.B, 'a B ya se le puede servir lo viejo')
+
+  await assert.rejects(() => s.rewrap('ns:proxy', miembros('A', 'B'), 'frase-mala'), /wrong password/)
 })
 
-test('rotate: clave nueva, valores recifrados, y el que salio ya no abre', async () => {
+test('rotate: llaves nuevas, valores recifrados, y el que salio ya no abre nada', async () => {
   const dir = tmp()
-  const sealer = fakeSealer()
-  const s = abrir(dir, sealer)
-  await s.set('proxy', 'TURN_KEY', 'secreto', false, PWD)
-  await s.rewrap('ns:proxy', miembros('pub-A', 'pub-B'), PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A', 'B') })
+  await s.set('proxy', 'K', 'v')
+  await s.set('proxy', 'K', 'v2')          // deja una versión en el histórico
+  assert.equal(s.history('ns:proxy').length, 1)
 
-  const cekVieja = sealer.openMaster(enDisco(dir).master, PWD)['ns:proxy']
-  const r = await s.rotate('ns:proxy', miembros('pub-A'), PWD)
-
-  assert.equal(r.rotated, 1, 'se recifra la privada')
-  assert.equal(r.gen, 2, 'nueva generacion')
-  const master = sealer.openMaster(enDisco(dir).master, PWD)
-  assert.notEqual(master['ns:proxy'], cekVieja, 'la CEK cambia de verdad')
-  assert.equal(await s.openBundle('proxy', null, PWD).then((o) => o.TURN_KEY), 'secreto', 'y el valor sigue ahi')
-
-  // El expulsado ya no tiene envoltura.
-  assert.equal(s.bundleFor('proxy', 'pub-B').ns, null)
-  assert.ok(s.bundleFor('proxy', 'pub-A').ns.wrap)
+  const r = await s.rotate('ns:proxy', miembros('A'), MAQUINA)
+  assert.equal(r.rotated, 1)
+  const disco = enDisco(dir)
+  for (const g of disco.ns.proxy.keyring) {
+    assert.equal(g.wraps.B, undefined, 'B se quedó fuera de todas las generaciones')
+    assert.ok(g.wraps.A && g.wraps[RECOVERY])
+  }
+  assert.equal(disco.history.length, 0, 'rotar es renunciar a revertir lo de antes: estaba cifrado con lo viejo')
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v2', 'el valor sigue siendo el mismo')
 })
 
-test('visibilidad: privada -> publica descifra, y al reves vuelve a sellar', async () => {
+test('unwrap: sacar a alguien del llavero NO pide la frase', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.set('proxy', 'K', 'valor', false, PWD)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A', 'B') })
+  await s.set('proxy', 'K', 'v')
 
-  assert.equal(await s.setVisibility('proxy', 'K', true, PWD), true)
-  assert.equal(s.publicOf('proxy').K, 'valor')
-  assert.equal(JSON.stringify(enDisco(dir)).includes('valor'), true, 'ahora si esta en claro, porque es publica')
-
-  assert.equal(await s.setVisibility('proxy', 'K', false, PWD), true)
-  assert.deepEqual(s.publicOf('proxy'), {}, 'ya no se ensena')
-  assert.equal(JSON.stringify(enDisco(dir)).includes('valor'), false, 'y vuelve a estar sellada')
+  assert.equal(s.unwrap('ns:proxy', 'B'), 1)
+  assert.equal(enDisco(dir).ns.proxy.keyring[0].wraps.B, undefined)
+  assert.ok(enDisco(dir).ns.proxy.keyring[0].wraps.A, 'y a los demás no se les toca')
 })
 
-test('migracion v3 -> v4: sella todo, deja respaldo, y no cambia ningun valor', async () => {
+test('visibilidad: a publica hay que LEERLA (frase); a privada es escribir (nada)', async () => {
   const dir = tmp()
-  // Un archivo v3 tal cual lo escribía la versión anterior.
-  writeJson(path.join(dir, 'secrets.json'), {
-    schemaVersion: 3,
-    ns: { proxy: { TURN_KEY: { v: 'secreto-v3', pub: false }, URL: { v: 'https://x', pub: true } } },
-    dev: { 'pub-A': { PROXY_PEERS: { v: 'wss://otro', pub: false } } }
-  }, atRestFor(dir))
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'K', 'v')
 
-  const s = abrir(dir, fakeSealer())
-  assert.equal(s.isLegacy(), true, 'al abrir NO migra: sellar exige contrasena y arrancar no debe pedirla')
-  // Y mientras tanto sigue sirviendo, que es lo que permite deshacer el despliegue.
-  assert.equal(s.bundleFor('proxy', 'pub-A').entries.TURN_KEY.v, 'secreto-v3')
+  await assert.rejects(() => s.setVisibility('proxy', 'K', true, 'frase-mala'), /wrong password/)
+  assert.equal(await s.setVisibility('proxy', 'K', true, MAQUINA), true)
+  assert.equal(s.publicOf('proxy').K, 'v')
 
-  const r = await s.migrate((owner) => (owner === 'ns:proxy' ? miembros('pub-A') : miembros('pub-A')), PWD)
-  assert.equal(r.migrated, true)
-  assert.equal(s.isLegacy(), false)
-
-  const raw = JSON.stringify(enDisco(dir))
-  assert.equal(raw.includes('secreto-v3'), false, 'la privada del scope queda sellada')
-  assert.equal(raw.includes('wss://otro'), false, 'y la del aparato tambien')
-  assert.equal(raw.includes('https://x'), true, 'la publica se queda en claro')
-
-  const abierto = await s.openBundle('proxy', 'pub-A', PWD)
-  assert.equal(abierto.TURN_KEY, 'secreto-v3')
-  assert.equal(abierto.PROXY_PEERS, 'wss://otro')
-  assert.equal(abierto.URL, 'https://x')
-
-  assert.equal(fs.existsSync(path.join(dir, 'secrets.json.v3.bak')), true, 'deshacer tiene que ser un mv')
+  assert.equal(await s.setVisibility('proxy', 'K', false), true, 'volver a taparla no pide nada')
+  assert.equal(enDisco(dir).ns.proxy.vars.K.pub, false)
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v')
 })
 
-test('migracion: si la comprobacion falla, NO se toca nada', async () => {
+test('conversion v3 -> v5: sin frase, con respaldo, y sin cambiar ningun valor', async () => {
   const dir = tmp()
   writeJson(path.join(dir, 'secrets.json'), {
     schemaVersion: 3,
-    ns: { proxy: { K: { v: 'original', pub: false } } },
+    ns: { proxy: { TURN_KEY: { v: 'secreto', pub: false }, URL: { v: 'wss://x', pub: true } } },
     dev: {}
   }, atRestFor(dir))
 
-  // Sellador roto: descifra devolviendo otra cosa. Es el fallo que la verificación
-  // antes-de-reemplazar existe para atrapar.
-  const roto = fakeSealer()
-  roto.decrypt = () => 'OTRA-COSA'
+  const s = abrir(dir, fakeSealer())
+  assert.equal(s.isLegacy(), true)
+  const r = await s.migrate(() => miembros('A'))
+  assert.equal(r.migrated, true)
+  assert.equal(r.from, 3)
 
-  const s = abrir(dir, roto)
-  await assert.rejects(() => s.migrate(() => miembros('pub-A'), PWD), /migration check failed/)
-  assert.equal(s.isLegacy(), true, 'sigue en v3')
-  assert.equal(enDisco(dir).ns.proxy.K.v, 'original', 'y el valor original intacto')
+  const disco = enDisco(dir)
+  assert.equal(disco.schemaVersion, 5)
+  assert.equal(JSON.stringify(disco).includes('secreto'), false)
+  assert.equal(await s.reveal('ns:proxy', 'TURN_KEY', MAQUINA), 'secreto')
+  assert.equal(s.publicOf('proxy').URL, 'wss://x')
+  assert.ok(fs.existsSync(path.join(dir, 'secrets.json.v3.bak')), 'deshacer tiene que ser un mv')
 })
 
-test('forgetDevice borra el cajon entero del aparato', async () => {
+test('conversion v4 -> v5: la frase hace falta UNA vez, y despues nunca mas', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.setDevice('pub-A', 'K', 'v', false, PWD)
-  await s.setDevice('pub-B', 'K', 'v', false, PWD)
+  const sealer = fakeSealer()
+  // Un v4 tal como lo dejaba la versión anterior: copia maestra bajo la frase.
+  const master = { 'ns:proxy': 'cek-vieja' }
+  writeJson(path.join(dir, 'secrets.json'), {
+    schemaVersion: 4,
+    ns: {
+      proxy: {
+        vars: { TURN_KEY: { pub: false, owner: 'ns:proxy', e: sealer.encrypt('cek-vieja', 'secreto') } },
+        keyring: [{ gen: 1, createdAt: 1, wraps: { A: { epk: 'enc-A', ct: 'wrap(cek-vieja)' } } }]
+      }
+    },
+    dev: {},
+    master: sealer.sealMaster(master, PWD)
+  }, atRestFor(dir))
 
-  assert.equal(s.forgetDevice('pub-A'), 1)
-  assert.deepEqual(s.listDevices()['pub-A'], undefined)
-  assert.equal(s.listDevices()['pub-B'].length, 1, 'no toca al de al lado')
+  const s = abrir(dir, sealer, { recipients: () => miembros('A') })
+  assert.equal(s.needsMigration(), true)
+  await assert.rejects(() => s.set('proxy', 'OTRA', 'x'), NeedsMigration)
+
+  await assert.rejects(() => s.migrate(() => miembros('A'), 'frase-mala'), /wrong password/)
+  const r = await s.migrate(() => miembros('A'), PWD)
+  assert.equal(r.from, 4)
+  assert.ok(fs.existsSync(path.join(dir, 'secrets.json.v4.bak')))
+
+  // Y a partir de aquí, escribir no pide nada.
+  await s.set('proxy', 'OTRA', 'nueva')
+  assert.equal(await s.reveal('ns:proxy', 'TURN_KEY', PWD), 'secreto', 'lo de antes se conserva')
+  assert.equal(await s.reveal('ns:proxy', 'OTRA', PWD), 'nueva')
 })
 
-test('batch: muchas escrituras, un guardado (y ahora acepta async)', async () => {
+test('cambiar la contrasena: quitar y volver a poner NO pierde los secretos', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await s.batch(async () => {
-    for (const k of ['A', 'B', 'C']) await s.set('proxy', k, 'v-' + k, false, PWD)
-    // A media carga, el disco todavía no tiene nada: ese es el sentido del grupo.
-    assert.equal(enDisco(dir).ns.proxy, undefined)
-  })
-  assert.equal(Object.keys(enDisco(dir).ns.proxy.vars).length, 3)
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'K', 'v')
+
+  // sin contraseña → con contraseña → otra → sin contraseña
+  assert.equal((await s.rekeyRecovery(null, PWD)).rekeyed, true)
+  assert.equal(await s.reveal('ns:proxy', 'K', PWD), 'v')
+  await s.rekeyRecovery(PWD, 'otra-frase')
+  assert.equal(await s.reveal('ns:proxy', 'K', 'otra-frase'), 'v')
+  await s.rekeyRecovery('otra-frase', null)
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v', 'sin frase, la llave de la máquina')
+})
+
+test('forgetDevice borra el cajon entero del aparato, y su historico', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.setDevice('A', 'PORT', '1')
+  await s.setDevice('A', 'PORT', '2')
+  assert.equal(s.history('dev:A').length, 1)
+
+  assert.equal(s.forgetDevice('A'), 1)
+  assert.deepEqual(s.listDevices(), {})
+  assert.equal(s.history('dev:A').length, 0)
+})
+
+test('sin sellador: se sirve y se lista, pero no se escribe una privada', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'K', 'v')
+  await s.set('proxy', 'URL', 'wss://x', true)
+
+  const mudo = openSecretsStore(dir, {})            // el daemon arrancando sin nada
+  assert.deepEqual(mudo.list().proxy.map((x) => x.key).sort(), ['K', 'URL'])
+  assert.equal(mudo.publicOf('proxy').URL, 'wss://x')
+  assert.ok(mudo.bundleFor('proxy', 'A').entries.K, 'servir no necesita abrir nada')
+  await assert.rejects(() => mudo.set('proxy', 'OTRA', 'x'), NeedsPassword)
+})
+
+test('batch: muchas escrituras, un guardado', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  let escrituras = 0
+  const file = path.join(dir, 'secrets.json')
+  const real = fs.writeFileSync
+  // `writeJson` escribe en un tmp y renombra (escritura atómica): se cuenta el tmp.
+  fs.writeFileSync = (...a) => { if (String(a[0]) === file + '.tmp') escrituras++; return real(...a) }
+  try {
+    await s.batch(async () => {
+      await s.set('proxy', 'A', '1')
+      await s.set('proxy', 'B', '2')
+      await s.set('proxy', 'C', '3')
+    })
+  } finally { fs.writeFileSync = real }
+  assert.equal(escrituras, 1, 'tres variables, un guardado')
 })
 
 test('las claves y los valores se siguen validando', async () => {
   const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  await assert.rejects(() => s.set('proxy', 'minusculas', 'v', false, PWD), /invalid key/)
-  await assert.rejects(() => s.set('proxy', 'K', '', false, PWD), /non-empty/)
-  await assert.rejects(() => s.set('MAYUS', 'K', 'v', false, PWD), /invalid namespace/)
-})
-
-test('rotate: el que ya no esta pierde la envoltura Y la CEK cambia', async () => {
-  const dir = tmp()
-  const sealer = fakeSealer()
-  const s = abrir(dir, sealer)
-  await s.set('proxy', 'K', 'secreto', false, PWD)
-  await s.rewrap('ns:proxy', miembros('pub-A', 'pub-B'), PWD)
-
-  // B guarda la CEK que le tocó (es lo que haría un aparato comprometido).
-  const cekQueViaB = sealer.openMaster(enDisco(dir).master, PWD)['ns:proxy']
-
-  await s.rotate('ns:proxy', miembros('pub-A'), PWD)
-  const ahora = sealer.openMaster(enDisco(dir).master, PWD)['ns:proxy']
-
-  assert.notEqual(ahora, cekQueViaB, 'la CEK que se llevo B ya no vale')
-  assert.equal(s.bundleFor('proxy', 'pub-B').ns, null, 'y no tiene envoltura nueva')
-  // A sigue trabajando sin enterarse.
-  assert.equal((await s.openBundle('proxy', null, PWD)).K, 'secreto')
-})
-
-test('cambiar la contrasena: quitar y volver a poner NO pierde los secretos', async () => {
-  // El proceso del dueño: quitar la contraseña y asignarla de nuevo. Lo que se
-  // re-cifra es la COPIA MAESTRA (el llavero de administracion), no los valores:
-  // los sobres siguen sellados a la llave de cada aparato en los tres estados.
-  const dir = tmp()
-  const s = abrir(dir, fakeSealer())
-  const CONTRA = PWD
-  const MAQUINA = 'llave-de-la-maquina'
-
-  await s.set('proxy', 'TURN_KEY', 'no-me-pierdas', false, CONTRA)
-  await s.rewrap('ns:proxy', miembros('pub-A'), CONTRA)
-  const sobreAntes = JSON.stringify(enDisco(dir).ns.proxy.vars.TURN_KEY)
-
-  // 1) Quitar la contraseña: la maestra pasa a abrirse con la llave de la maquina.
-  await s.rekeyMaster(CONTRA, MAQUINA)
-  assert.equal((await s.openBundle('proxy', null, MAQUINA)).TURN_KEY, 'no-me-pierdas')
-  await assert.rejects(() => s.openBundle('proxy', null, CONTRA), 'la vieja ya no abre')
-
-  // 2) Asignar una nueva.
-  const NUEVA = 'otra-frase-distinta'
-  await s.rekeyMaster(MAQUINA, NUEVA)
-  assert.equal((await s.openBundle('proxy', null, NUEVA)).TURN_KEY, 'no-me-pierdas')
-  await assert.rejects(() => s.openBundle('proxy', null, MAQUINA))
-
-  // 3) Y lo que importa: el SOBRE de la variable no se toco en ningun momento, asi
-  // que los aparatos siguen abriendo lo suyo sin enterarse del cambio.
-  assert.equal(JSON.stringify(enDisco(dir).ns.proxy.vars.TURN_KEY), sobreAntes, 'el sobre no se re-cifra')
-  assert.ok(s.bundleFor('proxy', 'pub-A').ns.wrap, 'y su envoltura sigue en pie')
-
-  // 4) Se puede seguir escribiendo con la nueva.
-  await s.set('proxy', 'OTRA', 'despues-del-cambio', false, NUEVA)
-  assert.equal((await s.openBundle('proxy', null, NUEVA)).OTRA, 'despues-del-cambio')
-})
-
-test('cambiar la contraseña con un re-envoltorio EN VUELO no la pierde', async () => {
-  // Encontrado probando, no leyendo: aprobar un aparato lanza un `rewrap` SIN esperarlo
-  // y SIN contraseña (a propósito: llega por el proxio y no hay a quién pedírsela). Si
-  // cae justo después de cambiar la contraseña, volvía a sellar la copia maestra con la
-  // llave VIEJA — y el vault quedaba abierto para cualquiera con el disco, con todo
-  // pareciendo sellado y sin un solo error. Todo lo que toca la maestra va en fila.
-  const dir = tmp()
-  const MAQUINA = 'la-de-la-maquina'
-  const FRASE = 'la-frase-nueva-del-perfil'
-  const st = openSecretsStore(dir, { sealer: fakeSealer(), defaultKey: () => MAQUINA })
-  await st.set('ns1', 'K', 'valor', false)
-
-  const enVuelo = st.rewrap('ns:ns1', [])          // sin await, como en el enrolamiento real
-  await st.rekeyMaster(null, FRASE)
-  await enVuelo.catch(() => {})
-
-  await assert.rejects(st.openBundle('ns1', null), /password/i,
-    'con la llave de la máquina ya NO se abre: la contraseña nueva es la que manda')
-  assert.deepEqual(await st.openBundle('ns1', null, FRASE), { K: 'valor' })
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await assert.rejects(() => s.set('proxy', 'minusculas', 'x'), /invalid key/)
+  await assert.rejects(() => s.set('proxy', 'K', ''), /non-empty/)
+  await assert.rejects(() => s.set('NO VALE', 'K', 'x'), /invalid namespace/)
 })

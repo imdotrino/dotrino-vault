@@ -23,6 +23,7 @@ import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar } from './secretsStore.js'
 import { makeSealer } from './sealer.js'
+import { openSealKeys } from './sealKey.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
 import { atRestFor, machineKey, migrateFile } from './atrest.js'
@@ -60,13 +61,28 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     try { await identity.prepareForAdoption() } catch (e) { log('[vault] could not prepare the profile for adoption:', e.message) }
   }
 
+  // LA LLAVE DE SELLADO (§8.8/§8.9): con ella se FIRMAN los sobres de los secretos. No
+  // abre nada, así que se usa sin la frase; su autoridad se la da el acta, que la nombra
+  // y que sella únicamente la maestra. Se estrena una por acta: aquí está el proveedor.
+  const sealKeys = openSealKeys(dir)
+  identity.setSealKeyProvider?.(() => sealKeys.mint())
+
   const store = openStore(dir)
   const threads = openThreadStore(dir)
-  const secrets = openSecretsStore(dir, { sealer: makeSealer(), defaultKey: () => new Uint8Array(machineKey(dir)) })
-  // SIN CONTRASEÑA NO HAY SECRETO. Las variables privadas se sellan con una llave que
-  // sale de la copia maestra, y esa copia se abre con la contraseña del perfil. Si no
-  // hay contraseña se cae a la llave de la máquina — que es la protección de siempre,
-  // pero su material vive en este mismo disco, así que una copia del disco lo abre.
+  const secrets = openSecretsStore(dir, {
+    sealer: makeSealer(),
+    // A QUIÉN se le envuelve la llave de cada cajón: los servicios de ese namespace (o el
+    // propio aparato, si el cajón es suyo) MÁS los aparatos que administran. Sale del
+    // acta, y por eso lo pone el vault: el store no conoce el acta.
+    recipients: (owner) => recipientsOf(owner),
+    // La FIRMA del sobre: dice que salió de esta bóveda y con qué acta (§8.8).
+    signer: (body) => signSeal(body),
+    defaultKey: () => new Uint8Array(machineKey(dir))
+  })
+  // SIN CONTRASEÑA NO HAY SECRETO. Escribir no la pide (sellar solo necesita públicas,
+  // §8.1), pero la copia de recuperación —la que deja al dueño VER sus valores— se cierra
+  // con ella. Sin contraseña se cae a la llave de la máquina, que es la protección de
+  // siempre, pero su material vive en este mismo disco: una copia del disco lo abre.
   // Se dice en voz alta: prometer una protección que no está puesta es peor que no
   // tenerla (docs/secretos-sellados.md §2.3).
   try {
@@ -78,6 +94,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const master = await masterPubkeyOf(identity)
   const fp = (await pubkeyId(master)).slice(0, 16)
+
+  /**
+   * El acta tiene que nombrar una llave de sellado QUE SEA NUESTRA. Si no nombra ninguna
+   * (un acta de antes de esto) o nombra una cuya privada no tenemos (el disco se
+   * restauró, o el acta la selló otro master), se estrena: firmar sobres es de esta
+   * máquina y no puede quedar a medias.
+   *
+   * Solo lo intenta el master —es el único que sella actas— y no bloquea el arranque: sin
+   * llave los sobres salen sin firma, que es lo que ya pasaba antes de §8.8.
+   */
+  try {
+    const info = await identity.profileActa?.()
+    const acta = info?.acta
+    if (info?.isMaster && acta && (!acta.sealPub || !sealKeys.has(acta.sealPub))) {
+      const r = await identity.rotateSealKey()
+      // Sin `%s`: este `log` va con un prefijo por delante, así que el formato no es lo
+      // primero y `console.log` no lo sustituye (salía «record #%s 2»).
+      log(`[vault] new sealing key in record #${r.seq}`)
+    }
+  } catch (e) { log('[vault] could not set up the sealing key:', e.message) }
 
   const { client } = await createTransport({ identity, dir, url: proxyUrl })
 
@@ -651,6 +687,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * La contraseña no se guarda: se deriva, se usa y se suelta con el sobre.
    */
+  /**
+   * La llave derivada de la contraseña, si el sobre la traía. Desde §8 solo la piden las
+   * operaciones que LEEN (ver un valor, cambiar su visibilidad): escribir no.
+   */
   async function adminKeyFrom (payload) {
     const pwd = payload?.password
     if (typeof pwd !== 'string' || !pwd) return undefined
@@ -679,15 +719,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         }))
       }
     },
-    async set ({ ns, pub, key, enc, public: isPublic }) {
+    async set ({ ns, pub, key, enc, public: isPublic }, who = null) {
       const payload = JSON.parse(await identity.openContent(enc))
       const value = payload?.value
       if (typeof value !== 'string' || !value) throw new Error('var.set: the sealed envelope must carry a non-empty value')
-      // La CONTRASEÑA viaja DENTRO del sobre, igual que en `setMany`: sin ella no se
-      // puede abrir la copia maestra, y guardar una privada acabaría en `wrong password`.
-      const ak = await adminKeyFrom(payload)
-      if (ns) await setSecret(ns, key, value, isPublic, ak)
-      else await setDeviceSecret(pub, key, value, isPublic, ak)
+      // NO PIDE LA CONTRASEÑA (§8.1): sellar solo necesita las públicas de quien va a
+      // leer. Lo que se guarda es quién lo escribió, para que el histórico lo diga.
+      if (ns) await setSecret(ns, key, value, isPublic, { by: who })
+      else await setDeviceSecret(pub, key, value, isPublic, { by: who })
       return { ok: true, key }
     },
     /**
@@ -700,7 +739,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * Los NOMBRES también viajan dentro del sobre —no solo los valores—: el proxy
      * transporta y no tiene por qué aprender cómo se llama la configuración de un servicio.
      */
-    async setMany ({ ns, pub, enc, public: isPublic }) {
+    async setMany ({ ns, pub, enc, public: isPublic }, who = null) {
       const payload = JSON.parse(await identity.openContent(enc))
       const items = payload?.items
       if (!Array.isArray(items) || !items.length) throw new Error('var.setMany: the sealed envelope must carry the variables')
@@ -713,11 +752,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         value: it?.value,
         ...(typeof it?.public === 'boolean' ? { public: it.public } : (isPublic === undefined ? {} : { public: isPublic }))
       }))
-      // La CONTRASEÑA viaja DENTRO del sobre (nunca en claro por el proxio): hace falta
-      // para abrir la copia maestra y sellar. Y sí, `applySecrets` va con `await` — sin
-      // él la escritura quedaba al aire y la respuesta salía antes de guardar nada.
-      const ak = await adminKeyFrom(payload)
-      const keys = ns ? await applySecrets(ns, list, ak) : await applyDeviceSecrets(pub, list, ak)
+      // NO PIDE LA CONTRASEÑA (§8.1). Y sí, `applySecrets` va con `await` — sin él la
+      // escritura quedaba al aire y la respuesta salía antes de guardar nada.
+      const keys = ns ? await applySecrets(ns, list, { by: who }) : await applyDeviceSecrets(pub, list, { by: who })
       return { ok: true, keys }
     }
   }
@@ -820,6 +857,47 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /**
+   * Los APARATOS QUE ADMINISTRAN: miembros sin CN (no son servicios) con llave de
+   * cifrado. Son los que pueden VER y REVERTIR desde la consola sin teclear la frase en
+   * ningún sitio, que es todo el punto del §8.2 — la capacidad de leer se muda de una
+   * frase que se escribe en cualquier parte a una llave que no sale del aparato.
+   *
+   * La bóveda NO entra en la lista, ni aquí ni en `nsMembers`: envolverle la llave a
+   * ella misma sería devolverle la capacidad de leerlo todo, que es justo lo que este
+   * diseño quita. Hay un test que lo afirma.
+   */
+  async function adminDevices () {
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    return (record?.members || []).filter((m) => !m.cn && m.encPub && m.pub !== master)
+  }
+
+  /** Los destinatarios de un cajón: quien lo consume, más quien lo administra. */
+  async function recipientsOf (owner) {
+    const admins = await adminDevices()
+    if (owner.startsWith('ns:')) return [...await nsMembers(owner.slice(3)), ...admins]
+    const pub = owner.slice(owner.indexOf(':') + 1)
+    const m = await memberOf(pub)
+    return [...(m ? [m] : []), ...admins]
+  }
+
+  /**
+   * Firma un sobre con la LLAVE DE SELLADO que nombra el acta (§8.8). Devuelve el `seq`
+   * del acta junto a la firma: es lo que le dice a quien verifica con qué llave
+   * comprobarla, porque esa llave rota con el acta (§8.9).
+   *
+   * Si no hay llave —o no es nuestra— el sobre sale SIN firma. Guardar la configuración
+   * es más importante que poder demostrar después de dónde salió.
+   */
+  async function signSeal (body) {
+    try {
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta
+      if (!acta?.sealPub) return null
+      const sig = await sealKeys.sign(acta.sealPub, body)
+      return sig ? { seq: acta.seq, sig } : null
+    } catch (_) { return null }
+  }
+
+  /**
    * Sellar no basta: hay que REPARTIR la llave. Tras cada escritura se envuelve la CEK
    * del cajón a sus miembros actuales — si no, el servicio recibe sobres que no puede
    * abrir y se queda reintentando para siempre, sin decir por qué.
@@ -918,10 +996,47 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   }
 
-  async function setSecret (ns, key, value, isPublic, adminKey) {
-    await secrets.set(ns, key, value, isPublic, adminKey)
-    await spreadKey(`ns:${ns}`, await nsMembers(ns), adminKey)
+  /**
+   * Escribir NO pide la frase (§8.1): el sobre se sella con las públicas de quien lo va
+   * a leer. `by` es el aparato que lo escribió, y va al histórico.
+   */
+  async function setSecret (ns, key, value, isPublic, { by = null } = {}) {
+    await secrets.set(ns, key, value, isPublic, { by })
+    await settleDebts(`ns:${ns}`, () => nsMembers(ns))
     audit('secret.set', { ns, key }); scheduleNotice(ns)
+  }
+
+  /**
+   * SALDAR LAS DEUDAS DEL PERFIL, con la frase en la mano. Es lo que hay que llamar tras
+   * desbloquear: heredarle a un aparato nuevo lo que ya estaba guardado, y rotar de
+   * verdad el cajón del que salió alguien. Las dos cosas exigen ABRIR, y abrir es lo
+   * único que la frase guarda (§8.3).
+   *
+   * No lanza: devuelve qué pasó con cada cajón, porque una deuda que no se puede saldar
+   * tiene que seguir viéndose en la lista en vez de tumbar la operación entera.
+   */
+  async function settleSecretDebts (adminKey = null) {
+    const out = {}
+    for (const owner of Object.keys(rotationsDue())) {
+      const k = owner.slice(owner.indexOf(':') + 1)
+      const members = owner.startsWith('ns:') ? await nsMembers(k) : [await memberOf(k)].filter(Boolean)
+      try { out[owner] = await spreadKey(owner, members, adminKey) } catch (e) { out[owner] = { error: e.message } }
+    }
+    return out
+  }
+
+  /**
+   * Si este cajón quedó a deber un re-envoltorio o una rotación, se intenta saldar ahora.
+   * Sin frase solo se puede en un perfil que no tiene contraseña —ahí la copia de
+   * recuperación se abre con la llave de la máquina—, y en uno que sí la tiene se queda
+   * anotado, que es lo que las listas enseñan. No se propaga el error: la variable YA se
+   * guardó, y el que escribe no tiene por qué enterarse de una deuda vieja.
+   */
+  async function settleDebts (owner, membersFn) {
+    const ns = owner.startsWith('ns:') ? owner.slice(3) : null
+    const debe = store.getSetting(`rewrap-due:${owner}`) || (ns && store.getSetting(`rotate-due:${ns}`))
+    if (!debe) return null
+    try { return await spreadKey(owner, await membersFn(), null) } catch (_) { return null }
   }
   async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
 
@@ -944,7 +1059,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * @returns {string[]} las claves que efectivamente cambiaron (un `rm` de lo que no
    *   estaba no cambia nada, y no tiene por qué reiniciar a nadie).
    */
-  async function applySecrets (ns, items, adminKey) {
+  async function applySecrets (ns, items, { by = null } = {}) {
     const list = assertItems(items)
     const changed = []
     await secrets.batch(async () => {
@@ -952,21 +1067,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         if (it.op === 'rm') {
           if (await secrets.delete(ns, it.key)) { audit('secret.rm', { ns, key: it.key }); changed.push(it.key) }
         } else {
-          await secrets.set(ns, it.key, it.value, it.public, adminKey)
+          await secrets.set(ns, it.key, it.value, it.public, { by })
           audit('secret.set', { ns, key: it.key })
           changed.push(it.key)
         }
       }
     })
     if (changed.length) {
-      await spreadKey(`ns:${ns}`, await nsMembers(ns), adminKey)
+      await settleDebts(`ns:${ns}`, () => nsMembers(ns))
       scheduleNotice(ns)
     }
     return changed
   }
 
   /** Lo mismo para el cajón de UN aparato (el aviso va solo a él). */
-  async function applyDeviceSecrets (pub, items, adminKey) {
+  async function applyDeviceSecrets (pub, items, { by = null } = {}) {
     const list = assertItems(items)
     const m = await requireService(pub)
     const changed = []
@@ -975,13 +1090,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         if (it.op === 'rm') {
           if (await secrets.deleteDevice(pub, it.key)) changed.push(it.key)
         } else {
-          await secrets.setDevice(pub, it.key, it.value, it.public, adminKey)
+          await secrets.setDevice(pub, it.key, it.value, it.public, { by })
           changed.push(it.key)
         }
       }
     })
     if (changed.length) {
-      await spreadKey(`dev:${pub}`, [m].filter(Boolean), adminKey)
+      await settleDebts(`dev:${pub}`, async () => [m].filter(Boolean))
       const device = await deviceIdOf(pub).catch(() => null)
       for (const it of list) {
         if (!changed.includes(it.key)) continue
@@ -1057,10 +1172,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return m
   }
 
-  async function setDeviceSecret (pub, key, value, isPublic, adminKey) {
+  async function setDeviceSecret (pub, key, value, isPublic, { by = null } = {}) {
     const m = await requireService(pub)
-    await secrets.setDevice(pub, key, value, isPublic, adminKey)
-    await spreadKey(`dev:${pub}`, [await memberOf(pub)].filter(Boolean), adminKey)
+    await secrets.setDevice(pub, key, value, isPublic, { by })
+    await settleDebts(`dev:${pub}`, async () => [await memberOf(pub)].filter(Boolean))
     audit('secret.set', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
     scheduleDeviceNotice(pub)
   }
@@ -1133,9 +1248,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // por eso es una operación con nombre propio, no algo que ocurra de refilón al
     // desbloquear: deja `secrets.json.v3.bak` para poder volver.
     migrateSecrets: (membersOf, adminKey) => secrets.migrate(membersOf, adminKey),
+    settleSecretDebts,
+    revealSecret: (owner, key, adminKey) => secrets.reveal(owner, key, adminKey),
+    secretHistory: (owner, key) => secrets.history(owner, key),
+    revealSecretHistory: (owner, key, ts, adminKey) => secrets.revealHistory(owner, key, ts, adminKey),
+    revertSecret: (owner, key, ts, opts) => secrets.revert(owner, key, ts, opts),
     // Cambiar la contraseña del perfil obliga a volver a cerrar la copia maestra con
     // la llave nueva, o los secretos quedarían ilegibles. No toca los sobres.
-    rekeySecrets: (oldKey, newKey) => secrets.rekeyMaster(oldKey, newKey),
+    rekeySecrets: (oldKey, newKey) => secrets.rekeyRecovery(oldKey, newKey),
     setDeviceSecret, deleteDeviceSecret, listDeviceSecrets, setDeviceSecretVisibility,
     applySecrets, applyDeviceSecrets,
     listDevices: () => identity.listDelegations(),

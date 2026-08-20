@@ -123,8 +123,13 @@ test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente esc
   // a medias, que es lo unico peor que no arrancar.
   await assert.rejects(fetchSecrets({ dir: svcDir }), /no key to open/)
 
-  // La siguiente escritura CON la contrasena lo salda sola.
-  await vault.setSecret('tarde', 'OTRA', 'x', true, CLAVE)
+  // Escribir NO lo salda, y ahora es coherente: escribir no pide la frase (§8.1) y
+  // heredarle lo VIEJO obliga a abrirlo. Lo que se escriba desde ahora sí le llega.
+  await vault.setSecret('tarde', 'OTRA', 'x', true)
+  assert.deepEqual(Object.keys(vault.rotationsDue()), ['ns:tarde'], 'sigue debiendo lo de antes')
+
+  // Se salda al desbloquear, que es cuando hay con qué abrir.
+  await vault.settleSecretDebts(CLAVE)
   assert.deepEqual(vault.rotationsDue(), {}, 'saldado')
   assert.equal((await fetchSecrets({ dir: svcDir })).TURN_KEY, 'la-clave', 'y ya lee lo suyo')
 })

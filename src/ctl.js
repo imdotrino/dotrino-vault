@@ -610,10 +610,11 @@ async function cmdSecret (rest) {
   /**
    * La contraseña del perfil, y SOLO si el perfil la tiene.
    *
-   * Desde que las privadas van selladas al aparato que las lee, escribir una variable
-   * deja de ser «guardar un valor»: hay que abrir la copia maestra de las llaves para
-   * poder envolver la nueva. Eso lo hace la contraseña, así que toda escritura la pide.
-   * Borrar no, porque tirar un sobre no obliga a abrirlo.
+   * Desde v5 la piden únicamente las operaciones que **LEEN** un valor: verlo, cambiarle
+   * la visibilidad (para enseñarlo hay que sacarlo), convertir el archivo y saldar lo que
+   * quedó a deber. **Guardar no la pide**: sellar solo necesita las públicas de quien va
+   * a leer (`docs/secretos-sellados.md` §8.1). Borrar tampoco, porque tirar un sobre no
+   * obliga a abrirlo.
    */
   let cachedPwd
   const adminPassword = async () => {
@@ -707,9 +708,9 @@ async function cmdSecret (rest) {
       process.exit(2)
     }
     const withVisibility = items.map((it) => (isPublic === undefined ? it : { ...it, public: isPublic }))
-    const password = await adminPassword()
+    // Guardar NO pide la contraseña (§8.1).
     const base = pub ? { op: 'batch', pub, items: withVisibility } : { op: 'batch', ns, items: withVisibility }
-    writeReq('secret-request.json', password ? { ...base, password } : base)
+    writeReq('secret-request.json', base)
     const d = await signalAndWaitList()
     const list = pub
       ? ((Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === pub)?.keys || [])
@@ -794,6 +795,80 @@ async function cmdSecret (rest) {
 
   if (sub === 'migrate') return secretMigrate()
 
+  // --- VER un valor, su histórico y volver atrás ---------------------------------
+  // Las tres van juntas porque son la misma idea: ver es lo único que la contraseña
+  // guarda, y revertir es ver + volver a guardar (§8.3/§8.4).
+  const ownerDe = async (kind, ref) => {
+    if (kind === 'ns') return `ns:${ref}`
+    const m = await findMember(ref)
+    return `dev:${m.pub}`
+  }
+
+  if (sub === 'show' || sub === 'history' || sub === 'revert') {
+    // `secret show device <ID> <CLAVE>` mira el cajón de un aparato.
+    const esDev = args[0] === 'device'
+    const [ref, key, extra] = esDev ? args.slice(1) : args
+    if (!ref || (sub !== 'history' && !key)) {
+      console.error('uso: dotrino-vault secret %s [device] <ns|ID> <CLAVE>%s', sub, sub === 'revert' ? ' <marca>' : '')
+      process.exit(2)
+    }
+    const owner = await ownerDe(esDev ? 'dev' : 'ns', ref)
+
+    if (sub === 'history') {
+      writeReq('secret-request.json', { op: 'history', owner, key: key || null })
+      const d = await signalAndWaitList()
+      const items = d.history?.items || []
+      if (!items.length) { console.log('No hay versiones anteriores de %s%s.', owner, key ? `/${key}` : ''); return }
+      console.log('\n%sVersiones anteriores%s  (la de arriba es la más reciente)\n', B, Z)
+      for (const h of items) {
+        // Sin `by` no es que falte un dato: es que se escribió AQUÍ, desde esta máquina.
+        // Lo que llega por la consola remota sí trae de qué aparato vino.
+        console.log('  %s  %s%s%s  %s%s', new Date(h.ts).toISOString(), B, h.key, Z,
+          h.by ? `desde ${h.by.slice(0, 12)}…` : 'desde esta máquina', h.signed ? '' : '   (sobre sin firma)')
+      }
+      console.log('\nPara volver a una:  dotrino-vault secret revert %s%s <CLAVE> <marca>\n',
+        esDev ? 'device ' : '', ref)
+      return
+    }
+
+    if (sub === 'revert') {
+      if (!extra) { console.error('uso: dotrino-vault secret revert [device] <ns|ID> <CLAVE> <marca>'); process.exit(2) }
+      const ts = Number.isFinite(Number(extra)) ? Number(extra) : Date.parse(extra)
+      if (!Number.isFinite(ts)) { console.error('La marca es la que enseña `secret history` (fecha ISO).'); process.exit(2) }
+      const password = await adminPassword()
+      writeReq('secret-request.json', { op: 'revert', owner, key, ts, ...(password ? { password } : {}) })
+      const d = await signalAndWaitList()
+      if (d?.secretError) return noSeAplico(d)
+      console.log('Restaurada: %s/%s', owner, key)
+      return
+    }
+
+    // `show`: el valor. Es lo único que la contraseña guarda en esta máquina.
+    const password = await adminPassword()
+    writeReq('secret-request.json', { op: 'reveal', owner, key, ...(password ? { password } : {}) })
+    const d = await signalAndWaitList()
+    if (d?.secretError) return noSeAplico(d)
+    if (d.revealed?.owner !== owner || d.revealed?.key !== key) {
+      console.error('El daemon no devolvió el valor (revisa: dotrino-vault logs)')
+      process.exit(1)
+    }
+    if (d.revealed.value == null) { console.error('No existe esa variable.'); process.exit(1) }
+    console.log(d.revealed.value)
+    return
+  }
+
+  // Saldar lo que quedó a deber: heredarle a un aparato lo ya guardado, rotar de verdad.
+  if (sub === 'settle') {
+    const password = await adminPassword()
+    writeReq('secret-request.json', { op: 'settle', ...(password ? { password } : {}) })
+    const d = await signalAndWaitList()
+    if (d?.secretError) return noSeAplico(d)
+    const pend = Object.keys(d.pending || {})
+    if (!pend.length) console.log('Nada pendiente.')
+    else console.log('Siguen pendientes: %s', pend.join(', '))
+    return
+  }
+
   if (sub === 'list') {
     const d = await signalAndWaitList()
     const names = d.ns || {}
@@ -850,7 +925,8 @@ async function cmdSecret (rest) {
       : op === 'rm'
         ? { op: 'dev-rm', pub: m.pub, key }
         : { op: 'dev-vis', pub: m.pub, key, public: wantsPublic(value, USAGE) }
-    const password = op === 'rm' ? null : await adminPassword()
+    // Solo la visibilidad pide la frase: enseñar un valor obliga a sacarlo.
+    const password = op === 'vis' ? await adminPassword() : null
     writeReq('secret-request.json', password ? { ...req, password } : req)
     const d = await signalAndWaitList()
     const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
@@ -889,7 +965,8 @@ async function cmdSecret (rest) {
       : sub === 'rm'
         ? { op: 'rm', ns, key }
         : { op: 'vis', ns, key, public: wantsPublic(value, USAGE) }
-    const password = sub === 'rm' ? null : await adminPassword()
+    // Solo la visibilidad pide la frase: enseñar un valor obliga a sacarlo.
+    const password = sub === 'visibility' ? await adminPassword() : null
     writeReq('secret-request.json', password ? { ...req, password } : req)
     const d = await signalAndWaitList()
     const list = d.ns?.[ns] || []
@@ -1117,6 +1194,16 @@ function help () {
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
   secret list                       lista los dos cajones: el valor de las públicas,
                                     tapadas las privadas
+  secret show [device] <ns|ID> <CLAVE>
+                                    VE el valor de una privada. Es lo único que pide la
+                                    contraseña del perfil: en esta máquina es lo único
+                                    que la separa de una copia del disco
+  secret history [device] <ns|ID> [CLAVE]
+                                    las versiones anteriores (quién y cuándo)
+  secret revert [device] <ns|ID> <CLAVE> <marca>
+                                    vuelve a una versión anterior
+  secret settle                     salda lo pendiente: hereda lo ya guardado a un
+                                    aparato nuevo y rota de verdad el cajón del que se fue
   --public | --private              (al hacer un set) si el VALOR puede salir de esta
                                     máquina hacia la consola remota. Se nace privada.
   secret visibility <ns> <CLAVE> public|private        cambia eso sin tocar el valor

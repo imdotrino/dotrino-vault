@@ -188,6 +188,14 @@ export async function runDaemon () {
    * «El daemon no aplicó el cambio», que no dice qué hacer.
    */
   let lastSecretError = null
+  /**
+   * El VALOR que se acaba de destapar, esperando al volcado siguiente (mismo camino que
+   * `lastSecretError`: la orden y el volcado son señales distintas). Vive en memoria un
+   * instante y se va con el volcado — quien lo lee borra el archivo enseguida.
+   */
+  let lastSecretValue = null
+  /** Y las versiones anteriores que se acaban de pedir. Mismo camino, mismo volcado. */
+  let lastSecretHistory = null
   const profileReqFile = path.join(dir, 'profile-request.json')
   const dumpReqFile = path.join(dir, 'dump-request.json')
   const meReqFile = path.join(dir, 'me-request.json')
@@ -328,10 +336,12 @@ export async function runDaemon () {
           // Carga en GRUPO (`secret set ns K=v K2=v2`, `secret import`): todas las
           // variables entran de una vez y sale UN solo aviso de cambio, para que el
           // servicio no se reinicie a media carga y arranque con la mitad puesta.
-          // La CONTRASEÑA, si vino, se convierte en la llave que abre la copia maestra
-          // de los secretos, y no se guarda en ningún sitio: se usa y se suelta. Sin
-          // ella se cae a la llave de la máquina, que es la protección de antes de
-          // esto (y el vault lo avisa al arrancar).
+          // La CONTRASEÑA, si vino, se convierte en la llave que abre la copia de
+          // RECUPERACIÓN, y no se guarda en ningún sitio: se usa y se suelta. Desde v5
+          // solo la piden las operaciones que LEEN —ver un valor, cambiar su visibilidad,
+          // convertir el archivo, rotar re-cifrando—: escribir no (§8.1). Sin ella se cae
+          // a la llave de la máquina, que es la protección de antes de esto (y el vault lo
+          // avisa al arrancar).
           const ak = sec.password ? await mgr.profiles.adminKey(sec.profile ? mgr.resolve(sec.profile) : mgr.currentId(), sec.password) : undefined
           if (sec.op === 'migrate') {
             const { members } = await vault.profileMembers()
@@ -340,20 +350,43 @@ export async function runDaemon () {
             ), ak)
             if (!r.migrated) console.log('[vault] nothing to migrate: %s', r.reason)
             else {
-              console.log('[vault] secrets SEALED (v3 -> v4). Backup left at secrets.json.v3.bak')
+              console.log('[vault] secrets SEALED (v%d -> v5). Backup left at secrets.json.v%d.bak', r.from, r.from)
               for (const [owner, sin] of Object.entries(r.sinLlave || {})) {
                 console.log('[vault] WARNING %s: %d member(s) without an encryption key will NOT read their variables', owner, sin.length)
               }
             }
           } else if (sec.op === 'batch') {
             const changed = sec.pub
-              ? await vault.applyDeviceSecrets(sec.pub, sec.items, ak)
-              : await vault.applySecrets(sec.ns, sec.items, ak)
+              ? await vault.applyDeviceSecrets(sec.pub, sec.items, { by: null })
+              : await vault.applySecrets(sec.ns, sec.items, { by: null })
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
-          } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public, ak); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
+          } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public, ak); console.log('[vault] device secret saved: %s', sec.key) }
+          else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
+          // Saldar lo que quedó a deber: heredarle a un aparato nuevo lo ya guardado y
+          // rotar de verdad el cajón del que salió alguien. Las dos cosas abren, así que
+          // van con la frase — y por eso se hacen aquí y no al escribir.
+          else if (sec.op === 'settle') {
+            const r = await vault.settleSecretDebts(ak)
+            const n = Object.keys(r).length
+            console.log(n ? `[vault] ${n} pending drawer(s) settled` : '[vault] nothing pending')
+          }
+          // Ver el valor de una privada: lo único que la frase guarda (§8.3).
+          else if (sec.op === 'reveal') {
+            const value = await vault.revealSecret(sec.owner, sec.key, ak)
+            lastSecretValue = { owner: sec.owner, key: sec.key, value }
+          }
+          // Qué versiones anteriores hay (sin valores: son sobres).
+          else if (sec.op === 'history') {
+            lastSecretHistory = { owner: sec.owner || null, key: sec.key || null, items: vault.secretHistory(sec.owner || null, sec.key || null) }
+          }
+          // REVERTIR: abrir la versión vieja (frase) y volver a guardarla (nada).
+          else if (sec.op === 'revert') {
+            const ok = await vault.revertSecret(sec.owner, sec.key, sec.ts, { adminKey: ak })
+            if (!ok) throw new Error('that version is not in the history any more')
+            console.log('[vault] secret reverted: %s/%s', sec.owner, sec.key)
+          }
           // Visibilidad: si el valor puede salir hacia la consola remota. No toca el valor.
           else if (sec.op === 'vis') { await vault.setSecretVisibility(sec.ns, sec.key, sec.public, ak); console.log('[vault] secret visibility: %s/%s → %s', sec.ns, sec.key, sec.public ? 'public' : 'private') }
           else if (sec.op === 'dev-vis') { await vault.setDeviceSecretVisibility(sec.pub, sec.key, sec.public, ak); console.log('[vault] device secret visibility: %s → %s', sec.key, sec.public ? 'public' : 'private') }
@@ -447,9 +480,13 @@ export async function runDaemon () {
           // Lo que quedó a deber un sellado. Va en el volcado porque si no se ve, no se
           // salda: son cajones cuyos miembros NO están leyendo sus variables.
           pending: t.vault.rotationsDue(),
-          ...(lastSecretError ? { secretError: lastSecretError } : {})
+          ...(lastSecretError ? { secretError: lastSecretError } : {}),
+          ...(lastSecretValue ? { revealed: lastSecretValue } : {}),
+          ...(lastSecretHistory ? { history: lastSecretHistory } : {})
         })
         lastSecretError = null
+        lastSecretValue = null
+        lastSecretHistory = null
         writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
         // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
         try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}

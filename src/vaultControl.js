@@ -452,6 +452,35 @@ async function secretOp (req, profile, check) {
   return out
 }
 
+/**
+ * VER el valor de una privada. Es lo único que pide la contraseña desde v5 (§8.3), y en
+ * esta máquina no hay otra manera: la llave de este aparato es una llave que vive en
+ * este mismo disco, así que si abriera sin frase, una copia del disco abriría todo.
+ *
+ * El valor viaja por el volcado —igual que el de las públicas— y quien lo lee borra el
+ * archivo en el acto; no se queda esperando a que alguien copie la carpeta.
+ */
+export async function revealSecret (owner, key, profile, password) {
+  requireAlive()
+  rm(F.secretsList)
+  await writeReq(F.secretReq, { op: 'reveal', owner, key, ...(password ? { password } : {}) }, profile)
+  await writeReq(F.dumpReq, {}, profile)
+  signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
+  const d = await waitFor(F.secretsList)
+  rm(F.secretsList)
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  assertOpen(d)
+  if (d.revealed?.owner !== owner || d.revealed?.key !== key) {
+    throw coded('the daemon did not return the value (check the service logs)', 'NOT_REVEALED')
+  }
+  return d.revealed.value
+}
+
+/** SALDA lo que quedó a deber (heredar lo viejo, rotar de verdad). Pide la contraseña. */
+export function settleSecrets (profile, password) {
+  return secretOp({ op: 'settle', ...(password ? { password } : {}) }, profile, () => {})
+}
+
 const keysOf = (out, pub) => (out.dev.find((x) => x.pub === pub)?.keys) || []
 /** ¿Está esa clave en la lista? Las listas traen `{key, public}`, nunca el valor. */
 const has = (list, key) => (list || []).some((x) => x.key === key)
