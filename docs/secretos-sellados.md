@@ -468,3 +468,33 @@ higiene y procedencia; con cadena, además, se nota.
 
 Alcance: además del daemon, el agente (`@dotrino/vault`) tiene que **verificar** la
 firma del sobre que recibe, no solo la del cuerpo del bundle.
+
+### 8.9. La llave de sellado ROTA CON EL ACTA
+
+Mejor que un certificado con vida propia (§8.8): la llave de sellado **vive en el acta y
+cambia con ella**. Cada acta nueva nombra una llave de sellado nueva, y el acta —como
+siempre y sin excepción— **la hace y la sella únicamente la maestra**. La cadena de
+autoridad queda en una línea: *maestra → acta (`seq` + `prev`) → `sealPub` → sobres*. La
+llave de sellado nunca se autoriza a sí misma; lo único que puede hacer es firmar.
+
+Lo que sale gratis de acoplarlas:
+
+- **Rotación sin ceremonia.** Entra o sale un aparato → acta nueva → llave nueva. No hay
+  un calendario de rotación que mantener ni un certificado que renovar.
+- **Un sobre dice CUÁNDO se selló, en términos de membresía.** Firmado con la llave del
+  acta N ⇒ sellado mientras la membresía era N. Eso hace visible lo que hoy no se ve: un
+  valor sellado a un aparato **después** de haberlo expulsado, o un llavero que se quedó
+  atrás respecto del acta.
+- **La ventana de una llave filtrada se cierra sola.** Los sobres nuevos tienen que ir
+  firmados con la llave del acta vigente; en cuanto hay acta nueva, la vieja ya no puede
+  producir nada que parezca fresco.
+
+Dos cosas que hay que resolver al implementarlo:
+
+1. **Los sobres viejos siguen teniendo que verificar.** Rotar no los re-firma —eso sería
+   recorrer todos los secretos en cada cambio de membresía—, así que el acta lleva un
+   registro compacto de las llaves anteriores (`sealKeys: [{ seq, pub }]`), que se poda
+   junto con el tope del histórico (§8.4).
+2. **Sube la versión del acta** (`ACTA_V`, hoy 1) en `@dotrino/identity`. Es un pilar, así
+   que el cambio va limpio en los dos lados y se publica; no hay retrocompatibilidad que
+   cuidar.
