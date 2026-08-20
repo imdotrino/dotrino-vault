@@ -777,20 +777,28 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
           const entradas = desde === LEGACY_VERSION ? (bag || {}) : (bag?.vars || {})
           const vars = {}
           const keyring = []
-          let gen = 0
+          // UNA SOLA generación para todo el cajón, y no es una excepción a «una por
+          // escritura»: convertir es UN acto, y aquí la bóveda tiene delante todos los
+          // valores en claro, así que puede sellarlos con la misma llave sin tener que
+          // recuperar nada. Además deja el cajón como lo espera un agente que todavía no
+          // se ha actualizado —una envoltura por cajón—, y eso es lo que permite convertir
+          // sin apagar a nadie. Lo que se escriba DESPUÉS ya estrena generación.
+          const gen = 1
+          let cek = null
           for (const [key, e] of Object.entries(entradas)) {
             const value = await claro(owner, e)
-            antes[`${owner} ${key}`] = value
+            antes[`${owner}\u0000${key}`] = value
             if (e.pub) { vars[key] = { v: value, pub: true }; continue }
-            const cek = await sealer.newKey()
-            gen += 1
-            const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, membersOf(owner) || [])
-            wraps[RECOVERY] = await sealer.wrapForKey(cek, next.recovery.pub)
-            if (faltan.length) sinLlave[owner] = faltan
+            if (!cek) {
+              cek = await sealer.newKey()
+              const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, membersOf(owner) || [])
+              wraps[RECOVERY] = await sealer.wrapForKey(cek, next.recovery.pub)
+              if (faltan.length) sinLlave[owner] = faltan
+              keyring.push({ gen, createdAt: Date.now(), wraps })
+            }
             const sobre = await sealer.encrypt(cek, value, gen)
             const seal = signer ? await signer({ owner, key, gen, iv: sobre.iv, ct: sobre.ct }) : null
             vars[key] = { pub: false, owner, gen, e: sobre, seal, at: Date.now(), by: null }
-            keyring.push({ gen, createdAt: Date.now(), wraps })
           }
           dst[k] = { vars, keyring }
         }
@@ -808,7 +816,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
               const g = bag.keyring.find((x) => x.gen === e.gen)
               abierto = await sealer.openValue(await sealer.openWrapWith(priv, g.wraps[RECOVERY]), e.e)
             }
-            if (abierto !== antes[`${owner} ${key}`]) {
+            if (abierto !== antes[`${owner}\u0000${key}`]) {
               throw new Error(`secrets: the migration check failed on ${owner}/${key}; nothing was touched`)
             }
           }

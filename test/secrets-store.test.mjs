@@ -382,3 +382,29 @@ test('las claves y los valores se siguen validando', async () => {
   await assert.rejects(() => s.set('proxy', 'K', ''), /non-empty/)
   await assert.rejects(() => s.set('NO VALE', 'K', 'x'), /invalid namespace/)
 })
+
+test('convertir deja UNA envoltura por cajon: un agente sin actualizar sigue abriendo', async () => {
+  // Por qué importa fuera del papel: al convertir en producción, los servicios que aún no
+  // se han actualizado solo saben usar UNA envoltura por cajón (la vigente). Si la
+  // conversión estrenara una generación por variable, abrirían la última y fallarían con
+  // el resto — o sea que convertir apagaría los servicios en vez de migrarlos.
+  const dir = tmp()
+  writeJson(path.join(dir, 'secrets.json'), {
+    schemaVersion: 3,
+    ns: { proxy: { A: { v: '1', pub: false }, B: { v: '2', pub: false }, C: { v: '3', pub: false } } },
+    dev: {}
+  }, atRestFor(dir))
+
+  const s = abrir(dir, fakeSealer())
+  await s.migrate(() => miembros('A'))
+
+  const disco = enDisco(dir)
+  assert.equal(disco.ns.proxy.keyring.length, 1, 'una sola generación para las tres')
+  assert.deepEqual(Object.values(disco.ns.proxy.vars).map((v) => v.gen), [1, 1, 1])
+  assert.equal(await s.reveal('ns:proxy', 'B', MAQUINA), '2')
+
+  // Y lo que se escriba DESPUÉS sí estrena generación: ahí es donde hace falta el agente
+  // nuevo, y por eso el orden de despliegue es agentes → daemon → conversión.
+  await s.set('proxy', 'D', '4')
+  assert.equal(enDisco(dir).ns.proxy.keyring.length, 2)
+})

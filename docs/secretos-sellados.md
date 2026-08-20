@@ -520,7 +520,11 @@ Dos cosas que hay que resolver al implementarlo:
 | `dotrino-vault` `web/` y `src/tui/` | se va el campo de la contraseña; entran «Ver», «Versiones» y «Restaurar» |
 | CLI | `secret show` · `secret history` · `secret revert` · `secret settle` |
 
-**Orden de despliegue, y no es opcional:** primero los **agentes** (`@dotrino/vault`
-≥0.27.0, que sabe abrir por generación), después el **daemon**, y solo entonces la
-**conversión** a v5. Al revés, un agente viejo se queda con la envoltura de la última
-generación y no abre las variables que vengan de otra.
+**Orden de despliegue:** primero los **agentes** (`@dotrino/vault` ≥0.27.0, que sabe abrir
+por generación), después el **daemon**, y solo entonces la **conversión** a v5.
+
+La conversión, además, **deja UNA sola generación por cajón** —convertir es un acto único
+y ahí la bóveda tiene los valores delante, así que no necesita recuperar ninguna llave—,
+y eso es justo lo que un agente sin actualizar espera. O sea que convertir no apaga a
+nadie: lo que rompe a un agente viejo es la **primera escritura posterior**, que sí
+estrena generación. Hay un test que lo fija (`secrets-store.test.mjs`).
