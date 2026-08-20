@@ -376,7 +376,7 @@ onMounted(async () => {
         <h1>{{ t.hero_title }}</h1>
         <p class="lead">{{ t.hero_sub }}</p>
         <div class="cta">
-          <a class="btn btn-primary" href="#download" data-testid="hero-download">↓ {{ t.hero_download }}</a>
+          <a class="btn btn-primary" href="#download" data-testid="hero-download" @click="goTo('download', $event)">↓ {{ t.hero_download }}</a>
           <a class="btn btn-ghost" :href="GITHUB">{{ t.hero_source }}</a>
         </div>
         <p class="note">{{ t.hero_note }}</p>
