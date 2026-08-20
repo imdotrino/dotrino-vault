@@ -270,6 +270,9 @@ fuera de línea, antes del paso 5.
 
 ### 6.1. Administrar después del sellado: TODA escritura pide la contraseña
 
+> ⚠️ **DEROGADO por el §8** (2026-08-20): desde v5 **escribir no pide nada** y la frase
+> queda para VER. Esta sección describe cómo fue entre el 2026-08-18 y esa fecha.
+
 Lo que cambia en el día a día, y costó dos versiones descubrirlo entero: desde el
 sellado, guardar una variable ya no es «escribir un valor». Hay que abrir la copia
 maestra para poder envolver la nueva a cada aparato, y eso solo lo hace la contraseña.
@@ -314,14 +317,17 @@ la llave de la máquina, que es la protección de antes de todo esto.
    que son rotables. No cambia que quien controle el VPS pueda suplantar al vault
    frente a la consola (§3, límite 3).
 
-## 8. La frase, solo para VER (acordado 2026-08-20 — sin implementar)
+## 8. La frase, solo para VER (acordado e IMPLEMENTADO el 2026-08-20)
 
 > Pedido del dueño: **no teclear la contraseña del perfil en el navegador**, y poder
 > administrar sin ella también desde la TUI. La frase deja de ser un requisito para
 > escribir y pasa a significar **una sola cosa: ver los valores**.
 
-El §6.1 de arriba describe lo contrario («TODA escritura pide la contraseña»). Esta
-sección lo deroga en cuanto se implemente; hasta entonces, manda el §6.1.
+**Implementado en `dotrino-vault` 0.42.0** (`secrets.json` v5), con
+`@dotrino/identity` 0.55.0 (acta v2 con llave de sellado, `openSealedValue`) y
+`@dotrino/vault` 0.27.0 (el agente comprueba la procedencia). **El §6.1 de arriba queda
+DEROGADO**: describía el estado anterior, en el que toda escritura pedía la contraseña.
+Se conserva porque explica de dónde viene esto y qué se deshizo.
 
 ### 8.1. Por qué se puede: cifrar es una capacidad PÚBLICA
 
@@ -498,3 +504,23 @@ Dos cosas que hay que resolver al implementarlo:
 2. **Sube la versión del acta** (`ACTA_V`, hoy 1) en `@dotrino/identity`. Es un pilar, así
    que el cambio va limpio en los dos lados y se publica; no hay retrocompatibilidad que
    cuidar.
+
+
+### 8.10. Cómo quedó, archivo por archivo
+
+| Dónde | Qué hace ahora |
+|---|---|
+| `@dotrino/identity` `vault/acta.js` | acta **v2**: `sealPub` + `sealSince` + `sealKeys` (el tramo de cada llave anterior) y `sealKeyAt(acta, seq)`. Las v1 se siguen leyendo y ascienden solas |
+| `@dotrino/identity` `vault/core.js` | `setSealKeyProvider` (se llama al sellar CADA acta), `rotateSealKey`, `openSealedValue` (un aparato abre lo que le sellaron, con su propia llave) |
+| `dotrino-vault` `src/sealKey.js` | el llavero de sellado de la bóveda: estrena llaves y firma con la que el acta nombra. **No abre nada**, así que se usa sin la frase |
+| `dotrino-vault` `src/secretsStore.js` | **v5**: sin copia maestra, con par de recuperación, una generación por escritura, recogida de generaciones, histórico y `reveal`/`revert` |
+| `dotrino-vault` `src/vault.js` | destinatarios (servicios + aparatos que administran + recuperación), firma de cada sobre, y el acta viajando con el bundle |
+| `dotrino-vault` `lib/src/admin.js` | ops `var.reveal` y `var.history`, **auditadas**: leer un secreto a distancia es justo lo que hay que poder revisar después |
+| `dotrino-vault` `lib/src/service.js` | el agente abre **por generación** y comprueba la **procedencia** de cada sobre |
+| `dotrino-vault` `web/` y `src/tui/` | se va el campo de la contraseña; entran «Ver», «Versiones» y «Restaurar» |
+| CLI | `secret show` · `secret history` · `secret revert` · `secret settle` |
+
+**Orden de despliegue, y no es opcional:** primero los **agentes** (`@dotrino/vault`
+≥0.27.0, que sabe abrir por generación), después el **daemon**, y solo entonces la
+**conversión** a v5. Al revés, un agente viejo se queda con la envoltura de la última
+generación y no abre las variables que vengan de otra.
