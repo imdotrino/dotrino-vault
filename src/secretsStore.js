@@ -791,7 +791,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
             if (e.pub) { vars[key] = { v: value, pub: true }; continue }
             if (!cek) {
               cek = await sealer.newKey()
-              const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, membersOf(owner) || [])
+              const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, (await membersOf(owner)) || [])
               wraps[RECOVERY] = await sealer.wrapForKey(cek, next.recovery.pub)
               if (faltan.length) sinLlave[owner] = faltan
               keyring.push({ gen, createdAt: Date.now(), wraps })

@@ -344,10 +344,11 @@ export async function runDaemon () {
           // avisa al arrancar).
           const ak = sec.password ? await mgr.profiles.adminKey(sec.profile ? mgr.resolve(sec.profile) : mgr.currentId(), sec.password) : undefined
           if (sec.op === 'migrate') {
-            const { members } = await vault.profileMembers()
-            const r = await vault.migrateSecrets((owner) => (
-              owner.startsWith('ns:') ? members.filter((m) => m.cn === owner.slice(3)) : members.filter((m) => m.pub === owner.slice(4))
-            ), ak)
+            // Sin lista a mano: la pone el vault, y es la MISMA que usa cualquier
+            // escritura (servicios del cajón + aparatos que administran). Con una lista
+            // propia aquí, lo convertido quedaba sellado solo a los servicios y el dueño
+            // no podía ver desde su consola nada de lo que ya tenía.
+            const r = await vault.migrateSecrets(null, ak)
             if (!r.migrated) console.log('[vault] nothing to migrate: %s', r.reason)
             else {
               console.log('[vault] secrets SEALED (v%d -> v5). Backup left at secrets.json.v%d.bak', r.from, r.from)

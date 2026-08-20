@@ -1278,7 +1278,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Sella un `secrets.json` v3 entero. Es el punto de no retorno del despliegue y
     // por eso es una operación con nombre propio, no algo que ocurra de refilón al
     // desbloquear: deja `secrets.json.v3.bak` para poder volver.
-    migrateSecrets: (membersOf, adminKey) => secrets.migrate(membersOf, adminKey),
+    /**
+     * Convierte el archivo de secretos al formato nuevo. `membersOf` es opcional y lo
+     * normal es NO pasarlo: por defecto se usa la misma lista de destinatarios que
+     * cualquier escritura —los servicios del cajón MÁS los aparatos que administran—.
+     *
+     * Pasarla a mano fue un error real: la conversión envolvía solo a los servicios, y
+     * entonces la consola del dueño no podía ver nada de lo que ya había, aunque el
+     * diseño dice que sí (§8.2). Lo de siempre: dos sitios decidiendo lo mismo.
+     */
+    migrateSecrets: (membersOf, adminKey) => secrets.migrate(
+      membersOf || ((owner) => recipientsOf(owner)), adminKey
+    ),
     settleSecretDebts,
     revealSecret: (owner, key, adminKey) => secrets.reveal(owner, key, adminKey),
     secretHistory: (owner, key) => secrets.history(owner, key),
