@@ -921,7 +921,7 @@ async function refreshAdmin () {
     admPending.value = p.pending || []
     // Una vez, al entrar: `refreshAdmin` también corre cada 2 s mientras hay un
     // emparejamiento abierto, y no hay por qué bajar la configuración entera en cada vuelta.
-    if (!vars.value) await loadVars().catch(() => { vars.value = null })
+    if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
   } catch (_) { canAdmin.value = false }
 }
 
@@ -933,6 +933,10 @@ async function refreshAdmin () {
 // transporta y no ve nada, ni siquiera los nombres.
 
 const vars = ref(null)                       // { ns: {<scope>: [...]}, dev: [...] }
+// Por qué no se pudo traer la lista. Estuvo tragándose el error («catch(() => null)») y el
+// resultado fue una pantalla que se quedaba en «cargando…» para siempre sin decir nada:
+// hizo falta abrir la consola del navegador para enterarse de que fallaba.
+const varsError = ref('')
 const newGroup = ref('')                   // el nombre que se está tecleando abajo
 const newGroups = ref([])                 // grupos creados aquí y todavía sin ninguna variable
 
@@ -940,6 +944,7 @@ const newGroups = ref([])                 // grupos creados aquí y todavía sin
 const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.slice(3) })
 
 async function loadVars () {
+  varsError.value = ''
   const r = await id.value.vaultAdmin('vars')
   vars.value = JSON.parse(await id.value.openContent(r.enc))
 }
@@ -1370,7 +1375,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <!-- Puntero, no explicación: aquí abajo SOLO están los grupos, y quien busque las
              de un aparato tiene que saber que están arriba (lo mismo que hace la TUI). -->
         <p class="muted devhint" data-testid="var-dev-hint">{{ t.var_dev_hint }}</p>
-        <p v-if="!vars" class="muted" data-testid="vars-loading">{{ t.loading }}</p>
+        <p v-if="!vars && !varsError" class="muted" data-testid="vars-loading">{{ t.loading }}</p>
+        <p v-if="varsError" class="muted warn" data-testid="vars-error">{{ varsError }}</p>
         <template v-else>
           <!-- SOLO LOS GRUPOS: las de un servicio se administran en su fila, arriba. Cada
                grupo lleva dentro sus variables y su formulario; el grupo se crea primero,

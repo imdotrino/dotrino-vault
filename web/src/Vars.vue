@@ -182,7 +182,14 @@ const submit = () => props.save({
 
 <template>
   <div class="varlist">
-    <div v-for="d in draft" :key="d.key" class="varrow" :data-var="tid + '/' + d.key">
+    <!-- La fila y su lista de versiones van DENTRO del mismo `v-for`: la lista cuelga de
+         la variable, no de la pantalla. Estuvieron separadas y el `<ul>` quedó FUERA del
+         bucle, refiriéndose a una `d` que ahí no existe: Vue reventaba al pintar
+         («Cannot read properties of undefined») y el componente entero se quedaba en
+         blanco, así que TODOS los grupos se veían vacíos aunque la bóveda mandara bien
+         sus variables. -->
+    <template v-for="d in draft" :key="d.key">
+    <div class="varrow" :data-var="tid + '/' + d.key">
       <!-- El nombre se queda: renombrar no existe (sería crear otra y dejar la vieja). -->
       <input class="k" type="text" :value="d.key" disabled :data-testid="'var-key-' + tid + '-' + d.key" />
       <input v-model="d.value" :type="d.priv ? 'password' : 'text'" autocomplete="off"
@@ -202,7 +209,7 @@ const submit = () => props.save({
               :disabled="busyRow === d.key" @click="verVersiones(d.key)">{{ t.var_versions }}</button>
       <code v-if="shown[d.key] != null" class="shown" :data-testid="'var-shown-' + tid + '-' + d.key">{{ shown[d.key] }}</code>
     </div>
-    <ul v-if="versions[d.key]" :key="d.key + '-h'" class="versions" :data-testid="'var-versions-' + tid + '-' + d.key">
+    <ul v-if="versions[d.key]" class="versions" :data-testid="'var-versions-' + tid + '-' + d.key">
       <li v-if="!versions[d.key].length" class="hint">{{ t.var_no_versions }}</li>
       <li v-for="h in versions[d.key]" :key="h.ts">
         <span class="hint">{{ cuando(h.ts) }}</span>
@@ -211,6 +218,7 @@ const submit = () => props.save({
                 :disabled="busyRow === d.key" @click="restaurar(d.key, h.ts)">{{ t.var_restore }}</button>
       </li>
     </ul>
+    </template>
 
     <template v-if="add">
       <div v-for="(n, idx) in added" :key="'n' + idx" class="varrow added" :data-testid="'var-new-' + tid + '-' + idx">
