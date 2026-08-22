@@ -159,6 +159,11 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
   if (!data) data = { schemaVersion: SCHEMA_VERSION, ns: {}, dev: {}, recovery: null, history: [] }
   if (!data.dev) data.dev = {}
   if (!data.history) data.history = []
+  // 0.47.0/0.48.0 guardaron la política DENTRO del cajón; se saca a `policies` al abrir.
+  for (const [ns, bag] of Object.entries(data.ns || {})) {
+    const stray = bag?.policy && typeof bag.policy === 'object' && !('v' in bag.policy) ? bag.policy : null
+    if (stray) { delete bag.policy; if (stray.approval) { if (!data.policies) data.policies = {}; data.policies[ns] = { approval: true } } }
+  }
 
   // v3 → v5 y v4 → v5 NO se hacen al abrir, y es deliberado: el daemon tiene que poder
   // arrancar y SERVIR sin nada (un perfil bloqueado sigue atendiendo a sus agentes). Un
@@ -592,19 +597,24 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * POLÍTICA de un cajón. Hoy una sola: `approval` — cada lectura espera el visto bueno
      * de un aparato con `approve` (ver `approvals.js`). Los cajones de los servicios que
      * corren solos (proxio, geo) van sin ella: no pueden esperar a un teléfono.
+     *
+     * Vive APARTE de las variables (`data.policies`), no dentro del cajón: en el formato
+     * v3 el cajón ES el mapa de variables y cualquier cosa que se meta ahí se reparte como
+     * si fuera una (pasó: `policy` salió en la lista y en el bundle).
      */
-    policyOf (ns) { assertNs(ns); return { approval: !!data.ns[ns]?.policy?.approval } },
+    policyOf (ns) { assertNs(ns); return { approval: !!data.policies?.[ns]?.approval } },
     setPolicy (ns, patch) {
       assertNs(ns)
-      if (!data.ns[ns]) data.ns[ns] = isLegacy() ? {} : { vars: {}, keyring: [] }
-      data.ns[ns].policy = { ...(data.ns[ns].policy || {}), ...patch }
+      if (!data.policies) data.policies = {}
+      data.policies[ns] = { ...(data.policies[ns] || {}), ...patch }
+      if (!data.policies[ns].approval) delete data.policies[ns]
       save()
       return this.policyOf(ns)
     },
     /** Solo los cajones con alguna política puesta (ns → política). */
     policies () {
       const out = {}
-      for (const ns of Object.keys(data.ns)) if (data.ns[ns]?.policy?.approval) out[ns] = { approval: true }
+      for (const [ns, p] of Object.entries(data.policies || {})) if (p?.approval) out[ns] = { approval: true }
       return out
     },
     /** Nombres y visibilidad (pub → [{key, public}]), sin valores. */
