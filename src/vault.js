@@ -1239,6 +1239,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       try {
         const r = await secrets.rewrap(owner, members, adminKey, { exact: true })
         const after = new Set(secrets.recipientsIn(owner))
+        // Rehecho el cajón, su anotación de deuda (si la había) ya no dice nada cierto.
+        await settleRewrapDebt(owner)
         out.drawers++
         out.wrapped += r?.wrapped || 0
         out.dropped += [...before].filter((p) => !after.has(p)).length

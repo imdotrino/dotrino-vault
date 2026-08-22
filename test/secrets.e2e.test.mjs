@@ -927,10 +927,12 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
   const mine = debts.find((d) => d.pub === second.device.publickey)
   assert.ok(mine, 'y aparece como incompleto, que es lo que verá quien administre')
   assert.deepEqual(mine.owners[`ns:${ns}`], ['TOKEN'], 'diciendo exactamente qué no puede abrir')
+  assert.ok(vault.rotationsDue()[`ns:${ns}`], 'y la deuda quedó ANOTADA (es lo que lee la consola)')
 
   // Y al abrir la bóveda se salda: es el otro camino, el de estar delante de la máquina.
   await vault.resealAll(PHRASE_KEY)
   assert.ok(vault.secrets.recipientsIn(`ns:${ns}`).includes(second.device.publickey),
     'abrir la bóveda rehace el llavero y lo deja al día')
+  assert.ok(!vault.rotationsDue()[`ns:${ns}`], 'y borra la anotación: la consola deja de avisar')
   assert.equal(first.device.publickey && true, true)
 })
