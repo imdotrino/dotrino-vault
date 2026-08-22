@@ -128,6 +128,7 @@ function cmdStatus () {
   }
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
+  if (s.sshAgent) console.log('  ssh-agent   : %s   (dotrino-vault ssh)', s.sshAgent)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')
   console.log('  datos       : %s', dir)
   const profiles = s.profiles || []
@@ -440,6 +441,32 @@ async function findMember (id) {
   const m = record?.members?.find((x) => x.id === String(id).toUpperCase())
   if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
   return m
+}
+
+/**
+ * `dotrino-vault ssh` — cómo usar la llave SSH del teléfono desde este PC. La llave
+ * privada no está aquí: el daemon expone un agente SSH y cada firma la aprueba el
+ * teléfono (`caps <ID> +aprueba`). Imprime lo que hay que poner en el shell.
+ */
+async function cmdSsh (args = []) {
+  const s = requireDaemon()
+  if (!s.sshAgent) { console.error('El daemon no tiene el agente SSH activo (DOTRINO_VAULT_SSH_AGENT=0, o Windows).'); process.exit(1) }
+  if (args[0] === 'keys' || args[0] === '-L') {
+    try { execFileSync('ssh-add', ['-L'], { env: { ...process.env, SSH_AUTH_SOCK: s.sshAgent }, stdio: 'inherit' }) } catch (_) { process.exit(1) }
+    return
+  }
+  console.log('# La llave SSH vive en tu teléfono; este PC solo le pide la firma. Pon en tu shell:')
+  console.log('export SSH_AUTH_SOCK=%s', s.sshAgent)
+  console.log('')
+  console.log('# Registra la llave desde el teléfono (vault.dotrino.com → Llave SSH) y pega su línea')
+  console.log('# pública en ~/.ssh/authorized_keys de cada servidor. Para no aprobar cada comando,')
+  console.log('# reusa la conexión 15 min en ~/.ssh/config:')
+  console.log('#   Host *')
+  console.log('#     ControlMaster auto')
+  console.log('#     ControlPath ~/.ssh/cm-%r@%h:%p')
+  console.log('#     ControlPersist 15m')
+  console.log('')
+  console.log('# Ver las llaves registradas:  dotrino-vault ssh keys')
 }
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
@@ -1308,6 +1335,7 @@ export async function runCtl (argv) {
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
+    case 'ssh': return cmdSsh(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':

@@ -756,6 +756,38 @@ CLI de apoyo: `dotrino-env status` (qué hay enrolado aquí), `dotrino-env check
 los secretos en el entorno de un proceso que no es Node). Primer consumidor:
 `dotrino-proxy` (TURN de Cloudflare).
 
+### Aprobación por uso (el teléfono dice que sí) y la llave SSH en el teléfono
+
+Un cajón puede exigir el **visto bueno de un aparato** en cada lectura: para lo que corre
+en tu PC (un asistente, un script) y no debería llevarse tus claves sin que lo sepas.
+
+```sh
+dotrino-vault caps <ID-del-teléfono> +aprueba       # quién aprueba (no viaja en un QR)
+dotrino-vault secret policy claude approval on       # el cajón «claude» espera el sí
+dotrino-env run --ns claude -- node mi-script.js     # el proceso se queda esperando…
+```
+
+…la bóveda apunta el pedido, avisa al teléfono (cola del proxio → aviso nativo), y solo su
+firma entrega las claves — **al proceso que pidió, en memoria**, con una **ventana de
+15 min** por aparato y cajón para no pedir veinte veces. Lo denegado corta sin reintentos;
+lo que nadie atiende vence a los 5 min; todo queda en `dotrino-vault activity`.
+
+**La llave SSH vive en el teléfono.** El daemon expone un **agente SSH** (protocolo de
+`ssh-agent`, socket en `$XDG_RUNTIME_DIR/dotrino-vault/ssh-agent.sock`) que **no guarda
+ninguna llave privada**: la llave nace en el teléfono (vault.dotrino.com → *Llave SSH de
+este aparato*; WebCrypto no extraíble, `ecdsa-sha2-nistp256`) y cada firma es un pedido
+que apruebas ahí. En el PC no queda nada que copiar.
+
+```sh
+dotrino-vault ssh                 # imprime el export SSH_AUTH_SOCK=… y la receta
+dotrino-vault ssh keys            # las llaves registradas (= ssh-add -L)
+ssh mi-servidor                   # el teléfono pide tu «sí» y firma
+```
+
+Para no aprobar cada comando, reusa la conexión con `ControlMaster auto` +
+`ControlPersist 15m` en `~/.ssh/config`: esa es la ventana de 15 min del SSH.
+`DOTRINO_VAULT_SSH_AGENT=0` apaga el agente.
+
 ## Alcance
 
 - **v1 (este):** daemon headless en Node, **multi-perfil**. En **Linux** queda como

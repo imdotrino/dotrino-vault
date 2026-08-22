@@ -21,14 +21,18 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
   const grants = new Map()
   const gkey = (ns, device) => ns + '|' + device
 
-  const publicOf = (p) => ({ id: p.id, ns: p.ns, deviceId: p.deviceId, label: p.label, ts: p.ts, exp: p.exp })
+  const publicOf = (p) => ({ id: p.id, kind: p.kind, ns: p.ns, deviceId: p.deviceId, label: p.label, ts: p.ts, exp: p.exp, ...(p.ssh ? { ssh: p.ssh } : {}) })
 
   return {
-    /** Apunta un pedido. Uno por cajón y aparato: pedir otra vez reemplaza al anterior. */
-    request ({ ns, device, deviceId, label = '', ek }) {
-      for (const [id, p] of pending) if (p.ns === ns && p.device === device) pending.delete(id)
+    /**
+     * Apunta un pedido. `kind`: `secrets` (leer un cajón; uno por cajón y aparato: pedir
+     * otra vez reemplaza al anterior) o `ssh` (firmar un reto SSH con la llave del
+     * teléfono; cada firma es un pedido, con `ssh: { key, data }` y sus callbacks).
+     */
+    request ({ kind = 'secrets', ns, device = null, deviceId, label = '', ek = null, ssh = null, resolve = null, reject = null }) {
+      if (kind === 'secrets') for (const [id, p] of pending) if (p.kind === 'secrets' && p.ns === ns && p.device === device) pending.delete(id)
       const ts = now()
-      const p = { id: rnd(), ns, device, deviceId, label, ek, ts, exp: ts + pendingTtlMs }
+      const p = { id: rnd(), kind, ns, device, deviceId, label, ek, ssh, resolve, reject, ts, exp: ts + pendingTtlMs }
       pending.set(p.id, p)
       return publicOf(p)
     },
@@ -55,7 +59,7 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
     /** Tira lo vencido; devuelve los pedidos que vencieron, para anotarlos. */
     sweep () {
       const t = now(); const gone = []
-      for (const [id, p] of pending) if (p.exp <= t) { pending.delete(id); gone.push(publicOf(p)) }
+      for (const [id, p] of pending) if (p.exp <= t) { pending.delete(id); gone.push(publicOf(p)); try { p.reject?.(new Error('approval: nobody approved the request in time')) } catch (_) {} }
       for (const [k, exp] of grants) if (exp <= t) grants.delete(k)
       return gone
     }

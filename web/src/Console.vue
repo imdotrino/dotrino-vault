@@ -152,6 +152,15 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
+    apv_ssh: 'quiere entrar por SSH con la llave',
+    // LLAVE SSH DE ESTE APARATO: nace aquí y nunca sale; el PC solo pide la firma.
+    ssh_t: 'Llave SSH de este aparato',
+    ssh_b: 'Una llave para entrar a tus servidores que vive solo en este aparato. Tu computadora te pide el «sí» aquí cada vez que la usa.',
+    ssh_create: 'Crear llave SSH', ssh_forget: 'Olvidar esta llave',
+    ssh_pub: 'Pega esta línea en ~/.ssh/authorized_keys de cada servidor:',
+    ssh_copy: 'Copiar', ssh_copied: 'Copiada',
+    ssh_none: 'Este aparato todavía no tiene llave SSH.',
+    ssh_nolocal: 'La bóveda tiene registrada una llave de este aparato, pero este navegador ya no la tiene: créala de nuevo.',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -296,6 +305,14 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
+    apv_ssh: 'wants to log in over SSH with the key',
+    ssh_t: 'SSH key of this device',
+    ssh_b: 'A key to log in to your servers that lives only on this device. Your computer asks you here for a “yes” every time it uses it.',
+    ssh_create: 'Create SSH key', ssh_forget: 'Forget this key',
+    ssh_pub: 'Paste this line into ~/.ssh/authorized_keys on each server:',
+    ssh_copy: 'Copy', ssh_copied: 'Copied',
+    ssh_none: 'This device has no SSH key yet.',
+    ssh_nolocal: 'The vault has a key of this device registered, but this browser no longer has it: create it again.',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
     var_t: 'Your apps\u2019 variables',
@@ -618,6 +635,7 @@ onMounted(async () => {
   await refreshSelf()
   await refreshAdmin()
   await refreshApprovals()
+  await loadSshKey()
 })
 
 let offVault = null
@@ -948,7 +966,73 @@ async function refreshApprovals () {
   } catch (_) { approvals.value = [] }
 }
 const apvLeft = (p) => Math.max(0, Math.round((p.exp - Date.now()) / 1000))
-const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id }); await refreshApprovals() })
+const apvApprove = (p) => run('apv-' + p.id, async () => {
+  // Un pedido SSH se aprueba FIRMANDO el reto con la llave de este aparato (WebCrypto, no
+  // extraíble): la firma cruda r‖s viaja con el «sí» y la bóveda la convierte a SSH.
+  if (p.kind === 'ssh') {
+    if (!sshKey.value) throw new Error(t.value.ssh_nolocal)
+    const data = Uint8Array.from(atob(p.ssh.data), (c) => c.charCodeAt(0))
+    const raw = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, sshKey.value.privateKey, data)
+    await id.value.vaultApprovals('approve', { id: p.id, sig: b64(new Uint8Array(raw)) })
+  } else {
+    await id.value.vaultApprovals('approve', { id: p.id })
+  }
+  await refreshApprovals()
+})
+
+// ---------- LLAVE SSH DE ESTE APARATO ----------
+// Nace aquí (P-256, no extraíble) y se queda en el IndexedDB de esta página; a la bóveda
+// solo va la pública, en el formato de `authorized_keys`. Cuando el `ssh` del PC necesita
+// una firma, llega como pedido (arriba) y se firma aquí.
+const sshKey = ref(null)        // CryptoKeyPair local
+const sshPub = ref('')          // la línea pública registrada
+const sshRegistered = ref([])   // lo que la bóveda tiene (de cualquier aparato)
+const sshCopied = ref(false)
+const b64 = (u8) => btoa(String.fromCharCode(...u8))
+const b64u = (str) => Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+const sshStr = (u8) => { const l = new Uint8Array(4); new DataView(l.buffer).setUint32(0, u8.length); return [l, u8] }
+const cat = (parts) => { const n = parts.reduce((a, p) => a + p.length, 0); const out = new Uint8Array(n); let o = 0; for (const p of parts) { out.set(p, o); o += p.length } return out }
+function sshPublicLine (jwk, comment) {
+  const point = cat([new Uint8Array([4]), b64u(jwk.x), b64u(jwk.y)])
+  const enc = (s) => new TextEncoder().encode(s)
+  const blob = cat([...sshStr(enc('ecdsa-sha2-nistp256')), ...sshStr(enc('nistp256')), ...sshStr(point)])
+  return `ecdsa-sha2-nistp256 ${b64(blob)} ${comment}`
+}
+function idb () {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open('dotrino-vault-console', 1)
+    r.onupgradeneeded = () => r.result.createObjectStore('keys')
+    r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error)
+  })
+}
+async function idbGet (k) { const db = await idb(); return new Promise((res, rej) => { const q = db.transaction('keys').objectStore('keys').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error) }) }
+async function idbSet (k, v) { const db = await idb(); return new Promise((res, rej) => { const q = db.transaction('keys', 'readwrite').objectStore('keys').put(v, k); q.onsuccess = () => res(); q.onerror = () => rej(q.error) }) }
+async function idbDel (k) { const db = await idb(); return new Promise((res, rej) => { const q = db.transaction('keys', 'readwrite').objectStore('keys').delete(k); q.onsuccess = () => res(); q.onerror = () => rej(q.error) }) }
+async function loadSshKey () {
+  try {
+    const saved = await idbGet('ssh')
+    sshKey.value = saved?.pair || null
+    sshPub.value = saved?.pub || ''
+    if (canApprove.value) { const r = await id.value.vaultApprovals('ssh.keys'); sshRegistered.value = Array.isArray(r?.items) ? r.items : [] }
+  } catch (_) { sshKey.value = null }
+}
+const sshCreate = () => run('ssh-create', async () => {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])
+  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
+  const mine = (members.value || []).find((m) => m.isMe)
+  const pub = sshPublicLine(jwk, 'dotrino-' + (mine?.id || 'device'))
+  await id.value.vaultApprovals('ssh.key.add', { pub })
+  await idbSet('ssh', { pair, pub, at: Date.now() })
+  await loadSshKey()
+})
+const sshForget = () => run('ssh-forget', async () => {
+  const mineLine = sshPub.value
+  const reg = sshRegistered.value.find((k) => mineLine.includes(k.blob))
+  if (reg) await id.value.vaultApprovals('ssh.key.rm', { id: reg.id })
+  await idbDel('ssh')
+  await loadSshKey()
+})
+async function sshCopy () { try { await navigator.clipboard.writeText(sshPub.value); sshCopied.value = true; setTimeout(() => { sshCopied.value = false }, 1500) } catch (_) {} }
 const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id }); await refreshApprovals() })
 const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals() }
 onMounted(() => { apvTimer = setInterval(apvTick, 5000); document.addEventListener('visibilitychange', apvTick) })
@@ -1369,12 +1453,34 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <h2>{{ t.apv_t }}</h2>
         <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
         <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
-          <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
+          <span v-if="p.kind === 'ssh'"><b>{{ p.deviceId }}</b> {{ t.apv_ssh }} <code>{{ p.ssh?.comment || p.ssh?.key }}</code>
+            <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
+          <span v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
           <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
         </div>
         <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+
+        <!-- LLAVE SSH: la privada nace y se queda en este aparato; a la bóveda va la pública. -->
+        <h2>
+          {{ t.ssh_t }}
+          <button type="button" class="i" data-testid="info-ssh" :aria-expanded="info === 'ssh'"
+                  :aria-label="t.info_label" @click="toggleInfo('ssh')">i</button>
+        </h2>
+        <p v-if="info === 'ssh'" class="muted info-panel">{{ t.ssh_b }}</p>
+        <template v-if="sshKey">
+          <p class="muted">{{ t.ssh_pub }}</p>
+          <div class="invite" data-testid="ssh-pub">
+            <code class="url">{{ sshPub }}</code>
+            <button class="btn ghost sm" data-testid="ssh-copy" @click="sshCopy">{{ sshCopied ? t.ssh_copied : t.ssh_copy }}</button>
+          </div>
+          <div class="row"><button class="btn ghost sm" data-testid="ssh-forget" :disabled="busy === 'ssh-forget'" @click="sshForget">{{ t.ssh_forget }}</button></div>
+        </template>
+        <template v-else>
+          <p class="muted">{{ sshRegistered.length ? t.ssh_nolocal : t.ssh_none }}</p>
+          <div class="row"><button class="btn" data-testid="ssh-create" :disabled="busy === 'ssh-create'" @click="sshCreate">{{ t.ssh_create }}</button></div>
+        </template>
       </template>
 
       <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->

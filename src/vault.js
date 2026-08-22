@@ -23,6 +23,7 @@ import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar } from './secretsStore.js'
 import { createApprovals } from './approvals.js'
+import { parsePublicKey, sshSignature } from './sshKeys.js'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { seal } from '../lib/src/sealed.js'
@@ -71,6 +72,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const store = openStore(dir)
   const threads = openThreadStore(dir)
   const approvals = createApprovals()
+  const approvalsSweeper = setInterval(() => { for (const g of approvals.sweep()) audit(g.kind === 'ssh' ? 'ssh.expired' : 'secrets.expired', { id: g.id, ns: g.ns, device: g.deviceId }) }, 30 * 1000); approvalsSweeper.unref?.()
   const secrets = openSecretsStore(dir, {
     sealer: makeSealer(),
     // A QUIÉN se le envuelve la llave de cada cajón: los servicios de ese namespace (o el
@@ -487,7 +489,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // da acceso a nada por sí solo. Quien firma esta petición ya tiene la llave de firma
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
-    if (p.data?.op === 'approvals' || p.data?.op === 'approve' || p.data?.op === 'deny') return handleApproval(from, p)
+    if (['approvals', 'approve', 'deny', 'ssh.keys', 'ssh.key.add', 'ssh.key.rm'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
@@ -548,6 +550,36 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return { body, signature }
   }
 
+  // ---------- LLAVES SSH DEL TELÉFONO (`sshKeys.js`) ----------
+  // Aquí solo viven las PÚBLICAS: la privada está en el aparato que aprueba. `ssh` en este
+  // PC habla con el agente del daemon (`sshAgent.js`), y cada firma es un pedido más.
+  const sshKeysFile = path.join(dir, 'ssh-keys.json')
+  const atRest = atRestFor(dir)
+  const readSshKeys = () => { const d = readJsonAt(sshKeysFile); return Array.isArray(d?.keys) ? d.keys : [] }
+  function readJsonAt (file) { try { return JSON.parse(atRest.decrypt(fs.readFileSync(file, 'utf8'))) } catch (_) { return null } }
+  const writeSshKeys = (keys) => fs.writeFileSync(sshKeysFile, atRest.encrypt(JSON.stringify({ v: 1, keys })), { mode: 0o600 })
+  const sshKeys = () => readSshKeys().map((k) => ({ id: k.id, type: k.type, blob: k.blob, comment: k.comment, deviceId: k.deviceId, addedAt: k.addedAt }))
+
+  /**
+   * FIRMAR UN RETO SSH: lo pide el agente local (el `ssh` del usuario) y lo resuelve el
+   * teléfono. No hay ventana: cada conexión es un «sí» — para no repetirlo veinte veces
+   * está `ControlMaster` en el `ssh_config`, que reusa la conexión 15 min.
+   */
+  function requestSshSign ({ keyId, data }) {
+    const key = readSshKeys().find((k) => k.id === keyId)
+    if (!key) return Promise.reject(new Error('ssh: unknown key'))
+    return new Promise((resolve, reject) => {
+      const pend = approvals.request({
+        kind: 'ssh', ns: 'ssh', deviceId: fp.slice(0, 4).toUpperCase() + '-' + fp.slice(4, 8).toUpperCase(), label: 'ssh',
+        ssh: { key: key.id, comment: key.comment, data: Buffer.from(data).toString('base64') },
+        resolve, reject
+      })
+      audit('ssh.pending', { key: key.id, id: pend.id })
+      log(`[vault] ssh: ${key.comment || key.id} is waiting for the phone to sign (${pend.id})`)
+      identity.profileActa?.().catch(() => null).then((r) => notifyApprovers(pend, r?.acta))
+    })
+  }
+
   /**
    * PEDIDOS DE APROBACIÓN (cajones con `approval`). Entran por `vault.secrets` con
    * `op: approvals | approve | deny`, firmados por un aparato con `vault:approve` — que,
@@ -573,9 +605,45 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       reply(from, { type: MSG.SECRETS_RESULT, body, signature })
     }
     if (op === 'approvals') return answer({ op: 'approvals', items: approvals.list() })
+    if (op === 'ssh.keys') return answer({ op: 'ssh.keys', items: sshKeys() })
+    if (op === 'ssh.key.add') {
+      let k
+      try { k = parsePublicKey(p.data?.pub) } catch (e) { return reply(from, { type: MSG.ERROR, error: e.message }) }
+      const keys = readSshKeys().filter((x) => x.id !== k.id)
+      keys.push({ ...k, deviceId: by, addedAt: Date.now() })
+      writeSshKeys(keys)
+      audit('ssh.key.add', { key: k.id, by })
+      log(`[vault] ssh: key ${k.id} (${k.comment || 'no comment'}) registered by ${by}`)
+      return answer({ op: 'ssh.key.add', id: k.id, ok: true })
+    }
+    if (op === 'ssh.key.rm') {
+      const keys = readSshKeys(); const n = keys.length
+      writeSshKeys(keys.filter((x) => x.id !== p.data?.id))
+      if (keys.length !== n) audit('ssh.key.rm', { key: p.data?.id, by })
+      return answer({ op: 'ssh.key.rm', ok: true })
+    }
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
     const pend = approvals.take(id)
     if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
+    if (pend.kind === 'ssh') {
+      if (op === 'deny') {
+        audit('ssh.denied', { key: pend.ssh.key, id, by })
+        try { pend.reject?.(new Error('ssh: denied from ' + by)) } catch (_) {}
+        return answer({ op: 'deny.result', id, ok: true })
+      }
+      if (op !== 'approve') return reply(from, { type: MSG.ERROR, error: 'approval: unknown op' })
+      const key = readSshKeys().find((k) => k.id === pend.ssh.key)
+      let blob
+      try { blob = sshSignature({ jwk: key.jwk, data: Buffer.from(pend.ssh.data, 'base64'), rawSig: p.data?.sig }) } catch (e) {
+        try { pend.reject?.(e) } catch (_) {}
+        audit('rejected', { what: 'ssh.sign', reason: e.message })
+        return reply(from, { type: MSG.ERROR, error: e.message })
+      }
+      audit('ssh.signed', { key: key.id, id, by })
+      log(`[vault] ssh: ${key.comment || key.id} signed by ${by}`)
+      try { pend.resolve?.(blob) } catch (_) {}
+      return answer({ op: 'approve.result', id, ok: true })
+    }
     if (op === 'deny') {
       audit('secrets.denied', { device: pend.deviceId, ns: pend.ns, id, by })
       log(`[vault] ${pend.ns}: request of ${pend.deviceId} DENIED by ${by}`)
@@ -1523,6 +1591,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     setSecretPolicy: async (ns, patch) => { const r = secrets.setPolicy(ns, patch); audit('secret.policy', { ns, ...r }); return r },
     secretPolicies: () => secrets.policies(),
     listApprovals: () => approvals.list(),
+    sshKeys,
+    requestSshSign,
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
     // dispositivos se entera de que entró alguien, venga de donde venga.
     approveDevice: async (code, adminKey) => {
@@ -1622,6 +1692,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return r
     },
     close () {
+      clearInterval(approvalsSweeper)
       for (const t of pendingNotices.values()) clearTimeout(t)
       pendingNotices.clear()
       try { client.close() } catch (_) {} identity.destroy()

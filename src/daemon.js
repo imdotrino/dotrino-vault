@@ -17,6 +17,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startVaultManager } from './manager.js'
+import { startSshAgent, defaultSocketPath } from './sshAgent.js'
 import { dataDir, writeJson, readJson } from './paths.js'
 import { VERSION } from './version.js'
 
@@ -63,6 +64,14 @@ export async function runDaemon () {
 
   const mgr = await startVaultManager({ root: dir, proxyUrl, onEnrollChallenge })
 
+  // --- agente SSH (la llave vive en el teléfono; ver sshAgent.js). `DOTRINO_VAULT_SSH_AGENT=0`
+  // lo apaga; cualquier otro valor es la ruta del socket.
+  let sshAgent = null
+  if (process.env.DOTRINO_VAULT_SSH_AGENT !== '0' && process.platform !== 'win32') {
+    const socketPath = process.env.DOTRINO_VAULT_SSH_AGENT || defaultSocketPath(dir)
+    try { sshAgent = startSshAgent({ socketPath, vault: () => mgr.current(), log: console.log }) } catch (e) { console.error('[vault] ssh-agent could not start: %s', e.message) }
+  }
+
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
   const daemonVersion = VERSION
@@ -73,7 +82,7 @@ export async function runDaemon () {
     const cur = mgr.summary().find((p) => p.current) || {}
     writeJson(stateFile, {
       v: 2, version: daemonVersion, fingerprint: cur.fingerprint || null, iss: cur.iss || null,
-      proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(),
+      proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(), sshAgent: sshAgent?.socketPath || null,
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -607,6 +616,7 @@ export async function runDaemon () {
   const shutdown = (sig) => {
     console.log(`\n[vault] ${sig} → deteniendo…`)
     rm(pairFile); rm(pendingEnrollFile)
+    try { sshAgent?.close() } catch (_) {}
     try { mgr.close() } catch (_) {}
     process.exit(0)
   }
