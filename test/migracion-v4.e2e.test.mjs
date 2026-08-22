@@ -109,16 +109,17 @@ test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente esc
   // Una boveda nueva NACE en v4, asi que aqui no hay migracion: lo que se imita es
   // ponerle contrasena al perfil, que re-sella la copia maestra bajo la frase.
   assert.equal((await vault.rekeySecrets(null, CLAVE)).rekeyed, true)
-  assert.deepEqual(vault.rotationsDue(), {}, 'recien sellado no se debe nada')
+  assert.deepEqual(await vault.secretDebts(), {}, 'recien sellado no se debe nada')
 
   // Y AHORA llega el servicio nuevo. Se le admite sin dar la contrasena, que es lo que
   // pasa cuando se aprueba desde vault.dotrino.com.
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:tarde'], label: 'tardon', ttlMs: 60000 })
   await enrollService({ qr: encodeInvite(qr), ns: 'tarde', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
 
-  const debe = vault.rotationsDue()
-  assert.deepEqual(Object.keys(debe), ['ns:tarde'], 'queda ANOTADO, no perdido en un log')
+  const debe = await vault.secretDebts()
+  assert.deepEqual(Object.keys(debe), ['ns:tarde'], 'se VE (calculado, no anotado ni perdido en un log)')
   assert.equal(debe['ns:tarde'].kind, 'rewrap')
+  assert.deepEqual(debe['ns:tarde'].members.map((m) => m.keys), [['TURN_KEY']], 'y dice qué variable falta')
   // Y mientras tanto NO lee: falla en voz alta en vez de arrancar con la configuracion
   // a medias, que es lo unico peor que no arrancar.
   await assert.rejects(fetchSecrets({ dir: svcDir }), /no key to open/)
@@ -126,11 +127,11 @@ test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente esc
   // Escribir NO lo salda, y ahora es coherente: escribir no pide la frase (§8.1) y
   // heredarle lo VIEJO obliga a abrirlo. Lo que se escriba desde ahora sí le llega.
   await vault.setSecret('tarde', 'OTRA', 'x', true)
-  assert.deepEqual(Object.keys(vault.rotationsDue()), ['ns:tarde'], 'sigue debiendo lo de antes')
+  assert.deepEqual(Object.keys(await vault.secretDebts()), ['ns:tarde'], 'sigue debiendo lo de antes')
 
   // Se salda al desbloquear, que es cuando hay con qué abrir.
   await vault.settleSecretDebts(CLAVE)
-  assert.deepEqual(vault.rotationsDue(), {}, 'saldado')
+  assert.deepEqual(await vault.secretDebts(), {}, 'saldado')
   assert.equal((await fetchSecrets({ dir: svcDir })).TURN_KEY, 'la-clave', 'y ya lee lo suyo')
 })
 

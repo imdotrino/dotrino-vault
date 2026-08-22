@@ -719,7 +719,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           // Lo que quedó a deber un sellado: quien administra a distancia tiene que
           // poder verlo, porque es exactamente lo que él puede saldar (escribiendo una
           // variable con la contraseña) y la bóveda no.
-          pending: rotationsDue(),
+          pending: await secretDebts(),
           // Y si el perfil NO tiene contraseña, decirlo: sus privadas se abren con la
           // llave de la máquina de la bóveda, cuyo material vive en ese mismo disco.
           // El comentario de aquí decía «la consola lo dice en voz alta» y la consola
@@ -1074,13 +1074,37 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return out
   }
 
+  /**
+   * Lo que quedó a deber una ROTACIÓN: un aparato salió conociendo la llave vigente y
+   * no se pudo rotar en ese momento. Eso sí es una nota, porque es un hecho pasado que el
+   * estado de hoy no enseña (quitarle la envoltura no le quita lo que ya supo).
+   */
   function rotationsDue () {
     const out = {}
     for (const [k, v] of Object.entries(store.listSettings?.() || {})) {
-      // La salida va SIEMPRE por owner (`ns:proxy`, `dev:<pub>`), aunque el ajuste de la
-      // rotación guarde solo el nombre del namespace: una sola forma para quien lo lee.
+      // La salida va SIEMPRE por owner (`ns:proxy`), aunque el ajuste guarde solo el
+      // nombre del namespace: una sola forma para quien lo lee.
       if (k.startsWith('rotate-due:')) out['ns:' + k.slice('rotate-due:'.length)] = { kind: 'rotate', at: Number(v) || 0 }
-      else if (k.startsWith('rewrap-due:')) out[k.slice('rewrap-due:'.length)] = { kind: 'rewrap', at: Number(v) || 0 }
+    }
+    return out
+  }
+
+  /**
+   * TODO lo que está a deber, por cajón: las rotaciones anotadas y, CALCULADO, cada
+   * envoltura que falta. La falta de una envoltura no se anota nunca: se mira. Una nota
+   * se desincroniza en cuanto alguien salda la deuda por un camino que no pasa por donde
+   * se anotó (pasó dos veces: el reparto por el hermano y el rehacer al abrir), y
+   * entonces la consola avisa de algo que ya no existe. Lo que se calcula no miente.
+   * @returns {Promise<Record<string, { kind: 'rotate'|'rewrap', at?: number, members?: { pub: string, keys: string[] }[] }>>}
+   */
+  async function secretDebts () {
+    const out = rotationsDue()
+    for (const m of await incompleteMembers()) {
+      for (const [owner, keys] of Object.entries(m.owners)) {
+        if (out[owner]?.kind === 'rotate') continue
+        out[owner] = out[owner] || { kind: 'rewrap', members: [] }
+        out[owner].members.push({ pub: m.pub, keys })
+      }
     }
     return out
   }
@@ -1100,12 +1124,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     try {
       const r = await secrets.rewrap(owner, members, adminKey)
-      // Saldado: si este cajón debía un re-envoltorio, ya está hecho.
-      if (store.getSetting(`rewrap-due:${owner}`)) {
-        store.setSetting(`rewrap-due:${owner}`, undefined)
-        log(`[vault] ${owner}: pending re-seal settled`)
-        audit('secret.rewrap', { owner, pending: true })
-      }
       if (r?.sinLlave?.length) {
         log(`[vault] ${owner}: ${r.sinLlave.length} member(s) without an encryption key - they will NOT be able to read their variables`)
         audit('secret.nokey', { owner, count: r.sinLlave.length })
@@ -1116,11 +1134,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // donde no hay a quién pedírsela: un servicio que acaba de registrar su llave de
       // cifrado llega por el proxio, no por una consola. Antes se perdía en un `.catch`
       // del que llamaba y el servicio se quedaba sin variables SIN QUE NADIE SE ENTERARA
-      // — el modo de fallo que más caro sale aquí. Se anota, se dice, y la siguiente
-      // escritura con contraseña lo salda.
-      store.setSetting(`rewrap-due:${owner}`, String(Date.now()))
-      log(`[vault] ${owner}: PENDING RE-SEAL - could not hand out its key (${e.message}).`)
-      log(`[vault] ${owner}: its members will NOT read their variables until you save one with the password.`)
+      // — el modo de fallo que más caro sale aquí. Se dice y se audita; la deuda no se
+      // anota: se CALCULA (`secretDebts`), así no hay nota que se quede vieja cuando la
+      // salde un hermano o el abrir la bóveda.
+      log(`[vault] ${owner}: could not hand out its key (${e.message}); its members will not read their variables until a sibling hands it out or the vault is opened`)
       audit('secret.rewrap-due', { owner, reason: e.message })
       throw e
     }
@@ -1193,44 +1210,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (done) {
       audit('secret.delegated', { owner, target: await deviceIdOf(targetPub).catch(() => null), gens: done })
       log(`[vault] ${owner}: ${done} key(s) handed out by its own service`)
-      await settleRewrapDebt(owner)
     }
     return { done, asked: pending.length }
   }
 
-  /**
-   * La deuda de un cajón se anota cuando la bóveda NO pudo envolver (`spreadKey`), y
-   * se borra cuando YA NO FALTA nada — sea quien sea quien lo haya saldado. Sin esto,
-   * un reparto hecho por el propio servicio dejaba la anotación puesta y la consola
-   * seguía diciendo que los aparatos no leían sus variables, cuando sí las leían.
-   */
-  async function settleRewrapDebt (owner) {
-    if (!store.getSetting(`rewrap-due:${owner}`)) return false
-    const stillMissing = (await incompleteMembers()).some((m) => m.owners[owner])
-    if (stillMissing) return false
-    store.setSetting(`rewrap-due:${owner}`, undefined)
-    log(`[vault] ${owner}: pending re-seal settled`)
-    audit('secret.rewrap', { owner, pending: true, delegated: true })
-    return true
-  }
-
-  /**
-   * REHACE EL LLAVERO ENTERO con la frase delante (pedido del dueño, 2026-08-22).
-   *
-   * La bóveda no puede *comprobar* una envoltura ajena —abrirla es cosa de su
-   * destinatario—, así que la integridad no se verifica: se **restablece**. Abierta, la
-   * bóveda puede abrir cada CEK por su envoltura de recuperación y volver a envolverla
-   * para exactamente quien el acta dice, y para nadie más. En una pasada:
-   *
-   *  · se crean las que faltaban (la deuda de un aparato que entró después);
-   *  · se reemplaza cualquiera que alguien hubiera metido mal —un servicio solo puede
-   *    AÑADIR envolturas, pero añadir una basura a quien no tenía deja a ese sin leer—;
-   *  · se caen las que sobran: la de quien administraba un cajón que hoy tiene dueño, o
-   *    la de un miembro que ya no está.
-   *
-   * Lo que NO hace, y conviene no confundir: quitar una envoltura no le quita a nadie lo
-   * que ya leyó, ni una llave que se haya guardado. Para eso está `rotate`.
-   */
   async function resealAll (adminKey = null) {
     const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [] }
     for (const owner of secrets.owners?.() || []) {
@@ -1239,8 +1222,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       try {
         const r = await secrets.rewrap(owner, members, adminKey, { exact: true })
         const after = new Set(secrets.recipientsIn(owner))
-        // Rehecho el cajón, su anotación de deuda (si la había) ya no dice nada cierto.
-        await settleRewrapDebt(owner)
         out.drawers++
         out.wrapped += r?.wrapped || 0
         out.dropped += [...before].filter((p) => !after.has(p)).length
@@ -1291,8 +1272,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function settleDebts (owner, membersFn) {
     const ns = owner.startsWith('ns:') ? owner.slice(3) : null
-    const debe = store.getSetting(`rewrap-due:${owner}`) || (ns && store.getSetting(`rotate-due:${ns}`))
-    if (!debe) return null
+    const owed = (ns && store.getSetting(`rotate-due:${ns}`)) ||
+      (await incompleteMembers()).some((m) => m.owners[owner])
+    if (!owed) return null
     try { return await spreadKey(owner, await membersFn(), null) } catch (_) { return null }
   }
   async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
@@ -1546,6 +1528,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Los namespaces que quedaron a deber una rotación (se fue un miembro y no se pudo
     // rotar su llave). Lo enseñan `secret list` y la consola: si no se ve, no se salda.
     rotationsDue,
+    secretDebts,
     // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
     isMaster: () => identity.isMaster(),
     setCaps: async (pub, caps) => {

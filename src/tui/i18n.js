@@ -84,7 +84,7 @@ const es = {
   // bóvedas (perfiles)
   noPassword: 'sin clave',
   noPasswordWarn: 'Este perfil no tiene contraseña: una copia de este disco abre las variables privadas.',
-  pendingSeal: (owner, kind) => `${owner}: sin sellar (${kind === 'rotate' ? 'salió un aparato' : 'entró un aparato'}). Sus aparatos NO leen sus variables; guarda una con la contraseña.`,
+  pendingSeal: (owner, kind, who) => kind === 'rotate' ? `${owner}: sin rotar (salió un aparato). Guarda una variable con la contraseña.` : `${owner}: sin llave todavía en ${who}. Se reparte sola con otro aparato del grupo encendido, o al abrir la bóveda.`,
   locked: '🔒 bloqueada',
   unlocked: '🔓 abierta',
   passwordOf: (name) => `Contraseña de "${name}"`,
@@ -377,7 +377,7 @@ const en = {
 
   noPassword: 'no password',
   noPasswordWarn: 'This profile has no password: a copy of this disk opens the private variables.',
-  pendingSeal: (owner, kind) => `${owner}: not sealed (${kind === 'rotate' ? 'a device left' : 'a device joined'}). Its devices are NOT reading their variables; save one with the password.`,
+  pendingSeal: (owner, kind, who) => kind === 'rotate' ? `${owner}: not rotated (a device left). Save a variable with the password.` : `${owner}: no key yet on ${who}. It is handed out by another device of the group that is on, or when the vault is opened.`,
   locked: '🔒 locked',
   unlocked: '🔓 unlocked',
   passwordOf: (name) => `Password for "${name}"`,

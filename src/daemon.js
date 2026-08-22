@@ -501,7 +501,7 @@ export async function runDaemon () {
           dev: await t.vault.listDeviceSecrets(),
           // Lo que quedó a deber un sellado. Va en el volcado porque si no se ve, no se
           // salda: son cajones cuyos miembros NO están leyendo sus variables.
-          pending: t.vault.rotationsDue(),
+          pending: await t.vault.secretDebts(),
           // Y quién NO puede abrir lo suyo. Es lo mismo visto desde el aparato, que es
           // como lo mira quien administra: «este servicio está en el acta y aun así no
           // arranca». Sin esto solo se veía en el log del propio servicio.

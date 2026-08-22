@@ -900,10 +900,9 @@ test('un servicio le reparte la llave del cajón a otro que entra después', asy
 
   const debts = await vault.incompleteMembers()
   assert.ok(!debts.some((d) => d.pub === second.device.publickey), 'y no queda como incompleto')
-  // La anotación de deuda que dejó la bóveda al no poder envolver se borra al saldarla
-  // el hermano: la consola no puede seguir diciendo que «no leen sus variables».
-  const settled = await until(() => !vault.rotationsDue()[`ns:${ns}`])
-  assert.ok(settled, 'y la deuda anotada (rewrap-due) desaparece al repartirse la llave')
+  // La deuda se CALCULA, así que saldada por el hermano deja de verse sin que nadie
+  // tenga que borrar nada: la consola no puede seguir diciendo que «no leen sus variables».
+  assert.ok(!(await vault.secretDebts())[`ns:${ns}`], 'y la deuda desaparece al repartirse la llave')
 
   watcher?.close?.()
 })
@@ -927,12 +926,14 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
   const mine = debts.find((d) => d.pub === second.device.publickey)
   assert.ok(mine, 'y aparece como incompleto, que es lo que verá quien administre')
   assert.deepEqual(mine.owners[`ns:${ns}`], ['TOKEN'], 'diciendo exactamente qué no puede abrir')
-  assert.ok(vault.rotationsDue()[`ns:${ns}`], 'y la deuda quedó ANOTADA (es lo que lee la consola)')
+  const owed = (await vault.secretDebts())[`ns:${ns}`]
+  assert.equal(owed?.kind, 'rewrap', 'y la deuda SE VE calculada (es lo que lee la consola)')
+  assert.deepEqual(owed.members, [{ pub: second.device.publickey, keys: ['TOKEN'] }], 'con quién y qué variable')
 
   // Y al abrir la bóveda se salda: es el otro camino, el de estar delante de la máquina.
   await vault.resealAll(PHRASE_KEY)
   assert.ok(vault.secrets.recipientsIn(`ns:${ns}`).includes(second.device.publickey),
     'abrir la bóveda rehace el llavero y lo deja al día')
-  assert.ok(!vault.rotationsDue()[`ns:${ns}`], 'y borra la anotación: la consola deja de avisar')
+  assert.ok(!(await vault.secretDebts())[`ns:${ns}`], 'y la deuda deja de verse: la consola deja de avisar')
   assert.equal(first.device.publickey && true, true)
 })

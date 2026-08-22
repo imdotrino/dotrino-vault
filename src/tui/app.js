@@ -357,7 +357,8 @@ function secretRows (st, t) {
   // arregla. Un aviso que hay que buscar no es un aviso.
   const head = []
   for (const [owner, info] of Object.entries(st.secrets?.pending || {})) {
-    head.push({ text: t.warn(' ' + i.pendingSeal(owner, info?.kind)), sel: false })
+    const who = (info?.members || []).map((m) => deviceIdOf(st, m.pub) + ' (' + m.keys.join(', ') + ')').join(', ')
+    head.push({ text: t.warn(' ' + i.pendingSeal(owner, info?.kind, who)), sel: false })
   }
   const p = activeProfile(st)
   if (p && !p.protected) head.push({ text: t.warn(' ' + i.noPasswordWarn), sel: false })
@@ -382,6 +383,10 @@ const devVarsOf = (st, pub) => (st.secrets?.dev || []).find((x) => x.pub === pub
  * acta sin poder arrancar del todo. Aquí se cuenta cuántas, que es lo que cabe en una
  * fila; el detalle está en la consola.
  */
+/** El ID corto de un aparato a partir de su llave, tal como lo enseña la lista de Aparatos. */
+const deviceIdOf = (st, pub) =>
+  (st.devices?.issued || []).find((d) => d.sub === pub)?.deviceId || (st.members || []).find((m) => m.pub === pub)?.id || pub.slice(0, 8)
+
 const debtOf = (st, pub) => {
   const d = (st.secrets?.incomplete || []).find((x) => x.pub === pub)
   return d ? [...new Set(Object.values(d.owners || {}).flat())].length : 0

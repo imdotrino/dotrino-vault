@@ -153,9 +153,9 @@ const T = {
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
     var_shared: 'la usan todas las máquinas',
     pend_t: 'Hay variables sin entregar',
-    pend_b: 'Estos grupos no han podido entregar su llave, así que sus aparatos no están leyendo sus variables. Se arregla guardando aquí cualquier variable de ese grupo con la contraseña.',
+    pend_b: 'Estos aparatos aún no tienen la llave de su grupo, así que no leen esas variables. Se arregla solo cuando otro aparato del grupo está encendido y se la reparte, o al abrir la bóveda en su computadora.',
     pend_rotate: 'salió un aparato del grupo',
-    pend_rewrap: 'entró un aparato al grupo',
+    pend_rewrap: 'sin llave todavía',
     nopwd_t: 'Esta bóveda no tiene contraseña',
     nopwd_b: 'Sus variables privadas se abren con una llave de la computadora donde vive la bóveda, y esa llave está en ese mismo disco: quien copie el disco las abre. Ponle una contraseña en esa computadora.',
     var_dev_t: 'Sus variables',
@@ -295,9 +295,9 @@ const T = {
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
     pend_t: 'Some variables are not being delivered',
-    pend_b: 'These groups could not hand out their key, so their devices are not reading their variables. Save any variable of that group here, with the password, and it is fixed.',
+    pend_b: 'These devices do not have their group key yet, so they are not reading those variables. It fixes itself when another device of the group is on and hands it out, or when the vault is opened on its computer.',
     pend_rotate: 'a device left the group',
-    pend_rewrap: 'a device joined the group',
+    pend_rewrap: 'no key yet',
     nopwd_t: 'This vault has no password',
     nopwd_b: 'Its private variables open with a key from the computer where the vault lives, and that key sits on the same disk: whoever copies the disk opens them. Set a password on that computer.',
     var_dev_t: 'Its variables',
@@ -989,7 +989,16 @@ const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)
  * justo quien puede saldarlo — tiene la contraseña, la bóveda no.
  */
 const pendingVars = computed(() => Object.entries(vars.value?.pending || {})
-  .map(([owner, info]) => ({ owner, kind: info?.kind || 'rewrap' })))
+  .map(([owner, info]) => ({
+    owner,
+    kind: info?.kind || 'rewrap',
+    // Calculado por la bóveda: quién no puede abrir qué. Se enseña por aparato (su ID,
+    // que es como lo reconoce quien administra) y con las variables que le faltan.
+    members: (info?.members || []).map((m) => ({
+      id: members.value.find((x) => x.pub === m.pub)?.id || m.pub.slice(0, 8),
+      keys: m.keys || []
+    }))
+  })))
 
 /** La bóveda dice si su perfil tiene contraseña. Sin ella, el sellado no protege de
     una copia del disco, y eso se dice — no se calla por incómodo. */
@@ -1417,6 +1426,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <ul>
               <li v-for="p in pendingVars" :key="p.owner" :data-owner="p.owner">
                 <code>{{ p.owner }}</code> — {{ p.kind === 'rotate' ? t.pend_rotate : t.pend_rewrap }}
+                <span v-for="m in p.members" :key="m.id" class="debtm"><code>{{ m.id }}</code>: {{ m.keys.join(', ') }}</span>
               </li>
             </ul>
             <small>{{ t.pend_b }}</small>
