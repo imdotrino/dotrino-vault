@@ -84,15 +84,12 @@ test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecret
   })
   assert.deepEqual(link.cert.scope, ['vault:sign', 'vault:secrets:eco'])
   assert.ok(link.device?.privateJwk && link.enc?.privateJwk && link.enc?.publickey, 'las dos llaves')
-  // En el acta entra con su cajón. Que lleve TAMBIÉN `sign` lo decide el acta
-  // (@dotrino/identity ≥ 0.57: permisos, no tipos); hasta que todos los que verifican
-  // el acta (node de contenido, agentes de los proxios, el iframe de identidad) corran
-  // esa versión, el vault sigue en 0.56 y el acta la recorta a `secrets` — el cert sí
-  // lleva `vault:sign`, que es lo que comprueban el node y las apps. Ver PENDIENTES.md.
+  // En el acta entra con TODAS sus capacidades (identity ≥ 0.57: permisos, no tipos):
+  // el cajón no borra la firma.
   const me = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === link.device.publickey)
   assert.ok(me, 'está en el acta')
   assert.equal(me.cn, 'eco')
-  assert.ok(me.caps.includes('secrets'))
+  assert.deepEqual([...me.caps].sort(), ['secrets', 'sign'])
   assert.equal(link.iss, qr.iss)
   const secrets = await fetchSecrets({ ns: 'eco', proxyUrl, masterPubkey: link.iss, device: link.device, cert: link.cert, enc: link.enc })
   assert.deepEqual(secrets, { BUFFER_API_KEY: 'b-789' })
