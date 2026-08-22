@@ -784,6 +784,15 @@ dotrino-vault ssh keys            # las llaves registradas (= ssh-add -L)
 ssh mi-servidor                   # el teléfono pide tu «sí» y firma
 ```
 
+**La bóveda puede estar en OTRA máquina** (la de Dotrino en el VPS): en tu PC corre el
+agente **delgado**, que no custodia nada y reenvía cada reto como un pedido a la bóveda
+que enroló ese servicio:
+
+```sh
+dotrino-env enroll --ns claude                   # una vez, contra la bóveda que sea
+dotrino-env ssh-agent --ns claude                # imprime export SSH_AUTH_SOCK=…
+```
+
 Para no aprobar cada comando, reusa la conexión con `ControlMaster auto` +
 `ControlPersist 15m` en `~/.ssh/config`: esa es la ventana de 15 min del SSH.
 `DOTRINO_VAULT_SSH_AGENT=0` apaga el agente.

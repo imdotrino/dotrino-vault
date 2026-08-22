@@ -163,3 +163,79 @@ test('la llave del teléfono se registra, el agente la lista, y firmar pasa por 
   await rpc({ op: 'ssh.key.rm', id: added.id })
   assert.equal((await agentCall(11)).payload.readUInt32BE(0), 0)
 })
+
+test('agente DELGADO en otra máquina: un servicio con sign reenvía el reto a la bóveda y el teléfono firma', async () => {
+  const { enrollWithVault, listSshKeys, requestSshSign } = await import('../lib/src/service.js')
+  const { signWithDevice } = await import('@dotrino/identity/capabilities')
+  const { requestRenew } = await import('@dotrino/identity/vault/remote.js')
+  const { MSG } = await import('../src/protocol.js')
+  const { p256Blob, readStrings } = await import('../src/sshKeys.js')
+  const { startSshAgent } = await import('../src/sshAgent.js')
+
+  const ttl = 30 * 24 * 60 * 60 * 1000
+  const inv = await vault.startPairing({ scope: ['vault:sign'], label: 'phone2', ttlMs: ttl })
+  const phone = await enrollWithVault({ qr: inv.qr, label: 'phone2', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  // La otra máquina: un servicio cualquiera con firma (Claude en su PC).
+  const inv2 = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:claude'], label: 'claude', ttlMs: ttl })
+  const svc = await enrollWithVault({ qr: inv2.qr, label: 'claude', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  const svcArgs = { ns: 'claude', proxyUrl, masterPubkey: vault.master, device: svc.device, cert: svc.cert }
+
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const rpc = async (data) => {
+    const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+    await c.connect()
+    try {
+      const signed = { ...data, publickey: phone.device.publickey, ts: Date.now() }
+      const { signature } = await signWithDevice({ privateJwk: phone.device.privateJwk, data: signed })
+      const res = new Promise((resolve, reject) => {
+        c.on('message', (_f, p) => { if (p?.type === MSG.SECRETS_RESULT) resolve(p.body); else if (p?.type === MSG.ERROR) reject(new Error(p.error)) })
+        setTimeout(() => reject(new Error('timeout')), 8000)
+      })
+      c.sendByPubkey(vault.master, { type: MSG.SECRETS, data: signed, signature, cert: phoneCert })
+      return await res
+    } finally { c.close() }
+  }
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const jwk = publicKey.export({ format: 'jwk' })
+  const blob = p256Blob(jwk)
+  await rpc({ op: 'ssh.key.add', pub: `ecdsa-sha2-nistp256 ${blob.toString('base64')} phone2` })
+
+  // Con la identidad del servicio: lista públicas y pide una firma.
+  const keys = await listSshKeys(svcArgs)
+  assert.equal(keys.length, 1); assert.equal(keys[0].comment, 'phone2')
+
+  // El agente delgado, con su socket, delante del `ssh` del usuario.
+  const sock2 = path.join(tmp('sock2-'), 'a.sock')
+  let cache = []
+  const thin = startSshAgent({
+    socketPath: sock2, log: () => {},
+    refresh: async () => { cache = await listSshKeys(svcArgs) },
+    vault: () => ({ sshKeys: () => cache, requestSshSign: ({ keyId, data }) => requestSshSign(svcArgs, { keyId, data }) })
+  })
+  await new Promise((r) => setTimeout(r, 100))
+  const prevSock = sock; sock = sock2
+  try {
+    const data = Buffer.from('reto-remoto')
+    const signing = agentCall(13, Buffer.concat([sshStr(blob), sshStr(data), Buffer.alloc(4)]))
+    await new Promise((r) => setTimeout(r, 900))
+    const [pend] = vault.listApprovals()
+    assert.equal(pend?.kind, 'ssh')
+    assert.notEqual(pend.deviceId, null, 'el pedido dice qué aparato lo pidió')
+    const raw = sign('sha256', data, { key: privateKey, dsaEncoding: 'ieee-p1363' })
+    await rpc({ op: 'approve', id: pend.id, sig: raw.toString('base64') })
+    const r = await signing
+    assert.equal(r.type, 14)
+    const [sigBlob] = readStrings(r.payload, 1)
+    const [algo] = readStrings(sigBlob, 1)
+    assert.equal(algo.toString(), 'ecdsa-sha2-nistp256')
+
+    // Denegado: FAILURE, sin firma.
+    const s2 = agentCall(13, Buffer.concat([sshStr(blob), sshStr(data), Buffer.alloc(4)]))
+    await new Promise((r) => setTimeout(r, 900))
+    const [p2] = vault.listApprovals()
+    await rpc({ op: 'deny', id: p2.id })
+    assert.equal((await s2).type, 5)
+  } finally { sock = prevSock; thin.close() }
+})

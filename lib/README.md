@@ -279,3 +279,10 @@ cert de una máquina vigente: sin esto toda máquina enrolada caducaba a los 30 
 | bitácora, cifrado en reposo, candado, multi-perfil | son del daemon; en el navegador dependen de `@dotrino/identity` |
 
 MIT · parte de [Dotrino](https://dotrino.com).
+
+## Agente SSH delgado (`dotrino-env ssh-agent`)
+
+La llave SSH vive en el teléfono del dueño (registrada en su bóveda). En esta máquina solo
+corre un agente `ssh-agent` sin llaves: cada `SIGN_REQUEST` viaja a la bóveda como un
+pedido que el teléfono aprueba firmando. `dotrino-env ssh-agent --ns <ns>` imprime el
+`SSH_AUTH_SOCK`. Como librería: `listSshKeys(args)` y `requestSshSign(args, { keyId, data })`.

@@ -490,6 +490,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
     if (['approvals', 'approve', 'deny', 'ssh.keys', 'ssh.key.add', 'ssh.key.rm'].includes(p.data?.op)) return handleApproval(from, p)
+    if (p.data?.op === 'ssh.sign' || p.data?.op === 'ssh.keys.public') return handleSshRemote(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
@@ -565,19 +566,49 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * teléfono. No hay ventana: cada conexión es un «sí» — para no repetirlo veinte veces
    * está `ControlMaster` en el `ssh_config`, que reusa la conexión 15 min.
    */
-  function requestSshSign ({ keyId, data }) {
+  function requestSshSign ({ keyId, data, askedBy = null, onPending = null }) {
     const key = readSshKeys().find((k) => k.id === keyId)
     if (!key) return Promise.reject(new Error('ssh: unknown key'))
     return new Promise((resolve, reject) => {
       const pend = approvals.request({
-        kind: 'ssh', ns: 'ssh', deviceId: fp.slice(0, 4).toUpperCase() + '-' + fp.slice(4, 8).toUpperCase(), label: 'ssh',
+        kind: 'ssh', ns: 'ssh', deviceId: askedBy || (fp.slice(0, 4).toUpperCase() + '-' + fp.slice(4, 8).toUpperCase()), label: 'ssh',
         ssh: { key: key.id, comment: key.comment, data: Buffer.from(data).toString('base64') },
         resolve, reject
       })
-      audit('ssh.pending', { key: key.id, id: pend.id })
+      try { onPending?.(pend) } catch (_) {}
+      audit('ssh.pending', { key: key.id, id: pend.id, device: askedBy || null })
       log(`[vault] ssh: ${key.comment || key.id} is waiting for the phone to sign (${pend.id})`)
       identity.profileActa?.().catch(() => null).then((r) => notifyApprovers(pend, r?.acta))
     })
+  }
+
+  /**
+   * AGENTE SSH DELGADO en otra máquina (`dotrino-env ssh-agent`): un aparato con `vault:sign`
+   * pide que un reto se firme con una llave del teléfono. No hay nada que proteger en el
+   * que pide: solo convierte el reto en un pedido; quien firma es el teléfono.
+   */
+  async function handleSshRemote (from, p) {
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'ssh')
+    const answer = async (body) => {
+      body = { ...body, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+    }
+    if (p.data.op === 'ssh.keys.public') return answer({ op: 'ssh.keys.public', items: sshKeys().map((k) => ({ id: k.id, blob: k.blob, comment: k.comment })) })
+    const key = readSshKeys().find((k) => k.id === p.data.key)
+    if (!key || typeof p.data.data !== 'string') return reply(from, { type: MSG.ERROR, error: 'ssh: unknown key' })
+    const asker = await deviceIdOf(chk.device).catch(() => null)
+    let pendId = null
+    const done = requestSshSign({ keyId: key.id, data: Buffer.from(p.data.data, 'base64'), askedBy: asker, onPending: (pend) => { pendId = pend.id } })
+    await answer({ op: 'ssh.pending', id: pendId, exp: Date.now() + 5 * 60 * 1000 })
+    try {
+      const sig = await done
+      await answer({ op: 'ssh.sign.result', sig: Buffer.from(sig).toString('base64') })
+    } catch (e) { reply(from, { type: MSG.ERROR, error: e.message }) }
   }
 
   /**
