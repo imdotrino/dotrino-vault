@@ -39,7 +39,7 @@ const T = {
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Master',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     debt_t: 'Este aparato todavía no puede abrir:',
@@ -145,6 +145,13 @@ const T = {
     invite_url: 'O pásale este enlace:',
     invite_copy: 'Copiar enlace', invite_copied: 'Copiado',
     adm_pending: 'Un dispositivo quiere conectarse',
+    // PEDIDOS DE APROBACIÓN: un cajón con aprobación por uso espera la firma de este aparato.
+    apv_t: 'Pedidos',
+    apv_none: 'Nadie está pidiendo nada.',
+    apv_asks: 'pide tus claves de',
+    apv_left: 'vence en',
+    apv_approve: 'Aprobar', apv_deny: 'Denegar',
+    apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -196,7 +203,7 @@ const T = {
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'Master',
     members: 'Devices', me: 'this device', is_master: 'Master',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     debt_t: 'This device cannot open yet:',
@@ -283,6 +290,12 @@ const T = {
     invite_url: 'Or send it this link:',
     invite_copy: 'Copy link', invite_copied: 'Copied',
     adm_pending: 'A device wants to connect',
+    apv_t: 'Requests',
+    apv_none: 'Nobody is asking for anything.',
+    apv_asks: 'asks for your keys of',
+    apv_left: 'expires in',
+    apv_approve: 'Approve', apv_deny: 'Deny',
+    apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
     var_t: 'Your apps\u2019 variables',
@@ -604,6 +617,7 @@ onMounted(async () => {
   })
   await refreshSelf()
   await refreshAdmin()
+  await refreshApprovals()
 })
 
 let offVault = null
@@ -917,6 +931,29 @@ async function refreshAdmin () {
   } catch (_) { canAdmin.value = false }
 }
 
+// ---------- PEDIDOS DE APROBACIÓN ----------
+// Un cajón con `secret policy <ns> approval on` no se entrega solo: la bóveda apunta el
+// pedido y espera la firma de un aparato con `aprueba` (este). Lo que se ve es el
+// pedido —quién, qué cajón, cuánto le queda— y dos botones. Se sondea cada 5 s mientras
+// la pantalla está a la vista; el aviso que despierta a la app llega por otro camino.
+const canApprove = ref(false)
+const approvals = ref([])
+let apvTimer = null
+async function refreshApprovals () {
+  try {
+    canApprove.value = await id.value.canApproveVault()
+    if (!canApprove.value) { approvals.value = []; return }
+    const r = await id.value.vaultApprovals('approvals')
+    approvals.value = Array.isArray(r?.items) ? r.items : []
+  } catch (_) { approvals.value = [] }
+}
+const apvLeft = (p) => Math.max(0, Math.round((p.exp - Date.now()) / 1000))
+const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id }); await refreshApprovals() })
+const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id }); await refreshApprovals() })
+const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals() }
+onMounted(() => { apvTimer = setInterval(apvTick, 5000); document.addEventListener('visibilitychange', apvTick) })
+onBeforeUnmount(() => { clearInterval(apvTimer); document.removeEventListener('visibilitychange', apvTick) })
+
 // ---------- VARIABLES DE ENTORNO (docs/consola-remota.md) ----------
 // Lo que se puede ver de una variable lo decide su dueño en la bóveda: de una PÚBLICA
 // llega el valor, de una PRIVADA solo el nombre. Poner un valor nuevo se puede en las dos
@@ -1221,7 +1258,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           </div>
           <p v-if="m.noAccess" class="muted svc-note">{{ t.dev_nocert_b }}</p>
           <div class="caps">
-            <button v-for="c in (m.cn ? ['secrets'] : ['sign','store','read','admin'])" :key="c"
+            <button v-for="c in (m.cn ? ['secrets','sign','approve'] : ['sign','store','read','admin','approve'])" :key="c"
                     class="cap" :class="{ on: m.caps.includes(c) }"
                     :disabled="!isMaster || busy === 'caps-' + m.pub"
                     :data-testid="'cap-' + c + '-' + m.id"
@@ -1325,6 +1362,20 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
       </div>
+
+      <!-- PEDIDOS: solo si el cert de este aparato lleva `approve`. Administrativa: el
+           pedido y sus dos botones; la advertencia se queda a la vista (no es explicación). -->
+      <template v-if="canApprove">
+        <h2>{{ t.apv_t }}</h2>
+        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
+        <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
+          <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
+            <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
+          <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
+          <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
+        </div>
+        <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+      </template>
 
       <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
       <template v-if="canAdmin">
