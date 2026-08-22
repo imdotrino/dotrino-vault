@@ -815,3 +815,31 @@ test('un aparato de administracion VE el valor sin ninguna contrasena (§8.2)', 
   const ajenoPub = JSON.stringify(await crypto.subtle.exportKey('jwk', ajeno.publicKey))
   await assert.rejects(() => vault.vars.reveal({ ns, key: 'TOKEN', device: ajenoPub }), /no wrapping/)
 })
+
+/**
+ * EL INVARIANTE del 2026-08-22: un cajón CON DUEÑO no se envuelve para quien administra.
+ *
+ * Es lo que hace que el token de R2 o las llaves de TURN no se puedan abrir desde un
+ * navegador. Y se comprueba mirando el llavero, no la respuesta de una API: la protección
+ * tenía que ser que la envoltura NO EXISTA, no que la bóveda se niegue a darla — un
+ * envoltorio guardado se abre con el disco, sin preguntarle a nadie.
+ */
+test('un cajón con servicio dueño NO lleva envoltura de quien administra', async () => {
+  const ns = 'condueno'
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
+  const dir = tmp('svc-dueno-')
+  const { enrollService } = await import('../lib/src/service.js')
+  const svc = await enrollService({
+    qr, ns, dir, label: 'service:' + ns,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+
+  await vault.secrets.set(ns, 'TOKEN', 'el-secreto-del-servicio')
+
+  const destinatarios = vault.secrets.recipientsIn(`ns:${ns}`)
+
+  assert.ok(destinatarios.includes(svc.device.publickey), 'su servicio sí, faltaría más')
+  assert.ok(destinatarios.includes('#recovery'), 'y la recuperación, que es lo que abre la frase')
+  assert.equal(destinatarios.length, 2,
+    'y NADIE más: ningún aparato que administre entra en un cajón que tiene dueño')
+})

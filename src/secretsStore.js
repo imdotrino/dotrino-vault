@@ -368,6 +368,82 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       return { pub: false, gen: e.gen, e: e.e, seal: e.seal || null, wrap: g?.wraps?.[memberPub] || null }
     },
 
+    /**
+     * Las variables privadas de un cajón que ESE miembro **no puede abrir**: las que no
+     * tienen envoltura para su llave en la generación vigente.
+     *
+     * Es la deuda del §8.7 vista desde el aparato en vez de desde el cajón. Un aparato
+     * que entra después de escrita una variable no tiene envoltura de ella —y no la
+     * puede tener, porque envolver exige abrir la CEK y eso pide la frase—, así que se
+     * queda sin poder leerla. Eso es correcto y no se relaja; lo que no puede pasar es
+     * que no se vea, que era el modo de fallo de verdad: un servicio en el acta,
+     * aparentemente bien, que arranca sin configuración.
+     *
+     * @param {string} owner `ns:<scope>` o `dev:<pub>`
+     * @param {string} memberPub la llave de FIRMA del miembro (así se indexan las envolturas)
+     * @returns {string[]} nombres de variables, vacío si puede con todas
+     */
+    missingFor (owner, memberPub) {
+      if (isLegacy()) return []
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      const out = []
+      for (const [key, e] of Object.entries(varsOf(bag, k))) {
+        if (e.pub) continue
+        const g = (bag[k]?.keyring || []).find((x) => x.gen === e.gen)
+        if (!g?.wraps?.[memberPub]) out.push(key)
+      }
+      return out
+    },
+
+    /**
+     * Las generaciones de un cajón que a `memberPub` le faltan, con LA ENVOLTURA DE
+     * QUIEN PREGUNTA para cada una. Es lo que necesita un aparato que administra para
+     * completar a otro sin la frase: abre cada una con su llave y la vuelve a envolver
+     * (`rewrapFor` de `@dotrino/identity`).
+     *
+     * Devuelve solo las generaciones que están EN USO (alguna variable las apunta): las
+     * viejas no hacen falta y re-envolverlas sería repartir llaves que ya no abren nada.
+     *
+     * @returns {Array<{ gen: number, mine: any }>} vacío si quien pregunta tampoco puede
+     */
+    wrapsToShare (owner, memberPub, myPub) {
+      if (isLegacy()) return []
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      const inUse = new Set(Object.values(varsOf(bag, k)).filter((e) => !e.pub).map((e) => e.gen))
+      const out = []
+      for (const g of bag[k]?.keyring || []) {
+        if (!inUse.has(g.gen) || g.wraps?.[memberPub]) continue
+        if (g.wraps?.[myPub]) out.push({ gen: g.gen, mine: g.wraps[myPub] })
+      }
+      return out
+    },
+
+    /**
+     * Guarda una envoltura que hizo otro. La bóveda NO la puede comprobar —abrirla
+     * exigiría la frase, que es justo lo que este camino evita—, así que lo que sí
+     * comprueba es lo que puede: que la generación exista y que ese miembro no tuviera
+     * ya una. Una envoltura mala deja al servicio sin leer, que se ve; no da acceso a
+     * nadie.
+     */
+    putWrap (owner, gen, memberPub, wrap) {
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      const g = (bag[k]?.keyring || []).find((x) => x.gen === gen)
+      if (!g) throw new Error(`putWrap: no existe la generación ${gen} de ${owner}`)
+      if (!wrap?.epk || !wrap?.iv || !wrap?.ct) throw new Error('putWrap: envoltura mal formada')
+      // SOLO AÑADE, NUNCA PISA. Quien re-envuelve es un servicio, y un servicio no
+      // administra: si pudiera reemplazar una envoltura existente podría dejar sin leer
+      // a otro miembro —o a quien administra— con una envoltura basura, y eso es
+      // denegación de servicio disfrazada de reparto. Reemplazar es cosa de la bóveda,
+      // por el camino de escribir (que estrena generación entera).
+      if (g.wraps?.[memberPub]) throw new Error(`putWrap: ${memberPub.slice(0, 12)}… ya tiene envoltura de la generación ${gen}`)
+      g.wraps = { ...(g.wraps || {}), [memberPub]: wrap }
+      save()
+      return true
+    },
+
     /** Lo mismo para una versión anterior: es lo que hace posible revertir desde un aparato. */
     sealedHistoryFor (owner, key, ts, memberPub) {
       const h = data.history.find((x) => x.owner === owner && x.key === key && x.ts === ts)
@@ -545,6 +621,18 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       for (const pub of Object.keys(data.dev)) out[pub] = names(data.dev, pub)
       return out
     },
+    /**
+     * QUIÉN puede abrir la generación vigente de un cajón (sus llaves de firma, más
+     * `#recovery`). Es diagnóstico, no un secreto: saber a cuántos se les envolvió no
+     * ayuda a abrir nada, y en cambio es lo único que responde de verdad a «¿quién
+     * puede leer esto?» — que es la pregunta que uno se hace mirando un cajón.
+     */
+    recipientsIn (owner) {
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      return Object.keys(topGen(bag, k)?.wraps || {})
+    },
+
     /** Las PÚBLICAS de un scope, con valor. Lo que la consola remota puede ver. */
     publicOf (ns) {
       assertNs(ns)
@@ -601,8 +689,12 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * Y por eso ESTO sí pide la frase: heredar lo viejo obliga a abrirlo.
      */
     async rewrap (...a) { return enFila(() => this._rewrap(...a)) },
+    /** Los cajones que existen, para poder recorrerlos todos (`ns:…` y `dev:…`). */
+    owners () {
+      return [...Object.keys(data.ns).map((k) => `ns:${k}`), ...Object.keys(data.dev).map((k) => `dev:${k}`)]
+    },
     /** @private */
-    async _rewrap (owner, members, adminKey = null) {
+    async _rewrap (owner, members, adminKey = null, { exact = false } = {}) {
       needSealer('re-wrap the key of a drawer')
       if (needsMigration()) throw new NeedsMigration()
       const [kind, k] = splitOwner(owner)
@@ -616,7 +708,17 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
         if (!w) continue
         const cek = await sealer.openWrapWith(priv, w)
         const r = await sealer.wrapFor(cek, members)
-        g.wraps = { ...g.wraps, ...r.wraps }
+        // `exact`: el llavero queda con lo que dice el acta y NADA más. Es lo que hace
+        // falta para rehacerlo al abrir la bóveda:
+        //   · una envoltura basura que metió alguien se reemplaza por la buena;
+        //   · una que sobra —de quien administraba antes de que este cajón tuviera
+        //     dueño, o de un miembro inventado— se cae.
+        // Sin `exact` se fusiona, que es lo correcto cuando solo se está repartiendo a
+        // unos pocos y no se quiere tocar al resto.
+        //
+        // OJO con lo que esto NO es: quitarle la envoltura a alguien no le quita lo que
+        // ya leyó ni la llave que se haya guardado. Cortar de verdad es `rotate`.
+        g.wraps = exact ? { ...r.wraps, [RECOVERY]: w } : { ...g.wraps, ...r.wraps }
         for (const s of r.sinLlave) sinLlave.add(s)
         wrapped += Object.keys(r.wraps).length
       }

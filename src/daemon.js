@@ -238,7 +238,28 @@ export async function runDaemon () {
       case 'rm': { const r = await mgr.remove(req.profile); return { done: `perfil borrado: ${r.name || r.id}` } }
       case 'rename': { const p = mgr.profiles.rename(ref(), req.name); return { done: `perfil renombrado: ${p.name}` } }
       case 'use': { const p = mgr.profiles.setCurrent(ref()); return { done: `perfil activo: ${p.name || p.id}` } }
-      case 'unlock': { await mgr.profiles.unlock(ref(), req.password); return { done: 'perfil desbloqueado' } }
+      // ABRIR LA BÓVEDA SALDA LO QUE SE DEBE. Un aparato que entró después de escrita
+      // una variable no puede abrirla —envolverle su llave exige abrir la CEK, y eso
+      // pide la frase—, así que se queda en deuda y se ve en la consola y en la TUI.
+      // Este es el único momento en que la frase está delante, así que es aquí donde se
+      // paga; el dueño no tiene que acordarse de un comando aparte.
+      case 'unlock': {
+        const id = ref()
+        await mgr.profiles.unlock(id, req.password)
+        let note = ''
+        try {
+          const ak = await mgr.profiles.adminKey(id, req.password)
+          // REHACER el llavero, no solo saldar: con la frase delante se puede dejar cada
+          // cajón envuelto para exactamente quien dice el acta — creando lo que falta,
+          // reemplazando lo que alguien metiera mal y quitando lo que sobre.
+          const r = await mgr.get(id)?.resealAll?.(ak)
+          if (r?.wrapped) console.log('[vault] keyring rebuilt on unlock: %d wrap(s) in %d drawer(s)%s',
+            r.wrapped, r.drawers, r.dropped ? `, ${r.dropped} stale one(s) dropped` : '')
+          if (r?.dropped) note = ` · llavero al día (${r.dropped} envoltura(s) de más retirada(s))`
+          else if (r?.wrapped) note = ' · llavero al día'
+        } catch (e) { console.error('[vault] could not rebuild the keyring on unlock:', e.message) }
+        return { done: 'perfil desbloqueado' + note }
+      }
       case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
       // PONER contraseña: los secretos pasan de abrirse con la llave de la máquina a
       // abrirse con la frase. Hay que volver a cerrar la copia maestra con la nueva, o

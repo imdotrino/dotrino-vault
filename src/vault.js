@@ -712,6 +712,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return {
         enc: await identity.sealContent(JSON.stringify({
           ns: listSecrets(), dev: await listDeviceSecrets(),
+          // Aparatos que están en el acta pero no pueden abrir lo suyo: hay que
+          // enseñarlo donde se administra, no solo en el log del servicio.
+          incomplete: await incompleteMembers(),
           // Lo que quedó a deber un sellado: quien administra a distancia tiene que
           // poder verlo, porque es exactamente lo que él puede saldar (escribiendo una
           // variable con la contraseña) y la bóveda no.
@@ -902,13 +905,42 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return (record?.members || []).filter((m) => !m.cn && m.encPub && m.pub !== master)
   }
 
-  /** Los destinatarios de un cajón: quien lo consume, más quien lo administra. */
+  /**
+   * Los destinatarios de un cajón. Y la regla que decide quién NO entra, que es la que
+   * importa (decidida por el dueño el 2026-08-22):
+   *
+   * **UN CAJÓN CON DUEÑO NO SE ENVUELVE PARA QUIEN ADMINISTRA.** Si el acta dice que
+   * hay un servicio que consume ese `ns`, sus variables son suyas y de nadie más: el
+   * token de R2 o las llaves de TURN no se pueden abrir desde un navegador, ni aunque
+   * alguien se lleve tu portátil con la sesión puesta.
+   *
+   * Dos cosas que hacen que esto se sostenga:
+   *
+   *  · **No es una negativa, es que no existe.** Se podría haber dejado el envoltorio y
+   *    que la bóveda se negara a entregarlo, pero entonces la protección sería una
+   *    política: el envoltorio seguiría en el disco, y quien tuviera el disco más la
+   *    llave de un aparato que administra lo abriría sin preguntarle a nadie. Lo que no
+   *    se crea no se puede saltar.
+   *  · **El criterio es ESTRUCTURAL, no de tiempo de ejecución.** Se mira el acta —qué
+   *    dice la maestra que existe—, no quién está encendido. «Hay un servicio activo»
+   *    se puede forzar esperando a que ese servicio esté caído.
+   *
+   * Y sigue habiendo quien pueda repartir: el propio SERVICIO re-envuelve para un
+   * miembro nuevo de su cajón (ya tiene la CEK, así que no gana nada), y la frase
+   * abre la envoltura de recuperación, que `wrapAll` añade siempre.
+   */
   async function recipientsOf (owner) {
-    const admins = await adminDevices()
-    if (owner.startsWith('ns:')) return [...await nsMembers(owner.slice(3)), ...admins]
+    if (owner.startsWith('ns:')) {
+      const owned = await nsMembers(owner.slice(3))
+      // Sin dueño (un cajón personal, o uno cuyo servicio ya no está) sí entra quien
+      // administra: si no, no quedaría nadie que pudiera abrirlo sin la frase.
+      return owned.length ? owned : await adminDevices()
+    }
     const pub = owner.slice(owner.indexOf(':') + 1)
     const m = await memberOf(pub)
-    return [...(m ? [m] : []), ...admins]
+    // El cajón propio de un aparato de SERVICIO es tan suyo como el de su ns.
+    if (m?.cn) return [m]
+    return [...(m ? [m] : []), ...await adminDevices()]
   }
 
   /**
@@ -975,6 +1007,46 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * enseñarlas es la diferencia entre un servicio mal configurado y uno mal configurado
    * que además nadie ve.
    */
+  /**
+   * Los aparatos INCOMPLETOS: los que están en el acta pero no pueden abrir alguna de
+   * las variables que les tocan (§8.7). Pasa siempre que entra uno nuevo — envolverle su
+   * llave exige abrir la CEK, y eso pide la frase, que por el camino del enrolamiento no
+   * hay quien la teclee.
+   *
+   * Que no puedan leer es CORRECTO y no se relaja. Lo que se arregla aquí es que se
+   * vea: hasta ahora un servicio recién enrolado aparecía en la lista como cualquier
+   * otro y arrancaba sin configuración, repitiendo un error en su propio log que nadie
+   * mira. Con esto, la consola y la TUI pueden decir exactamente qué falta y qué hacer
+   * (`dotrino-vault secret settle`, que sí pide la frase).
+   *
+   * @returns {Promise<Array<{ pub: string, cn: string|null, owners: Record<string, string[]> }>>}
+   */
+  async function incompleteMembers () {
+    if (secrets.isLegacy?.()) return []
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const out = []
+    for (const m of record?.members || []) {
+      if (!m.encPub || m.pub === master) continue
+      const owners = {}
+      // Un servicio lee su cajón de ns y el suyo propio; un aparato que administra
+      // puede DESTAPAR cualquiera, así que se le miran todos: sin envoltura, el botón
+      // «Ver» de la consola le fallaría sin explicar por qué.
+      // Un aparato que administra NO debe tener envoltura de los cajones con dueño
+      // (`recipientsOf`), así que no se le cuenta como falta: lo que ahí falta es a
+      // propósito y ponerlo en la lista sería pedir que se «arregle» lo correcto.
+      const ownedNs = new Set((record?.members || []).filter((x) => x.cn).map((x) => x.cn))
+      const drawers = m.cn
+        ? [`ns:${m.cn}`, `dev:${m.pub}`]
+        : [...Object.keys(secrets.list()).filter((ns) => !ownedNs.has(ns)).map((ns) => `ns:${ns}`), `dev:${m.pub}`]
+      for (const owner of drawers) {
+        const missing = secrets.missingFor(owner, m.pub)
+        if (missing.length) owners[owner] = missing
+      }
+      if (Object.keys(owners).length) out.push({ pub: m.pub, cn: m.cn || null, owners })
+    }
+    return out
+  }
+
   function rotationsDue () {
     const out = {}
     for (const [k, v] of Object.entries(store.listSettings?.() || {})) {
@@ -1046,11 +1118,59 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * No lanza: devuelve qué pasó con cada cajón, porque una deuda que no se puede saldar
    * tiene que seguir viéndose en la lista en vez de tumbar la operación entera.
    */
+  /**
+   * REHACE EL LLAVERO ENTERO con la frase delante (pedido del dueño, 2026-08-22).
+   *
+   * La bóveda no puede *comprobar* una envoltura ajena —abrirla es cosa de su
+   * destinatario—, así que la integridad no se verifica: se **restablece**. Abierta, la
+   * bóveda puede abrir cada CEK por su envoltura de recuperación y volver a envolverla
+   * para exactamente quien el acta dice, y para nadie más. En una pasada:
+   *
+   *  · se crean las que faltaban (la deuda de un aparato que entró después);
+   *  · se reemplaza cualquiera que alguien hubiera metido mal —un servicio solo puede
+   *    AÑADIR envolturas, pero añadir una basura a quien no tenía deja a ese sin leer—;
+   *  · se caen las que sobran: la de quien administraba un cajón que hoy tiene dueño, o
+   *    la de un miembro que ya no está.
+   *
+   * Lo que NO hace, y conviene no confundir: quitar una envoltura no le quita a nadie lo
+   * que ya leyó, ni una llave que se haya guardado. Para eso está `rotate`.
+   */
+  async function resealAll (adminKey = null) {
+    const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [] }
+    for (const owner of secrets.owners?.() || []) {
+      const before = new Set(secrets.recipientsIn(owner))
+      const members = await recipientsOf(owner)
+      try {
+        const r = await secrets.rewrap(owner, members, adminKey, { exact: true })
+        const after = new Set(secrets.recipientsIn(owner))
+        out.drawers++
+        out.wrapped += r?.wrapped || 0
+        out.dropped += [...before].filter((p) => !after.has(p)).length
+        for (const p of r?.sinLlave || []) out.sinLlave.push(p)
+      } catch (e) {
+        log(`[vault] ${owner}: could not reseal (${e.message})`)
+      }
+    }
+    if (out.dropped) audit('secret.reseal', { drawers: out.drawers, dropped: out.dropped })
+    return out
+  }
+
   async function settleSecretDebts (adminKey = null) {
     const out = {}
-    for (const owner of Object.keys(rotationsDue())) {
+    // Las deudas ANOTADAS más las que se ven MIRANDO: un aparato puede quedarse sin
+    // envoltura sin que nadie llegara a anotar nada (basta con que el apunte se pierda
+    // por un camino que no pase por `spreadKey`), y entonces `settle` contestaba «nada
+    // pendiente» mientras el servicio repetía en su log que no podía leer. Se calcula,
+    // que es barato y no depende de que alguien se acordara de apuntarlo.
+    const debts = new Set(Object.keys(rotationsDue()))
+    for (const m of await incompleteMembers()) for (const owner of Object.keys(m.owners)) debts.add(owner)
+
+    for (const owner of debts) {
       const k = owner.slice(owner.indexOf(':') + 1)
-      const members = owner.startsWith('ns:') ? await nsMembers(k) : [await memberOf(k)].filter(Boolean)
+      // Los destinatarios de un cajón no son solo quien lo consume: también quien lo
+      // administra (`recipientsOf`). Envolver solo para los primeros dejaba a la consola
+      // sin poder destapar lo que ella misma acababa de saldar.
+      const members = await recipientsOf(owner)
       try { out[owner] = await spreadKey(owner, members, adminKey) } catch (e) { out[owner] = { error: e.message } }
     }
     return out
@@ -1287,6 +1407,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * entonces la consola del dueño no podía ver nada de lo que ya había, aunque el
      * diseño dice que sí (§8.2). Lo de siempre: dos sitios decidiendo lo mismo.
      */
+    resealAll,
     migrateSecrets: (membersOf, adminKey) => secrets.migrate(
       membersOf || ((owner) => recipientsOf(owner)), adminKey
     ),

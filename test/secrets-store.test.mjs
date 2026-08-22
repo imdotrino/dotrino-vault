@@ -408,3 +408,45 @@ test('convertir deja UNA envoltura por cajon: un agente sin actualizar sigue abr
   await s.set('proxy', 'D', '4')
   assert.equal(enDisco(dir).ns.proxy.keyring.length, 2)
 })
+
+/**
+ * Quien re-envuelve para un miembro nuevo es el SERVICIO (ya tiene la llave, así que no
+ * gana nada). Pero un servicio no administra: por eso solo puede AÑADIR. Si pudiera
+ * reemplazar, un servicio comprometido dejaría sin leer a los demás miembros del cajón
+ * metiéndoles una envoltura basura — denegación de servicio disfrazada de reparto.
+ */
+test('una envoltura solo se AÑADE: un servicio no puede pisar la de otro', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'TOKEN', 'secreto')
+
+  const gen = 1
+  const wrap = { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' }
+
+  assert.equal(s.putWrap('ns:proxy', gen, 'newcomer', wrap), true, 'añadir al que no tenía, sí')
+  assert.throws(() => s.putWrap('ns:proxy', gen, 'newcomer', wrap), /ya tiene envoltura/,
+    'pisar la que ya está, NO')
+  assert.throws(() => s.putWrap('ns:proxy', gen, 'A', wrap), /ya tiene envoltura/,
+    'y menos la de otro miembro del cajón')
+  assert.throws(() => s.putWrap('ns:proxy', 99, 'other', wrap), /no existe la generación/)
+  assert.throws(() => s.putWrap('ns:proxy', gen, 'other', { epk: 'x' }), /mal formada/)
+})
+
+/**
+ * Y lo que arregla ese añadido si alguien lo usó mal: abrir la bóveda REHACE el llavero.
+ * No comprueba las envolturas —abrir una ajena es cosa de su destinatario—, las
+ * restablece: quedan exactamente las que dice el acta.
+ */
+test('rehacer el llavero deja lo que dice el acta y nada más', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'TOKEN', 'secreto')
+  s.putWrap('ns:proxy', 1, 'intruder', { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' })
+  assert.ok(s.recipientsIn('ns:proxy').includes('intruder'), 'se coló uno')
+
+  await s.rewrap('ns:proxy', miembros('A'), null, { exact: true })
+  const left = s.recipientsIn('ns:proxy')
+  assert.ok(!left.includes('intruder'), 'y al rehacer, se cae')
+  assert.ok(left.includes('A'), 'el miembro de verdad se queda')
+  assert.ok(left.includes(RECOVERY), 'y la recuperación, que es lo que abre la frase')
+})
