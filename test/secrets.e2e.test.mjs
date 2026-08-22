@@ -67,6 +67,28 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   assert.deepEqual(secrets, { TURN_KEY_ID: 'k-123', TURN_KEY_API_TOKEN: 't-456' })
 })
 
+/**
+ * PERMISOS, NO TIPOS (2026-08-22). Un aparato es un aparato y lo que puede hacer: un
+ * bot que publica en las apps firma como aparato del acta (`vault:sign`) Y lee su
+ * cajón (`vault:secrets:<ns>`), en UN solo cert y con UN solo enrolamiento. Y ese
+ * enrolamiento (`enrollWithVault`) no persiste nada: quien lo llama decide dónde
+ * vive la identidad, y los secretos se piden con ella por parámetros, sin `dir`.
+ */
+test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecrets abre con la identidad por parámetros', async () => {
+  await vault.setSecret('eco', 'BUFFER_API_KEY', 'b-789')
+  const { qr } = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:eco'], label: 'social-bot', ttlMs: 60000 })
+  const { enrollWithVault, fetchSecrets } = await import('../lib/src/service.js')
+  const link = await enrollWithVault({
+    qr, label: 'social-bot', expectedScope: 'vault:secrets:eco',
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+  assert.deepEqual(link.cert.scope, ['vault:sign', 'vault:secrets:eco'])
+  assert.ok(link.device?.privateJwk && link.enc?.privateJwk && link.enc?.publickey, 'las dos llaves')
+  assert.equal(link.iss, qr.iss)
+  const secrets = await fetchSecrets({ ns: 'eco', proxyUrl, masterPubkey: link.iss, device: link.device, cert: link.cert, enc: link.enc })
+  assert.deepEqual(secrets, { BUFFER_API_KEY: 'b-789' })
+})
+
 test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', async () => {
   // «Pública» quiere decir UNA cosa: que ese valor puede salir de esta máquina. Taparlo
   // justo aquí —en la lista que mira su dueño desde la terminal de la propia bóveda—

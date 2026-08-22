@@ -143,7 +143,19 @@ export async function runDaemon () {
       if (!vault) return
       const profileId = pairReq?.profile ? mgr.resolve(pairReq.profile) : mgr.currentId()
       const isService = typeof pairReq?.service === 'string' && pairReq.service
-      const scope = isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
+      // PERMISOS, no tipos (2026-08-22): el cert lleva lo que pidió `pair --scope`, y si
+      // no pidió nada, el juego de siempre. `--service <ns>` sigue siendo el atajo de
+      // `vault:secrets:<ns>`. Se valida aquí porque es la maestra la que firma: nada
+      // que no esté en esta lista entra en un cert, y `vault:admin` nunca por este camino.
+      const ALLOWED = (x) => x === 'vault:sign' || x === 'vault:read' || x === 'vault:store' || /^vault:secrets:[a-z0-9-]{1,32}$/.test(x)
+      const asked = Array.isArray(pairReq?.scope) ? pairReq.scope.filter((x) => typeof x === 'string') : null
+      if (asked && asked.some((x) => !ALLOWED(x))) {
+        writeJson(pairFile, { v: 2, at: Date.now(), error: 'scope not allowed: ' + asked.filter((x) => !ALLOWED(x)).join(',') })
+        return console.error('[vault] pairing refused: scope not allowed (%s)', asked.join(','))
+      }
+      const scope = asked?.length
+        ? [...new Set(asked)]
+        : isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
       const label = pairReq?.label || (isService ? 'service:' + pairReq.service : 'cli')
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja

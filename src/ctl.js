@@ -180,6 +180,30 @@ async function cmdPair (args = []) {
       console.error('uso: dotrino-vault pair --service <ns>   (ns en minúsculas, p.ej. proxy)'); process.exit(2)
     }
   }
+  // --scope <lista>: los PERMISOS del cert, y nada más. No hay tipos de aparato
+  // (2026-08-22, dueño): un aparato es un aparato y lo que puede hacer. Sin --scope,
+  // el juego de siempre (sign,read,store); `--service <ns>` es el atajo de
+  // `secrets:<ns>`, y los dos se combinan (`--service eco --scope sign` = un bot que
+  // firma como aparato del acta y lee solo su cajón). `admin` no se empareja: se
+  // concede desde el PC (`caps <ID> +administra`).
+  const scIdx = args.indexOf('--scope')
+  let scope = null
+  if (scIdx >= 0) {
+    const raw = args[scIdx + 1]
+    if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope sign,read,store,secrets:<ns>'); process.exit(2) }
+    const ALIAS = { firma: 'sign', lee: 'read', guarda: 'store' }
+    scope = []
+    for (const tok of raw.split(',').map((t) => t.trim()).filter(Boolean)) {
+      const t = ALIAS[tok] || tok
+      if (t === 'admin' || t === 'administra') { console.error('`admin` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +administra'); process.exit(2) }
+      if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
+      const m = /^secrets:([a-z0-9-]{1,32})$/.exec(t)
+      if (m) { scope.push('vault:secrets:' + m[1]); continue }
+      console.error('permiso desconocido: %s  (sign | read | store | secrets:<ns>)', tok); process.exit(2)
+    }
+    if (service) scope.push('vault:secrets:' + service)
+    scope = [...new Set(scope)]
+  }
   // `--new-account [nombre]`: la otra respuesta a «¿a qué cuenta entra?». En vez de
   // meter el dispositivo en una cuenta que ya vive aquí, se ESTRENA una (vacía) y
   // entra a ella; las demás no se tocan. En la TUI esto es una pregunta con sus
@@ -211,7 +235,7 @@ async function cmdPair (args = []) {
   }
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(adopt ? { mode: 'adopt' } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -1179,6 +1203,8 @@ function help () {
                       estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
+  pair --scope <lista>  los PERMISOS del cert: sign,read,store,secrets:<ns> (sin esto: sign,read,store;
+                      se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
   secret set <ns> CLAVE=valor CLAVE2=valor2 …
