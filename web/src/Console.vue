@@ -170,8 +170,6 @@ const T = {
     var_save_hint: 'Se guardan juntas: la aplicación se reinicia una sola vez.',
     var_pending: 'sin guardar',
     var_incomplete: 'Hay una fila sin nombre o sin valor.',
-    var_show: 'Ver',
-    var_hide: 'Ocultar',
     var_versions: 'Versiones',
     var_no_versions: 'No hay versiones anteriores.',
     var_restore: 'Restaurar',
@@ -309,8 +307,6 @@ const T = {
     var_save_hint: 'They are saved together: the app restarts only once.',
     var_pending: 'unsaved',
     var_incomplete: 'A row has no name or no value.',
-    var_show: 'Show',
-    var_hide: 'Hide',
     var_versions: 'Versions',
     var_no_versions: 'No earlier versions.',
     var_restore: 'Restore',
@@ -1033,9 +1029,10 @@ function saveVars ({ target, items }) {
 }
 
 /**
- * VER el valor de una variable. La bóveda entrega el sobre y **la envoltura dirigida a
- * este aparato**; abrirlo lo hace el navegador con su propia llave de cifrado, que no
- * sale de aquí (§8.2). Ninguna contraseña de por medio, en ningún momento.
+ * Abrir el valor de una variable, solo para VOLVER A UNA VERSIÓN (abajo). La bóveda
+ * entrega el sobre y **la envoltura dirigida a este aparato**; abrirlo lo hace el
+ * navegador con su propia llave de cifrado, que no sale de aquí (§8.2). No hay botón
+ * «Ver»: un valor privado no se mira desde la consola, se cambia.
  */
 async function revealVar (target, key, ts = null) {
   const r = await id.value.vaultAdmin('var.reveal', { ...targetOf(target), key, ...(ts ? { ts } : {}) })
@@ -1289,7 +1286,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
                   :t="t" :busy="busy" :save="saveVars" :add="!!m.cn"
-                  :reveal="(k) => revealVar('dev:' + m.pub, k)"
                   :history="(k) => historyVar('dev:' + m.pub, k)"
                   :restore="(k, ts) => restoreVar('dev:' + m.pub, k, ts)" />
           </div>
@@ -1437,7 +1433,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
               <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
               <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
                     :t="t" :busy="busy" :save="saveVars"
-                    :reveal="(k) => revealVar('ns:' + ns, k)"
                     :history="(k) => historyVar('ns:' + ns, k)"
                     :restore="(k, ts) => restoreVar('ns:' + ns, k, ts)" />
             </li>
