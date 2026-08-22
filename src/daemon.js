@@ -502,6 +502,10 @@ export async function runDaemon () {
           // Lo que quedó a deber un sellado. Va en el volcado porque si no se ve, no se
           // salda: son cajones cuyos miembros NO están leyendo sus variables.
           pending: t.vault.rotationsDue(),
+          // Y quién NO puede abrir lo suyo. Es lo mismo visto desde el aparato, que es
+          // como lo mira quien administra: «este servicio está en el acta y aun así no
+          // arranca». Sin esto solo se veía en el log del propio servicio.
+          incomplete: await t.vault.incompleteMembers(),
           ...(lastSecretError ? { secretError: lastSecretError } : {}),
           ...(lastSecretValue ? { revealed: lastSecretValue } : {}),
           ...(lastSecretHistory ? { history: lastSecretHistory } : {})

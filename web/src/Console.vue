@@ -42,6 +42,8 @@ const T = {
     caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
+    debt_t: 'Este aparato todavía no puede abrir:',
+    debt_b: 'se le entregan solas cuando abras la bóveda en su máquina, o en cuanto otro aparato del mismo servicio esté encendido.',
     caps_none: 'sin permisos',
     info_label: 'Qué es esto',
     sync_err_t: 'No se pudo hablar con tu bóveda',
@@ -203,6 +205,8 @@ const T = {
     caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
+    debt_t: 'This device cannot open yet:',
+    debt_b: 'it gets them on its own when you open the vault on its machine, or as soon as another device of the same service is up.',
     caps_none: 'no permissions',
     info_label: 'What is this',
     sync_err_t: 'Could not reach your vault',
@@ -960,6 +964,19 @@ const scopeNames = computed(() => {
   return [...new Set([...del, ...newGroups.value])].sort()
 })
 
+/**
+ * La DEUDA de un aparato: qué variables no puede abrir (§8.11). Sale de la bóveda ya
+ * calculada — es ella la que sabe qué envoltura tiene cada uno—, y se junta todo en una
+ * lista de nombres porque a quien administra le da igual de qué cajón salga: lo que
+ * necesita saber es que ese aparato NO está funcionando del todo.
+ */
+const debtOf = (pub) => {
+  const d = (vars.value?.incomplete || []).find((x) => x.pub === pub)
+  if (!d) return null
+  const keys = [...new Set(Object.values(d.owners || {}).flat())]
+  return keys.length ? { keys } : null
+}
+
 /** Las variables de un aparato, para pintarlas en SU fila. */
 const varsOfDevice = (pub) => (vars.value?.dev || []).find((d) => d.pub === pub)?.keys || []
 /**
@@ -1242,6 +1259,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <span v-if="!m.caps.length" class="muted">{{ t.caps_none }}</span>
           </div>
           <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
+          <!-- APARATO EN DEUDA: está en el acta pero no puede abrir lo suyo. Pasa siempre
+               que entra uno nuevo — envolverle su llave exige abrir la de contenido, y eso
+               pide la frase. Se dice AQUÍ, en su fila, porque es una propiedad del aparato
+               y no del cajón; y se dice qué hacer, que si no es solo un susto. -->
+          <p v-if="debtOf(m.pub)" class="warn debt" :data-testid="'debt-' + m.id">
+            {{ t.debt_t }} <code>{{ debtOf(m.pub).keys.join(', ') }}</code> — {{ t.debt_b }}
+          </p>
           <!-- LAS VARIABLES DE UN SERVICIO, EN SU FILA. Son suyas —solo él las lee— así que
                se administran donde se le ve: nombre, permisos y configuración juntos. Antes
                había que bajar a otra sección y elegirlo en un desplegable «¿Dónde?».
@@ -1454,6 +1478,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
   padding: 0;
 }
 .i:hover, .i[aria-expanded="true"] { opacity: 1; }
+.debt { margin: .35rem 0 0; font-size: .9em; }
+.debt code { font-size: .95em; }
 /* Variables: una fila por variable, el valor a la vista solo si es pública. */
 .vars { list-style: none; padding: 0; margin: 0; }
 .vargroup { border-top: 1px solid #1e2a3d; padding: 10px 0; }

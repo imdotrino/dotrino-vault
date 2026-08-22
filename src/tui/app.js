@@ -258,8 +258,12 @@ function deviceRows (st, t) {
   for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
     const vars = devVarsOf(st, d.sub).length
+    const debt = debtOf(st, d.sub)
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
-      (vars ? t.muted(`  vars:${vars}`) : '')
+      (vars ? t.muted(`  vars:${vars}`) : '') +
+      // EN DEUDA: en el acta y sin poder abrir lo suyo. Va en color de aviso al lado de
+      // sus variables, que es donde se mira cuando algo no arranca.
+      (debt ? t.warn(`  ${i.deviceDebt(debt)}`) : '')
     // SIN ACCESO: está en el acta y no puede entrar. Es un aviso, no un adorno, así que va
     // en el color de aviso y en el sitio donde estaría su vencimiento.
     const status = d.noAccess
@@ -371,6 +375,17 @@ function secretRows (st, t) {
 
 /** Las claves guardadas para UN aparato (`pub`), o `[]`. Cada una es `{key, public}`. */
 const devVarsOf = (st, pub) => (st.secrets?.dev || []).find((x) => x.pub === pub)?.keys || []
+
+/**
+ * Lo que ese aparato NO puede abrir (§8.11). Un servicio que entra después de escrita
+ * una variable no tiene envoltura de ella, y hasta que alguien se la reparta está en el
+ * acta sin poder arrancar del todo. Aquí se cuenta cuántas, que es lo que cabe en una
+ * fila; el detalle está en la consola.
+ */
+const debtOf = (st, pub) => {
+  const d = (st.secrets?.incomplete || []).find((x) => x.pub === pub)
+  return d ? [...new Set(Object.values(d.owners || {}).flat())].length : 0
+}
 
 const sortByKey = (list) => (list || []).slice().sort((a, b) => a.key.localeCompare(b.key))
 

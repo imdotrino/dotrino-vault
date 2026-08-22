@@ -131,6 +131,7 @@ const es = {
   noLabel: '(sin etiqueta)',
   // Está en el acta y no puede entrar: o le retiraron el certificado, o se le venció.
   deviceNoAccess: 'SIN ACCESO — está en el acta pero no puede entrar',
+  deviceDebt: (n) => `no abre ${n}`,
   thisVault: 'esta bóveda (manda ella)',
   cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
   revokedCount: (n) => `  Revocados: ${n}`,
@@ -421,6 +422,7 @@ const en = {
   noDevices: '  (no devices enrolled — press P to pair one)',
   noLabel: '(no label)',
   deviceNoAccess: 'NO ACCESS — it is on the record but cannot get in',
+  deviceDebt: (n) => `cannot open ${n}`,
   thisVault: 'this vault (it is the Master)',
   cantRemoveMaster: 'This vault is the Master: it does not remove itself.',
   revokedCount: (n) => `  Revoked: ${n}`,
