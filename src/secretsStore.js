@@ -106,6 +106,19 @@ export class NeedsMigration extends Error {
   }
 }
 
+/**
+ * Privada es para siempre. Una variable puede dejar de mostrarse (pública → privada), pero
+ * nunca al revés: lo que se marcó como secreto no se destapa ni por `visibility` ni de
+ * refilón con un `set --public`. Si hace falta un valor público, es OTRA variable (o se
+ * borra esta y se crea de nuevo, y eso queda a la vista).
+ */
+export class PrivateStaysPrivate extends Error {
+  constructor (key) {
+    super(`${key} is private and a private variable cannot be made public: delete it and create it again as public`)
+    this.code = 'PRIVATE_STAYS_PRIVATE'
+  }
+}
+
 /** Migra un cajón `{KEY: 'valor'}` (v1/v2) a `{KEY: {v, pub}}`: todo entra como PRIVADO. */
 function migrateBag (bag) {
   const out = {}
@@ -476,6 +489,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const vars = ensureBag(bag, k)
       const before = vars[key]
       const pub = isPublic === undefined ? !!before?.pub : !!isPublic
+      if (before && !before.pub && pub) throw new PrivateStaysPrivate(key)
 
       // v3: se guarda como siempre. Convertir a sobres es un gesto aparte y explícito
       // (`migrate`), no algo que ocurra de refilón al escribir.
@@ -534,9 +548,10 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     },
 
     /**
-     * Cambiar la visibilidad EXIGE LEER: para que una privada pase a pública hay que
-     * poner su valor en claro, y para lo contrario hay que sellarlo. Por eso, de todo lo
-     * que se puede administrar, esto es lo que sigue pidiendo la frase (§8.6).
+     * Cambiar la visibilidad solo va en UNA dirección: de pública a privada (sellar el
+     * valor, que es escribir y no pide nada). De privada a pública NO existe
+     * (`PrivateStaysPrivate`): destapar un secreto no es una casilla, es borrarlo y
+     * crear otro.
      */
     async setVisibility (ns, key, isPublic, adminKey = null) {
       assertNs(ns)
@@ -554,28 +569,14 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const e = vars[key]
       if (!e) return false
       const want = !!isPublic
-      if (isLegacy()) { e.pub = want; save(); return true }
-      if (needsMigration()) throw new NeedsMigration()
       if (!!e.pub === want) return true
+      if (!e.pub) throw new PrivateStaysPrivate(key)
+      if (isLegacy()) { e.pub = false; save(); return true }
+      if (needsMigration()) throw new NeedsMigration()
 
-      needSealer('change the visibility of a variable')
-      let value
-      if (e.pub) {
-        value = e.v
-      } else {
-        const priv = await openRecovery(adminKey)
-        value = await sealer.openValue(await this._cekOf(bag, k, e.gen, priv), e.e)
-      }
-      if (want) {
-        pushHistory(owner, key, e, null)
-        vars[key] = { v: value, pub: true }
-        gcKeyring(bag, k, owner)
-        save()
-        return true
-      }
       // De pública a privada: es una escritura normal, con su generación y su firma.
       held++
-      try { await this._putRaw(bag, k, owner, key, value, false, null) } finally { held-- }
+      try { await this._putRaw(bag, k, owner, key, e.v, false, null) } finally { held-- }
       save()
       return true
     },

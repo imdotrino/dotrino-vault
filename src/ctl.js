@@ -1231,9 +1231,10 @@ function help () {
   secret settle                     salda lo pendiente: hereda lo ya guardado a un
                                     aparato nuevo y rota de verdad el cajón del que se fue
   --public | --private              (al hacer un set) si el VALOR puede salir de esta
-                                    máquina hacia la consola remota. Se nace privada.
-  secret visibility <ns> <CLAVE> public|private        cambia eso sin tocar el valor
-  secret device visibility <ID> <CLAVE> public|private
+                                    máquina hacia la consola remota. Se nace privada,
+                                    y una privada NO se vuelve pública (bórrala y créala).
+  secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
+  secret device visibility <ID> <CLAVE> private
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente

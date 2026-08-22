@@ -88,9 +88,10 @@ watch(added, (ns) => {
 
 const changed = (d) => d.value !== d.was.value || d.priv !== d.was.priv
 /**
- * Confirmar exige un valor, siempre. Por eso una privada no se puede volver pública sin
- * teclearlo: quien administra a distancia no puede destapar un secreto que no conoce,
- * solo reemplazarlo (y eso queda en la bitácora).
+ * Confirmar exige un valor, siempre. Y una privada NO se vuelve pública: la casilla de
+ * una variable que ya es privada va deshabilitada (la bóveda lo rechaza igual,
+ * `PRIVATE_STAYS_PRIVATE`). Quien administra a distancia solo puede reemplazar el valor a
+ * ciegas; destapar un secreto es borrarlo y crear otro, y eso queda en la bitácora.
  */
 const ready = computed(() => [
   ...draft.value.filter((d) => changed(d) && !!d.value),
@@ -168,8 +169,10 @@ const submit = () => props.save({
       <input v-model="d.value" :type="d.priv ? 'password' : 'text'" autocomplete="off"
              :placeholder="d.was.priv ? '••••••' : t.var_value_ph"
              :data-testid="'var-value-' + tid + '-' + d.key" />
-      <label class="chk">
-        <input v-model="d.priv" type="checkbox" :data-testid="'var-private-' + tid + '-' + d.key" />
+      <!-- Privada es para siempre: la casilla solo sirve para TAPAR una pública. -->
+      <label class="chk" :title="d.was.priv ? t.var_private_final : undefined">
+        <input v-model="d.priv" type="checkbox" :disabled="d.was.priv"
+               :data-testid="'var-private-' + tid + '-' + d.key" />
         {{ t.var_private_ask }}
       </label>
       <span v-if="changed(d)" class="tag">{{ t.var_pending }}</span>

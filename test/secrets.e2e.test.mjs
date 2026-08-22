@@ -421,6 +421,8 @@ test('si la configuración es la misma, comparar no reinicia a nadie', async () 
   // visibilidad no cambia lo que el servicio lee.
   const { watchSecretsChanges, readServiceIdentity } = await import('../lib/src/service.js')
   const me = readServiceIdentity(svcDir).device.publickey
+  await vault.setSecret('proxy', 'TURN_URL', 'turn:x', true)   // pública, para poder taparla
+  await new Promise((r) => setTimeout(r, 1500))   // que su aviso llegue ANTES de empezar a contar
   const changes = []
   const w = await watchSecretsChanges({
     dir: svcDir, ns: 'proxy', applied: await fetchSecretsFrom(svcDir), reconcileMinMs: 0,
@@ -430,17 +432,18 @@ test('si la configuración es la misma, comparar no reinicia a nadie', async () 
   try {
     await new Promise((r) => setTimeout(r, 800))   // que termine la comparación del arranque
     assert.equal(await w.reconcile(), false, 'nada cambió: nadie se muere')
-    await vault.setSecretVisibility('proxy', 'TURN_KEY_ID', true)
+    // Una pública que se tapa (la única dirección que existe): mismo valor, otro sobre.
+    await vault.setSecretVisibility('proxy', 'TURN_URL', false)
     assert.equal(await w.reconcile(), false, 'cambiar quién ve el valor no es cambiar el valor')
     await new Promise((r) => setTimeout(r, 600))
-    assert.equal(changes.length, 0)
+    assert.equal(changes.length, 0, JSON.stringify(changes))
 
     // Y con un cambio de verdad sí, aunque sea del cajón del aparato.
     await vault.setDeviceSecret(me, 'PORT', '9999')
     assert.equal(await w.reconcile(), true)
   } finally {
     w.stop()
-    await vault.setSecretVisibility('proxy', 'TURN_KEY_ID', false)
+    await vault.deleteSecret('proxy', 'TURN_URL')
   }
 })
 

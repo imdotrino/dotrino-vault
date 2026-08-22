@@ -178,6 +178,7 @@ const T = {
     var_paste_hint: 'Para cargar varias de una vez, pega tu configuración (NOMBRE=valor, una por línea) en el campo del nombre.',
     var_value_ph: 'valor',
     var_private_ask: 'Privada',
+    var_private_final: 'Una variable privada no se puede volver pública: bórrala y créala de nuevo.',
     var_paste_err: (e) => ({
       shape: `línea ${e.line}: no tiene la forma NOMBRE=valor`,
       key: `línea ${e.line}: «${e.key}» va en MAYUSCULAS_CON_GUION_BAJO`,
@@ -315,6 +316,7 @@ const T = {
     var_paste_hint: 'To load several at once, paste your configuration (NAME=value, one per line) into the name field.',
     var_value_ph: 'value',
     var_private_ask: 'Private',
+    var_private_final: 'A private variable cannot be made public: delete it and create it again.',
     adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',

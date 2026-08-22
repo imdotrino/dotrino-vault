@@ -250,18 +250,31 @@ test('unwrap: sacar a alguien del llavero NO pide la frase', async () => {
   assert.ok(enDisco(dir).ns.proxy.keyring[0].wraps.A, 'y a los demás no se les toca')
 })
 
-test('visibilidad: a publica hay que LEERLA (frase); a privada es escribir (nada)', async () => {
+test('visibilidad: de publica a privada es escribir (nada); de privada a publica NO EXISTE', async () => {
   const dir = tmp()
   const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'URL', 'wss://x', true)
   await s.set('proxy', 'K', 'v')
 
-  await assert.rejects(() => s.setVisibility('proxy', 'K', true, 'frase-mala'), /wrong password/)
-  assert.equal(await s.setVisibility('proxy', 'K', true, MAQUINA), true)
-  assert.equal(s.publicOf('proxy').K, 'v')
+  assert.equal(await s.setVisibility('proxy', 'URL', false), true, 'taparla no pide nada')
+  assert.equal(enDisco(dir).ns.proxy.vars.URL.pub, false)
+  assert.equal(await s.reveal('ns:proxy', 'URL', MAQUINA), 'wss://x')
 
-  assert.equal(await s.setVisibility('proxy', 'K', false), true, 'volver a taparla no pide nada')
+  // Ni con la frase correcta: destapar un secreto no es una casilla.
+  await assert.rejects(() => s.setVisibility('proxy', 'K', true, MAQUINA), { code: 'PRIVATE_STAYS_PRIVATE' })
+  await assert.rejects(() => s.setVisibility('proxy', 'URL', true, MAQUINA), { code: 'PRIVATE_STAYS_PRIVATE' })
+  // Ni de refilon con un set --public sobre la misma clave.
+  await assert.rejects(() => s.set('proxy', 'K', 'v2', true), { code: 'PRIVATE_STAYS_PRIVATE' })
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v', 'y el valor no se toco')
   assert.equal(enDisco(dir).ns.proxy.vars.K.pub, false)
-  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v')
+  // Un set sin decir nada conserva la visibilidad: sigue privada.
+  await s.set('proxy', 'K', 'v3')
+  assert.equal(enDisco(dir).ns.proxy.vars.K.pub, false)
+
+  // El camino valido: borrarla y crearla de nuevo como publica (queda a la vista).
+  await s.delete('proxy', 'K')
+  await s.set('proxy', 'K', 'v4', true)
+  assert.equal(s.publicOf('proxy').K, 'v4')
 })
 
 test('conversion v3 -> v5: sin frase, con respaldo, y sin cambiar ningun valor', async () => {

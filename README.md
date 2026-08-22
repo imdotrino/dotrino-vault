@@ -316,7 +316,7 @@ dos.
 ```sh
 dotrino-vault secret set web PUBLIC_URL https://ejemplo.com --public
 dotrino-vault secret set web API_KEY sk-…              # sin bandera: privada
-dotrino-vault secret visibility web PUBLIC_URL private # cambiarlo sin tocar el valor
+dotrino-vault secret visibility web PUBLIC_URL private # taparla sin tocar el valor (privada → pública no existe)
 ```
 
 - **Se nace privada.** Y **rotar el valor conserva la visibilidad**: exponer un secreto

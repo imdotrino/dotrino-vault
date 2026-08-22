@@ -48,6 +48,7 @@ objeción sigue siendo correcta —por eso la respuesta no fue abrir el archivo,
 | La lee el servicio dueño | sí | sí |
 | Su VALOR sale de la máquina de la bóveda | sí, hacia la consola | **nunca** |
 | Se le puede poner un valor nuevo desde la consola | sí | sí, **a ciegas** |
+| Se puede cambiar a la otra columna | sí, a privada (sin tocar el valor) | **nunca** (`PRIVATE_STAYS_PRIVATE`): se borra y se crea otra |
 
 Lo que cruza, entonces, no es «los secretos»: es lo que su dueño **marcó** como mostrable,
 una variable a la vez y con la marca puesta a mano en la máquina de la bóveda (o al
@@ -63,7 +64,12 @@ Tres cosas sostienen la fila:
    viaja sellada con la clave de contenido del perfil, la misma del `store`: el proxy
    transporta y no ve nada. Y el valor que se manda a guardar viaja igual; un `var.set`
    con el valor en claro se **rechaza**, no se «arregla».
-3. **Borrar no se delega.** Un aparato robado con `admin` puede escribir configuración
+3. **Privada es para siempre (2026-08-22).** Una pública se puede tapar; una privada no se
+   destapa, ni desde la consola ni con `secret visibility … public` en la máquina de la
+   bóveda, ni de refilón con `set --public` sobre la misma clave. En la consola la casilla
+   «Privada» de una variable que ya lo es va **deshabilitada**. Si hace falta ese valor a
+   la vista, se borra la variable y se crea otra pública — un gesto que queda a la vista.
+4. **Borrar no se delega.** Un aparato robado con `admin` puede escribir configuración
    —daño acotado y reversible, se le revoca— pero no puede dejar a tus servicios sin
    ninguna. Escribir, además, **avisa a todos los miembros** (§5).
 
