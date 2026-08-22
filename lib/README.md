@@ -280,9 +280,10 @@ cert de una máquina vigente: sin esto toda máquina enrolada caducaba a los 30 
 
 MIT · parte de [Dotrino](https://dotrino.com).
 
-## Agente SSH delgado (`dotrino-env ssh-agent`)
+## Agente SSH con llaves en memoria (`dotrino-env ssh-agent`)
 
-La llave SSH vive en el teléfono del dueño (registrada en su bóveda). En esta máquina solo
-corre un agente `ssh-agent` sin llaves: cada `SIGN_REQUEST` viaja a la bóveda como un
-pedido que el teléfono aprueba firmando. `dotrino-env ssh-agent --ns <ns>` imprime el
-`SSH_AUTH_SOCK`. Como librería: `listSshKeys(args)` y `requestSshSign(args, { keyId, data })`.
+La llave SSH es un secreto más del cajón (`SSH_KEY_*`, el archivo en base64). Al arrancar,
+el agente pide el cajón a la bóveda (con la aprobación del teléfono si el aparato la pide),
+carga las llaves en memoria y sirve el protocolo de `ssh-agent`; en el disco no queda nada.
+`dotrino-env ssh-agent --ns ssh` imprime el `SSH_AUTH_SOCK`. Como librería:
+`loadPrivateKey`, `publicLine`, `signSsh` (`src/sshKeys.js`) y `startSshAgent` (`src/sshAgent.js`).

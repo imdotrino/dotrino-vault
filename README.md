@@ -240,7 +240,7 @@ dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrar
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
 dotrino-vault pair --scope <lista>  # los PERMISOS del cert: sign,read,store,secrets:<ns>. Sin esto, sign,read,store.
-dotrino-vault secret policy <ns> approval on|off   # el cajón pide tu aprobación en cada lectura (15 min de ventana)
+dotrino-vault caps <ID> +permiso     # ese aparato pide tu aprobación (teléfono) al recibir claves; pair --approval al enrolar
                                     # Se combina con --service: `--service eco --scope sign` = un bot que firma
                                     # como aparato del acta y lee SOLO su cajón. `admin` no se empareja (caps).
 dotrino-vault secret set <ns> <CLAVE> <valor>   # variable del SCOPE: la comparten todos los
@@ -756,46 +756,40 @@ CLI de apoyo: `dotrino-env status` (qué hay enrolado aquí), `dotrino-env check
 los secretos en el entorno de un proceso que no es Node). Primer consumidor:
 `dotrino-proxy` (TURN de Cloudflare).
 
-### Aprobación por uso (el teléfono dice que sí) y la llave SSH en el teléfono
+### Aprobación desde el teléfono (un aparato que pide permiso para recibir claves)
 
-Un cajón puede exigir el **visto bueno de un aparato** en cada lectura: para lo que corre
-en tu PC (un asistente, un script) y no debería llevarse tus claves sin que lo sepas.
-
-```sh
-dotrino-vault caps <ID-del-teléfono> +aprueba       # quién aprueba (no viaja en un QR)
-dotrino-vault secret policy claude approval on       # el cajón «claude» espera el sí
-dotrino-env run --ns claude -- node mi-script.js     # el proceso se queda esperando…
-```
-
-…la bóveda apunta el pedido, avisa al teléfono (cola del proxio → aviso nativo), y solo su
-firma entrega las claves — **al proceso que pidió, en memoria**, con una **ventana de
-15 min** por aparato y cajón para no pedir veinte veces. Lo denegado corta sin reintentos;
-lo que nadie atiende vence a los 5 min; todo queda en `dotrino-vault activity`.
-
-**La llave SSH vive en el teléfono.** El daemon expone un **agente SSH** (protocolo de
-`ssh-agent`, socket en `$XDG_RUNTIME_DIR/dotrino-vault/ssh-agent.sock`) que **no guarda
-ninguna llave privada**: la llave nace en el teléfono (vault.dotrino.com → *Llave SSH de
-este aparato*; WebCrypto no extraíble, `ecdsa-sha2-nistp256`) y cada firma es un pedido
-que apruebas ahí. En el PC no queda nada que copiar.
+Liberar claves privadas a un aparato puede exigir el **visto bueno de otro aparato** (el
+teléfono, con `caps <ID> +aprueba`). Es una propiedad **del aparato**, no del cajón: el VPS
+desatendido no pide; la PC del dueño sí. Por defecto nadie pide; se fija al enrolar o se
+cambia después como un permiso más:
 
 ```sh
-dotrino-vault ssh                 # imprime el export SSH_AUTH_SOCK=… y la receta
-dotrino-vault ssh keys            # las llaves registradas (= ssh-add -L)
-ssh mi-servidor                   # el teléfono pide tu «sí» y firma
+dotrino-vault caps <ID-del-teléfono> +aprueba        # quién aprueba (no viaja en un QR)
+dotrino-vault pair --service claude --approval       # el que entre pedirá permiso
+dotrino-vault caps <ID> +permiso | -permiso          # cambiarlo después
+dotrino-env run --ns claude -- node mi-script.js     # el proceso espera el sí…
 ```
 
-**La bóveda puede estar en OTRA máquina** (la de Dotrino en el VPS): en tu PC corre el
-agente **delgado**, que no custodia nada y reenvía cada reto como un pedido a la bóveda
-que enroló ese servicio:
+…la bóveda apunta el pedido, avisa al teléfono (cola del proxio → aviso nativo en la app de
+Dotrino), y solo su firma entrega las claves — **al proceso que pidió, en memoria**. Pide en
+**cada petición**, que para un servicio bien hecho es **una por arranque**: pide al iniciar,
+se queda las claves en memoria y no vuelve a pedir. Lo denegado corta sin reintentos; lo que
+nadie atiende vence a los 5 min; todo queda en `dotrino-vault activity`.
+
+### La llave SSH como un secreto más (`dotrino-env ssh-agent`)
+
+La llave privada SSH vive **sellada en la bóveda** (cajón `ssh`, variables `SSH_KEY_*` con el
+archivo en base64) y solo existe en claro en la memoria del agente que la pidió. En el disco
+de la PC no queda nada; cerrar el agente es olvidar las llaves.
 
 ```sh
-dotrino-env enroll --ns claude                   # una vez, contra la bóveda que sea
-dotrino-env ssh-agent --ns claude                # imprime export SSH_AUTH_SOCK=…
+dotrino-vault secret set ssh SSH_KEY_DOTRINO "$(base64 -w0 ~/.ssh/id_ed25519)"
+dotrino-env enroll --ns ssh                 # una vez (pair --service ssh --approval en la bóveda)
+dotrino-env ssh-agent --ns ssh              # pide el cajón (tu sí en el teléfono) e imprime export SSH_AUTH_SOCK=…
+ssh mi-servidor                             # firma en local, con la llave en memoria
 ```
 
-Para no aprobar cada comando, reusa la conexión con `ControlMaster auto` +
-`ControlPersist 15m` en `~/.ssh/config`: esa es la ventana de 15 min del SSH.
-`DOTRINO_VAULT_SSH_AGENT=0` apaga el agente.
+ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en PEM.
 
 ## Alcance
 

@@ -17,7 +17,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startVaultManager } from './manager.js'
-import { startSshAgent, defaultSocketPath } from './sshAgent.js'
 import { dataDir, writeJson, readJson } from './paths.js'
 import { VERSION } from './version.js'
 
@@ -64,14 +63,6 @@ export async function runDaemon () {
 
   const mgr = await startVaultManager({ root: dir, proxyUrl, onEnrollChallenge })
 
-  // --- agente SSH (la llave vive en el teléfono; ver sshAgent.js). `DOTRINO_VAULT_SSH_AGENT=0`
-  // lo apaga; cualquier otro valor es la ruta del socket.
-  let sshAgent = null
-  if (process.env.DOTRINO_VAULT_SSH_AGENT !== '0' && process.platform !== 'win32') {
-    const socketPath = process.env.DOTRINO_VAULT_SSH_AGENT || defaultSocketPath(dir)
-    try { sshAgent = startSshAgent({ socketPath, vault: () => mgr.current(), log: console.log }) } catch (e) { console.error('[vault] ssh-agent could not start: %s', e.message) }
-  }
-
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
   const daemonVersion = VERSION
@@ -82,7 +73,7 @@ export async function runDaemon () {
     const cur = mgr.summary().find((p) => p.current) || {}
     writeJson(stateFile, {
       v: 2, version: daemonVersion, fingerprint: cur.fingerprint || null, iss: cur.iss || null,
-      proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(), sshAgent: sshAgent?.socketPath || null,
+      proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(),
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -127,6 +118,7 @@ export async function runDaemon () {
 
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
+  let pendingApproval = false // lo pidió `pair --approval`; se aplica al aprobar
   const pairReqFile = path.join(dir, 'pair-request.json')
   async function handlePairingRequest () {
     try {
@@ -167,6 +159,9 @@ export async function runDaemon () {
         ? [...new Set(asked)]
         : isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
       const label = pairReq?.label || (isService ? 'service:' + pairReq.service : 'cli')
+      // `pair --approval`: el aparato que entre por esta invitación pedirá el visto bueno del
+      // teléfono cada vez que reciba claves privadas (se aplica al aprobarlo, abajo).
+      pendingApproval = !!pairReq?.approval
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
       // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`). El nombre viaja
@@ -327,6 +322,8 @@ export async function runDaemon () {
           const vault = targetOf(appr)
           if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
+          if (pendingApproval && r?.cert?.sub) { try { await vault.setApproval(r.cert.sub, true); console.log('[vault] the new device will need approval on every key request') } catch (e) { console.error('[vault] could not flag approval: %s', e.message) } }
+          pendingApproval = false
           console.log('[vault] aprobado %s', r.deviceId)
           answer({ ok: true, deviceId: r.deviceId || null })
         } catch (e) {
@@ -406,7 +403,7 @@ export async function runDaemon () {
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
           } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'policy') { const r = await vault.setSecretPolicy(sec.ns, { approval: !!sec.approval }); console.log('[vault] %s: approval %s', sec.ns, r.approval ? 'REQUIRED (15 min window)' : 'off') }
+          else if (sec.op === 'approval') { const r = await vault.setApproval(sec.pub, !!sec.approval); console.log('[vault] device %s: approval %s', sec.id || '?', r.approval ? 'REQUIRED on every key request' : 'off') }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
           // Saldar lo que quedó a deber: heredarle a un aparato nuevo lo ya guardado y
@@ -616,7 +613,6 @@ export async function runDaemon () {
   const shutdown = (sig) => {
     console.log(`\n[vault] ${sig} → deteniendo…`)
     rm(pairFile); rm(pendingEnrollFile)
-    try { sshAgent?.close() } catch (_) {}
     try { mgr.close() } catch (_) {}
     process.exit(0)
   }

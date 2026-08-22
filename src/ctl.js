@@ -128,7 +128,6 @@ function cmdStatus () {
   }
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
-  if (s.sshAgent) console.log('  ssh-agent   : %s   (dotrino-vault ssh)', s.sshAgent)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')
   console.log('  datos       : %s', dir)
   const profiles = s.profiles || []
@@ -188,6 +187,9 @@ async function cmdPair (args = []) {
   // `secrets:<ns>`, y los dos se combinan (`--service eco --scope sign` = un bot que
   // firma como aparato del acta y lee solo su cajón). `admin` no se empareja: se
   // concede desde el PC (`caps <ID> +administra`).
+  // --approval: el aparato que entre pedirá tu aprobación (teléfono) en cada petición de
+  // claves privadas. Por defecto NO pide; se cambia después con `caps <ID> +permiso`.
+  const approval = args.includes('--approval')
   const scIdx = args.indexOf('--scope')
   let scope = null
   if (scIdx >= 0) {
@@ -238,7 +240,7 @@ async function cmdPair (args = []) {
   }
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -402,7 +404,8 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +permiso')
+  console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
   console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
@@ -444,36 +447,27 @@ async function findMember (id) {
 }
 
 /**
- * `dotrino-vault ssh` — cómo usar la llave SSH del teléfono desde este PC. La llave
- * privada no está aquí: el daemon expone un agente SSH y cada firma la aprueba el
- * teléfono (`caps <ID> +aprueba`). Imprime lo que hay que poner en el shell.
+ * `dotrino-vault approval <ID> on|off` — ese aparato solo recibe claves privadas con el
+ * visto bueno de un aparato con `aprueba` (el teléfono). Es propiedad del APARATO, no del
+ * cajón: el VPS desatendido no pide; la PC del dueño sí. Pide en cada petición, que para un
+ * servicio bien hecho es una por arranque.
  */
-async function cmdSsh (args = []) {
-  const s = requireDaemon()
-  if (!s.sshAgent) { console.error('El daemon no tiene el agente SSH activo (DOTRINO_VAULT_SSH_AGENT=0, o Windows).'); process.exit(1) }
-  if (args[0] === 'keys' || args[0] === '-L') {
-    try { execFileSync('ssh-add', ['-L'], { env: { ...process.env, SSH_AUTH_SOCK: s.sshAgent }, stdio: 'inherit' }) } catch (_) { process.exit(1) }
-    return
-  }
-  console.log('# La llave SSH vive en tu teléfono; este PC solo le pide la firma. Pon en tu shell:')
-  console.log('export SSH_AUTH_SOCK=%s', s.sshAgent)
-  console.log('')
-  console.log('# Registra la llave desde el teléfono (vault.dotrino.com → Llave SSH) y pega su línea')
-  console.log('# pública en ~/.ssh/authorized_keys de cada servidor. Para no aprobar cada comando,')
-  console.log('# reusa la conexión 15 min en ~/.ssh/config:')
-  console.log('#   Host *')
-  console.log('#     ControlMaster auto')
-  console.log('#     ControlPath ~/.ssh/cm-%r@%h:%p')
-  console.log('#     ControlPersist 15m')
-  console.log('')
-  console.log('# Ver las llaves registradas:  dotrino-vault ssh keys')
+async function cmdApproval (args = []) {
+  const [id, val] = args
+  if (!id || !['on', 'off'].includes(val)) { console.error('uso: dotrino-vault approval <ID> on|off'); process.exit(2) }
+  const m = await findMember(id)
+  writeReq('secret-request.json', { op: 'approval', pub: m.pub, id: m.id, approval: val === 'on' })
+  sendSignal(requireDaemon().pid, 'SIGUSR2')
+  console.log(val === 'on'
+    ? `Listo: ${m.id} solo recibirá claves privadas cuando un aparato con  caps <ID> +aprueba  lo apruebe (en cada arranque).`
+    : `Listo: ${m.id} vuelve a recibir sus claves sin aprobación.`)
 }
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+permiso|-permiso')
     process.exit(2)
   }
   const CAP_BY_WORD = {
@@ -483,8 +477,21 @@ async function cmdCaps (args = []) {
   const s = requireDaemon()
   const m = await findMember(id)
 
-  const caps = new Set(m.caps)
+  // `+permiso` / `-permiso` no es una capacidad del acta: es la marca de la bóveda «este
+  // aparato pide aprobación al recibir claves». Se cambia aquí, como cualquier permiso.
+  const rest = []
   for (const c of changes) {
+    const w = c.slice(1).toLowerCase()
+    if ((c[0] === '+' || c[0] === '-') && (w === 'permiso' || w === 'approval')) {
+      writeReq('secret-request.json', { op: 'approval', pub: m.pub, id: m.id, approval: c[0] === '+' })
+      sendSignal(s.pid, 'SIGUSR2')
+      console.log(c[0] === '+' ? `Listo: ${m.id} pedirá tu aprobación en cada petición de claves.` : `Listo: ${m.id} ya no pide aprobación.`)
+      await sleep(300)
+    } else rest.push(c)
+  }
+  if (!rest.length) return
+  const caps = new Set(m.caps)
+  for (const c of rest) {
     const sign = c[0]
     const cap = CAP_BY_WORD[c.slice(1).toLowerCase()]
     if (!cap || (sign !== '+' && sign !== '-')) { console.error('permiso no reconocido: %s', c); process.exit(2) }
@@ -737,7 +744,6 @@ async function cmdSecret (rest) {
     '     dotrino-vault secret device rm  <ID> <CLAVE>',
     '     dotrino-vault secret list',
     '     dotrino-vault secret migrate                                 SELLA los secretos (una vez)',
-    '     dotrino-vault secret policy <ns> approval on|off              cada lectura espera tu aprobación (teléfono)',
     '',
     'CARGA LA CONFIGURACIÓN DE UN SERVICIO DE UNA VEZ (`set` con varios pares, o `import`):',
     'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
@@ -848,95 +854,6 @@ async function cmdSecret (rest) {
   }
 
   if (sub === 'migrate') return secretMigrate()
-  // `secret policy <ns> approval on|off`: el cajón pasa a pedir el visto bueno de un
-  // aparato con `aprueba` (el teléfono) en cada lectura, con ventana de 15 min.
-  if (sub === 'policy') {
-    const [ns, what, val] = args
-    if (!isValidSecretsNs(ns || '') || what !== 'approval' || !['on', 'off'].includes(val)) {
-      console.error('uso: dotrino-vault secret policy <ns> approval on|off'); process.exit(2)
-    }
-    writeReq('secret-request.json', { op: 'policy', ns, approval: val === 'on' })
-    sendSignal(s.pid, 'SIGUSR2')
-    console.log(val === 'on'
-      ? `Listo: cada lectura de «${ns}» esperará la aprobación de un aparato con  caps <ID> +aprueba  (ventana de 15 min).`
-      : `Listo: «${ns}» vuelve a entregarse sin aprobación.`)
-    return
-  }
-
-  // --- VER un valor, su histórico y volver atrás ---------------------------------
-  // Las tres van juntas porque son la misma idea: ver es lo único que la contraseña
-  // guarda, y revertir es ver + volver a guardar (§8.3/§8.4).
-  const ownerDe = async (kind, ref) => {
-    if (kind === 'ns') return `ns:${ref}`
-    const m = await findMember(ref)
-    return `dev:${m.pub}`
-  }
-
-  if (sub === 'show' || sub === 'history' || sub === 'revert') {
-    // `secret show device <ID> <CLAVE>` mira el cajón de un aparato.
-    const esDev = args[0] === 'device'
-    const [ref, key, extra] = esDev ? args.slice(1) : args
-    if (!ref || (sub !== 'history' && !key)) {
-      console.error('uso: dotrino-vault secret %s [device] <ns|ID> <CLAVE>%s', sub, sub === 'revert' ? ' <marca>' : '')
-      process.exit(2)
-    }
-    const owner = await ownerDe(esDev ? 'dev' : 'ns', ref)
-
-    if (sub === 'history') {
-      writeReq('secret-request.json', { op: 'history', owner, key: key || null })
-      const d = await signalAndWaitList()
-      const items = d.history?.items || []
-      if (!items.length) { console.log('No hay versiones anteriores de %s%s.', owner, key ? `/${key}` : ''); return }
-      console.log('\n%sVersiones anteriores%s  (la de arriba es la más reciente)\n', B, Z)
-      for (const h of items) {
-        // Sin `by` no es que falte un dato: es que se escribió AQUÍ, desde esta máquina.
-        // Lo que llega por la consola remota sí trae de qué aparato vino.
-        console.log('  %s  %s%s%s  %s%s', new Date(h.ts).toISOString(), B, h.key, Z,
-          h.by ? `desde ${h.by.slice(0, 12)}…` : 'desde esta máquina', h.signed ? '' : '   (sobre sin firma)')
-      }
-      console.log('\nPara volver a una:  dotrino-vault secret revert %s%s <CLAVE> <marca>\n',
-        esDev ? 'device ' : '', ref)
-      return
-    }
-
-    if (sub === 'revert') {
-      if (!extra) { console.error('uso: dotrino-vault secret revert [device] <ns|ID> <CLAVE> <marca>'); process.exit(2) }
-      const ts = Number.isFinite(Number(extra)) ? Number(extra) : Date.parse(extra)
-      if (!Number.isFinite(ts)) { console.error('La marca es la que enseña `secret history` (fecha ISO).'); process.exit(2) }
-      const password = await adminPassword()
-      writeReq('secret-request.json', { op: 'revert', owner, key, ts, ...(password ? { password } : {}) })
-      const d = await signalAndWaitList()
-      if (d?.secretError) return noSeAplico(d)
-      console.log('Restaurada: %s/%s', owner, key)
-      return
-    }
-
-    // `show`: el valor. Es lo único que la contraseña guarda en esta máquina.
-    const password = await adminPassword()
-    writeReq('secret-request.json', { op: 'reveal', owner, key, ...(password ? { password } : {}) })
-    const d = await signalAndWaitList()
-    if (d?.secretError) return noSeAplico(d)
-    if (d.revealed?.owner !== owner || d.revealed?.key !== key) {
-      console.error('El daemon no devolvió el valor (revisa: dotrino-vault logs)')
-      process.exit(1)
-    }
-    if (d.revealed.value == null) { console.error('No existe esa variable.'); process.exit(1) }
-    console.log(d.revealed.value)
-    return
-  }
-
-  // Saldar lo que quedó a deber: heredarle a un aparato lo ya guardado, rotar de verdad.
-  if (sub === 'settle') {
-    const password = await adminPassword()
-    writeReq('secret-request.json', { op: 'settle', ...(password ? { password } : {}) })
-    const d = await signalAndWaitList()
-    if (d?.secretError) return noSeAplico(d)
-    const pend = Object.keys(d.pending || {})
-    if (!pend.length) console.log('Nada pendiente.')
-    else console.log('Siguen pendientes: %s', pend.join(', '))
-    return
-  }
-
   if (sub === 'list') {
     const d = await signalAndWaitList()
     const names = d.ns || {}
@@ -1247,6 +1164,7 @@ function help () {
                       estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
+  pair --approval       el aparato que entre pedirá tu aprobación (teléfono) al recibir claves
   pair --scope <lista>  los PERMISOS del cert: sign,read,store,secrets:<ns> (sin esto: sign,read,store;
                       se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
@@ -1335,7 +1253,7 @@ export async function runCtl (argv) {
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
-    case 'ssh': return cmdSsh(rest)
+    case 'approval': return cmdApproval(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':
