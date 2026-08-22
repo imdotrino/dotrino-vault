@@ -1,6 +1,6 @@
 {
   "name": "@dotrino/vault",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Usa ESTE dispositivo (navegador) como bóveda/CA del ecosistema Dotrino: atiende enrolamientos por el proxy y firma certificados de delegación a tus máquinas. Incluye el cliente de SERVICIO (Node): un proyecto se enrola una vez y jala sus credenciales del vault en vez del .env (`import '@dotrino/vault/config'`).",
   "type": "module",
   "main": "src/index.js",
@@ -43,7 +43,7 @@
     "pairing"
   ],
   "peerDependencies": {
-    "@dotrino/identity": ">=0.54.0",
+    "@dotrino/identity": ">=0.56.0",
     "@dotrino/proxy-client": ">=0.9.0"
   },
   "license": "MIT",
