@@ -528,3 +528,75 @@ y ahí la bóveda tiene los valores delante, así que no necesita recuperar ning
 y eso es justo lo que un agente sin actualizar espera. O sea que convertir no apaga a
 nadie: lo que rompe a un agente viejo es la **primera escritura posterior**, que sí
 estrena generación. Hay un test que lo fija (`secrets-store.test.mjs`).
+
+### 8.11. Quien reparte la llave a un aparato nuevo es el SERVICIO
+
+> Decidido con el dueño el 2026-08-22, al ver que un content node recién enrolado
+> arrancaba repitiendo *«no key to open CONTENT_S3_KEY_ID: this device has no wrapping
+> for its drawer»*. Cierra el §8.7 por el lado que faltaba.
+
+**El problema.** Una variable se sella al escribirla, para los miembros que había
+entonces. Un aparato que entra después no tiene envoltura de ella — y la bóveda no se la
+puede hacer, porque envolver exige **abrir** la llave y abrirla pide la frase. Así que un
+servicio recién enrolado se queda sin configuración.
+
+**Las dos salidas malas, y por qué se descartaron.**
+
+| Idea | Por qué no |
+|---|---|
+| Que el admin console mande la frase para abrir la bóveda | es teclear la contraseña del perfil en un navegador, que es justo lo que el §8.1 existe para evitar |
+| Un **depósito de llaves privadas** en la bóveda, para asignarle una al que llegue | para poder entregarla sin la frase, esa privada tiene que abrirse **sin** la frase → es una segunda llave de recuperación sin contraseña, y quien copie el disco lee todo. Propuesta del dueño y descartada por él mismo al ver el precio |
+
+**La salida buena: que reparta quien ya tiene la llave abierta.** El servicio que consume
+ese cajón la abre en cada arranque. Re-envolverla para otro miembro **no le añade ningún
+poder** — ya podía leer eso —, así que es el único que puede hacerlo sin que nadie ceda
+nada:
+
+```
+bóveda → servicio   { owner, gen, TU envoltura, a quién, ACTA }   firmado por la maestra
+servicio            comprueba la firma · comprueba el acta · saca del ACTA la pública
+                    del destinatario · abre con su llave · envuelve
+servicio → bóveda   { la envoltura nueva }                        firmado por él
+bóveda              putWrap: la guarda
+```
+
+**Los cuatro cerrojos, y ninguno sobra:**
+
+1. **La petición va firmada por la maestra.** Un mensaje suelto por el proxy no mueve nada.
+2. **El acta viaja dentro y se comprueba aparte**, también firmada por la maestra.
+3. **La pública del destinatario se saca del ACTA, nunca del mensaje.** Si se cogiera del
+   mensaje, quien lo mandara —incluida una bóveda comprometida— podría hacer que el
+   servicio envolviera la llave para una pública suya.
+4. **El destinatario tiene que ser de ESE cajón** (`cn === ns`): un servicio no puede
+   ampliar el acceso a nada que no sea lo suyo.
+
+Y del lado de la bóveda, **`putWrap` solo AÑADE, nunca pisa** (lo pidió el dueño pensando
+en un servicio comprometido): si pudiera reemplazar, dejaría sin leer a los demás miembros
+metiéndoles una envoltura basura. Reemplazar es cosa de la bóveda, y pasa por escribir,
+que estrena generación entera.
+
+**Si no hay nadie encendido que la reparta, la deuda se queda A LA VISTA** —
+`incompleteMembers()` dice qué aparato no puede abrir qué variables — y **abrir la bóveda
+la salda**: con la frase delante, `resealAll` rehace el llavero entero y lo deja
+exactamente con lo que dice el acta (crea lo que falta, reemplaza lo que alguien metiera
+mal y tira lo que sobra).
+
+> **Todo esto existe SOLO porque hay contraseña.** Un perfil sin frase abre su propia
+> llave de recuperación y se envuelve solo; no hay deuda que saldar ni nada que delegar.
+> Es exactamente por eso que el trabajo vale: el caso con frase es el de producción.
+
+#### Hacia dónde crece: consumidores EFÍMEROS
+
+> Anotado por el dueño el 2026-08-22 como caso a revisar, no implementado.
+
+*«Quiero meter `.env` en funciones lambda: nacen y reciben variables de un servicio
+delegado.»* Es este mismo mecanismo, con una diferencia que hay que resolver antes:
+**una lambda no puede estar en el acta**, porque nace después de que la maestra firmara y
+muere en segundos.
+
+Lo que haría falta, y por eso no está hecho: que el acta pueda **avalar a una clase de
+efímeros bajo un `cn`** —un servicio que puede envolver para llaves recién nacidas que él
+mismo acredita, con vida corta— en vez de a un miembro concreto. El cerrojo 3 de arriba
+se vuelve entonces *«la pública viene del aval del servicio, y el aval caduca»*, que es
+un modelo distinto y hay que pensarlo con calma: es abrirle a un servicio la puerta de
+decidir quién lee lo suyo.

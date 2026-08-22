@@ -843,3 +843,90 @@ test('un cajón con servicio dueño NO lleva envoltura de quien administra', asy
   assert.equal(destinatarios.length, 2,
     'y NADIE más: ningún aparato que administre entra en un cajón que tiene dueño')
 })
+
+/**
+ * LA DELEGACIÓN (§8.11): quien reparte la llave a un aparato nuevo es OTRO SERVICIO del
+ * mismo cajón, no la bóveda ni quien administra.
+ *
+ * Es el caso normal, no un rincón: cualquier segundo servicio de un `ns` entra después
+ * de que sus variables ya estén escritas, y la bóveda no puede envolvérselas —hacerlo
+ * exige abrir la llave, y abrirla pide la frase—. El hermano sí puede, y no gana nada:
+ * ya podía leer eso.
+ */
+/**
+ * La llave que sale de la frase del perfil. Aquí va fija porque lo que se prueba no es
+ * derivarla —eso es de `profiles`— sino qué puede la bóveda con ella y sin ella.
+ */
+const PHRASE_KEY = new Uint8Array(32).fill(7)
+
+test('un servicio le reparte la llave del cajón a otro que entra después', async () => {
+  const ns = 'delegado'
+  const { enrollService, fetchSecrets, watchSecretsChanges } = await import('../lib/src/service.js')
+
+  const join = async (label) => {
+    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label, ttlMs: 60000 })
+    const dir = tmp('svc-' + label + '-')
+    const svc = await enrollService({
+      qr, ns, dir, label,
+      onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+    })
+    return { dir, ...svc }
+  }
+  const until = async (fn, ms = 8000) => {
+    const end = Date.now() + ms
+    while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 100)) }
+    return false
+  }
+
+  // CON FRASE. Sin ella la bóveda abre su propia llave de recuperación y se envuelve
+  // sola al aprobar, así que la delegación no llegaría a hacer falta — y la prueba
+  // pasaría sin probar nada. Con frase, la bóveda NO puede, que es el caso real.
+  await vault.rekeySecrets(null, PHRASE_KEY)
+
+  // El primero entra, se escribe la variable (su envoltura se hace al escribirla) y se
+  // queda ESCUCHANDO: es lo que le permite atender la petición de reparto.
+  const first = await join('service:first')
+  await vault.secrets.set(ns, 'TOKEN', 'lo-que-hay-que-repartir')
+  const watcher = await watchSecretsChanges({ dir: first.dir, ns, applied: null, log: () => {} })
+
+  // El segundo entra DESPUÉS: la generación ya existe y no lo incluía. La bóveda no
+  // puede envolvérsela —no tiene la frase—, así que se la pide a su hermano.
+  const second = await join('service:second')
+  const handed = await until(() => vault.secrets.recipientsIn(`ns:${ns}`).includes(second.device.publickey))
+  assert.ok(handed, 'al enrolarse, su hermano le reparte la llave sin que nadie teclee la frase')
+
+  // Y la prueba de que la envoltura sirve de verdad: el segundo lee el valor.
+  assert.equal((await fetchSecrets({ dir: second.dir, ns })).TOKEN, 'lo-que-hay-que-repartir')
+
+  const debts = await vault.incompleteMembers()
+  assert.ok(!debts.some((d) => d.pub === second.device.publickey), 'y no queda como incompleto')
+
+  watcher?.close?.()
+})
+
+test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async () => {
+  const ns = 'sinnadie'
+  const { enrollService } = await import('../lib/src/service.js')
+  const join = async (label) => {
+    const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label, ttlMs: 60000 })
+    const dir = tmp('svc-' + label + '-')
+    return { dir, ...await enrollService({ qr, ns, dir, label, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } }) }
+  }
+
+  const first = await join('service:one')          // enrolado, pero SIN escuchar
+  await vault.secrets.set(ns, 'TOKEN', 'lo-de-este-cajon')
+  const second = await join('service:two')
+
+  assert.ok(!vault.secrets.recipientsIn(`ns:${ns}`).includes(second.device.publickey),
+    'nadie pudo repartirle nada')
+  const debts = await vault.incompleteMembers()
+  const mine = debts.find((d) => d.pub === second.device.publickey)
+  assert.ok(mine, 'y aparece como incompleto, que es lo que verá quien administre')
+  assert.deepEqual(mine.owners[`ns:${ns}`], ['TOKEN'], 'diciendo exactamente qué no puede abrir')
+
+  // Y al abrir la bóveda se salda: es el otro camino, el de estar delante de la máquina.
+  await vault.resealAll(PHRASE_KEY)
+  assert.ok(vault.secrets.recipientsIn(`ns:${ns}`).includes(second.device.publickey),
+    'abrir la bóveda rehace el llavero y lo deja al día')
+  assert.equal(first.device.publickey && true, true)
+})

@@ -539,6 +539,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.DEVICES) return await handleDevices(from, payload)
       if (payload.type === MSG.RENEW) return await handleRenew(from, payload)
       if (payload.type === MSG.SECRETS) return await handleSecrets(from, payload)
+      if (payload.type === MSG.REWRAP_OK) return await handleRewrapOk(payload)
       if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
       if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
     } catch (e) {
@@ -929,6 +930,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * miembro nuevo de su cajón (ya tiene la CEK, así que no gana nada), y la frase
    * abre la envoltura de recuperación, que `wrapAll` añade siempre.
    */
+  /**
+   * Llega la envoltura que hizo un servicio. Se comprueba QUIÉN la firma —tiene que ser
+   * el aparato al que se le pidió, no cualquiera que pase por el proxy— y se reparte a
+   * quien esté esperándola. Guardarla es cosa de `delegateRewrap`, que es quien sabe
+   * qué pidió; aquí solo se valida el remitente.
+   */
+  async function handleRewrapOk (payload) {
+    const d = payload?.data
+    if (!d || d.op !== 'rewrap.ok' || !d.wrap) return
+    const signer = payload?.cert?.sub
+    if (!signer) return
+    if (!(await verifyDeviceSig({ publickey: signer, data: d, signature: payload.signature }))) {
+      return log('[vault] a handed key arrived BADLY SIGNED: ignored')
+    }
+    // Y que quien firma sea de ese cajón: si no, no tenía por qué poder abrir esa llave.
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const m = (record?.members || []).find((x) => x.pub === signer)
+    const ns = d.owner?.startsWith('ns:') ? d.owner.slice(3) : null
+    if (!m || (ns && m.cn !== ns)) return log('[vault] a handed key arrived from someone outside that drawer: ignored')
+    for (const fn of [...rewrapWaiters]) { try { fn(d) } catch (_) {} }
+  }
+
+  /** Suscriptores de `vault.rewrap.ok` (la envoltura que devuelve un servicio). */
+  const rewrapWaiters = new Set()
+  const onRewrapOk = (fn) => { rewrapWaiters.add(fn); return () => rewrapWaiters.delete(fn) }
+
   async function recipientsOf (owner) {
     if (owner.startsWith('ns:')) {
       const owned = await nsMembers(owner.slice(3))
@@ -1119,6 +1146,58 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * tiene que seguir viéndose en la lista en vez de tumbar la operación entera.
    */
   /**
+   * PIDE AL SERVICIO QUE REPARTA la llave de su cajón a un miembro nuevo (§8.11).
+   *
+   * Es la única forma de completar a un aparato sin la frase y sin que nadie guarde
+   * llaves de más: la bóveda no puede abrir la CEK, pero el servicio que la consume la
+   * tiene abierta, y re-envolverla no le da ningún poder que no tuviera.
+   *
+   * La bóveda manda su propia envoltura de esa generación —la del servicio, que él ya
+   * podía abrir— junto al ACTA firmada. El servicio saca de ahí la pública del
+   * destinatario y contesta con la envoltura nueva, que se guarda con `putWrap`, que
+   * solo AÑADE. Si el servicio no está encendido, la deuda se queda a la vista.
+   *
+   * @returns {Promise<{ done: number, asked: number }>}
+   */
+  async function delegateRewrap (owner, targetPub, { timeoutMs = 15000 } = {}) {
+    const ns = owner.startsWith('ns:') ? owner.slice(3) : null
+    if (!ns) return { done: 0, asked: 0 }
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record) return { done: 0, asked: 0 }
+    // Quien puede repartir: un miembro de ESE cajón que no sea el propio destinatario.
+    const helpers = (record.members || []).filter((m) => m.cn === ns && m.pub !== targetPub && m.encPub)
+    const pending = secrets.wrapsToShare(owner, targetPub, helpers[0]?.pub || '')
+    if (!helpers.length || !pending.length) return { done: 0, asked: 0 }
+
+    let done = 0
+    for (const gen of pending) {
+      const body = { op: 'rewrap', owner, gen: gen.gen, wrap: gen.mine, target: targetPub, acta: record, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      const answer = new Promise((resolve) => {
+        const off = onRewrapOk((d) => {
+          if (d.owner !== owner || d.gen !== gen.gen || d.target !== targetPub) return
+          off(); resolve(d.wrap)
+        })
+        setTimeout(() => { off(); resolve(null) }, timeoutMs).unref?.()
+      })
+      try { client.sendByPubkey(helpers[0].pub, { type: MSG.REWRAP, body, signature }) } catch (e) {
+        log(`[vault] ${owner}: could not ask for the key to be handed out (${e.message})`)
+        continue
+      }
+      const wrap = await answer
+      if (!wrap) continue
+      try { secrets.putWrap(owner, gen.gen, targetPub, wrap); done++ } catch (e) {
+        log(`[vault] ${owner}: the handed key was refused (${e.message})`)
+      }
+    }
+    if (done) {
+      audit('secret.delegated', { owner, target: await deviceIdOf(targetPub).catch(() => null), gens: done })
+      log(`[vault] ${owner}: ${done} key(s) handed out by its own service`)
+    }
+    return { done, asked: pending.length }
+  }
+
+  /**
    * REHACE EL LLAVERO ENTERO con la frase delante (pedido del dueño, 2026-08-22).
    *
    * La bóveda no puede *comprobar* una envoltura ajena —abrirla es cosa de su
@@ -1171,7 +1250,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // administra (`recipientsOf`). Envolver solo para los primeros dejaba a la consola
       // sin poder destapar lo que ella misma acababa de saldar.
       const members = await recipientsOf(owner)
-      try { out[owner] = await spreadKey(owner, members, adminKey) } catch (e) { out[owner] = { error: e.message } }
+      try { out[owner] = await spreadKey(owner, members, adminKey) } catch (e) {
+        // Sin frase, el último recurso es pedírselo a quien sí puede: el propio servicio.
+        let delegated = 0
+        for (const m of await incompleteMembers()) {
+          if (!m.owners[owner]) continue
+          delegated += (await delegateRewrap(owner, m.pub).catch(() => ({ done: 0 }))).done
+        }
+        out[owner] = delegated ? { delegated } : { error: e.message }
+      }
     }
     return out
   }
@@ -1386,7 +1473,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // puertas de aprobar (el PC y la consola remota), y no en `enroll.js`, que es
       // el archivo vendorizado en el iframe de identidad.
       const m = r?.cert?.sub ? await memberOf(r.cert.sub) : null
-      if (m?.cn) await spreadKey(`ns:${m.cn}`, await nsMembers(m.cn), adminKey).catch((e) => log('[vault] could not hand the key to the new service:', e.message))
+      if (m?.cn) {
+        await spreadKey(`ns:${m.cn}`, await nsMembers(m.cn), adminKey).catch(async (e) => {
+          log('[vault] could not hand the key to the new service:', e.message)
+          // Sin la frase la bóveda no puede envolvérsela… pero un HERMANO suyo sí: otro
+          // servicio del mismo cajón ya tiene la llave abierta (§8.11). Si contesta, el
+          // recién llegado arranca completo; si no hay ninguno encendido, la deuda queda
+          // a la vista y se salda al abrir la bóveda.
+          const r2 = await delegateRewrap(`ns:${m.cn}`, m.pub).catch(() => ({ done: 0 }))
+          if (!r2.done) log(`[vault] ns:${m.cn}: nobody could hand it the key — it stays in debt until the vault is opened`)
+        })
+      }
       await notifyMembers('enrolled', { deviceId: r?.deviceId || null, by: 'pc' })
       return r
     },
@@ -1408,6 +1505,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * diseño dice que sí (§8.2). Lo de siempre: dos sitios decidiendo lo mismo.
      */
     resealAll,
+    delegateRewrap,
+    incompleteMembers,
     migrateSecrets: (membersOf, adminKey) => secrets.migrate(
       membersOf || ((owner) => recipientsOf(owner)), adminKey
     ),
