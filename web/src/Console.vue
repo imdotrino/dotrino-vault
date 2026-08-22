@@ -636,6 +636,7 @@ onMounted(async () => {
   await refreshAdmin()
   await refreshApprovals()
   await loadSshKey()
+  registerNativePush()
 })
 
 let offVault = null
@@ -1035,6 +1036,24 @@ const sshForget = () => run('ssh-forget', async () => {
 async function sshCopy () { try { await navigator.clipboard.writeText(sshPub.value); sshCopied.value = true; setTimeout(() => { sshCopied.value = false }, 1500) } catch (_) {} }
 const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id }); await refreshApprovals() })
 const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals() }
+
+// APP NATIVA: si esta página corre dentro de la app de Dotrino, el token de push (FCM en
+// Android) llega por `window.DotrinoNative.pushToken()` o por el evento
+// `dotrino-native-push-token`; se registra en el proxio bajo la llave de este aparato,
+// para que la bóveda pueda timbrar el teléfono cuando haya un pedido.
+async function registerNativePush (detail) {
+  const token = detail?.token || (typeof window.DotrinoNative?.pushToken === 'function' ? window.DotrinoNative.pushToken() : null)
+  if (!token) return
+  try {
+    const key = 'dotrino-native-push'
+    if (localStorage.getItem(key) === token) return
+    await id.value.registerPush({ kind: detail?.kind || 'fcm', token })
+    try { localStorage.setItem(key, token) } catch (_) {}
+  } catch (_) {}
+}
+const onNativeToken = (e) => { registerNativePush(e.detail) }
+onMounted(() => { window.addEventListener('dotrino-native-push-token', onNativeToken) })
+onBeforeUnmount(() => { window.removeEventListener('dotrino-native-push-token', onNativeToken) })
 onMounted(() => { apvTimer = setInterval(apvTick, 5000); document.addEventListener('visibilitychange', apvTick) })
 onBeforeUnmount(() => { clearInterval(apvTimer); document.removeEventListener('visibilitychange', apvTick) })
 
