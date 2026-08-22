@@ -26,6 +26,7 @@ const es = {
   // encabezado / estado
   daemonRunning: 'corriendo',
   daemonStopped: 'DETENIDO',
+  daemonStale: (running, installed) => `⚠ el servicio corre ${running} y el binario instalado es ${installed}: reinícialo (systemctl --user restart dotrino-vault)`,
   activeVault: 'Bóveda activa: ',
   noName: '(sin nombre)',
   tooSmall: 'Terminal muy pequeño',
@@ -324,6 +325,7 @@ const en = {
 
   daemonRunning: 'running',
   daemonStopped: 'STOPPED',
+  daemonStale: (running, installed) => `⚠ the service runs ${running} but the installed binary is ${installed}: restart it (systemctl --user restart dotrino-vault)`,
   activeVault: 'Active vault: ',
   tooSmall: 'Terminal too small',
   tooSmallHint: (cols, rows) => `Resize to ≥ 24×9 (now ${cols}×${rows}).`,
