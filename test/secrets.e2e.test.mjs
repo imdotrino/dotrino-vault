@@ -951,3 +951,92 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
   assert.ok(!(await vault.secretDebts())[`ns:${ns}`], 'y la deuda deja de verse: la consola deja de avisar')
   assert.equal(first.device.publickey && true, true)
 })
+
+test('cajón con approval: el agente espera, el aparato con `approve` firma, y se abre una ventana de 15 min', async () => {
+  assert.deepEqual(await vault.setSecretPolicy('claude', { approval: true }), { approval: true })
+  assert.deepEqual(vault.secretPolicies(), { claude: { approval: true } })
+  const { enrollWithVault, fetchSecrets, waitForSecrets } = await import('../lib/src/service.js')
+  const { signWithDevice } = await import('@dotrino/identity/capabilities')
+  const { requestRenew } = await import('@dotrino/identity/vault/remote.js')
+  const { MSG } = await import('../src/protocol.js')
+
+  // El agente (Claude): lee el cajón `claude`. La variable entra DESPUÉS de enrolarlo,
+  // que es el orden real (primero el aparato, luego importar el .env), y así tiene su sobre.
+  const inv1 = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:claude'], label: 'claude', ttlMs: 30 * 24 * 60 * 60 * 1000 })
+  const agent = await enrollWithVault({ qr: inv1.qr, label: 'claude', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  await vault.setSecret('claude', 'DEEPSEEK_API_KEY', 'sk-1')
+  // El teléfono: un aparato normal al que el dueño le concede `approve` a mano.
+  const inv2 = await vault.startPairing({ scope: ['vault:sign'], label: 'phone', ttlMs: 30 * 24 * 60 * 60 * 1000 })
+  const phone = await enrollWithVault({ qr: inv2.qr, label: 'phone', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
+  // El cert refleja el acta al renovar: ahora trae `vault:approve`.
+  const renewed = await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })
+  assert.ok(renewed.cert.scope.includes('vault:approve'), 'el cert renovado trae approve')
+  const phoneCert = renewed.cert
+
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const rpc = async (data, cert, device) => {
+    const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+    await c.connect()
+    try {
+      const signed = { ...data, publickey: device.publickey, ts: Date.now() }
+      const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data: signed })
+      const res = new Promise((resolve, reject) => {
+        c.on('message', (_f, p) => { if (p?.type === MSG.SECRETS_RESULT) resolve(p); else if (p?.type === MSG.ERROR) reject(new Error(p.error)) })
+        setTimeout(() => reject(new Error('timeout')), 8000)
+      })
+      c.sendByPubkey(vault.master, { type: MSG.SECRETS, data: signed, signature, cert })
+      return await res
+    } finally { c.close() }
+  }
+  const args = { ns: 'claude', proxyUrl, masterPubkey: vault.master, device: agent.device, cert: agent.cert, enc: agent.enc }
+  const settle = () => new Promise((r) => setTimeout(r, 800))
+
+  // 1) DENEGAR: el agente recibe un error que NO se reintenta (ni con waitForSecrets).
+  // `.catch` desde el principio: se rechaza antes de que lleguemos a mirarla.
+  const w1 = fetchSecrets(args).catch((e) => e)
+  await settle()
+  const [p1] = vault.listApprovals()
+  assert.equal(p1?.ns, 'claude')
+  const den = await rpc({ op: 'deny', id: p1.id }, phoneCert, phone.device)
+  assert.equal(den.body.ok, true)
+  assert.match((await w1).message, /unauthorized: denied/)
+  const w2 = waitForSecrets({ ...args, retryMs: 100 }).catch((e) => e)
+  await settle()
+  const [p2] = vault.listApprovals()
+  await rpc({ op: 'deny', id: p2.id }, phoneCert, phone.device)
+  assert.match((await w2).message, /unauthorized: denied/)
+  await settle()
+
+  // 2) APROBAR: el pedido se lista, solo firma quien tiene `approve`, y se entrega.
+  let pendingSeen = null
+  const waiting = fetchSecrets({ ...args, onPending: (p) => { pendingSeen = p } })
+  await settle()
+  const list = vault.listApprovals()
+  assert.equal(list.length, 1)
+  assert.equal(list[0].label, 'claude')
+  assert.equal(pendingSeen?.id, list[0].id)
+  const seen = await rpc({ op: 'approvals' }, phoneCert, phone.device)
+  assert.equal(seen.body.items.length, 1)
+  await assert.rejects(rpc({ op: 'approve', id: list[0].id }, agent.cert, agent.device), /unauthorized/)
+  const ok = await rpc({ op: 'approve', id: list[0].id }, phoneCert, phone.device)
+  assert.equal(ok.body.ok, true)
+  assert.deepEqual(await waiting, { DEEPSEEK_API_KEY: 'sk-1' })
+  assert.equal(vault.listApprovals().length, 0)
+
+  // 3) VENTANA abierta: la siguiente lectura del mismo aparato no pide nada.
+  assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
+  assert.equal(vault.listApprovals().length, 0)
+
+  // 4) Un pedido que nadie atiende vence solo, y la política se puede apagar.
+  const { createApprovals } = await import('../src/approvals.js')
+  let t = 0
+  const a = createApprovals({ now: () => t, pendingTtlMs: 10, grantTtlMs: 10 })
+  const r = a.request({ ns: 'x', device: 'd', deviceId: 'D', ek: 'e' })
+  a.grant('x', 'd'); assert.equal(a.has('x', 'd'), true)
+  t = 11
+  assert.deepEqual(a.sweep().map((x) => x.id), [r.id])
+  assert.equal(a.has('x', 'd'), false)
+  await vault.setSecretPolicy('claude', { approval: false })
+  assert.deepEqual(vault.secretPolicies(), {})
+})

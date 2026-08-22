@@ -73,7 +73,7 @@ solo de qué cert se emitió un día.
 
 ```sh
 dotrino-vault members            # el acta: qué llaves son tuyas y qué puede hacer cada una
-dotrino-vault caps <ID> +firma   # cambia permisos (+firma -guarda +lee …)
+dotrino-vault caps <ID> +firma   # cambia permisos (+firma -guarda +lee +administra +aprueba …)
 ```
 
 **Los certificados caducan y se renuevan solos.** Un cert dura **30 días**. Mientras
@@ -235,11 +235,12 @@ dotrino-vault approve <código>     # aprueba tecleando los 6 dígitos que MUEST
 dotrino-vault reject  <deviceId>   # rechaza un dispositivo pendiente
 dotrino-vault devices              # lista dispositivos enrolados / revocados
 dotrino-vault members              # el acta del perfil: qué llaves son tuyas y qué puede cada una
-dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma -guarda +lee …)
+dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma -guarda +lee +administra +aprueba …)
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
 dotrino-vault pair --scope <lista>  # los PERMISOS del cert: sign,read,store,secrets:<ns>. Sin esto, sign,read,store.
+dotrino-vault secret policy <ns> approval on|off   # el cajón pide tu aprobación en cada lectura (15 min de ventana)
                                     # Se combina con --service: `--service eco --scope sign` = un bot que firma
                                     # como aparato del acta y lee SOLO su cajón. `admin` no se empareja (caps).
 dotrino-vault secret set <ns> <CLAVE> <valor>   # variable del SCOPE: la comparten todos los

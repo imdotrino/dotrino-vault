@@ -27,6 +27,7 @@ import tty from 'node:tty'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir, readJson } from './paths.js'
 import { assertVar } from './secretsStore.js'
+import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
@@ -196,6 +197,7 @@ async function cmdPair (args = []) {
     for (const tok of raw.split(',').map((t) => t.trim()).filter(Boolean)) {
       const t = ALIAS[tok] || tok
       if (t === 'admin' || t === 'administra') { console.error('`admin` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +administra'); process.exit(2) }
+      if (t === 'approve' || t === 'aprueba') { console.error('`approve` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +aprueba'); process.exit(2) }
       if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
       const m = /^secrets:([a-z0-9-]{1,32})$/.exec(t)
       if (m) { scope.push('vault:secrets:' + m[1]); continue }
@@ -379,7 +381,7 @@ async function cmdMembers () {
   assertOpen(record)
   if (!record.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
-  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}` }
+  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}` }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
   // misma que se enseña al emparejar y en la lista de miembros.
@@ -399,7 +401,7 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
   console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
@@ -444,12 +446,12 @@ async function findMember (id) {
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba')
     process.exit(2)
   }
   const CAP_BY_WORD = {
-    firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin',
-    sign: 'sign', store: 'store', read: 'read', admin: 'admin'
+    firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
+    sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve'
   }
   const s = requireDaemon()
   const m = await findMember(id)
@@ -708,6 +710,7 @@ async function cmdSecret (rest) {
     '     dotrino-vault secret device rm  <ID> <CLAVE>',
     '     dotrino-vault secret list',
     '     dotrino-vault secret migrate                                 SELLA los secretos (una vez)',
+    '     dotrino-vault secret policy <ns> approval on|off              cada lectura espera tu aprobación (teléfono)',
     '',
     'CARGA LA CONFIGURACIÓN DE UN SERVICIO DE UNA VEZ (`set` con varios pares, o `import`):',
     'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
@@ -818,6 +821,20 @@ async function cmdSecret (rest) {
   }
 
   if (sub === 'migrate') return secretMigrate()
+  // `secret policy <ns> approval on|off`: el cajón pasa a pedir el visto bueno de un
+  // aparato con `aprueba` (el teléfono) en cada lectura, con ventana de 15 min.
+  if (sub === 'policy') {
+    const [ns, what, val] = args
+    if (!isValidSecretsNs(ns || '') || what !== 'approval' || !['on', 'off'].includes(val)) {
+      console.error('uso: dotrino-vault secret policy <ns> approval on|off'); process.exit(2)
+    }
+    writeReq('secret-request.json', { op: 'policy', ns, approval: val === 'on' })
+    sendSignal(s.pid, 'SIGUSR2')
+    console.log(val === 'on'
+      ? `Listo: cada lectura de «${ns}» esperará la aprobación de un aparato con  caps <ID> +aprueba  (ventana de 15 min).`
+      : `Listo: «${ns}» vuelve a entregarse sin aprobación.`)
+    return
+  }
 
   // --- VER un valor, su histórico y volver atrás ---------------------------------
   // Las tres van juntas porque son la misma idea: ver es lo único que la contraseña

@@ -588,6 +588,25 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       for (const ns of Object.keys(data.ns)) out[ns] = names(data.ns, ns)
       return out
     },
+    /**
+     * POLÍTICA de un cajón. Hoy una sola: `approval` — cada lectura espera el visto bueno
+     * de un aparato con `approve` (ver `approvals.js`). Los cajones de los servicios que
+     * corren solos (proxio, geo) van sin ella: no pueden esperar a un teléfono.
+     */
+    policyOf (ns) { assertNs(ns); return { approval: !!data.ns[ns]?.policy?.approval } },
+    setPolicy (ns, patch) {
+      assertNs(ns)
+      if (!data.ns[ns]) data.ns[ns] = isLegacy() ? {} : { vars: {}, keyring: [] }
+      data.ns[ns].policy = { ...(data.ns[ns].policy || {}), ...patch }
+      save()
+      return this.policyOf(ns)
+    },
+    /** Solo los cajones con alguna política puesta (ns → política). */
+    policies () {
+      const out = {}
+      for (const ns of Object.keys(data.ns)) if (data.ns[ns]?.policy?.approval) out[ns] = { approval: true }
+      return out
+    },
     /** Nombres y visibilidad (pub → [{key, public}]), sin valores. */
     listDevices () {
       const out = {}

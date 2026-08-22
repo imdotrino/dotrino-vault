@@ -22,6 +22,7 @@ import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar } from './secretsStore.js'
+import { createApprovals } from './approvals.js'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { seal } from '../lib/src/sealed.js'
@@ -69,6 +70,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const store = openStore(dir)
   const threads = openThreadStore(dir)
+  const approvals = createApprovals()
   const secrets = openSecretsStore(dir, {
     sealer: makeSealer(),
     // A QUIÉN se le envuelve la llave de cada cajón: los servicios de ese namespace (o el
@@ -485,6 +487,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // da acceso a nada por sí solo. Quien firma esta petición ya tiene la llave de firma
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
+    if (p.data?.op === 'approvals' || p.data?.op === 'approve' || p.data?.op === 'deny') return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
@@ -501,29 +504,106 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('rejected', { what: 'secrets', ns, reason: 'cn' })
       return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
     }
-    let enc
-    try {
-      // Mientras el archivo siga en v3 el cable NO cambia: se mandan los valores como
-      // siempre. Solo tras la migración viajan sobres, y entonces quien los abre es el
-      // agente con su llave. Así el despliegue del daemon se deshace con un reinicio,
-      // porque hasta el primer desbloqueo no ha cambiado nada de lo que ve nadie.
-      const b = secrets.bundleFor(ns, chk.device)
-      // EL ACTA VIAJA CON EL BUNDLE (§8.8): es lo que le permite al agente comprobar que
-      // los sobres los selló esta bóveda, y con qué llave —la que el acta nombra para el
-      // `seq` con el que se firmaron—. No es un dato secreto: el acta es pública dentro
-      // del perfil y el agente ya es miembro. Sin ella podría abrir igual, pero no sabría
-      // de dónde salió lo que abre.
-      const payload = b.legacy
-        ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])) }
-        : { sealed: b, acta: record || null }
-      enc = await seal({ ek: p.data.ek, payload })
-    } catch (e) {
+    // APROBACIÓN POR USO: si el cajón la exige y este aparato no tiene la ventana abierta,
+    // el pedido se apunta, se avisa a quien aprueba y se contesta «pendiente». La respuesta
+    // de verdad sale cuando el teléfono firme (`handleApproval`), sellada a la misma `ek`.
+    if (secrets.policyOf(ns).approval && !approvals.has(ns, chk.device)) {
+      const deviceId = await deviceIdOf(chk.device).catch(() => null)
+      const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
+      const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek })
+      audit('secrets.pending', { device: deviceId, ns, id: pend.id })
+      log(`[vault] ${ns}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
+      const body = { op: 'secrets.pending', ns, id: pend.id, exp: pend.exp, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+      await notifyApprovers(pend, record)
+      return
+    }
+    let res
+    try { res = await resultFor(ns, chk.device, p.data.ek, record) } catch (e) {
       return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
     }
+    audit('secrets', { device: await deviceIdOf(chk.device), ns })
+    reply(from, { type: MSG.SECRETS_RESULT, ...res })
+  }
+
+  /** El bundle de `ns` para `devicePub`, sellado a su `ek` y firmado por la maestra. */
+  async function resultFor (ns, devicePub, ek, record) {
+    // Mientras el archivo siga en v3 el cable NO cambia: se mandan los valores como
+    // siempre. Solo tras la migración viajan sobres, y entonces quien los abre es el
+    // agente con su llave. Así el despliegue del daemon se deshace con un reinicio,
+    // porque hasta el primer desbloqueo no ha cambiado nada de lo que ve nadie.
+    const b = secrets.bundleFor(ns, devicePub)
+    // EL ACTA VIAJA CON EL BUNDLE (§8.8): es lo que le permite al agente comprobar que
+    // los sobres los selló esta bóveda, y con qué llave —la que el acta nombra para el
+    // `seq` con el que se firmaron—. No es un dato secreto: el acta es pública dentro
+    // del perfil y el agente ya es miembro. Sin ella podría abrir igual, pero no sabría
+    // de dónde salió lo que abre.
+    const payload = b.legacy
+      ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])) }
+      : { sealed: b, acta: record || null }
+    const enc = await seal({ ek, payload })
     const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
     const { signature } = await identity.signData(body)
-    audit('secrets', { device: await deviceIdOf(chk.device), ns })
-    reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+    return { body, signature }
+  }
+
+  /**
+   * PEDIDOS DE APROBACIÓN (cajones con `approval`). Entran por `vault.secrets` con
+   * `op: approvals | approve | deny`, firmados por un aparato con `vault:approve` — que,
+   * como `admin`, no se empareja: se concede a mano (`caps <ID> +aprueba`). El acta tiene
+   * que decirlo también, para que quitar el permiso surta efecto en el acto.
+   */
+  async function handleApproval (from, p) {
+    const op = p.data?.op
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: SCOPE.APPROVE, trustedIssuer: master, revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'approval')
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (record && !Acta.memberCan(record, chk.device, 'approve')) {
+      audit('rejected', { what: 'approval', reason: 'acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not approve' })
+    }
+    const by = await deviceIdOf(chk.device).catch(() => null)
+    const answer = async (body) => {
+      body = { ...body, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+    }
+    if (op === 'approvals') return answer({ op: 'approvals', items: approvals.list() })
+    const id = typeof p.data?.id === 'string' ? p.data.id : ''
+    const pend = approvals.take(id)
+    if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
+    if (op === 'deny') {
+      audit('secrets.denied', { device: pend.deviceId, ns: pend.ns, id, by })
+      log(`[vault] ${pend.ns}: request of ${pend.deviceId} DENIED by ${by}`)
+      try { client.sendByPubkey(pend.device, { type: MSG.ERROR, error: `unauthorized: denied — the "${pend.ns}" request was denied from ${by}` }) } catch (_) {}
+      return answer({ op: 'deny.result', id, ok: true })
+    }
+    if (op !== 'approve') return reply(from, { type: MSG.ERROR, error: 'approval: unknown op' })
+    const exp = approvals.grant(pend.ns, pend.device)
+    let res
+    try { res = await resultFor(pend.ns, pend.device, pend.ek, record) } catch (e) {
+      return reply(from, { type: MSG.ERROR, error: 'approval: could not seal the reply: ' + e.message })
+    }
+    audit('secrets.approved', { device: pend.deviceId, ns: pend.ns, id, by, until: exp })
+    log(`[vault] ${pend.ns}: request of ${pend.deviceId} approved by ${by} (window until ${new Date(exp).toISOString()})`)
+    // Va por `sendByPubkey`: si el que pedía ya no está conectado, lo recoge al volver.
+    try { client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res }) } catch (_) {}
+    return answer({ op: 'approve.result', id, ok: true, exp })
+  }
+
+  /** Aviso a los aparatos que aprueban (cola del proxio → push nativo si están apagados). */
+  async function notifyApprovers (pend, record) {
+    try {
+      const body = { ev: 'approval', id: pend.id, ns: pend.ns, deviceId: pend.deviceId, label: pend.label, exp: pend.exp, ts: Date.now() }
+      const { signature } = await identity.signData(body)
+      const who = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).map((m) => m.pub)
+      if (!who.length) log(`[vault] ${pend.ns}: nobody can approve (grant it with: dotrino-vault caps <ID> +aprueba)`)
+      for (const pub of who) { try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {} }
+    } catch (e) { log('[vault] could not notify approvers:', e.message) }
   }
 
   client.on('message', async (from, payload) => {
@@ -1438,6 +1518,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
+    // Cajones con aprobación por uso (`approvals.js`).
+    secretPolicy: (ns) => secrets.policyOf(ns),
+    setSecretPolicy: async (ns, patch) => { const r = secrets.setPolicy(ns, patch); audit('secret.policy', { ns, ...r }); return r },
+    secretPolicies: () => secrets.policies(),
+    listApprovals: () => approvals.list(),
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
     // dispositivos se entera de que entró alguien, venga de donde venga.
     approveDevice: async (code, adminKey) => {

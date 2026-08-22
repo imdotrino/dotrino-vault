@@ -146,7 +146,8 @@ export async function runDaemon () {
       // PERMISOS, no tipos (2026-08-22): el cert lleva lo que pidió `pair --scope`, y si
       // no pidió nada, el juego de siempre. `--service <ns>` sigue siendo el atajo de
       // `vault:secrets:<ns>`. Se valida aquí porque es la maestra la que firma: nada
-      // que no esté en esta lista entra en un cert, y `vault:admin` nunca por este camino.
+      // que no esté en esta lista entra en un cert, y `vault:admin` / `vault:approve` nunca
+      // por este camino (se conceden a mano con `caps`).
       const ALLOWED = (x) => x === 'vault:sign' || x === 'vault:read' || x === 'vault:store' || /^vault:secrets:[a-z0-9-]{1,32}$/.test(x)
       const asked = Array.isArray(pairReq?.scope) ? pairReq.scope.filter((x) => typeof x === 'string') : null
       if (asked && asked.some((x) => !ALLOWED(x))) {
@@ -396,6 +397,7 @@ export async function runDaemon () {
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
           } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'policy') { const r = await vault.setSecretPolicy(sec.ns, { approval: !!sec.approval }); console.log('[vault] %s: approval %s', sec.ns, r.approval ? 'REQUIRED (15 min window)' : 'off') }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
           // Saldar lo que quedó a deber: heredarle a un aparato nuevo lo ya guardado y
