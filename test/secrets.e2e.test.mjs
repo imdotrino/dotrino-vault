@@ -787,33 +787,16 @@ test('un sobre con la firma cambiada NO se abre: el agente comprueba la proceden
 })
 
 
-test('un aparato de administracion VE el valor sin ninguna contrasena (§8.2)', async () => {
-  // El motivo de todo esto: la capacidad de leer deja de ser una frase que se teclea en
-  // cualquier parte y pasa a ser una llave que no sale del aparato. La boveda entrega el
-  // sobre y la envoltura dirigida a ESE aparato; abrirlo es cosa suya, y ella no puede.
-  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
-
-  // Un aparato del dueño (sin CN: no es un servicio) con su llave de cifrado.
-  const par = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits'])
-  const encPub = JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey))
-  const firma = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-  const pub = JSON.stringify(await crypto.subtle.exportKey('jwk', firma.publicKey))
-  await vault.identity.admitMember({ pub, encPub, label: 'Consola', caps: ['store', 'read', 'admin'] })
-
-  const ns = 'verlo'
-  await vault.setSecret(ns, 'TOKEN', 'lo-que-quiero-ver')
-
-  const r = await vault.vars.reveal({ ns, key: 'TOKEN', device: pub })
-  assert.equal(r.pub, false, 'es privada: viene sellada, no en claro')
-  assert.ok(r.wrap, 'y con la envoltura dirigida a este aparato')
-
-  const cek = await openWrap({ wrap: r.wrap, myEncPrivateKey: par.privateKey })
-  assert.equal(await decryptWithCek({ cek, envelope: r.e }), 'lo-que-quiero-ver')
-
-  // Y a un aparato que NO esta en la lista no se le entrega ninguna envoltura.
-  const ajeno = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-  const ajenoPub = JSON.stringify(await crypto.subtle.exportKey('jwk', ajeno.publicKey))
-  await assert.rejects(() => vault.vars.reveal({ ns, key: 'TOKEN', device: ajenoPub }), /no wrapping/)
+test('quien administra NO puede ver un valor a distancia: la operacion no existe (2026-08-22)', async () => {
+  // Lo que se quitó y no vuelve: `var.reveal` / `var.history` del protocolo de
+  // administración. Un aparato que administra no tiene sobres de lo privado; ver, el
+  // histórico y volver a una versión son de la bóveda en su máquina (CLI/TUI).
+  assert.equal(vault.vars.reveal, undefined, 'no hay reveal para el admin')
+  assert.equal(vault.vars.history, undefined, 'ni history')
+  const { ADMIN_OPS } = await import('../lib/src/admin.js').catch(() => ({}))
+  if (ADMIN_OPS) {
+    assert.ok(!ADMIN_OPS.includes('var.reveal') && !ADMIN_OPS.includes('var.history'), 'y el protocolo tampoco las anuncia')
+  }
 })
 
 /**

@@ -515,9 +515,9 @@ Dos cosas que hay que resolver al implementarlo:
 | `dotrino-vault` `src/sealKey.js` | el llavero de sellado de la bóveda: estrena llaves y firma con la que el acta nombra. **No abre nada**, así que se usa sin la frase |
 | `dotrino-vault` `src/secretsStore.js` | **v5**: sin copia maestra, con par de recuperación, una generación por escritura, recogida de generaciones, histórico y `reveal`/`revert` |
 | `dotrino-vault` `src/vault.js` | destinatarios (servicios + aparatos que administran + recuperación), firma de cada sobre, y el acta viajando con el bundle |
-| `dotrino-vault` `lib/src/admin.js` | ops `var.reveal` y `var.history`, **auditadas**: leer un secreto a distancia es justo lo que hay que poder revisar después |
+| `dotrino-vault` `lib/src/admin.js` | **sin** `var.reveal`/`var.history` (quitadas 2026-08-22): un aparato que administra no tiene sobres de lo privado; ver/histórico/volver son de la bóveda en su máquina |
 | `dotrino-vault` `lib/src/service.js` | el agente abre **por generación** y comprueba la **procedencia** de cada sobre |
-| `dotrino-vault` `web/` y `src/tui/` | se va el campo de la contraseña; entran «Ver», «Versiones» y «Restaurar» |
+| `dotrino-vault` `web/` y `src/tui/` | se va el campo de la contraseña de la consola; la TUI conserva ver con contraseña |
 | CLI | `secret show` · `secret history` · `secret revert` · `secret settle` |
 
 **Orden de despliegue:** primero los **agentes** (`@dotrino/vault` ≥0.27.0, que sabe abrir

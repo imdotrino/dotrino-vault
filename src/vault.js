@@ -739,32 +739,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return { ok: true, key }
     },
     /**
-     * VER un valor DESDE UN APARATO, sin ninguna contraseña. La bóveda no abre nada: le
-     * entrega al aparato el sobre y **la envoltura de la llave que le corresponde a él**,
-     * y lo abre él con su propia llave de cifrado, que no sale de su dispositivo (§8.2).
-     *
-     * Que la bóveda no pueda leerlo es lo que hace que esto sea seguro de servir: si
-     * pudiera, todo el diseño sobraría.
-     */
-    async reveal ({ ns, pub, key, ts = null, device = null }) {
-      const owner = ns ? `ns:${ns}` : `dev:${pub}`
-      const r = ts
-        ? secrets.sealedHistoryFor(owner, key, ts, device)
-        : secrets.sealedFor(owner, key, device)
-      if (!r) throw new Error('var.reveal: there is no such variable')
-      if (!r.pub && !r.wrap) {
-        throw new Error('var.reveal: this device has no wrapping for that drawer yet (settle the pending re-seal on the vault machine)')
-      }
-      return { owner, key, ...r }
-    },
-
-    /** Las versiones anteriores (sin valores: son sobres). Para poder volver atrás. */
-    async history ({ ns, pub, key = null }) {
-      const owner = ns ? `ns:${ns}` : `dev:${pub}`
-      return { owner, key, items: secrets.history(owner, key) }
-    },
-
-    /**
      * VARIAS DE UNA VEZ, y por eso existe: cada guardado suelto hace que la bóveda avise
      * al servicio de que su configuración cambió, y el servicio SALE para releerla entera
      * (`watchEnv`). Guardadas de una en una, quien administra a distancia reiniciaba el

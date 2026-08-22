@@ -348,25 +348,6 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       return sealer.openValue(cek, e.e)
     },
 
-    /**
-     * LO SELLADO A UN APARATO: el sobre del valor y **la envoltura de la llave dirigida a
-     * ese miembro**. Con eso, y solo con eso, el aparato lo abre por su cuenta — la
-     * bóveda no interviene y no hay ninguna frase de por medio (§8.2).
-     *
-     * Devuelve `null` si esa variable no existe, y `{ pub: true, v }` si es pública (no
-     * hay nada que abrir). Si el miembro no tiene envoltura para esa generación, devuelve
-     * el sobre sin `wrap`: quien pregunta tiene que poder distinguir «no existe» de «no
-     * es para ti», que es justo la deuda que enseña `rotationsDue`.
-     */
-    sealedFor (owner, key, memberPub) {
-      const [kind, k] = splitOwner(owner)
-      const bag = kind === 'ns' ? data.ns : data.dev
-      const e = varsOf(bag, k)[key]
-      if (!e) return null
-      if (e.pub || isLegacy()) return { pub: true, v: e.v }
-      const g = (bag[k]?.keyring || []).find((x) => x.gen === e.gen)
-      return { pub: false, gen: e.gen, e: e.e, seal: e.seal || null, wrap: g?.wraps?.[memberPub] || null }
-    },
 
     /**
      * Las variables privadas de un cajón que ESE miembro **no puede abrir**: las que no
@@ -444,15 +425,6 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       return true
     },
 
-    /** Lo mismo para una versión anterior: es lo que hace posible revertir desde un aparato. */
-    sealedHistoryFor (owner, key, ts, memberPub) {
-      const h = data.history.find((x) => x.owner === owner && x.key === key && x.ts === ts)
-      if (!h) return null
-      const [kind, k] = splitOwner(owner)
-      const bag = kind === 'ns' ? data.ns : data.dev
-      const g = (bag[k]?.keyring || []).find((x) => x.gen === h.gen)
-      return { pub: false, gen: h.gen, e: h.e, seal: h.seal || null, wrap: g?.wraps?.[memberPub] || null }
-    },
 
     /** @private La CEK de una generación, abierta con la privada de recuperación. */
     async _cekOf (bag, k, gen, priv) {
