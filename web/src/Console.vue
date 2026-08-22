@@ -170,11 +170,6 @@ const T = {
     var_save_hint: 'Se guardan juntas: la aplicación se reinicia una sola vez.',
     var_pending: 'sin guardar',
     var_incomplete: 'Hay una fila sin nombre o sin valor.',
-    var_versions: 'Versiones',
-    var_no_versions: 'No hay versiones anteriores.',
-    var_restore: 'Restaurar',
-    var_by: (id) => `desde ${id}`,
-    var_by_vault: 'desde la máquina de la bóveda',
     var_group_new: 'Grupo nuevo',
     var_scope_ph: 'nombre del grupo (p. ej. proxy)',
     var_key_ph: 'NOMBRE_DE_LA_VARIABLE',
@@ -307,11 +302,6 @@ const T = {
     var_save_hint: 'They are saved together: the app restarts only once.',
     var_pending: 'unsaved',
     var_incomplete: 'A row has no name or no value.',
-    var_versions: 'Versions',
-    var_no_versions: 'No earlier versions.',
-    var_restore: 'Restore',
-    var_by: (id) => `from ${id}`,
-    var_by_vault: 'from the vault machine',
     var_paste_err: (e) => ({
       shape: `line ${e.line}: not in the form NAME=value`,
       key: `line ${e.line}: "${e.key}" must be UPPERCASE_WITH_UNDERSCORES`,
@@ -1028,34 +1018,6 @@ function saveVars ({ target, items }) {
   })
 }
 
-/**
- * Abrir el valor de una variable, solo para VOLVER A UNA VERSIÓN (abajo). La bóveda
- * entrega el sobre y **la envoltura dirigida a este aparato**; abrirlo lo hace el
- * navegador con su propia llave de cifrado, que no sale de aquí (§8.2). No hay botón
- * «Ver»: un valor privado no se mira desde la consola, se cambia.
- */
-async function revealVar (target, key, ts = null) {
-  const r = await id.value.vaultAdmin('var.reveal', { ...targetOf(target), key, ...(ts ? { ts } : {}) })
-  if (r?.pub) return r.v                       // una pública no está cerrada
-  return id.value.openSealedValue(r.wrap, r.e)
-}
-
-/** Las versiones anteriores de una variable (sin valores: son sobres). */
-async function historyVar (target, key) {
-  const r = await id.value.vaultAdmin('var.history', { ...targetOf(target), key })
-  return r?.items || []
-}
-
-/**
- * VOLVER A UNA VERSIÓN ANTERIOR: se abre aquí y se vuelve a guardar. No es un modo
- * especial de nada — es ver + escribir—, así que hereda las dos reglas: abrir lo hace
- * este aparato con su llave, y escribir no pide nada.
- */
-async function restoreVar (target, key, ts) {
-  const value = await revealVar(target, key, ts)
-  await saveVars({ target, items: [{ key, value, public: false }] })
-}
-
 /** Crear un grupo es solo abrirle su apartado: existe de verdad con la primera variable. */
 function createGroup () {
   const ns = newGroup.value.trim().toLowerCase()
@@ -1285,9 +1247,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                :data-testid="'devvars-' + m.id">
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
-                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn"
-                  :history="(k) => historyVar('dev:' + m.pub, k)"
-                  :restore="(k, ts) => restoreVar('dev:' + m.pub, k, ts)" />
+                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn" />
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
@@ -1432,9 +1392,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
               <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
               <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
-                    :t="t" :busy="busy" :save="saveVars"
-                    :history="(k) => historyVar('ns:' + ns, k)"
-                    :restore="(k, ts) => restoreVar('ns:' + ns, k, ts)" />
+                    :t="t" :busy="busy" :save="saveVars" />
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->

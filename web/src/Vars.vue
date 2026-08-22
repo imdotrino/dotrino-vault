@@ -46,15 +46,10 @@ const props = defineProps({
   // servicio: la bóveda solo se las guarda a quien las lee, así que ofrecer el formulario
   // sería un botón que siempre falla. Lo que ya tuviera se sigue viendo y se puede cambiar.
   add: { type: Boolean, default: true },
-  // VOLVER ATRÁS. Los pone la consola porque necesitan la llave de ESTE aparato: la
-  // bóveda entrega el sobre y su envoltura, y quien abre es el navegador (§8.2). Si no
-  // vienen, la fila se queda como estaba — una bóveda vieja no sabe hacerlo.
-  // (El botón «Ver» se quitó: un valor privado no se mira desde la consola, se cambia.)
-  history: { type: Function, default: null },  // (key) → Promise<Array<{ts, by, signed}>>
-  restore: { type: Function, default: null }   // (key, ts) → Promise<void>
+  // (Los botones «Ver» y «Versiones» se quitaron: un valor privado no se mira ni se
+  // deshace desde la consola, se cambia.)
 })
 
-const versions = ref({}) // versiones anteriores abiertas: { CLAVE: [...] }
 const busyRow = ref('')
 const rowError = ref('')
 
@@ -149,18 +144,7 @@ function onPaste (ev, idx) {
   added.value = next
 }
 
-async function verVersiones (key) {
-  if (versions.value[key]) { const { [key]: _, ...resto } = versions.value; versions.value = resto; return }
-  busyRow.value = key; rowError.value = ''
-  try { versions.value = { ...versions.value, [key]: await props.history(key) } } catch (e) { rowError.value = e?.message || String(e) } finally { busyRow.value = '' }
-}
 
-async function restaurar (key, ts) {
-  busyRow.value = key; rowError.value = ''
-  try { await props.restore(key, ts) } catch (e) { rowError.value = e?.message || String(e) } finally { busyRow.value = '' }
-}
-
-const cuando = (ts) => new Date(ts).toLocaleString()
 
 /** UNA llamada con todo dentro: la bóveda las guarda juntas y avisa una sola vez. */
 const submit = () => props.save({
@@ -189,18 +173,7 @@ const submit = () => props.save({
         {{ t.var_private_ask }}
       </label>
       <span v-if="changed(d)" class="tag">{{ t.var_pending }}</span>
-      <button v-if="history" class="btn sm ghost" :data-testid="'var-history-' + tid + '-' + d.key"
-              :disabled="busyRow === d.key" @click="verVersiones(d.key)">{{ t.var_versions }}</button>
     </div>
-    <ul v-if="versions[d.key]" class="versions" :data-testid="'var-versions-' + tid + '-' + d.key">
-      <li v-if="!versions[d.key].length" class="hint">{{ t.var_no_versions }}</li>
-      <li v-for="h in versions[d.key]" :key="h.ts">
-        <span class="hint">{{ cuando(h.ts) }}</span>
-        <span class="hint">{{ h.by ? t.var_by(h.by) : t.var_by_vault }}</span>
-        <button class="btn sm ghost" :data-testid="'var-restore-' + tid + '-' + d.key + '-' + h.ts"
-                :disabled="busyRow === d.key" @click="restaurar(d.key, h.ts)">{{ t.var_restore }}</button>
-      </li>
-    </ul>
     </template>
 
     <template v-if="add">
@@ -254,8 +227,6 @@ const submit = () => props.save({
 .paste-hint { margin: 6px 0 0 12px; }
 .err { margin: 6px 0 0 12px; font-size: 13px; color: #ffb4a2; }
 .tag { font-size: 12px; color: #ffd79a; }
-.versions { list-style: none; margin: 4px 0 0 24px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.versions li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 input[type="text"], input[type="password"] {
   background: #0d1521; color: #dbe7f7; border: 1px solid #223047;
   border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; min-width: 0; flex: 1 1 160px;
