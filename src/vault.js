@@ -1193,8 +1193,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (done) {
       audit('secret.delegated', { owner, target: await deviceIdOf(targetPub).catch(() => null), gens: done })
       log(`[vault] ${owner}: ${done} key(s) handed out by its own service`)
+      await settleRewrapDebt(owner)
     }
     return { done, asked: pending.length }
+  }
+
+  /**
+   * La deuda de un cajón se anota cuando la bóveda NO pudo envolver (`spreadKey`), y
+   * se borra cuando YA NO FALTA nada — sea quien sea quien lo haya saldado. Sin esto,
+   * un reparto hecho por el propio servicio dejaba la anotación puesta y la consola
+   * seguía diciendo que los aparatos no leían sus variables, cuando sí las leían.
+   */
+  async function settleRewrapDebt (owner) {
+    if (!store.getSetting(`rewrap-due:${owner}`)) return false
+    const stillMissing = (await incompleteMembers()).some((m) => m.owners[owner])
+    if (stillMissing) return false
+    store.setSetting(`rewrap-due:${owner}`, undefined)
+    log(`[vault] ${owner}: pending re-seal settled`)
+    audit('secret.rewrap', { owner, pending: true, delegated: true })
+    return true
   }
 
   /**

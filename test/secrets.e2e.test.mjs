@@ -900,6 +900,10 @@ test('un servicio le reparte la llave del cajón a otro que entra después', asy
 
   const debts = await vault.incompleteMembers()
   assert.ok(!debts.some((d) => d.pub === second.device.publickey), 'y no queda como incompleto')
+  // La anotación de deuda que dejó la bóveda al no poder envolver se borra al saldarla
+  // el hermano: la consola no puede seguir diciendo que «no leen sus variables».
+  const settled = await until(() => !vault.rotationsDue()[`ns:${ns}`])
+  assert.ok(settled, 'y la deuda anotada (rewrap-due) desaparece al repartirse la llave')
 
   watcher?.close?.()
 })
