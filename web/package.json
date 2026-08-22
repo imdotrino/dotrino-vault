@@ -13,8 +13,9 @@
   "dependencies": {
     "@dotrino/identity": "0.55.0",
     "@dotrino/install": "0.3.1",
+    "@dotrino/nav": "0.3.0",
     "@dotrino/support": "0.8.1",
-    "@dotrino/topbar": "0.8.1",
+    "@dotrino/topbar": "0.8.2",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4",
     "vue": "3.5.13"
