@@ -92,6 +92,16 @@ const I18N = {
       ['dotrino-vault profile ls', 'tus cuentas en esta computadora'],
       ['dotrino-vault tui', 'todo lo anterior, en una pantalla'],
     ],
+    docs_t: 'Toda la documentación, en el wiki',
+    docs_links: [
+      ['Instalación al detalle', 'https://wiki.dotrino.com/vault/instalacion/'],
+      ['La CLI completa', 'https://wiki.dotrino.com/vault/cli/'],
+      ['La interfaz de terminal (TUI)', 'https://wiki.dotrino.com/vault/tui/'],
+      ['Conectar tus aparatos', 'https://wiki.dotrino.com/vault/emparejar/'],
+      ['Secretos de servicios', 'https://wiki.dotrino.com/vault/secretos/'],
+      ['Aprobación desde el teléfono', 'https://wiki.dotrino.com/vault/aprobacion/'],
+      ['Llaves SSH sin archivos', 'https://wiki.dotrino.com/vault/ssh/'],
+    ],
     use_tui_t: 'La pantalla de control (y en Windows, todo en una ventana)',
     use_tui_b: 'Hay una interfaz de terminal a pantalla completa donde ves tus dispositivos, apruebas los que se conectan y cambias permisos, sin acordarte de ningún comando. En Windows y macOS, donde la bóveda ocupa la ventana en la que la arrancaste, puedes abrir las dos a la vez:',
     use_tui_alt: 'Si la bóveda ya está corriendo en otra ventana, ahí abres solo la pantalla:',
@@ -188,6 +198,16 @@ const I18N = {
       ['dotrino-vault activity', 'log: what was signed and who joined'],
       ['dotrino-vault profile ls', 'your accounts on this computer'],
       ['dotrino-vault tui', 'all of the above, on one screen'],
+    ],
+    docs_t: 'All the documentation, on the wiki',
+    docs_links: [
+      ['Install in detail', 'https://wiki.dotrino.com/en/vault/instalacion/'],
+      ['The full CLI', 'https://wiki.dotrino.com/en/vault/cli/'],
+      ['The terminal UI (TUI)', 'https://wiki.dotrino.com/en/vault/tui/'],
+      ['Pairing your devices', 'https://wiki.dotrino.com/en/vault/emparejar/'],
+      ['Service secrets', 'https://wiki.dotrino.com/en/vault/secretos/'],
+      ['Phone approval', 'https://wiki.dotrino.com/en/vault/aprobacion/'],
+      ['SSH keys without files', 'https://wiki.dotrino.com/en/vault/ssh/'],
     ],
     use_tui_t: 'The control screen (and on Windows, everything in one window)',
     use_tui_b: 'There is a full-screen terminal interface where you see your devices, approve the ones connecting and change permissions, without remembering any command. On Windows and macOS, where the vault takes over the window you started it in, you can open both at once:',
@@ -522,49 +542,16 @@ onMounted(async () => {
             </div>
             <pre><code>{{ tuiJuntoCmd }}</code></pre>
           </div>
-          <p>{{ t.use_tui_alt }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ t.dl_win_sh }}</span>
-              <button class="copy" @click="copy(tuiSoloCmd, 'tuis')">{{ copied === 'tuis' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ tuiSoloCmd }}</code></pre>
-          </div>
-          <p>{{ t.use_tui_path }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>PowerShell</span>
-              <button class="copy" @click="copy(winPathCmd, 'winpath')">{{ copied === 'winpath' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ winPathCmd }}</code></pre>
-          </div>
         </div>
 
-        <p class="use-more">
-          <a href="/devices" @click="go('console', $event)">{{ t.use_more }}</a>
-        </p>
-
-        <details class="use-cmds">
-          <summary>{{ t.use_cmds_t }}</summary>
-          <p class="cmds-how">{{ t.use_cmds_how }}</p>
-          <ul class="cmds-how">
-            <li>{{ t.use_cmds_linux }}</li>
-            <li v-html="t.use_cmds_npx"></li>
-            <li v-html="t.use_cmds_docker"></li>
+        <!-- El detalle (CLI completa, TUI, secretos, aprobación) vive en el WIKI (§9.2):
+             la landing dice lo esencial y manda allá, en vez de repetir tablas de comandos. -->
+        <div class="use-docs" data-testid="use-docs">
+          <h3>{{ t.docs_t }}</h3>
+          <ul>
+            <li v-for="(d, i) in t.docs_links" :key="i"><a :href="d[1]" rel="noopener">{{ d[0] }}</a></li>
           </ul>
-          <table>
-            <tbody>
-              <tr v-for="(c, i) in t.use_cmds" :key="i">
-                <td><code>{{ c[0] }}</code></td>
-                <td>{{ c[1] }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ t.use_service_t }}</span>
-              <button class="copy" @click="copy(serviceCmd, 'svc')">{{ copied === 'svc' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ serviceCmd }}</code></pre>
-          </div>
-        </details>
+        </div>
       </section>
       </template>
     </main>
