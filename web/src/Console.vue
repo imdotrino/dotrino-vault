@@ -30,6 +30,9 @@ const props = defineProps({
   mode: { type: String, default: 'console' }
 })
 const pairOnly = computed(() => props.mode === 'pair')
+// /approvals: SOLO los pedidos. Responsabilidades separadas: /devices administra el perfil,
+// /approvals es donde se dice que sí o que no (y a donde apunta el aviso del teléfono).
+const approvalsOnly = computed(() => props.mode === 'approvals')
 
 const T = {
   es: {
@@ -152,6 +155,7 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
+    apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda:  dotrino-vault caps <ID> +aprueba',
     adm_code_ph: 'Los 6 dígitos que muestra',
     adm_approve: 'Aprobar', adm_reject: 'Rechazar',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -296,6 +300,7 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
+    apv_nocap: 'This device does not approve requests. Grant it from the vault:  dotrino-vault caps <ID> +aprueba',
     adm_code_ph: 'The 6 digits it shows',
     adm_approve: 'Approve', adm_reject: 'Reject',
     var_t: 'Your apps\u2019 variables',
@@ -938,6 +943,12 @@ async function refreshAdmin () {
 // pedido —quién, qué cajón, cuánto le queda— y dos botones. Se sondea cada 5 s mientras
 // la pantalla está a la vista; el aviso que despierta a la app llega por otro camino.
 const canApprove = ref(false)
+// ACORDEONES de /devices: la lista creció hasta hacerse ilegible, así que cada aparato y
+// cada grupo de variables se pliega tras su cabecera. Nacen cerrados; el estado no se
+// guarda (abrir es un gesto de la visita, no una preferencia).
+const openMembers = ref(new Set())
+const openGroups = ref(new Set())
+const toggleOpen = (set, key) => { const s = new Set(set.value); if (s.has(key)) s.delete(key); else s.add(key); set.value = s }
 const approvals = ref([])
 let apvTimer = null
 async function refreshApprovals () {
@@ -1216,6 +1227,22 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
       </details>
     </template>
 
+    <template v-else-if="approvalsOnly">
+      <!-- /approvals: SOLO pedir el sí o el no. Lo administrativo vive en /devices. -->
+      <template v-if="canApprove">
+        <h2>{{ t.apv_t }}</h2>
+        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
+        <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
+          <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
+            <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
+          <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
+          <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
+        </div>
+        <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+      </template>
+      <p v-else class="muted" data-testid="apv-nocap">{{ t.apv_nocap }}</p>
+    </template>
+
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
 
@@ -1264,8 +1291,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
            master lo puede todo; uno con «administra» puede conectar y quitar. -->
       <h2>{{ t.members }}</h2>
       <ul class="members" data-testid="members">
-        <li v-for="m in devices" :key="m.pub" class="member" :data-member="m.id">
-          <div class="who">
+        <li v-for="m in devices" :key="m.pub" class="member" :class="{ open: openMembers.has(m.pub) }" :data-member="m.id">
+          <div class="who acc" role="button" tabindex="0" :aria-expanded="openMembers.has(m.pub)"
+               :data-testid="'acc-member-' + m.id"
+               @click="toggleOpen(openMembers, m.pub)" @keyup.enter="toggleOpen(openMembers, m.pub)">
+            <span class="chev" aria-hidden="true">{{ openMembers.has(m.pub) ? '▾' : '▸' }}</span>
             <strong>{{ m.label || m.id }}</strong>
             <span class="tag" v-if="m.isMe">{{ t.me }}</span>
             <span class="tag master" v-if="m.isMaster">{{ t.is_master }}</span>
@@ -1276,6 +1306,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
             <code class="mid">{{ m.id }}</code>
           </div>
+          <template v-if="openMembers.has(m.pub)">
           <p v-if="m.noAccess" class="muted svc-note">{{ t.dev_nocert_b }}</p>
           <div class="caps">
             <button v-for="c in (m.cn ? ['secrets','sign','approve'] : ['sign','store','read','admin','approve'])" :key="c"
@@ -1325,6 +1356,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                     @click="confirming.kind === 'remove' ? removeMember(m) : confirming.kind === 'handover' ? handover(m) : renounceSign()">{{ t.yes }}</button>
             <button class="btn ghost sm" @click="confirming = null">{{ t.cancel }}</button>
           </div>
+          </template>
         </li>
       </ul>
 
@@ -1382,21 +1414,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
       </div>
-
-      <!-- PEDIDOS: solo si el cert de este aparato lleva `approve`. Administrativa: el
-           pedido y sus dos botones; la advertencia se queda a la vista (no es explicación). -->
-      <template v-if="canApprove">
-        <h2>{{ t.apv_t }}</h2>
-        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
-        <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
-          <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
-            <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
-          <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
-          <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
-        </div>
-        <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
-
-      </template>
 
       <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
       <template v-if="canAdmin">
@@ -1463,21 +1480,30 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           </div>
 
           <ul class="vars" data-testid="vars">
-            <li v-for="ns in scopeNames" :key="ns" class="vargroup" :data-scope="ns">
-              <div class="who"><strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span></div>
-              <Vars :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
+            <li v-for="ns in scopeNames" :key="ns" class="vargroup" :class="{ open: openGroups.has(ns) }" :data-scope="ns">
+              <div class="who acc" role="button" tabindex="0" :aria-expanded="openGroups.has(ns)"
+                   :data-testid="'acc-group-' + ns"
+                   @click="toggleOpen(openGroups, ns)" @keyup.enter="toggleOpen(openGroups, ns)">
+                <span class="chev" aria-hidden="true">{{ openGroups.has(ns) ? '▾' : '▸' }}</span>
+                <strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span>
+                <span class="muted count">{{ (vars.ns[ns] || []).length }}</span>
+              </div>
+              <Vars v-if="openGroups.has(ns)" :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
                     :t="t" :busy="busy" :save="saveVars" />
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->
-            <li v-for="d in orphanVars" :key="d.pub" class="vargroup" :data-device="d.id">
-              <div class="who">
+            <li v-for="d in orphanVars" :key="d.pub" class="vargroup" :class="{ open: openGroups.has(d.pub) }" :data-device="d.id">
+              <div class="who acc" role="button" tabindex="0" :aria-expanded="openGroups.has(d.pub)"
+                   :data-testid="'acc-orphan-' + d.id"
+                   @click="toggleOpen(openGroups, d.pub)" @keyup.enter="toggleOpen(openGroups, d.pub)">
+                <span class="chev" aria-hidden="true">{{ openGroups.has(d.pub) ? '▾' : '▸' }}</span>
                 <strong>{{ d.label || d.id }}</strong>
                 <span class="tag svc" v-if="d.cn">{{ t.service }} «{{ d.cn }}»</span>
                 <code class="mid">{{ d.id }}</code>
                 <span class="tag out">{{ t.var_orphan }}</span>
               </div>
-              <div v-for="v in d.keys" :key="v.key" class="varrow" :data-var="d.id + '/' + v.key">
+              <div v-if="openGroups.has(d.pub)" v-for="v in d.keys" :key="v.key" class="varrow" :data-var="d.id + '/' + v.key">
                 <code>{{ v.key }}</code>
                 <span v-if="v.public" class="val" :data-testid="'val-' + v.key">{{ v.value }}</span>
                 <span v-else class="tag out">{{ t.var_private }}</span>
@@ -1604,6 +1630,10 @@ textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #
 .invite .btn { flex: 0 0 auto; }
 .scanbox { margin: 10px 0; }
 .scanbox video { width: 100%; max-width: 360px; border-radius: 12px; background: #000; }
+.who.acc { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+.who.acc:focus-visible { outline: 1px solid #4f8cff; border-radius: 8px; }
+.chev { color: #9fb3c8; width: 14px; display: inline-block; }
+.count { font-size: 12px; }
 .pending { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #10203a; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
 .pending input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; width: 140px; font-family: ui-monospace, monospace; }
 details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
