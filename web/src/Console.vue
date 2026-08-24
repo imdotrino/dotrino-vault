@@ -948,7 +948,11 @@ const canApprove = ref(false)
 // guarda (abrir es un gesto de la visita, no una preferencia).
 const openMembers = ref(new Set())
 const openGroups = ref(new Set())
-const toggleOpen = (set, key) => { const s = new Set(set.value); if (s.has(key)) s.delete(key); else s.add(key); set.value = s }
+// Ojo: en el template los `ref` llegan DESENVUELTOS, así que estas funciones cierran sobre
+// el ref aquí (pasarlo como argumento entregaba el Set pelado y el toggle no era reactivo).
+const toggleIn = (ref_, key) => { const s = new Set(ref_.value); if (s.has(key)) s.delete(key); else s.add(key); ref_.value = s }
+const toggleMember = (key) => toggleIn(openMembers, key)
+const toggleGroup = (key) => toggleIn(openGroups, key)
 const approvals = ref([])
 let apvTimer = null
 async function refreshApprovals () {
@@ -1294,7 +1298,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <li v-for="m in devices" :key="m.pub" class="member" :class="{ open: openMembers.has(m.pub) }" :data-member="m.id">
           <div class="who acc" role="button" tabindex="0" :aria-expanded="openMembers.has(m.pub)"
                :data-testid="'acc-member-' + m.id"
-               @click="toggleOpen(openMembers, m.pub)" @keyup.enter="toggleOpen(openMembers, m.pub)">
+               @click="toggleMember(m.pub)" @keyup.enter="toggleMember(m.pub)">
             <span class="chev" aria-hidden="true">{{ openMembers.has(m.pub) ? '▾' : '▸' }}</span>
             <strong>{{ m.label || m.id }}</strong>
             <span class="tag" v-if="m.isMe">{{ t.me }}</span>
@@ -1483,7 +1487,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <li v-for="ns in scopeNames" :key="ns" class="vargroup" :class="{ open: openGroups.has(ns) }" :data-scope="ns">
               <div class="who acc" role="button" tabindex="0" :aria-expanded="openGroups.has(ns)"
                    :data-testid="'acc-group-' + ns"
-                   @click="toggleOpen(openGroups, ns)" @keyup.enter="toggleOpen(openGroups, ns)">
+                   @click="toggleGroup(ns)" @keyup.enter="toggleGroup(ns)">
                 <span class="chev" aria-hidden="true">{{ openGroups.has(ns) ? '▾' : '▸' }}</span>
                 <strong>{{ ns }}</strong><span class="tag">{{ t.var_shared }}</span>
                 <span class="muted count">{{ (vars.ns[ns] || []).length }}</span>
@@ -1496,7 +1500,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
             <li v-for="d in orphanVars" :key="d.pub" class="vargroup" :class="{ open: openGroups.has(d.pub) }" :data-device="d.id">
               <div class="who acc" role="button" tabindex="0" :aria-expanded="openGroups.has(d.pub)"
                    :data-testid="'acc-orphan-' + d.id"
-                   @click="toggleOpen(openGroups, d.pub)" @keyup.enter="toggleOpen(openGroups, d.pub)">
+                   @click="toggleGroup(d.pub)" @keyup.enter="toggleGroup(d.pub)">
                 <span class="chev" aria-hidden="true">{{ openGroups.has(d.pub) ? '▾' : '▸' }}</span>
                 <strong>{{ d.label || d.id }}</strong>
                 <span class="tag svc" v-if="d.cn">{{ t.service }} «{{ d.cn }}»</span>
