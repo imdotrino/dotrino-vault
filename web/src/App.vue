@@ -31,6 +31,8 @@ const I18N = {
       'seguridad': 'Cifrado, store y alcance',
       'cli': 'CLI de control',
       'secretos': 'Secretos de servicios',
+      'empezar/que-es': 'Qué es Dotrino',
+      'desarrollo/contribuir': 'Contribuir',
     },
     how_1_t: 'Lo instalas',
     how_1_b: 'Descargas un programa que se queda funcionando en tu computadora y se encarga de guardar tus cosas. Queda listo en un minuto, sin configurar nada.',
@@ -40,12 +42,12 @@ const I18N = {
     how_3_b: 'Tu información vive en tu máquina y solo la ven los dispositivos que tú conectaste. ¿Perdiste el teléfono? Lo desconectas con un clic y tus datos siguen a salvo.',
     feat_title: 'Lo que te da',
     feats: [
-      ['Todo junto', 'Archivos, contactos, notas y lo que guardan tus apps: una sola bóveda, en vez de tus cosas regadas por mil sitios.'],
-      ['Es tuya', 'Vive en tu propia computadora, no en los servidores de una empresa. Tú eres el único dueño.'],
-      ['Privada de verdad', 'Sin anuncios, sin cookies, sin rastreo. Nadie mira ni vende tu información.'],
-      ['En todos tus dispositivos', 'Tu teléfono, tu laptop y tu PC, conectados a la misma bóveda de forma segura.'],
-      ['Tú decides quién entra', 'Conectas y desconectas dispositivos cuando quieras. El control es solo tuyo.'],
-      ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.'],
+      ['Todo junto', 'Archivos, contactos, notas y lo que guardan tus apps: una sola bóveda, en vez de tus cosas regadas por mil sitios.', 'seguridad'],
+      ['Es tuya', 'Vive en tu propia computadora, no en los servidores de una empresa. Tú eres el único dueño.', 'modelo'],
+      ['Privada de verdad', 'Sin anuncios, sin cookies, sin rastreo. Nadie mira ni vende tu información.', 'empezar/que-es'],
+      ['En todos tus dispositivos', 'Tu teléfono, tu laptop y tu PC, conectados a la misma bóveda de forma segura.', 'emparejar'],
+      ['Tú decides quién entra', 'Conectas y desconectas dispositivos cuando quieras. El control es solo tuyo.', 'modelo'],
+      ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.', 'desarrollo/contribuir'],
     ],
      dl_title: 'Descarga',
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
@@ -150,6 +152,8 @@ const I18N = {
       'seguridad': 'Encryption, store and scope',
       'cli': 'Control CLI',
       'secretos': 'Service secrets',
+      'empezar/que-es': 'What is Dotrino',
+      'desarrollo/contribuir': 'Contributing',
     },
     how_1_t: 'You install it',
     how_1_b: 'You download a program that keeps running on your computer and takes care of storing your stuff. Ready in a minute, nothing to configure.',
@@ -159,12 +163,12 @@ const I18N = {
     how_3_b: 'Your information lives on your machine and only the devices you connected can see it. Lost your phone? Disconnect it with one click and your data stays safe.',
     feat_title: 'What you get',
     feats: [
-      ['Everything together', 'Files, contacts, notes and whatever your apps save: one single vault, instead of your stuff spread across a thousand places.'],
-      ['It’s yours', 'It lives on your own computer, not on a company’s servers. You are the only owner.'],
-      ['Truly private', 'No ads, no cookies, no tracking. Nobody looks at or sells your information.'],
-      ['On all your devices', 'Your phone, laptop and PC, connected to the same vault securely.'],
-      ['You decide who gets in', 'Connect and disconnect devices whenever you want. The control is only yours.'],
-      ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.'],
+      ['Everything together', 'Files, contacts, notes and whatever your apps save: one single vault, instead of your stuff spread across a thousand places.', 'seguridad'],
+      ['It’s yours', 'It lives on your own computer, not on a company’s servers. You are the only owner.', 'modelo'],
+      ['Truly private', 'No ads, no cookies, no tracking. Nobody looks at or sells your information.', 'empezar/que-es'],
+      ['On all your devices', 'Your phone, laptop and PC, connected to the same vault securely.', 'emparejar'],
+      ['You decide who gets in', 'Connect and disconnect devices whenever you want. The control is only yours.', 'modelo'],
+      ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.', 'desarrollo/contribuir'],
     ],
      dl_title: 'Download',
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
@@ -363,7 +367,8 @@ routeNow()
  */
 /** La página del wiki en el idioma activo (§9.2): cada método enlaza su guía AHÍ, no solo al final. */
 function wikiUrl (slug) {
-  return `https://wiki.dotrino.com${lang.value === 'en' ? '/en' : ''}/vault/${slug}/`
+  const path = slug.includes('/') ? slug : `vault/${slug}`
+  return `https://wiki.dotrino.com${lang.value === 'en' ? '/en' : ''}/${path}/`
 }
 
 function goTo (id, ev) {
@@ -462,6 +467,7 @@ onMounted(async () => {
         <div class="grid">
           <div class="feat" v-for="(f, i) in t.feats" :key="i">
             <h3>{{ f[0] }}</h3><p>{{ f[1] }}</p>
+            <p v-if="f[2]" class="dl-guide"><a :href="wikiUrl(f[2])" rel="noopener">{{ t.wikiTitles[f[2]] }} →</a></p>
           </div>
         </div>
       </section>
