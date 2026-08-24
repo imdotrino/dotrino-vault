@@ -34,7 +34,7 @@ const I18N = {
       ['Tú decides quién entra', 'Conectas y desconectas dispositivos cuando quieras. El control es solo tuyo.'],
       ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.'],
     ],
-    dl_guide: 'Guía completa en el wiki', dl_title: 'Descarga',
+    dl_guide: 'Cómo instalar', dl_title: 'Descarga',
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
     dl_deb_t: 'Ubuntu o Debian',
     dl_deb_btn: 'Descargar el instalador (.deb)',
@@ -141,7 +141,7 @@ const I18N = {
       ['You decide who gets in', 'Connect and disconnect devices whenever you want. The control is only yours.'],
       ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.'],
     ],
-    dl_guide: 'Full guide on the wiki', dl_title: 'Download',
+    dl_guide: 'How to install', dl_title: 'Download',
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
     dl_deb_t: 'Ubuntu or Debian',
     dl_deb_btn: 'Download the installer (.deb)',
@@ -448,77 +448,30 @@ onMounted(async () => {
         </div>
         <p class="os-hint">{{ t.dl_os_hint }}</p>
 
-        <!-- 1 · Instalador -->
+        <!-- §9.2: el home NO documenta. Cada vía: título, una frase, su botón de descarga
+             (si lo tiene) y «Cómo instalar →» al wiki. Los comandos y las notas viven allá. -->
         <div class="dl-card" data-testid="m-installer">
           <h3>{{ t.m1_t }}</h3>
           <template v-if="os === 'linux'">
             <p class="dl-note m1-lead">{{ t.m1_lead }}</p>
             <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
-            <p class="dl-note">{{ t.dl_deb_note }}</p>
-            <h4 class="sub">{{ t.dl_tar_t }}</h4>
             <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
-            <div class="codeblock">
-              <div class="code-head"><span>{{ t.dl_install_t }}</span>
-                <button class="copy" @click="copy(installCmd, 'install')">{{ copied === 'install' ? '✓' : '⧉' }}</button>
-              </div>
-              <pre><code>{{ installCmd }}</code></pre>
-            </div>
-            <p class="warn">{{ t.dl_warn }}</p>
           </template>
           <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>
           <p class="dl-guide"><a :href="wikiUrl('instalar-linux')" rel="noopener" data-testid="guide-linux">{{ t.dl_guide }} →</a></p>
         </div>
 
-        <!-- 2 · Un comando (mismo instalador universal del ecosistema en los tres) -->
         <div class="dl-card" data-testid="m-command">
           <h3>{{ t.m2_t }}</h3>
           <p class="dl-note m1-lead">{{ t.m2_lead }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ os === 'windows' ? t.dl_win_ps : t.dl_win_sh }}</span>
-              <button class="copy" @click="copy(os === 'windows' ? winPsCmd : winShCmd, 'cmd')">{{ copied === 'cmd' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ os === 'windows' ? winPsCmd : winShCmd }}</code></pre>
-          </div>
-          <div class="codeblock">
-            <div class="code-head"><span>Node ≥ 20</span>
-              <button class="copy" @click="copy(npxCmd, 'npx')">{{ copied === 'npx' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ npxCmd }}</code></pre>
-          </div>
-          <p class="dl-note m1-lead">{{ t.m2_tui }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>{{ os === 'windows' ? t.dl_win_ps : t.dl_win_sh }} · {{ t.m3_tui_tag }}</span>
-              <button class="copy" @click="copy(os === 'windows' ? winPsTuiCmd : winShTuiCmd, 'cmdtui')">{{ copied === 'cmdtui' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ os === 'windows' ? winPsTuiCmd : winShTuiCmd }}</code></pre>
-          </div>
-          <p class="dl-note">{{ t.m2_note }}</p>
           <p class="dl-guide"><a :href="wikiUrl('instalar-npx')" rel="noopener" data-testid="guide-npx">{{ t.dl_guide }} →</a></p>
         </div>
 
-        <!-- 3 · Docker (idéntico en los tres; solo cambia la nota) -->
         <div class="dl-card" data-testid="m-docker">
           <h3>{{ t.m3_t }}</h3>
           <p class="dl-note m1-lead">{{ t.dl_docker_lead }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>Docker</span>
-              <button class="copy" @click="copy(dockerCmd, 'docker')">{{ copied === 'docker' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ dockerCmd }}</code></pre>
-          </div>
-          <p class="dl-note">{{ os === 'linux' ? t.dl_docker_note : t.m3_desktop }}</p>
           <p class="dl-guide"><a :href="wikiUrl('instalar-docker')" rel="noopener" data-testid="guide-docker">{{ t.dl_guide }} →</a></p>
         </div>
-
-        <div class="codeblock">
-          <div class="code-head"><span>{{ t.dl_pair_t }}</span>
-            <button class="copy" @click="copy(pairCmd, 'pair')">{{ copied === 'pair' ? '✓' : '⧉' }}</button>
-          </div>
-          <pre><code>{{ pairCmd }}</code></pre>
-        </div>
-        <p class="dl-note">{{ t.dl_pair_note }}</p>
-
-        <p class="other">{{ t.dl_other }}</p>
       </section>
 
       <!-- CÓMO SE USA — la landing explicaba cómo descargarla y ahí se acababa. Lo que
@@ -534,22 +487,6 @@ onMounted(async () => {
             <h3>{{ c[0] }}</h3>
             <p>{{ c[1] }}</p>
           </article>
-        </div>
-
-        <div class="use-warn" data-testid="use-warn">
-          <h3>{{ t.use_warn_t }}</h3>
-          <p>{{ t.use_warn_b }}</p>
-        </div>
-
-        <div class="use-tui" data-testid="use-tui">
-          <h3>{{ t.use_tui_t }}</h3>
-          <p>{{ t.use_tui_b }}</p>
-          <div class="codeblock">
-            <div class="code-head"><span>Windows · macOS · Linux</span>
-              <button class="copy" @click="copy(tuiJuntoCmd, 'tuij')">{{ copied === 'tuij' ? '✓' : '⧉' }}</button>
-            </div>
-            <pre><code>{{ tuiJuntoCmd }}</code></pre>
-          </div>
         </div>
 
         <!-- El detalle (CLI completa, TUI, secretos, aprobación) vive en el WIKI (§9.2):
