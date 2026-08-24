@@ -19,6 +19,8 @@ const I18N = {
     why_title: '¿Para qué sirve?',
     why_body: 'Hoy tu información está repartida y, casi siempre, en servidores de grandes empresas que la guardan, la miran y la usan para ganar dinero: unas cosas en Google, otras en tu teléfono, otras en cada app. Dotrino Vault las junta en un solo lugar que es tuyo de verdad —tu computadora— y tus demás dispositivos acceden a ella de forma segura, estés donde estés. Tu información deja de estar prestada y vuelve a ser tuya.',
     how_title: 'Cómo funciona',
+    how_1_link: 'Cómo instalar', how_2_link: 'Cómo conectar un aparato', how_3_link: 'Cómo te protege',
+    use_card_more: 'Cómo se hace, en el wiki',
     how_1_t: 'Lo instalas',
     how_1_b: 'Descargas un programa que se queda funcionando en tu computadora y se encarga de guardar tus cosas. Queda listo en un minuto, sin configurar nada.',
     how_2_t: 'Conectas tus dispositivos',
@@ -68,15 +70,15 @@ const I18N = {
     use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda trabaja de fondo. Con el instalador de Linux y con Docker arranca sola cada vez que enciendes la computadora; si la levantaste con el comando de Windows o macOS, funciona mientras dejes esa ventana abierta. Esto es lo poco que sí harás alguna vez.',
     use_cards: [
       ['Conectar un teléfono o una laptop',
-       'En tu computadora pides un código; en el aparato lo escaneas o lo pegas. El aparato te muestra seis dígitos y tú los escribes en la computadora. Ese ida y vuelta es lo que evita que alguien se cuele: aprobar exige tener el aparato en la mano.'],
+       'En tu computadora pides un código; en el aparato lo escaneas o lo pegas. El aparato te muestra seis dígitos y tú los escribes en la computadora. Ese ida y vuelta es lo que evita que alguien se cuele: aprobar exige tener el aparato en la mano.', 'emparejar'],
       ['Ver quién está conectado',
-       'Tu página de dispositivos lista cada aparato, qué puede hacer cada uno y cuál manda. Desde ahí quitas permisos o sacas a uno del todo.'],
+       'Tu página de dispositivos lista cada aparato, qué puede hacer cada uno y cuál manda. Desde ahí quitas permisos o sacas a uno del todo.', 'modelo'],
       ['Si pierdes un aparato',
-       'Lo desconectas y deja de servir: la bóveda no vuelve a firmar por él y, la próxima vez que se encienda, se borra lo que tenía de tu cuenta.'],
+       'Lo desconectas y deja de servir: la bóveda no vuelve a firmar por él y, la próxima vez que se encienda, se borra lo que tenía de tu cuenta.', 'modelo'],
       ['Tener varias cuentas',
-       'Puedes guardar más de una cuenta en la misma computadora (la personal y la del trabajo, por ejemplo). Funcionan a la vez y no se ven entre ellas.'],
+       'Puedes guardar más de una cuenta en la misma computadora (la personal y la del trabajo, por ejemplo). Funcionan a la vez y no se ven entre ellas.', 'perfiles'],
       ['Ponerle una contraseña',
-       'Opcional. Protege que otro que se siente en tu computadora te cambie la cuenta. No protege el disco, y tus aparatos siguen funcionando aunque esté puesta.'],
+       'Opcional. Protege que otro que se siente en tu computadora te cambie la cuenta. No protege el disco, y tus aparatos siguen funcionando aunque esté puesta.', 'perfiles'],
     ],
     use_warn_t: 'Lo más importante que tienes que saber',
     use_warn_b: 'Tu cuenta vive en esta computadora y en ningún otro lado. No hay una copia nuestra ni una forma de recuperarla: si pierdes la máquina sin haber conectado otra bóveda antes, pierdes la cuenta. Es el precio de que sea tuya de verdad, y preferimos decírtelo antes que prometerte un rescate que no existe.',
@@ -126,6 +128,8 @@ const I18N = {
     why_title: 'What is it for?',
     why_body: 'Today your information is scattered and, almost always, sitting on big companies’ servers that keep it, look at it and use it to make money: some things on Google, others on your phone, others in each app. Dotrino Vault brings it all into one place that is truly yours —your computer— and your other devices reach it securely, wherever you are. Your information stops being borrowed and becomes yours again.',
     how_title: 'How it works',
+    how_1_link: 'How to install', how_2_link: 'How to pair a device', how_3_link: 'How it protects you',
+    use_card_more: 'How to, on the wiki',
     how_1_t: 'You install it',
     how_1_b: 'You download a program that keeps running on your computer and takes care of storing your stuff. Ready in a minute, nothing to configure.',
     how_2_t: 'You connect your devices',
@@ -175,15 +179,15 @@ const I18N = {
     use_lead: 'Most of the time you do nothing: the vault works in the background. With the Linux installer and with Docker it starts on its own every time you turn the computer on; if you launched it with the Windows or macOS command, it runs while you leave that window open. This is the little you will actually do.',
     use_cards: [
       ['Connect a phone or a laptop',
-       'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.'],
+       'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.', 'emparejar'],
       ['See who is connected',
-       'Your devices page lists every device, what each one can do and which one is the Master. From there you take permissions away or remove one entirely.'],
+       'Your devices page lists every device, what each one can do and which one is the Master. From there you take permissions away or remove one entirely.', 'modelo'],
       ['If you lose a device',
-       'You disconnect it and it stops working: the vault will not sign for it again and, next time it turns on, it wipes what it had of your account.'],
+       'You disconnect it and it stops working: the vault will not sign for it again and, next time it turns on, it wipes what it had of your account.', 'modelo'],
       ['Keep several accounts',
-       'You can keep more than one account on the same computer (personal and work, say). They run at the same time and cannot see each other.'],
+       'You can keep more than one account on the same computer (personal and work, say). They run at the same time and cannot see each other.', 'perfiles'],
       ['Set a password',
-       'Optional. It stops someone sitting at your computer from changing your account. It does not protect the disk, and your devices keep working with it on.'],
+       'Optional. It stops someone sitting at your computer from changing your account. It does not protect the disk, and your devices keep working with it on.', 'perfiles'],
     ],
     use_warn_t: 'The most important thing to know',
     use_warn_b: 'Your account lives on this computer and nowhere else. There is no copy of ours and no way to recover it: if you lose the machine without having connected another vault first, you lose the account. That is the price of it being truly yours, and we would rather tell you than promise a rescue that does not exist.',
@@ -421,9 +425,13 @@ onMounted(async () => {
       <section id="how" class="how">
         <h2>{{ t.how_title }}</h2>
         <ol class="steps">
-          <li><span class="num">1</span><div><h3>{{ t.how_1_t }}</h3><p>{{ t.how_1_b }}</p></div></li>
-          <li><span class="num">2</span><div><h3>{{ t.how_2_t }}</h3><p>{{ t.how_2_b }}</p></div></li>
-          <li><span class="num">3</span><div><h3>{{ t.how_3_t }}</h3><p>{{ t.how_3_b }}</p></div></li>
+          <!-- §9.2: el «cómo» de verdad vive en el wiki; cada paso enlaza EL SUYO aquí mismo. -->
+          <li><span class="num">1</span><div><h3>{{ t.how_1_t }}</h3><p>{{ t.how_1_b }}</p>
+            <p class="dl-guide"><a :href="wikiUrl('instalacion')" rel="noopener">{{ t.how_1_link }} →</a></p></div></li>
+          <li><span class="num">2</span><div><h3>{{ t.how_2_t }}</h3><p>{{ t.how_2_b }}</p>
+            <p class="dl-guide"><a :href="wikiUrl('emparejar')" rel="noopener">{{ t.how_2_link }} →</a></p></div></li>
+          <li><span class="num">3</span><div><h3>{{ t.how_3_t }}</h3><p>{{ t.how_3_b }}</p>
+            <p class="dl-guide"><a :href="wikiUrl('seguridad')" rel="noopener">{{ t.how_3_link }} →</a></p></div></li>
         </ol>
       </section>
 
@@ -486,17 +494,10 @@ onMounted(async () => {
           <article v-for="(c, i) in t.use_cards" :key="i" class="use-card">
             <h3>{{ c[0] }}</h3>
             <p>{{ c[1] }}</p>
+            <p v-if="c[2]" class="dl-guide"><a :href="wikiUrl(c[2])" rel="noopener">{{ t.use_card_more }} →</a></p>
           </article>
         </div>
 
-        <!-- El detalle (CLI completa, TUI, secretos, aprobación) vive en el WIKI (§9.2):
-             la landing dice lo esencial y manda allá, en vez de repetir tablas de comandos. -->
-        <div class="use-docs" data-testid="use-docs">
-          <h3>{{ t.docs_t }}</h3>
-          <ul>
-            <li v-for="(d, i) in t.docs_links" :key="i"><a :href="d[1]" rel="noopener">{{ d[0] }}</a></li>
-          </ul>
-        </div>
       </section>
       </template>
     </main>
