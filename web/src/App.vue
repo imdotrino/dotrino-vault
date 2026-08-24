@@ -34,7 +34,7 @@ const I18N = {
       ['Tú decides quién entra', 'Conectas y desconectas dispositivos cuando quieras. El control es solo tuyo.'],
       ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.'],
     ],
-    dl_title: 'Descarga',
+    dl_guide: 'Guía completa en el wiki', dl_title: 'Descarga',
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
     dl_deb_t: 'Ubuntu o Debian',
     dl_deb_btn: 'Descargar el instalador (.deb)',
@@ -141,7 +141,7 @@ const I18N = {
       ['You decide who gets in', 'Connect and disconnect devices whenever you want. The control is only yours.'],
       ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.'],
     ],
-    dl_title: 'Download',
+    dl_guide: 'Full guide on the wiki', dl_title: 'Download',
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
     dl_deb_t: 'Ubuntu or Debian',
     dl_deb_btn: 'Download the installer (.deb)',
@@ -336,6 +336,11 @@ routeNow()
  * El `href` se queda por accesibilidad y para poder abrir en pestaña nueva; el
  * desplazamiento lo hacemos nosotros.
  */
+/** La página del wiki en el idioma activo (§9.2): cada método enlaza su guía AHÍ, no solo al final. */
+function wikiUrl (slug) {
+  return `https://wiki.dotrino.com${lang.value === 'en' ? '/en' : ''}/vault/${slug}/`
+}
+
 function goTo (id, ev) {
   const target = document.getElementById(id)
   if (!target) return
@@ -461,6 +466,7 @@ onMounted(async () => {
             <p class="warn">{{ t.dl_warn }}</p>
           </template>
           <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-linux')" rel="noopener" data-testid="guide-linux">{{ t.dl_guide }} →</a></p>
         </div>
 
         <!-- 2 · Un comando (mismo instalador universal del ecosistema en los tres) -->
@@ -487,6 +493,7 @@ onMounted(async () => {
             <pre><code>{{ os === 'windows' ? winPsTuiCmd : winShTuiCmd }}</code></pre>
           </div>
           <p class="dl-note">{{ t.m2_note }}</p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-npx')" rel="noopener" data-testid="guide-npx">{{ t.dl_guide }} →</a></p>
         </div>
 
         <!-- 3 · Docker (idéntico en los tres; solo cambia la nota) -->
@@ -500,6 +507,7 @@ onMounted(async () => {
             <pre><code>{{ dockerCmd }}</code></pre>
           </div>
           <p class="dl-note">{{ os === 'linux' ? t.dl_docker_note : t.m3_desktop }}</p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-docker')" rel="noopener" data-testid="guide-docker">{{ t.dl_guide }} →</a></p>
         </div>
 
         <div class="codeblock">
