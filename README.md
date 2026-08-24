@@ -784,7 +784,7 @@ de la PC no queda nada; cerrar el agente es olvidar las llaves.
 
 ```sh
 dotrino-vault secret set ssh SSH_KEY_DOTRINO "$(base64 -w0 ~/.ssh/id_ed25519)"
-dotrino-env enroll --ns ssh                 # una vez (pair --service ssh --approval en la bóveda)
+dotrino-env enroll --ns ssh --code <código>                 # una vez (pair --service ssh --approval en la bóveda)
 dotrino-env ssh-agent --ns ssh              # pide el cajón (tu sí en el teléfono) e imprime export SSH_AUTH_SOCK=…
 ssh mi-servidor                             # firma en local, con la llave en memoria
 ```

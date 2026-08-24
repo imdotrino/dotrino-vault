@@ -1,6 +1,6 @@
 {
   "name": "@dotrino/vault",
-  "version": "0.33.1",
+  "version": "0.33.2",
   "description": "Usa ESTE dispositivo (navegador) como bóveda/CA del ecosistema Dotrino: atiende enrolamientos por el proxy y firma certificados de delegación a tus máquinas. Incluye el cliente de SERVICIO (Node): un proyecto se enrola una vez y jala sus credenciales del vault en vez del .env (`import '@dotrino/vault/config'`).",
   "type": "module",
   "main": "src/index.js",
@@ -9,6 +9,7 @@
     "dotrino-env": "bin/dotrino-env.js"
   },
   "exports": {
+    "./bin/dotrino-env.js": "./bin/dotrino-env.js",
     ".": {
       "import": "./src/index.js"
     },
