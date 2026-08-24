@@ -19,8 +19,19 @@ const I18N = {
     why_title: '¿Para qué sirve?',
     why_body: 'Hoy tu información está repartida y, casi siempre, en servidores de grandes empresas que la guardan, la miran y la usan para ganar dinero: unas cosas en Google, otras en tu teléfono, otras en cada app. Dotrino Vault las junta en un solo lugar que es tuyo de verdad —tu computadora— y tus demás dispositivos acceden a ella de forma segura, estés donde estés. Tu información deja de estar prestada y vuelve a ser tuya.',
     how_title: 'Cómo funciona',
-    how_1_link: 'Cómo instalar', how_2_link: 'Cómo conectar un aparato', how_3_link: 'Cómo te protege',
-    use_card_more: 'Cómo se hace, en el wiki',
+    // §9.2: los enlaces al wiki llevan el TÍTULO de su página, no un genérico.
+    wikiTitles: {
+      'instalacion': 'Instalación: elige tu vía',
+      'instalar-linux': 'Instalar en Linux (.deb / tarball)',
+      'instalar-npx': 'Instalar con un comando (npx)',
+      'instalar-docker': 'Instalar con Docker',
+      'emparejar': 'Emparejar un aparato',
+      'modelo': 'El modelo: perfil, acta y llaves',
+      'perfiles': 'Perfiles y contraseña',
+      'seguridad': 'Cifrado, store y alcance',
+      'cli': 'CLI de control',
+      'secretos': 'Secretos de servicios',
+    },
     how_1_t: 'Lo instalas',
     how_1_b: 'Descargas un programa que se queda funcionando en tu computadora y se encarga de guardar tus cosas. Queda listo en un minuto, sin configurar nada.',
     how_2_t: 'Conectas tus dispositivos',
@@ -36,7 +47,7 @@ const I18N = {
       ['Tú decides quién entra', 'Conectas y desconectas dispositivos cuando quieras. El control es solo tuyo.'],
       ['Gratis y abierta', 'No cuesta nada y no pide cuenta. Su código es abierto, para que cualquiera lo revise.'],
     ],
-    dl_guide: 'Cómo instalar', dl_title: 'Descarga',
+     dl_title: 'Descarga',
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
     dl_deb_t: 'Ubuntu o Debian',
     dl_deb_btn: 'Descargar el instalador (.deb)',
@@ -128,8 +139,18 @@ const I18N = {
     why_title: 'What is it for?',
     why_body: 'Today your information is scattered and, almost always, sitting on big companies’ servers that keep it, look at it and use it to make money: some things on Google, others on your phone, others in each app. Dotrino Vault brings it all into one place that is truly yours —your computer— and your other devices reach it securely, wherever you are. Your information stops being borrowed and becomes yours again.',
     how_title: 'How it works',
-    how_1_link: 'How to install', how_2_link: 'How to pair a device', how_3_link: 'How it protects you',
-    use_card_more: 'How to, on the wiki',
+    wikiTitles: {
+      'instalacion': 'Install: pick your path',
+      'instalar-linux': 'Install on Linux (.deb / tarball)',
+      'instalar-npx': 'Install with one command (npx)',
+      'instalar-docker': 'Install with Docker',
+      'emparejar': 'Pairing a device',
+      'modelo': 'The model: profile, record, keys',
+      'perfiles': 'Profiles and password',
+      'seguridad': 'Encryption, store and scope',
+      'cli': 'Control CLI',
+      'secretos': 'Service secrets',
+    },
     how_1_t: 'You install it',
     how_1_b: 'You download a program that keeps running on your computer and takes care of storing your stuff. Ready in a minute, nothing to configure.',
     how_2_t: 'You connect your devices',
@@ -145,7 +166,7 @@ const I18N = {
       ['You decide who gets in', 'Connect and disconnect devices whenever you want. The control is only yours.'],
       ['Free and open', 'It costs nothing and asks for no account. Its code is open for anyone to review.'],
     ],
-    dl_guide: 'How to install', dl_title: 'Download',
+     dl_title: 'Download',
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
     dl_deb_t: 'Ubuntu or Debian',
     dl_deb_btn: 'Download the installer (.deb)',
@@ -427,11 +448,11 @@ onMounted(async () => {
         <ol class="steps">
           <!-- §9.2: el «cómo» de verdad vive en el wiki; cada paso enlaza EL SUYO aquí mismo. -->
           <li><span class="num">1</span><div><h3>{{ t.how_1_t }}</h3><p>{{ t.how_1_b }}</p>
-            <p class="dl-guide"><a :href="wikiUrl('instalacion')" rel="noopener">{{ t.how_1_link }} →</a></p></div></li>
+            <p class="dl-guide"><a :href="wikiUrl('instalacion')" rel="noopener">{{ t.wikiTitles['instalacion'] }} →</a></p></div></li>
           <li><span class="num">2</span><div><h3>{{ t.how_2_t }}</h3><p>{{ t.how_2_b }}</p>
-            <p class="dl-guide"><a :href="wikiUrl('emparejar')" rel="noopener">{{ t.how_2_link }} →</a></p></div></li>
+            <p class="dl-guide"><a :href="wikiUrl('emparejar')" rel="noopener">{{ t.wikiTitles['emparejar'] }} →</a></p></div></li>
           <li><span class="num">3</span><div><h3>{{ t.how_3_t }}</h3><p>{{ t.how_3_b }}</p>
-            <p class="dl-guide"><a :href="wikiUrl('seguridad')" rel="noopener">{{ t.how_3_link }} →</a></p></div></li>
+            <p class="dl-guide"><a :href="wikiUrl('seguridad')" rel="noopener">{{ t.wikiTitles['seguridad'] }} →</a></p></div></li>
         </ol>
       </section>
 
@@ -466,19 +487,19 @@ onMounted(async () => {
             <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
           </template>
           <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>
-          <p class="dl-guide"><a :href="wikiUrl('instalar-linux')" rel="noopener" data-testid="guide-linux">{{ t.dl_guide }} →</a></p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-linux')" rel="noopener" data-testid="guide-linux">{{ t.wikiTitles['instalar-linux'] }} →</a></p>
         </div>
 
         <div class="dl-card" data-testid="m-command">
           <h3>{{ t.m2_t }}</h3>
           <p class="dl-note m1-lead">{{ t.m2_lead }}</p>
-          <p class="dl-guide"><a :href="wikiUrl('instalar-npx')" rel="noopener" data-testid="guide-npx">{{ t.dl_guide }} →</a></p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-npx')" rel="noopener" data-testid="guide-npx">{{ t.wikiTitles['instalar-npx'] }} →</a></p>
         </div>
 
         <div class="dl-card" data-testid="m-docker">
           <h3>{{ t.m3_t }}</h3>
           <p class="dl-note m1-lead">{{ t.dl_docker_lead }}</p>
-          <p class="dl-guide"><a :href="wikiUrl('instalar-docker')" rel="noopener" data-testid="guide-docker">{{ t.dl_guide }} →</a></p>
+          <p class="dl-guide"><a :href="wikiUrl('instalar-docker')" rel="noopener" data-testid="guide-docker">{{ t.wikiTitles['instalar-docker'] }} →</a></p>
         </div>
       </section>
 
@@ -494,7 +515,7 @@ onMounted(async () => {
           <article v-for="(c, i) in t.use_cards" :key="i" class="use-card">
             <h3>{{ c[0] }}</h3>
             <p>{{ c[1] }}</p>
-            <p v-if="c[2]" class="dl-guide"><a :href="wikiUrl(c[2])" rel="noopener">{{ t.use_card_more }} →</a></p>
+            <p v-if="c[2]" class="dl-guide"><a :href="wikiUrl(c[2])" rel="noopener">{{ t.wikiTitles[c[2]] }} →</a></p>
           </article>
         </div>
 
