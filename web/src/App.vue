@@ -9,7 +9,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_approvals: 'Pedidos', nav_home: 'Inicio',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_approvals: 'Pedidos', nav_docs: 'Documentación', nav_home: 'Inicio',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -106,7 +106,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_approvals: 'Requests', nav_home: 'Home',
+    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_approvals: 'Requests', nav_docs: 'Docs', nav_home: 'Home',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -366,6 +366,7 @@ onMounted(async () => {
       <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
       <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
       <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
+      <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
 
