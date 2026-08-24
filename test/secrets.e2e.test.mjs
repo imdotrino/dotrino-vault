@@ -589,7 +589,9 @@ test('el scope corta el acceso a otro namespace', async () => {
 
 test('un cert revocado deja de poder leer', async () => {
   const { issued } = await vault.listDevices()
-  const mine = issued.find((d) => d.label === 'service:proxy')
+  // La etiqueta por defecto de un servicio es su ns a secas (sin «service:»); el que vale
+  // es el ÚLTIMO cert emitido para el cajón proxy (re-enrolar re-emite).
+  const mine = issued.filter((d) => (d.scope || []).includes('vault:secrets:proxy')).at(-1)
   assert.ok(mine, 'el servicio enrolado aparece en delegations')
   await vault.revokeDevice(mine.nonce)
   await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)

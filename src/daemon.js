@@ -158,7 +158,9 @@ export async function runDaemon () {
       const scope = asked?.length
         ? [...new Set(asked)]
         : isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
-      const label = pairReq?.label || (isService ? 'service:' + pairReq.service : 'cli')
+      // La etiqueta por defecto de un servicio es su ns a secas: la lista ya marca [servicio «ns»],
+      // y el prefijo «service:» confundía (el cajón se llama claude, no service:claude).
+      const label = pairReq?.label || (isService ? pairReq.service : 'cli')
       // `pair --approval`: el aparato que entre por esta invitación pedirá el visto bueno del
       // teléfono cada vez que reciba claves privadas (se aplica al aprobarlo, abajo).
       pendingApproval = !!pairReq?.approval
