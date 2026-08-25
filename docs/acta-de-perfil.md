@@ -180,9 +180,24 @@ dispositivo de esa persona lo abre, hubiera estado en línea o no.
 ### 1.3 Retención del historial
 
 - **Un tercero no necesita historial**: recibe el snapshot actual y verifica firma + `seq`.
-- **Un miembro que vuelve necesita una ventana** para comprobar el encadenamiento (si está
-  en `seq 5` y le llega la 9, necesita 6-7-8). **Ventana normada: las últimas 50 actas o
-  12 meses, lo que sea mayor.** El master es quien las conserva.
+- **Un miembro que vuelve casi nunca necesita la cadena, y por eso NO se le manda.**
+  `canAdopt` adopta el acta actual **de un salto** —sin mirar un solo eslabón— siempre que
+  la haya sellado quien él tiene por sellador; el `prev` solo se comprueba cuando la nueva
+  es **contigua**, donde por definición no hay cadena que mandar. Así que si está en `seq 5`
+  y le llega la 9 sellada por el mismo master, adopta la 9 y ya está: **6-7-8 no aportan
+  nada**.
+- **La cadena viaja en exactamente un caso: que haya habido un TRASPASO de master durante
+  el hueco.** Ahí el acta actual la firmó alguien que él no conoce, y el acta del traspaso
+  —firmada por el sellador que sí conocía— es el puente. Se le manda el tramo desde su `seq`,
+  y nada más.
+- **Ventana que el master conserva: las últimas 50 actas.** Mandarlas siempre «por si acaso»
+  salió caro: cada acta es un **snapshot completo** de los miembros (~940 bytes por miembro),
+  así que la ventana crece con **cambios × miembros**. Llegó a 991 KB de una respuesta de
+  1,03 MB, el proxio corta el frame a **1 MB** y cerraba la conexión de la bóveda con un
+  1009 — sin una línea de log de su lado. El 2026-08-24 un simple renombre de aparato cruzó
+  el filo y la bóveda quedó **muda para todo el ecosistema** tres días. Por eso, además,
+  `handleDevices` mide lo que va a mandar y recorta la cadena antes de que el transporte la
+  tire (`MAX_REPLY_BYTES`).
 - Un miembro apagado más tiempo que la ventana **debe re-admitirse** (pasa otra vez por el
   emparejamiento con aprobación humana — deseable, no un defecto).
 - El historial de auditoría legible por el dueño va en el `activity.log` que ya existe y
