@@ -31,6 +31,13 @@ import { atRestFor, machineKey, migrateFile } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 /**
+ * Tope de una respuesta de la bóveda por el transporte. El proxio (`PROXY_MAX_FRAME_BYTES`)
+ * corta el frame a 1 MB, y el sobre del proxio (destinatarios, tipos) va por encima de esto:
+ * se deja margen en vez de apurar el límite.
+ */
+const MAX_REPLY_BYTES = 768 * 1024
+
+/**
  * Abre UN perfil del vault (una maestra, un dir, una conexión al proxy). El
  * daemon multi-perfil (`manager.js`) levanta uno de estos por perfil.
  *
@@ -417,7 +424,30 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
-    reply(from, { type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain })
+    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain }))
+  }
+
+  /**
+   * NADA DE FRAMES QUE NO CABEN. El proxio corta a 1 MB y cierra la conexión con un 1009:
+   * la respuesta no llega, la bóveda reconecta y no queda ni una línea de log de su lado.
+   * Así estuvo muda tres días para todo el ecosistema (2026-08-24) mientras el bot social
+   * repetía «no tienes ningún node de contenido enrolado».
+   *
+   * La cadena de actas es lo único que puede crecer sin techo aquí —cada acta es un
+   * snapshot completo de los miembros—, así que se recorta por el FINAL: el tramo que sale
+   * sigue siendo contiguo desde el `seq` del que pregunta, que es lo que necesita para
+   * encadenar, y en la siguiente pregunta seguirá desde donde llegó.
+   */
+  function fitChain (msg) {
+    const size = (m) => JSON.stringify(m).length
+    if (size(msg) <= MAX_REPLY_BYTES) return msg
+    const full = msg.chain?.length || 0
+    while (msg.chain?.length && size(msg) > MAX_REPLY_BYTES) msg.chain = msg.chain.slice(0, -1)
+    if (!msg.chain?.length) msg.chain = null
+    const left = msg.chain?.length || 0
+    log(`[vault] record chain trimmed to fit the transport: ${left}/${full} link(s), ${size(msg)} bytes`)
+    if (size(msg) > MAX_REPLY_BYTES) log(`[vault] ⚠ the reply STILL does not fit (${size(msg)} bytes): the proxy will drop it`)
+    return msg
   }
 
   // RENOVACIÓN automática: un dispositivo con cert VIGENTE y no revocado pide un
