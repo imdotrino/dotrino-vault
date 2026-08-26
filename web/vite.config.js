@@ -60,13 +60,16 @@ const commitMeta = {
 //    respondía **404**, y un 404 en la puerta de entrada del emparejamiento es pedir
 //    problemas (cachés, navegadores embebidos, previsualizaciones de enlace).
 //  · `approvals/index.html` — los pedidos de aprobación (el aviso del teléfono abre aquí).
+//  · `vault/index.html` — este navegador COMO bóveda: la vía por defecto para quien no
+//    tiene el daemon. Necesita ser una ruta de verdad y no un `#`: es lo que abre la
+//    extensión, y un fragmento no sobrevive a que Chrome reabra la pestaña.
 //  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
 //    enruta en el cliente.
 const spaFallback = {
   name: 'spa-404',
   closeBundle () {
     try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
-    for (const ruta of ['devices', 'dispositivos', 'd', 'approvals']) {
+    for (const ruta of ['devices', 'dispositivos', 'd', 'approvals', 'vault']) {
       try {
         mkdirSync('dist/' + ruta, { recursive: true })
         copyFileSync('dist/index.html', `dist/${ruta}/index.html`)

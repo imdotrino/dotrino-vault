@@ -1,6 +1,12 @@
 <script setup>
-import { ref, computed, markRaw, onMounted } from 'vue'
+import { ref, computed, markRaw, onMounted, defineAsyncComponent } from 'vue'
 import Console from './Console.vue'
+
+/**
+ * La bóveda-en-pestaña se carga aparte: arrastra el transporte y el gestor de
+ * contraseñas, y quien entra a la landing no tiene por qué bajarlos.
+ */
+const Vault = defineAsyncComponent(() => import('./Vault.vue'))
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
@@ -9,7 +15,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_approvals: 'Pedidos', nav_docs: 'Documentación', nav_home: 'Inicio',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_docs: 'Documentación', nav_home: 'Inicio',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -131,7 +137,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_approvals: 'Requests', nav_docs: 'Docs', nav_home: 'Home',
+    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_approvals: 'Requests', nav_vault: 'My vault', nav_docs: 'Docs', nav_home: 'Home',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -350,6 +356,9 @@ function routeNow () {
   if (/\/d$/.test(p) || invited) view.value = 'pair'
   else if (/\/(devices|dispositivos)$/.test(p)) view.value = 'console'
   else if (/\/approvals$/.test(p)) view.value = 'approvals'
+  // `/vault`: este navegador ES la bóveda mientras la pestaña esté abierta. Vive aquí
+  // y no en la app de contraseñas porque la bóveda es del vault, y las apps le piden.
+  else if (/\/vault$/.test(p)) view.value = 'vault'
   else view.value = 'home'
 }
 routeNow()
@@ -380,7 +389,8 @@ function goTo (id, ev) {
 
 function go (v, ev) {
   ev?.preventDefault()
-  history.pushState(null, '', v === 'console' ? '/devices' : v === 'approvals' ? '/approvals' : '/')
+  const path = { console: '/devices', approvals: '/approvals', vault: '/vault' }[v] || '/'
+  history.pushState(null, '', path)
   routeNow()
 }
 window.addEventListener('popstate', routeNow)
@@ -421,12 +431,14 @@ onMounted(async () => {
       <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
       <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
       <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
+      <a href="/vault" data-testid="nav-vault" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
       <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
 
     <main>
-      <Console v-if="view === 'console' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
+      <Vault v-if="view === 'vault'" :lang="lang" />
+      <Console v-else-if="view === 'console' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
       <template v-else>
       <!-- HERO -->
       <section class="hero">

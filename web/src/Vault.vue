@@ -1,0 +1,354 @@
+<script setup>
+/**
+ * ESTE DISPOSITIVO ES TU BÓVEDA — mientras esta pestaña esté abierta.
+ *
+ * Su sitio es aquí y no en la app de contraseñas: la bóveda es del vault, y las apps
+ * le piden. Que exista esta pantalla es lo que hace que el ecosistema cumpla su propia
+ * regla — **ninguna app puede exigir que el usuario tenga un daemon encendido**. El
+ * daemon del PC sigue siendo el upgrade: añade estar disponible con el navegador
+ * cerrado, no otra cosa.
+ *
+ * Guarda lo mismo, responde de a una y habla el mismo protocolo que el daemon, así que
+ * pasar de una a otro es enlazar de nuevo y nada más.
+ */
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { Identity } from '@dotrino/identity'
+import { WebSocketProxyClient, getPublicKeyJwk, signData } from '@dotrino/proxy-client'
+import { LocalVault, VaultResponder, samePubkey, importAuto } from '@dotrino/passmanager'
+
+const props = defineProps({ lang: { type: String, default: 'es' } })
+
+const T = {
+  es: {
+    opening: 'Abriendo tu bóveda…',
+    active: 'Tu bóveda está respondiendo',
+    inactive: 'La bóveda no está respondiendo',
+    warning: 'Mientras esta pestaña esté abierta, tu bóveda responde a tus aparatos. Si la cierras, dejan de poder pedir contraseñas — nada se pierde, pero no responden hasta que vuelvas a abrirla.',
+    code: 'Pega este código en tu extensión para enlazarla',
+    copied: 'Copiado',
+    devices: 'Aparatos que pueden pedir credenciales',
+    none: 'Ninguno todavía. Enlaza tu extensión con el código de arriba.',
+    authorise: 'Y pega aquí el código que muestra la extensión',
+    authoriseBtn: 'Autorizar',
+    remove: 'Retirar',
+    kept: 'Guardado en esta bóveda',
+    empty: 'Nada guardado. Importa lo que ya tienes desde otro gestor.',
+    importBtn: 'Importar de 1Password, Bitwarden o Chrome',
+    imported: (n) => `${n} entrada${n === 1 ? '' : 's'} importada${n === 1 ? '' : 's'}`,
+    asking: (q) => `«${q}» pide una contraseña`,
+    askingText: 'Si le dices que sí, podrá pedir credenciales mientras esta bóveda siga abierta.',
+    yes: 'Sí, dásela',
+    no: 'No',
+    anySite: 'cualquier sitio',
+    noIdentity: 'Hace falta tu perfil de Dotrino. Créalo y vuelve.',
+  },
+  en: {
+    opening: 'Opening your vault…',
+    active: 'Your vault is answering',
+    inactive: 'The vault is not answering',
+    warning: 'While this tab is open, your vault answers your devices. If you close it they can no longer ask for passwords — nothing is lost, but they get no answer until you open it again.',
+    code: 'Paste this code into your extension to link it',
+    copied: 'Copied',
+    devices: 'Devices that may ask for credentials',
+    none: 'None yet. Link your extension with the code above.',
+    authorise: 'And paste here the code your extension shows',
+    authoriseBtn: 'Authorise',
+    remove: 'Remove',
+    kept: 'Kept in this vault',
+    empty: 'Nothing kept yet. Import what you already have from another manager.',
+    importBtn: 'Import from 1Password, Bitwarden or Chrome',
+    imported: (n) => `${n} entr${n === 1 ? 'y' : 'ies'} imported`,
+    asking: (q) => `“${q}” is asking for a password`,
+    askingText: 'If you say yes, it can ask for credentials while this vault stays open.',
+    yes: 'Yes, give it',
+    no: 'No',
+    anySite: 'any site',
+    noIdentity: 'Your Dotrino profile is needed. Create it and come back.',
+  },
+}
+const t = (k, ...a) => {
+  const v = (T[props.lang] || T.es)[k] ?? T.es[k] ?? k
+  return typeof v === 'function' ? v(...a) : v
+}
+
+// --- almacén: IndexedDB de este origen ---------------------------------------
+
+const DB = 'dotrino-vault-passwords'
+const STORE = 'kv'
+
+function openDb () {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB, 1)
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function idb (mode, fn) {
+  const db = await openDb()
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, mode)
+      const req = fn(tx.objectStore(STORE))
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+  } finally { db.close() }
+}
+
+const store = {
+  async get (k) { return idb('readonly', s => s.get(k)) },
+  async set (k, v) { return idb('readwrite', s => s.put(v, k)) },
+}
+
+/**
+ * La llave vive como `CryptoKey` NO EXTRAÍBLE: IndexedDB la clona en vez de
+ * serializarla, así que nunca existe en forma exportable — ni este código puede sacarla.
+ * Y se comprueba QUÉ hay guardado, no solo que haya algo: un dato viejo reventaba dentro
+ * de WebCrypto con un error que no dice de dónde viene.
+ */
+async function vaultKey () {
+  const saved = await store.get('cek')
+  if (saved instanceof CryptoKey) return saved
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+  await store.set('cek', key)
+  return key
+}
+
+// --- estado -------------------------------------------------------------------
+
+const ready = ref(false)
+const error = ref('')
+const code = ref('')
+const devices = ref([])
+const entries = ref([])
+const paste = ref('')
+const pasteError = ref('')
+const note = ref('')
+const asking = ref(null)
+
+let identity = null
+let vault = null
+let responder = null
+
+const listDevices = async () => (await store.get('devices')) || []
+
+const sealing = {
+  async seal (msg, peerEncPub) {
+    if (!peerEncPub) throw Object.assign(new Error('no encryption key'), { code: 'unsealed' })
+    return {
+      app: 'passmanager',
+      sealed: await identity.encrypt([peerEncPub], JSON.stringify(msg)),
+      from: await identity.getEncryptionPubkey(),
+    }
+  },
+  async open (env) {
+    return JSON.parse(await identity.decrypt(env.from, null, env.sealed))
+  },
+  isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed,
+}
+
+async function refresh () {
+  devices.value = await listDevices()
+  entries.value = vault ? await vault.list() : []
+}
+
+async function authorise () {
+  pasteError.value = ''
+  try {
+    const b64 = String(paste.value || '').trim().replace(/-/g, '+').replace(/_/g, '/')
+    const c = JSON.parse(atob(b64))
+    if (c?.v !== 1 || !c.sign || !c.enc) throw new Error('bad')
+    const list = await listDevices()
+    await store.set('devices', [
+      ...list.filter(d => !samePubkey(d.pubkey, c.sign)),
+      { pubkey: c.sign, encPub: c.enc, label: 'Extensión', ts: Date.now() },
+    ])
+    paste.value = ''
+    await refresh()
+  } catch {
+    pasteError.value = t('authoriseBtn')
+  }
+}
+
+async function remove (pubkey) {
+  await store.set('devices', (await listDevices()).filter(d => !samePubkey(d.pubkey, pubkey)))
+  await refresh()
+}
+
+async function importFile (ev) {
+  const f = ev.target.files?.[0]
+  if (!f) return
+  try {
+    const { entries: list } = importAuto(await f.text())
+    for (const e of list) await vault.put(e)
+    note.value = t('imported', list.length)
+    await refresh()
+  } catch (e) { pasteError.value = e.message }
+  ev.target.value = ''
+}
+
+function copy () {
+  navigator.clipboard.writeText(code.value).then(() => {
+    note.value = t('copied')
+    setTimeout(() => { note.value = '' }, 1200)
+  })
+}
+
+/** Aprobar es del usuario y está delante: se le pregunta aquí, no en un log. */
+function askUser (who) {
+  return new Promise((resolve) => { asking.value = { who, resolve } })
+}
+function answer (yes) {
+  asking.value?.resolve(yes)
+  asking.value = null
+}
+
+onMounted(async () => {
+  try {
+    // `identity` NUNCA en un ref reactivo: el Proxy de Vue rompe el postMessage al
+    // iframe («could not be cloned»). Por eso es un `let` suelto y no un `ref`.
+    identity = await Identity.connect()
+    vault = new LocalVault(store)
+    vault.unlock(await vaultKey())
+
+    const client = new WebSocketProxyClient({
+      url: 'wss://proxy.dotrino.com',
+      enableWebRTC: false,
+      requireSealed: true,
+      sealing,
+    })
+    await client.connect()
+    const publickey = await getPublicKeyJwk()
+    const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
+    await client.identify({ data, signature: await signData(data) })
+
+    let known = await listDevices()
+    responder = new VaultResponder({
+      client,
+      vault,
+      isAllowed: (pub) => known.some(d => samePubkey(d.pubkey, pub)),
+      encPubOf: (pub) => known.find(d => samePubkey(d.pubkey, pub))?.encPub || null,
+      needsApproval: () => true,
+      approve: async ({ pubkey }) => askUser(known.find(d => samePubkey(d.pubkey, pubkey))?.label || '?'),
+      admin: {
+        async devices () { return listDevices() },
+        async unlink (pub) { await remove(pub); known = await listDevices(); return { ok: true } },
+      },
+      onRequest: async () => { known = await listDevices(); refresh() },
+    })
+    responder.start()
+
+    code.value = btoa(JSON.stringify({
+      v: 1, sign: publickey, enc: await identity.getEncryptionPubkey(),
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+    await refresh()
+    ready.value = true
+  } catch (e) {
+    error.value = e?.message || String(e)
+  }
+})
+
+onBeforeUnmount(() => responder?.stop())
+</script>
+
+<template>
+  <section class="vault">
+    <p v-if="!ready && !error" class="loading">{{ t('opening') }}</p>
+
+    <template v-if="error">
+      <div class="state"><span class="dot"></span><span>{{ t('inactive') }}</span></div>
+      <p class="err">{{ error }}</p>
+      <p class="hint">{{ t('noIdentity') }}</p>
+    </template>
+
+    <template v-if="ready">
+      <div class="state"><span class="dot on"></span><span>{{ t('active') }}</span></div>
+      <p class="warn">{{ t('warning') }}</p>
+
+      <h2>{{ t('code') }}</h2>
+      <code class="code" data-testid="vault-code" @click="copy">{{ code }}</code>
+      <p v-if="note" class="hint">{{ note }}</p>
+
+      <h2>{{ t('devices') }}</h2>
+      <ul v-if="devices.length" class="rows">
+        <li v-for="d in devices" :key="d.pubkey" class="row">
+          <div>
+            <strong>{{ d.label }}</strong>
+            <div class="hint">{{ new Date(d.ts).toLocaleDateString(lang) }}</div>
+          </div>
+          <button class="danger" data-testid="remove-device" @click="remove(d.pubkey)">{{ t('remove') }}</button>
+        </li>
+      </ul>
+      <p v-else class="hint">{{ t('none') }}</p>
+
+      <p class="hint">{{ t('authorise') }}</p>
+      <div class="paste">
+        <input v-model="paste" type="text" data-testid="device-code" :placeholder="t('authoriseBtn')">
+        <button data-testid="authorise" @click="authorise">{{ t('authoriseBtn') }}</button>
+      </div>
+      <p v-if="pasteError" class="err">{{ pasteError }}</p>
+
+      <h2>{{ t('kept') }}</h2>
+      <ul v-if="entries.length" class="rows">
+        <li v-for="e in entries" :key="e.id" class="row">
+          <div>
+            <strong>{{ e.title || e.sites?.[0] || '—' }}</strong>
+            <div class="hint">{{ (e.sites || []).join(' ') || t('anySite') }}</div>
+          </div>
+          <span class="hint">{{ [e.hasSecret && '🔑', e.hasTotp && '2FA', e.hasFields && '+'].filter(Boolean).join(' ') }}</span>
+        </li>
+      </ul>
+      <p v-else class="hint">{{ t('empty') }}</p>
+      <label class="import">
+        {{ t('importBtn') }}
+        <input type="file" accept=".csv,.json,.txt" hidden @change="importFile">
+      </label>
+    </template>
+
+    <!-- Sin `confirm()`: bloquea, no se traduce y se ve mal (CONVENCIONES §5). -->
+    <div v-if="asking" class="ask-backdrop">
+      <div class="ask">
+        <strong>{{ t('asking', asking.who) }}</strong>
+        <p class="hint">{{ t('askingText') }}</p>
+        <div class="ask-row">
+          <button class="danger" data-testid="deny" @click="answer(false)">{{ t('no') }}</button>
+          <button data-testid="approve" @click="answer(true)">{{ t('yes') }}</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.vault { max-width: 720px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+h2 { font-size: 1rem; margin: 2rem 0 .6rem; opacity: .85; }
+.loading, .hint { opacity: .7; font-size: .9rem; }
+.err { color: #ff8a8a; font-size: .9rem; }
+.state { display: flex; align-items: center; gap: .6rem; font-weight: 600; }
+.dot { width: .7rem; height: .7rem; border-radius: 50%; background: #777; }
+.dot.on { background: #35d07f; box-shadow: 0 0 .6rem #35d07f; }
+.warn { margin: .8rem 0 0; padding: .8rem 1rem; border-left: 3px solid #f0b429;
+        background: rgba(240,180,41,.08); font-size: .9rem; }
+.code { display: block; word-break: break-all; cursor: pointer; font-size: .8rem;
+        padding: .8rem; border-radius: .5rem; background: rgba(255,255,255,.06); }
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+       padding: .7rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.paste { display: flex; gap: .5rem; margin-top: .4rem; }
+.paste input { flex: 1; min-width: 0; padding: .55rem .7rem; border-radius: .5rem;
+               border: 1px solid rgba(255,255,255,.18); background: transparent; color: inherit; }
+button, .import { cursor: pointer; padding: .55rem .9rem; border-radius: .5rem; border: 0;
+                  background: #2f6df6; color: #fff; font: inherit; }
+button.danger { background: transparent; color: #ff8a8a; border: 1px solid rgba(255,138,138,.4); }
+.import { display: inline-block; margin-top: .8rem; }
+.ask-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid;
+                place-items: center; padding: 1rem; z-index: 50; }
+.ask { max-width: 26rem; background: #14161c; padding: 1.4rem; border-radius: .8rem;
+       border: 1px solid rgba(255,255,255,.12); }
+.ask-row { display: flex; gap: .6rem; justify-content: flex-end; margin-top: 1rem; }
+</style>
