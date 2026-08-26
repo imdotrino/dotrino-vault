@@ -8,7 +8,7 @@
  * (`@dotrino/identity`), que es quien custodia la llave y sella el acta.
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
-import { ref, computed, markRaw, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
@@ -16,10 +16,16 @@ import Vars from './Vars.vue'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
 /**
+ * La bóveda-en-pestaña (lo que atiende las peticiones de contraseñas) se carga aparte:
+ * arrastra el transporte y el gestor, y solo hace falta cuando la bóveda es ESTE aparato.
+ */
+const Vault = defineAsyncComponent(() => import('./Vault.vue'))
+
+/**
  * `mode`:
- *   · `console` (`/devices`) — la pantalla ADMINISTRATIVA: el acta, los miembros, los
- *     permisos, la bóveda de este aparato. Ignora cualquier invitación que venga en la
- *     URL: aquí no se empareja.
+ *   · `console` (`/vault`) — la pantalla ADMINISTRATIVA: dónde vive tu bóveda, el acta,
+ *     los miembros y los permisos. Ignora cualquier invitación que venga en la URL: aquí
+ *     no se empareja.
  *   · `pair` (`/d`)          — SOLO emparejar. Es la dirección corta a la que apunta el
  *     QR, y lo que hace es una cosa y nada más. Mezclarla con la consola era lo que
  *     hacía que llegar por un QR te dejara delante de una pantalla llena de botones sin
@@ -30,7 +36,7 @@ const props = defineProps({
   mode: { type: String, default: 'console' }
 })
 const pairOnly = computed(() => props.mode === 'pair')
-// /approvals: SOLO los pedidos. Responsabilidades separadas: /devices administra el perfil,
+// /approvals: SOLO los pedidos. Responsabilidades separadas: /vault administra el perfil,
 // /approvals es donde se dice que sí o que no (y a donde apunta el aviso del teléfono).
 const approvalsOnly = computed(() => props.mode === 'approvals')
 
@@ -130,11 +136,20 @@ const T = {
     pair_fail: 'No se pudo conectar: ',
     cam_err: 'No se pudo abrir la cámara. Pega el código a mano.',
     no_qr: 'No se encontró ningún código en esa imagen.',
-    self_t: 'Que este dispositivo sea la bóveda',
-    self_b: 'Otros dispositivos tuyos podrán conectarse a este. Tiene que estar encendido y con la página abierta.',
-    self_on: 'Encendida', self_off: 'Apagada', self_start: 'Encender', self_stop: 'Apagar',
-    self_pair: 'Generar código para conectar otro',
+    // DÓNDE VIVE TU BÓVEDA. Es el dato del que cuelga todo lo demás de esta pantalla, y
+    // por eso va arriba y sin (i): no es una explicación, es el estado.
+    at_self: 'Tu bóveda es este dispositivo',
+    at_self_on: 'escuchando a tus otros aparatos',
+    at_self_wait: 'encendiendo…',
+    at_self_busy: 'la está atendiendo otra pestaña tuya',
+    at_self_err: 'no pudo encenderse:',
+    at_remote: (n) => (n ? `Tu bóveda es «${n}»` : 'Tu bóveda es otra máquina'),
+    at_remote_off: 'sin confirmar todavía',
+    self_b: 'Este aparato hace de bóveda mientras esta página esté abierta. Otros aparatos tuyos se conectan a él.',
+    self_add: 'Conectar otro aparato a esta bóveda',
+    self_pair: 'Generar el código',
     self_pending: 'Un dispositivo quiere conectarse',
+    pass_t: 'Contraseñas que guarda esta bóveda',
     self_code_ph: 'Los 6 dígitos que muestra',
     self_approve: 'Aprobar', self_reject: 'Rechazar',
     // --- Administrar la bóveda desde aquí (consola remota) ---
@@ -281,11 +296,18 @@ const T = {
     pair_fail: 'Could not connect: ',
     cam_err: 'Could not open the camera. Paste the code by hand.',
     no_qr: 'No code found in that image.',
-    self_t: 'Make this device the vault',
-    self_b: 'Your other devices will be able to connect to this one. It has to be on, with the page open.',
-    self_on: 'On', self_off: 'Off', self_start: 'Turn on', self_stop: 'Turn off',
-    self_pair: 'Create a code to connect another one',
+    at_self: 'Your vault is this device',
+    at_self_on: 'listening to your other devices',
+    at_self_wait: 'starting…',
+    at_self_busy: 'another tab of yours is holding it',
+    at_self_err: 'could not start:',
+    at_remote: (n) => (n ? `Your vault is “${n}”` : 'Your vault is another machine'),
+    at_remote_off: 'not confirmed yet',
+    self_b: 'This device acts as the vault while this page is open. Your other devices connect to it.',
+    self_add: 'Connect another device to this vault',
+    self_pair: 'Create the code',
     self_pending: 'A device wants to connect',
+    pass_t: 'Passwords kept in this vault',
     adm_t: 'Manage your vault from here',
     adm_b: 'This device can connect and remove others without you going to the computer where your vault lives.',
     adm_no_t: 'This device can only look',
@@ -506,15 +528,20 @@ async function refresh () {
       scheduleRetry()
     }
   } finally { checking.value = false }
-  const [a, m, mi] = await Promise.all([
+  const [a, m, mi, vc] = await Promise.all([
     id.value.profileActa().catch(() => null),
     id.value.profileMembers().catch(() => ({ members: [] })),
-    id.value.myMembership().catch(() => null)
+    id.value.myMembership().catch(() => null),
+    id.value.getVaultCert().catch(() => null)
   ])
   record.value = a?.acta || null
   members.value = m.members || []
   computeProfileIdShort()
   mine.value = mi
+  link.value = vc || { cert: null, acta: null }
+  // Y con eso ya se sabe dónde vive la bóveda: escuchar o conectarse no es una casilla
+  // que el dueño tenga que encontrar, es la consecuencia de dónde está.
+  await applyVaultRole()
 }
 
 /**
@@ -587,7 +614,7 @@ async function copyInvite (url, key) {
  * recargar solo: recargar debajo de los pies a alguien al que acaban de echar es justo lo
  * que hace que no se entienda qué pasó.
  */
-const reloadNow = () => { location.href = '/devices' + location.search }
+const reloadNow = () => { location.href = '/vault' + location.search }
 
 /** Volver a emparejar conserva la query (`?vault=` apunta al iframe con el que corre). */
 const pairHref = computed(() => '/d' + location.search)
@@ -605,7 +632,7 @@ onMounted(async () => {
   // La invitación se queda en la barra MIENTRAS dura el emparejamiento; se limpia al
   // terminar (`connect`). Antes se borraba aquí mismo, nada más entrar, y eso hacía
   // que cualquier recarga durante el proceso cayera en la lista de dispositivos con
-  // la invitación ya perdida — «de la nada me sacó a /devices». Y recargas hay: el
+  // la invitación ya perdida — «de la nada me sacó a /vault». Y recargas hay: el
   // service worker está en `autoUpdate`, así que cuando se despliega una versión
   // nueva toma el control y RECARGA la página sola, justo encima del código de seis
   // dígitos. Conservando el #fragment la recarga es recuperable: al volver se
@@ -620,14 +647,25 @@ onMounted(async () => {
     else if (e?.phase === 'account-removed') { expelled.value = true; accountGone.value = { error: e.error || '' } }
     else if (e?.phase === 'rejected') rejected.value = e.reason || '1'
   })
-  await refreshSelf()
+  // El mostrador de esta bóveda no arranca en el mismo instante en que se enciende (pide
+  // el candado de la pestaña visible), así que el estado se ESCUCHA en vez de sondearlo:
+  // si no, la línea de arriba se quedaba en «encendiendo…» hasta que algo la refrescara.
+  offSelf = id.value.onSelfVault?.((e) => {
+    if (typeof e?.running === 'boolean') self.value = { ...self.value, running: e.running }
+    if (Array.isArray(e?.pending)) selfPending.value = e.pending
+    if (e?.error) selfError.value = e.error
+  })
   await refreshAdmin()
   await refreshApprovals()
   registerNativePush()
 })
 
 let offVault = null
-onBeforeUnmount(() => { try { offVault?.() } catch (_) {} })
+let offSelf = null
+onBeforeUnmount(() => {
+  try { offVault?.() } catch (_) {}
+  try { offSelf?.() } catch (_) {}
+})
 
 // ---------- acciones del master ----------
 
@@ -711,10 +749,10 @@ const pairFlow = computed(() => {
 /** Sale del proceso y devuelve la consola completa. */
 const closeFlow = () => {
   pairError.value = ''; justPaired.value = false
-  // Emparejar termina donde empieza administrar: en `/devices`. `/d` no lista nada.
+  // Emparejar termina donde empieza administrar: en `/vault`. `/d` no lista nada.
   // Se conserva la query: `?vault=` apunta al iframe de identidad y perderlo aquí
   // mandaría la página al de producción a mitad de camino.
-  if (pairOnly.value) location.href = '/devices' + location.search
+  if (pairOnly.value) location.href = '/vault' + location.search
 }
 
 /**
@@ -857,7 +895,74 @@ async function scan () {
   } catch { scanning.value = false; msg.value = { kind: 'bad', text: t.value.cam_err } }
 }
 
-// ---------- este dispositivo como bóveda ----------
+// ---------- DÓNDE VIVE LA BÓVEDA, y qué hace esta página en consecuencia ----------
+
+/**
+ * Lo dice el CERTIFICADO de delegación de este aparato (`getVaultCert`), no la lista de
+ * dispositivos. Es la única señal que no se contamina: en cuanto la bóveda es este mismo
+ * navegador, `listVaultDevices` pasa a responder con lo local y el «no estás emparejado»
+ * que servía para distinguirlo deja de llegar.
+ *
+ *   · `cert`            → la bóveda es OTRA máquina y hay con qué hablarle.
+ *   · sin cert, con acta ajena → la hubo y ya no queda enlace (`staleCopy`).
+ *   · lo demás          → la bóveda es ESTE aparato.
+ */
+const link = ref({ cert: null, acta: null })
+const vaultAt = computed(() => {
+  if (link.value?.cert) return 'remote'
+  if (link.value?.acta && !isMaster.value) return 'lost'
+  return 'self'
+})
+/** Cómo se llama la máquina que hace de bóveda, para poder nombrarla en vez de decir «tu bóveda». */
+const masterLabel = computed(() => {
+  const m = members.value.find((x) => x.isMaster)
+  return m?.label || m?.id || ''
+})
+/** Fallo al encender el mostrador de esta bóveda. Se enseña; callarlo dejaba la página muda. */
+const selfError = ref('')
+
+/**
+ * ESCUCHA O SE CONECTA, sin preguntar.
+ *
+ * Si la bóveda es este aparato, se enciende su mostrador y otros aparatos tuyos pueden
+ * conectarse. Si vive en otra máquina, se apaga —una cuenta no tiene dos bóvedas— y lo
+ * único que hace la página es hablar con ella.
+ *
+ * Antes esto era una casilla que había que encontrar y marcar, y hasta que alguien la
+ * marcaba el aparato no atendía a nadie: la bóveda por defecto del ecosistema (el propio
+ * aparato) existía en el código y no en la práctica.
+ */
+async function applyVaultRole () {
+  const wantSelf = vaultAt.value === 'self'
+  const cambia = wantSelf !== !!self.value.enabled
+  try {
+    if (cambia) await id.value.setSelfVault(wantSelf)
+    selfError.value = ''
+  } catch (e) { selfError.value = e?.message || String(e) }
+  await refreshSelf()
+  // Cambiar de papel cambia lo que se puede hacer a distancia (`canAdminVault` mira el
+  // cert), así que hay que volver a preguntarlo: si no, recién emparejado el aparato
+  // seguía sin ofrecer la consola remota hasta que alguien recargara.
+  if (cambia) await refreshAdmin()
+}
+
+/** El resumen de una línea que va arriba del todo: qué bóveda es y si está respondiendo. */
+const listening = computed(() => (vaultAt.value === 'self'
+  ? !!self.value.running
+  : vaultAt.value === 'remote' && !syncError.value && !!checkedAt.value))
+const atTitle = computed(() => (vaultAt.value === 'self'
+  ? t.value.at_self
+  : t.value.at_remote(masterLabel.value)))
+const atState = computed(() => {
+  if (vaultAt.value === 'self') {
+    if (selfError.value) return t.value.at_self_err + ' ' + selfError.value
+    if (self.value.running) return t.value.at_self_on
+    return self.value.enabled ? t.value.at_self_busy : t.value.at_self_wait
+  }
+  if (vaultAt.value === 'lost') return t.value.sync_stale
+  if (checking.value) return t.value.sync_checking
+  return checkedAt.value ? t.value.sync_at(shortTime(checkedAt.value)) : t.value.at_remote_off
+})
 
 const self = ref({ enabled: false, running: false })
 const selfQr = ref(null)
@@ -880,11 +985,6 @@ async function refreshSelf () {
     selfPending.value = self.value.running ? await id.value.selfVaultPending() : []
   } catch (_) {}
 }
-const selfToggle = () => run('self', async () => {
-  await id.value.setSelfVault(!self.value.enabled)
-  await refreshSelf()
-  await refreshAdmin()
-})
 const selfPair = () => run('selfpair', async () => {
   const r = await id.value.selfVaultPairing({})
   // El QR lleva el ENLACE compacto, no el JSON: así el otro aparato lo escanea con
@@ -943,7 +1043,7 @@ async function refreshAdmin () {
 // pedido —quién, qué cajón, cuánto le queda— y dos botones. Se sondea cada 5 s mientras
 // la pantalla está a la vista; el aviso que despierta a la app llega por otro camino.
 const canApprove = ref(false)
-// ACORDEONES de /devices: la lista creció hasta hacerse ilegible, así que cada aparato y
+// ACORDEONES de /vault: la lista creció hasta hacerse ilegible, así que cada aparato y
 // cada grupo de variables se pliega tras su cabecera. Nacen cerrados; el estado no se
 // guarda (abrir es un gesto de la visita, no una preferencia).
 const openMembers = ref(new Set())
@@ -1208,7 +1308,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
     </div>
 
     <!-- `/d` es SOLO emparejar: aquí abajo empieza lo administrativo, y eso vive en
-         `/devices`. Sin invitación en la URL, lo único que se ofrece es la entrada al
+         `/vault`. Sin invitación en la URL, lo único que se ofrece es la entrada al
          proceso (escanear / abrir / pegar). -->
     <template v-else-if="pairOnly">
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
@@ -1232,7 +1332,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
     </template>
 
     <template v-else-if="approvalsOnly">
-      <!-- /approvals: SOLO pedir el sí o el no. Lo administrativo vive en /devices. -->
+      <!-- /approvals: SOLO pedir el sí o el no. Lo administrativo vive en /vault. -->
       <template v-if="canApprove">
         <h2>{{ t.apv_t }}</h2>
         <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
@@ -1249,6 +1349,16 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
+
+      <!-- DÓNDE VIVE TU BÓVEDA, y si está respondiendo. Es lo primero porque de eso
+           cuelga todo lo demás de la pantalla: con la bóveda aquí, esto es un mostrador
+           que atiende; con la bóveda en otra máquina, es una consola que le habla. No
+           hay nada que marcar — la página ya hizo lo que tocaba. -->
+      <div class="vaultat" data-testid="vault-at" :data-where="vaultAt">
+        <span class="dot" :class="{ on: listening }" aria-hidden="true"></span>
+        <strong>{{ atTitle }}</strong>
+        <span class="muted">— {{ atState }}</span>
+      </div>
 
       <!-- Sin esto, un fallo de sincronía era INVISIBLE: la pantalla enseñaba tan
            tranquila la copia del acta del día que emparejaste, y no había forma de saber
@@ -1283,9 +1393,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <li>{{ t.profile }} <code data-testid="profile-id">{{ profileIdShort || '—' }}</code></li>
         <li>{{ t.version }} <code>#{{ record.seq }}</code></li>
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
-        <!-- CUÁNDO se confirmó esto con la bóveda, y con qué volver a intentarlo. Es dato y
-             es acción: exactamente lo que va en una pantalla de administración. -->
-        <li data-testid="sync-state" class="muted">
+        <!-- CUÁNDO se confirmó esto con la bóveda. Solo cuando la bóveda es OTRA máquina:
+             si es esta, no hay nada que confirmar con nadie y la línea sobraba. -->
+        <li v-if="vaultAt !== 'self'" data-testid="sync-state" class="muted">
           {{ checking ? t.sync_checking : (checkedAt ? t.sync_at(shortTime(checkedAt)) : t.sync_stale) }}
         </li>
       </ul>
@@ -1364,9 +1474,35 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         </li>
       </ul>
 
-      <!-- Conectar este dispositivo a una bóveda. Aquí solo está la ENTRADA al
-           proceso (escanear / abrir archivo / pegar); en cuanto hay una invitación,
-           la pantalla del proceso se lo lleva todo (ver `pairFlow`). -->
+      <!-- LA BÓVEDA ES ESTE APARATO: lo único que se administra aquí es a quién se deja
+           entrar. Encenderla ya no es un paso — lo hizo la página al ver que no hay
+           ninguna otra. Lo que queda es el código para el aparato siguiente. -->
+      <template v-if="vaultAt === 'self'">
+      <h2>
+        {{ t.self_add }}
+        <button type="button" class="i" data-testid="info-self" :aria-expanded="info === 'self'"
+                :aria-label="t.info_label" @click="toggleInfo('self')">i</button>
+      </h2>
+      <p v-if="info === 'self'" class="muted info-panel">{{ t.self_b }}</p>
+      <div class="row">
+        <button class="btn" data-testid="self-pair" :disabled="!self.running || busy === 'selfpair'"
+                @click="selfPair">{{ t.self_pair }}</button>
+      </div>
+      <div v-if="selfQr" class="qrbox" v-html="selfQr"></div>
+      <div v-if="selfUrl" class="invite" data-testid="self-invite">
+        <span class="muted">{{ t.invite_url }}</span>
+        <code class="url">{{ selfUrl }}</code>
+        <button class="btn ghost sm" data-testid="self-copy" @click="copyInvite(selfUrl, 'self')">
+          {{ copied === 'self' ? t.invite_copied : t.invite_copy }}
+        </button>
+      </div>
+      </template>
+
+      <!-- Mudar ESTE dispositivo a otra bóveda. Sigue estando aunque el aparato ya haga
+           de bóveda: es el camino a la del PC, que es la que sigue encendida cuando
+           cierras el navegador. Aquí solo está la ENTRADA al proceso (escanear / abrir
+           archivo / pegar); en cuanto hay una invitación, la pantalla del proceso se lo
+           lleva todo (ver `pairFlow`). -->
       <template v-if="!alreadyInVault">
       <h2>
         {{ t.pair_t }}
@@ -1391,33 +1527,22 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
       </details>
 
-      <!-- Este dispositivo como bóveda -->
-      <h2>
-        {{ t.self_t }}
-        <button type="button" class="i" data-testid="info-self" :aria-expanded="info === 'self'"
-                :aria-label="t.info_label" @click="toggleInfo('self')">i</button>
-      </h2>
-      <p v-if="info === 'self'" class="muted info-panel">{{ t.self_b }}</p>
-      <div class="row">
-        <span class="tag" :class="{ master: self.running }">{{ self.running ? t.self_on : t.self_off }}</span>
-        <button class="btn ghost" data-testid="self-toggle" @click="selfToggle">{{ self.enabled ? t.self_stop : t.self_start }}</button>
-        <button v-if="self.running" class="btn" data-testid="self-pair" @click="selfPair">{{ t.self_pair }}</button>
-      </div>
-      <div v-if="selfQr" class="qrbox" v-html="selfQr"></div>
-      <div v-if="selfUrl" class="invite" data-testid="self-invite">
-        <span class="muted">{{ t.invite_url }}</span>
-        <code class="url">{{ selfUrl }}</code>
-        <button class="btn ghost sm" data-testid="self-copy" @click="copyInvite(selfUrl, 'self')">
-          {{ copied === 'self' ? t.invite_copied : t.invite_copy }}
-        </button>
-      </div>
       </template>
+
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
         <span>{{ t.self_pending }}: <code>{{ p.deviceId }}</code></span>
         <input v-model="selfCode" :placeholder="t.self_code_ph" inputmode="numeric" data-testid="self-code" />
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
       </div>
+
+      <!-- LO QUE ESTA BÓVEDA GUARDA Y ATIENDE. Solo cuando la bóveda es este aparato: si
+           vive en otra máquina, es ella quien responde a las peticiones y montar aquí un
+           segundo mostrador sería tener dos bóvedas de la misma cuenta. -->
+      <template v-if="vaultAt === 'self'">
+        <h2>{{ t.pass_t }}</h2>
+        <Vault :lang="lang" :identity="id" />
+      </template>
 
       <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
       <template v-if="canAdmin">
@@ -1560,6 +1685,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 .devhint { font-size: 13px; margin: 4px 0 0; }
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
+/* Dónde vive la bóveda: una línea, con su lucecita. Es estado, no un cartel. */
+.vaultat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; font-size: 15px; }
+.vaultat .dot { width: 9px; height: 9px; border-radius: 50%; background: #56637a; }
+.vaultat .dot.on { background: #35d07f; box-shadow: 0 0 8px #35d07f; }
+.vaultat .muted { font-size: 13px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }
 h2 { font-size: 18px; margin: 32px 0 8px; }
 .lead { color: #9fb0c9; margin: 0 0 20px; }

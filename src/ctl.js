@@ -267,14 +267,14 @@ async function cmdPair (args = []) {
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
-  console.log('\nO pega este código en vault.dotrino.com/dispositivos :\n  ' + b64)
+  console.log('\nO pega este código en vault.dotrino.com/vault :\n  ' + b64)
 
   // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.
   const saveIdx = args.indexOf('--save')
   if (saveIdx >= 0) {
     const next = args[saveIdx + 1]
     const file = (next && !next.startsWith('-')) ? next : 'dotrino-invite.dpair'
-    try { fs.writeFileSync(file, url + '\n', { mode: 0o600 }); console.log('\nInvitación guardada en: %s\n  (ábrela en vault.dotrino.com/dispositivos → «Abrir imagen o archivo». Es efímera y de un solo uso; no la compartas.)', file) }
+    try { fs.writeFileSync(file, url + '\n', { mode: 0o600 }); console.log('\nInvitación guardada en: %s\n  (ábrela en vault.dotrino.com/vault → «Abrir imagen o archivo». Es efímera y de un solo uso; no la compartas.)', file) }
     catch (e) { console.error('No se pudo guardar la invitación:', e.message) }
   }
 

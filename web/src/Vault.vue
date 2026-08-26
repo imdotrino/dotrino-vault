@@ -1,12 +1,16 @@
 <script setup>
 /**
- * ESTE DISPOSITIVO ES TU BÓVEDA — mientras esta pestaña esté abierta.
+ * EL MOSTRADOR DE CONTRASEÑAS de la bóveda-en-pestaña — mientras esta pestaña esté abierta.
  *
- * Su sitio es aquí y no en la app de contraseñas: la bóveda es del vault, y las apps
- * le piden. Que exista esta pantalla es lo que hace que el ecosistema cumpla su propia
- * regla — **ninguna app puede exigir que el usuario tenga un daemon encendido**. El
- * daemon del PC sigue siendo el upgrade: añade estar disponible con el navegador
- * cerrado, no otra cosa.
+ * No es una página: es una SECCIÓN de `/vault`, y solo se monta cuando esa página ha
+ * determinado que la bóveda de esta cuenta es este mismo aparato. Si la bóveda vive en
+ * otra máquina, es ella quien responde y aquí no se levanta un segundo mostrador: una
+ * cuenta no tiene dos bóvedas.
+ *
+ * Su sitio es el vault y no la app de contraseñas: la bóveda es del vault, y las apps le
+ * piden. Que exista es lo que hace que el ecosistema cumpla su propia regla — **ninguna
+ * app puede exigir que el usuario tenga un daemon encendido**. El daemon del PC sigue
+ * siendo el upgrade: añade estar disponible con el navegador cerrado, no otra cosa.
  *
  * Guarda lo mismo, responde de a una y habla el mismo protocolo que el daemon, así que
  * pasar de una a otro es enlazar de nuevo y nada más.
@@ -16,13 +20,37 @@ import { Identity } from '@dotrino/identity'
 import { WebSocketProxyClient, getPublicKeyJwk, signData } from '@dotrino/proxy-client'
 import { LocalVault, VaultResponder, samePubkey, importAuto } from '@dotrino/passmanager'
 
-const props = defineProps({ lang: { type: String, default: 'es' } })
+const props = defineProps({
+  lang: { type: String, default: 'es' },
+  /**
+   * La identidad YA abierta de la consola. Se pasa en vez de abrir otra: `Identity.connect()`
+   * monta su propio iframe, así que hacerlo aquí ponía DOS en la misma página — y, en
+   * local, uno contra `id.dotrino.com` y el otro contra el del disco, o sea dos perfiles
+   * distintos en la misma pantalla. Va `markRaw` desde la consola (un Proxy de Vue no
+   * sobrevive al `postMessage`).
+   */
+  identity: { type: Object, default: null },
+})
+
+/**
+ * El proxio: el del ecosistema. En localhost se puede apuntar a otro con `?proxy=`, que es
+ * lo que hace el banco de pruebas — sin eso, un escenario de punta a punta abría una
+ * conexión de verdad contra producción, que es justo lo que promete no hacer.
+ */
+function proxyUrl () {
+  try {
+    const u = new URL(location.href)
+    const p = u.searchParams.get('proxy')
+    if (p && /^wss?:\/\//.test(p) && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname)) return p
+  } catch (_) { /* URL rara: el del ecosistema */ }
+  return 'wss://proxy.dotrino.com'
+}
 
 const T = {
   es: {
-    opening: 'Abriendo tu bóveda…',
-    active: 'Tu bóveda está respondiendo',
-    inactive: 'La bóveda no está respondiendo',
+    opening: 'Abriendo tus contraseñas…',
+    active: 'Respondiendo a tus aparatos',
+    inactive: 'No está respondiendo',
     warning: 'Mientras esta pestaña esté abierta, tu bóveda responde a tus aparatos. Si la cierras, dejan de poder pedir contraseñas — nada se pierde, pero no responden hasta que vuelvas a abrirla.',
     code: 'Pega este código en tu extensión para enlazarla',
     copied: 'Copiado',
@@ -43,9 +71,9 @@ const T = {
     noIdentity: 'Hace falta tu perfil de Dotrino. Créalo y vuelve.',
   },
   en: {
-    opening: 'Opening your vault…',
-    active: 'Your vault is answering',
-    inactive: 'The vault is not answering',
+    opening: 'Opening your passwords…',
+    active: 'Answering your devices',
+    inactive: 'Not answering',
     warning: 'While this tab is open, your vault answers your devices. If you close it they can no longer ask for passwords — nothing is lost, but they get no answer until you open it again.',
     code: 'Paste this code into your extension to link it',
     copied: 'Copied',
@@ -211,12 +239,12 @@ onMounted(async () => {
   try {
     // `identity` NUNCA en un ref reactivo: el Proxy de Vue rompe el postMessage al
     // iframe («could not be cloned»). Por eso es un `let` suelto y no un `ref`.
-    identity = await Identity.connect()
+    identity = props.identity || await Identity.connect()
     vault = new LocalVault(store)
     vault.unlock(await vaultKey())
 
     const client = new WebSocketProxyClient({
-      url: 'wss://proxy.dotrino.com',
+      url: proxyUrl(),
       enableWebRTC: false,
       requireSealed: true,
       sealing,
@@ -325,8 +353,9 @@ onBeforeUnmount(() => responder?.stop())
 </template>
 
 <style scoped>
-.vault { max-width: 720px; margin: 0 auto; padding: 2rem 1rem 4rem; }
-h2 { font-size: 1rem; margin: 2rem 0 .6rem; opacity: .85; }
+/* Es una sección de la consola, no una página: el ancho y el aire los pone `/vault`. */
+.vault { padding: 0; }
+h2 { font-size: .95rem; margin: 1.4rem 0 .6rem; opacity: .85; }
 .loading, .hint { opacity: .7; font-size: .9rem; }
 .err { color: #ff8a8a; font-size: .9rem; }
 .state { display: flex; align-items: center; gap: .6rem; font-weight: 600; }

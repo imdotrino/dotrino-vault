@@ -50,26 +50,28 @@ const commitMeta = {
   transformIndexHtml (html) { return html.replace('</head>', `  <meta name="commit" content="${commit}" />\n  </head>`) },
 }
 
-// GitHub Pages no sabe de rutas de una SPA. Tres capas:
+// GitHub Pages no sabe de rutas de una SPA. Una carpeta por ruta:
+//  · `vault/index.html` — TU BÓVEDA: la ruta canónica y la única pantalla administrativa.
+//    Dice dónde vive tu bóveda y actúa en consecuencia (si es este aparato, escucha; si
+//    es otra máquina, se conecta). Necesita ser una ruta de verdad y no un `#`: es lo que
+//    abre la extensión del gestor, y un fragmento no sobrevive a que Chrome reabra la
+//    pestaña.
 //  · `d/index.html` — la ruta CORTA a la que apunta el QR de hoy (`/d#v=…`). Es corta
 //    a propósito: dentro de un QR cada carácter se paga en módulos, y los módulos son
 //    filas y columnas de terminal (`lib/src/invite.js`).
-//  · `devices/index.html` — la ruta canónica de la página de dispositivos.
-//  · `dispositivos/index.html` — la que fue canónica y la gente ya tiene guardada
-//    (`/dispositivos#vault=…`). Se conserva: sin esto la página se veía igual pero
-//    respondía **404**, y un 404 en la puerta de entrada del emparejamiento es pedir
-//    problemas (cachés, navegadores embebidos, previsualizaciones de enlace).
+//  · `devices/index.html` y `dispositivos/index.html` — las que fueron canónicas y la
+//    gente ya tiene guardadas (`/dispositivos#vault=…`). Se conservan y la app las manda
+//    a `/vault`: sin esto la página respondía **404**, y un 404 en la puerta de entrada
+//    del emparejamiento es pedir problemas (cachés, navegadores embebidos,
+//    previsualizaciones de enlace).
 //  · `approvals/index.html` — los pedidos de aprobación (el aviso del teléfono abre aquí).
-//  · `vault/index.html` — este navegador COMO bóveda: la vía por defecto para quien no
-//    tiene el daemon. Necesita ser una ruta de verdad y no un `#`: es lo que abre la
-//    extensión, y un fragmento no sobrevive a que Chrome reabra la pestaña.
 //  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
 //    enruta en el cliente.
 const spaFallback = {
   name: 'spa-404',
   closeBundle () {
     try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
-    for (const ruta of ['devices', 'dispositivos', 'd', 'approvals', 'vault']) {
+    for (const ruta of ['vault', 'd', 'approvals', 'devices', 'dispositivos']) {
       try {
         mkdirSync('dist/' + ruta, { recursive: true })
         copyFileSync('dist/index.html', `dist/${ruta}/index.html`)

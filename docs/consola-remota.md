@@ -207,11 +207,16 @@ autocompletado es otra cosa y no entra aquí.
 
 ## 7. F5 — La aplicación
 
-**La misma página de siempre, en `vault.dotrino.com/devices`** (ruta canónica desde
-2026-08-04; `/dispositivos` sigue respondiendo porque hay invitaciones impresas con esa
-forma). En el menú se llama **«Mis dispositivos»**. No hay app nueva ni subdominio nuevo:
-quien administra ya tiene la identidad en ese aparato, y el cert **es** la credencial —
-no hay login ni contraseña.
+**La misma página de siempre, en `vault.dotrino.com/vault`** (ruta canónica desde
+2026-08-26; `/devices` y `/dispositivos` siguen respondiendo porque hay invitaciones
+impresas con esas formas, y la app las manda a la nueva). En el menú se llama **«Mi
+bóveda»**. No hay app nueva ni subdominio nuevo: quien administra ya tiene la identidad en
+ese aparato, y el cert **es** la credencial — no hay login ni contraseña.
+
+**Y la página decide sola con quién habla.** Al abrirla mira el certificado de delegación
+de este aparato: si lo hay, la bóveda es otra máquina y se conecta a ella (esto); si no lo
+hay, la bóveda es este mismo aparato y lo que hace es **encender su mostrador** y quedarse
+escuchando a los demás. Era una casilla que había que encontrar y marcar.
 
 La sección de administración **solo aparece si `canAdminVault()`**, que mira el scope del
 cert. Y eso es únicamente para saber qué pintar: la bóveda vuelve a comprobarlo en cada

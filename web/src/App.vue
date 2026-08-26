@@ -1,12 +1,6 @@
 <script setup>
-import { ref, computed, markRaw, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, markRaw, onMounted } from 'vue'
 import Console from './Console.vue'
-
-/**
- * La bóveda-en-pestaña se carga aparte: arrastra el transporte y el gestor de
- * contraseñas, y quien entra a la landing no tiene por qué bajarlos.
- */
-const Vault = defineAsyncComponent(() => import('./Vault.vue'))
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
@@ -15,7 +9,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_devices: 'Mis dispositivos', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_docs: 'Documentación', nav_home: 'Inicio',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_docs: 'Documentación', nav_home: 'Inicio',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -91,7 +85,7 @@ const I18N = {
       ['Conectar un teléfono o una laptop',
        'En tu computadora pides un código; en el aparato lo escaneas o lo pegas. El aparato te muestra seis dígitos y tú los escribes en la computadora. Ese ida y vuelta es lo que evita que alguien se cuele: aprobar exige tener el aparato en la mano.', 'emparejar'],
       ['Ver quién está conectado',
-       'Tu página de dispositivos lista cada aparato, qué puede hacer cada uno y cuál manda. Desde ahí quitas permisos o sacas a uno del todo.', 'modelo'],
+       'Tu página «Mi bóveda» lista cada aparato, qué puede hacer cada uno y cuál manda. Desde ahí quitas permisos o sacas a uno del todo.', 'modelo'],
       ['Si pierdes un aparato',
        'Lo desconectas y deja de servir: la bóveda no vuelve a firmar por él y, la próxima vez que se encienda, se borra lo que tenía de tu cuenta.', 'modelo'],
       ['Tener varias cuentas',
@@ -132,12 +126,12 @@ const I18N = {
     use_cmds_npx: 'Si la levantaste con el comando (Windows o macOS), antepón <code>npx -p @dotrino/vaultd</code>.',
     use_cmds_docker: 'Con Docker, antepón <code>docker exec -it dotrino-vault</code>.',
     use_service_t: 'Arrancar, parar y ver qué pasa',
-    use_more: 'Todo esto también está en tu página de dispositivos, sin terminal.',
+    use_more: 'Todo esto también está en tu página «Mi bóveda», sin terminal.',
     foot_tag: 'Tu información, en tu lugar, bajo tus reglas.',
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_devices: 'My devices', nav_approvals: 'Requests', nav_vault: 'My vault', nav_docs: 'Docs', nav_home: 'Home',
+    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_docs: 'Docs', nav_home: 'Home',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -212,7 +206,7 @@ const I18N = {
       ['Connect a phone or a laptop',
        'On your computer you ask for a code; on the device you scan or paste it. The device shows six digits and you type them on the computer. That back-and-forth is what keeps anyone else out: approving requires holding the device.', 'emparejar'],
       ['See who is connected',
-       'Your devices page lists every device, what each one can do and which one is the Master. From there you take permissions away or remove one entirely.', 'modelo'],
+       'Your “My vault” page lists every device, what each one can do and which one is the Master. From there you take permissions away or remove one entirely.', 'modelo'],
       ['If you lose a device',
        'You disconnect it and it stops working: the vault will not sign for it again and, next time it turns on, it wipes what it had of your account.', 'modelo'],
       ['Keep several accounts',
@@ -253,7 +247,7 @@ const I18N = {
     use_cmds_npx: 'If you launched it with the command (Windows or macOS), prefix them with <code>npx -p @dotrino/vaultd</code>.',
     use_cmds_docker: 'With Docker, prefix them with <code>docker exec -it dotrino-vault</code>.',
     use_service_t: 'Starting, stopping and seeing what is going on',
-    use_more: 'All of this is also on your devices page, no terminal needed.',
+    use_more: 'All of this is also on your “My vault” page, no terminal needed.',
     foot_tag: 'Your data, in your place, under your rules.',
     foot_eco: 'Part of the Dotrino ecosystem', foot_src: 'Source', foot_discord: 'Discord',
   },
@@ -340,25 +334,37 @@ function copy (text, key) {
   navigator.clipboard?.writeText(text).then(() => { copied.value = key; setTimeout(() => (copied.value = ''), 1400) })
 }
 
-/* Ruta: la landing en `/` y la página de dispositivos en `/devices`, con `/d`
-   como atajo. El QR de `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta
-   existe porque cada carácter del enlace son módulos del QR, y los módulos son filas
-   de terminal. `/dispositivos` fue la ruta canónica y sigue respondiendo: hay
-   invitaciones impresas y enlaces guardados con esa forma, y romperlos no arregla nada. En los dos casos la invitación viaja en el #fragment, que nunca
-   llega al servidor. */
+/* Ruta: la landing en `/` y TU BÓVEDA en `/vault`, con `/d` como atajo. El QR de
+   `dotrino-vault pair` abre `/d#v=<invitación>` — la forma corta existe porque cada
+   carácter del enlace son módulos del QR, y los módulos son filas de terminal.
+
+   `/vault` es UNA sola página: dice dónde vive tu bóveda y actúa en consecuencia
+   (si es este aparato, escucha; si es otra máquina, se conecta). Antes eran dos
+   —`/devices` para administrar y `/vault` para ser la bóveda— y había que saber de
+   antemano en cuál estabas.
+
+   `/devices` y `/dispositivos` fueron canónicas y SIGUEN respondiendo: hay invitaciones
+   impresas y enlaces guardados con esas formas, y romperlos no arregla nada. Se atienden
+   aquí y la barra se pone en la forma nueva. En todos los casos la invitación viaja en el
+   #fragment, que nunca llega al servidor. */
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
   const invited = location.hash.includes('#vault=') || location.hash.includes('#v=')
-  // `/d` es SOLO emparejar (es la dirección corta del QR) y `/devices` SOLO administrar:
+  // `/d` es SOLO emparejar (es la dirección corta del QR) y `/vault` SOLO administrar:
   // una pantalla es informativa o administrativa, y emparejar es un proceso con su propia
   // pantalla. Una invitación en la URL manda: llegues por donde llegues, se empareja.
   if (/\/d$/.test(p) || invited) view.value = 'pair'
-  else if (/\/(devices|dispositivos)$/.test(p)) view.value = 'console'
   else if (/\/approvals$/.test(p)) view.value = 'approvals'
-  // `/vault`: este navegador ES la bóveda mientras la pestaña esté abierta. Vive aquí
-  // y no en la app de contraseñas porque la bóveda es del vault, y las apps le piden.
-  else if (/\/vault$/.test(p)) view.value = 'vault'
+  else if (/\/(vault|devices|dispositivos)$/.test(p)) {
+    view.value = 'vault'
+    // Las direcciones viejas responden, pero la barra queda en la canónica: quien la
+    // copie de ahí reparte la de ahora. No es un salto de página (`replaceState`), así
+    // que no se pierde el «volver» ni se dispara otra vuelta de enrutado.
+    if (!/\/vault$/.test(p)) {
+      try { history.replaceState(null, '', '/vault' + location.search + location.hash) } catch (_) {}
+    }
+  }
   else view.value = 'home'
 }
 routeNow()
@@ -389,7 +395,7 @@ function goTo (id, ev) {
 
 function go (v, ev) {
   ev?.preventDefault()
-  const path = { console: '/devices', approvals: '/approvals', vault: '/vault' }[v] || '/'
+  const path = { vault: '/vault', approvals: '/approvals' }[v] || '/'
   history.pushState(null, '', path)
   routeNow()
 }
@@ -429,16 +435,14 @@ onMounted(async () => {
       <a v-if="view === 'home'" href="#how" @click="goTo('how', $event)">{{ t.nav_how }}</a>
       <a v-if="view === 'home'" href="#download" @click="goTo('download', $event)">{{ t.nav_download }}</a>
       <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
-      <a href="/devices" data-testid="nav-devices" :class="{ on: view === 'console' }" @click="go('console', $event)">{{ t.nav_devices }}</a>
-      <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
       <a href="/vault" data-testid="nav-vault" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
+      <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
       <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
 
     <main>
-      <Vault v-if="view === 'vault'" :lang="lang" />
-      <Console v-else-if="view === 'console' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
+      <Console v-if="view === 'vault' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
       <template v-else>
       <!-- HERO -->
       <section class="hero">
