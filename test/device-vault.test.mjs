@@ -10,8 +10,9 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeDeviceKey, signWithDevice, signDelegationWith, verifyDelegation } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, signWithDevice, signDelegationWith, verifyDelegation, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import { startDeviceVault } from '../lib/src/index.js'
+import { MSG } from '../lib/src/protocol.js'
 
 /** Identidad P mínima que firma de verdad (misma forma que la del vault real). */
 async function fakeIdentity () {
@@ -146,4 +147,108 @@ test('HELLO: el QR corto obtiene la llave, y fuera de un emparejamiento no hay r
   assert.equal(ok.body.iss, identity.iss)
   assert.equal(ok.body.sn, qr.sn, 'la respuesta queda atada a ESTA sesión')
   vault.close()
+})
+
+// --- PARIDAD con el daemon ----------------------------------------------------
+//
+// El vault de dispositivo se quedó atrás: atendía enrolar, renovar y listar, pero no
+// FIRMAR — que es para lo que un aparato se enrola. Un aparato contra un
+// dispositivo-bóveda hacía el emparejamiento entero y luego no podía hacer nada.
+//
+// Este test compara los dos routers leyendo el código, para que la próxima vez que el
+// daemon aprenda un mensaje nuevo salte aquí en vez de descubrirse usándolo.
+
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
+const mensajesDe = (archivo) => new Set(
+  [...readFileSync(join(raiz, archivo), 'utf8').matchAll(/(?:payload|p)\.type === MSG\.([A-Z_]+)/g)]
+    .map(m => m[1]))
+
+test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
+  const daemon = mensajesDe('src/vault.js')
+  const dispositivo = mensajesDe('lib/src/index.js')
+
+  // Lo que el daemon hace y aquí no tendría sentido, con su motivo. Cualquier otra
+  // diferencia es una carencia, no una decisión.
+  const soloDaemon = new Set([
+    // Cajones de secretos de SERVICIOS: un navegador no reparte credenciales de
+    // producción a daemons; eso vive en la máquina del dueño.
+    'SECRETS',
+    // Consola remota de administración: se concede a mano y su sitio es el PC.
+    'ADMIN',
+    // Re-envolver la llave de contenido tras rotar: lo dispara el daemon al migrar.
+    'REWRAP_OK',
+    // Renunciar a permisos propios: lo pide un agente headless al arrancar.
+    'RENOUNCE',
+  ])
+
+  const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))
+  assert.deepEqual(faltan, [], `el dispositivo-bóveda no atiende: ${faltan.join(', ')}`)
+
+  // Y lo esencial, dicho aparte para que se lea en el fallo.
+  for (const m of ['SIGN', 'GET', 'STORE', 'CHECK', 'ENROLL', 'RENEW', 'DEVICES']) {
+    assert.ok(dispositivo.has(m), `falta ${m}: sin eso el aparato enrolado no puede usarlo`)
+  }
+})
+
+test('SIGN: una máquina enrolada consigue una firma, y VERIFICA', async () => {
+  const { identity, client, vault } = await mount()
+  const { device, cert } = await enrolledMachine(identity)
+
+  const payload = { op: 'identify', publickey: device.publickey, ts: Date.now() }
+  // `publickey` en el data va porque `verifyChain` lo exige: es cómo sabe QUÉ aparato
+  // firmó, y sin él responde `no-device-pubkey`.
+  const p = await signedByDevice(device, cert, {
+    op: 'sign', publickey: device.publickey, payload, ts: Date.now(),
+  })
+  client.emit('message', 'from-x', { type: MSG.SIGN, ...p })
+  await new Promise(r => setTimeout(r, 60))
+
+  const resp = client.sent.find(x => x.type === MSG.SIGNED)
+  assert.ok(resp, 'la bóveda no contestó a un SIGN legítimo')
+  assert.equal(resp.device, device.publickey)
+
+  // Y la firma tiene que valer de verdad contra la identidad de la bóveda, no solo venir.
+  const ok = await verifyDeviceSig({
+    publickey: resp.publickey,
+    data: payload,
+    signature: resp.signature,
+  })
+  assert.equal(ok, true, 'la firma no verifica contra la pubkey que devolvió')
+})
+
+test('SIGN: sin cert, con cert de otro scope o con ts viejo, NO se firma', async () => {
+  const { identity, client, vault } = await mount()
+
+  // 1. Sin cert.
+  client.emit('message', 'x', { type: MSG.SIGN, data: { op: 'sign', payload: { a: 1 }, ts: Date.now() } })
+  // 2. Con un cert que no sirve para firmar.
+  const otro = await makeDeviceKey({ label: 'solo-lee' })
+  const { cert: certLee } = await identity.signDelegation(otro.publickey, ['vault:read'], { ttlMs: 60000 })
+  client.emit('message', 'x', { type: MSG.SIGN, ...(await signedByDevice(otro, certLee, { op: 'sign', publickey: otro.publickey, payload: { a: 1 }, ts: Date.now() })) })
+  // 3. Con un ts fuera de la ventana (repetición de un mensaje viejo).
+  const { device, cert } = await enrolledMachine(identity)
+  client.emit('message', 'x', { type: MSG.SIGN, ...(await signedByDevice(device, cert, { op: 'sign', publickey: device.publickey, payload: { a: 1 }, ts: Date.now() - 30 * 60_000 })) })
+
+  await new Promise(r => setTimeout(r, 80))
+  assert.equal(client.sent.filter(x => x.type === MSG.SIGNED).length, 0, 'firmó algo que no debía')
+  assert.equal(client.sent.filter(x => x.type === MSG.ERROR).length, 3, 'no rechazó los tres')
+})
+
+test('CHECK: un aparato pregunta si sigue dentro, y se le contesta', async () => {
+  const { identity, client } = await mount()
+  const device = await makeDeviceKey({ label: 'preguntón' })
+
+  const data = { op: 'check', publickey: device.publickey, ts: Date.now() }
+  const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+  client.emit('message', 'x', { type: MSG.CHECK, data, signature })
+  await new Promise(r => setTimeout(r, 60))
+
+  const resp = client.sent.find(x => x.type === MSG.CHECKED)
+  assert.ok(resp, 'no contestó al CHECK')
+  // La identidad de prueba no tiene acta, así que la respuesta correcta es «no estás».
+  assert.equal(resp.in, false)
 })
