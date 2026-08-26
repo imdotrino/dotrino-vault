@@ -813,6 +813,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         log,
       }).start()
       log('[vault] passwords: atendiendo peticiones de %d aparato(s)', passwordDevices().length)
+      // El código que se pega en la extensión o en la consola web. Lleva las DOS
+      // públicas: por la de firma enruta el proxio, a la de cifrado se le sella el
+      // contenido. Es público: no hay nada aquí que no pueda verse.
+      try {
+        const codigo = Buffer.from(JSON.stringify({
+          v: 1,
+          sign: await client.getPublicKey(),
+          enc: await identity.getEncryptionPubkey(),
+        })).toString('base64url')
+        log('[vault] passwords: enlaza un aparato con este código:\n%s', codigo)
+      } catch (e) {
+        log('[vault] passwords: no se pudo componer el código de enlace: %s', e.message)
+      }
     }
   } catch (e) {
     log('[vault] passwords: no se pudo levantar (%s); el resto sigue igual', e.message)

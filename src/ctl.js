@@ -481,9 +481,12 @@ async function cmdPasswords (args = []) {
   const m = await findMember(id)
   writeReq('secret-request.json', { op: 'passwords', pub: m.pub, id: m.id, label: m.label || '', on: val === 'on' })
   sendSignal(requireDaemon().pid, 'SIGUSR2')
-  console.log(val === 'on'
-    ? `Listo: ${m.id} puede pedir contraseñas de tu bóveda (de una en una; nunca la lista entera).`
-    : `Listo: ${m.id} deja de poder pedir contraseñas.`)
+  if (val === 'on') {
+    console.log(`Listo: ${m.id} puede pedir contraseñas de tu bóveda (de una en una; nunca la lista entera).`)
+    console.log('Reinicia el vault: al arrancar imprime el código de enlace que se pega en la extensión.')
+  } else {
+    console.log(`Listo: ${m.id} deja de poder pedir contraseñas.`)
+  }
 }
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
