@@ -78,6 +78,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const store = openStore(dir)
   const threads = openThreadStore(dir)
   const approvals = createApprovals()
+
+  /**
+   * Pedidos de aprobación que NO son de un cajón de secretos: quien espera es una
+   * promesa dentro del vault (la bóveda de contraseñas), no un aparato aguardando un
+   * sobre sellado. `id` del pedido → `resolve(boolean)`.
+   *
+   * Aparte a propósito: `approvals` es un módulo puro y no tiene por qué saber que hay
+   * dos clases de espera.
+   */
+  const waiters = new Map()
   // APARATOS QUE PIDEN APROBACIÓN: una lista de llaves en `approval.json` (cifrado en reposo
   // como todo el dir). Es decisión de esta bóveda, no del acta: es ella la que entrega.
   const approvalFile = path.join(dir, 'approval.json')
@@ -91,6 +101,72 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     audit('approval', { device: await deviceIdOf(pub).catch(() => null), on: !!on })
     return { approval: !!on }
   }
+  // LA BÓVEDA DE CONTRASEÑAS: entradas y su llave, en el dir del perfil y cifradas en
+  // reposo como todo lo demás. Quién puede pedir es una LISTA DE ESTA BÓVEDA, no del
+  // acta — por lo mismo que `approval.json`: es ella la que entrega. El acta sigue
+  // mandando en que el aparato exista y no esté revocado, y eso se comprueba aparte.
+  const passwordsFile = path.join(dir, 'passwords.json')
+  const passwordsAtRest = atRestFor(dir)
+  const readPasswordsFile = () => {
+    try { return JSON.parse(passwordsAtRest.decrypt(fs.readFileSync(passwordsFile, 'utf8'))) } catch (_) { return null }
+  }
+  const writePasswordsFile = (d) => {
+    fs.writeFileSync(passwordsFile, passwordsAtRest.encrypt(JSON.stringify(d)), { mode: 0o600 })
+  }
+
+  /** El almacén que espera `@dotrino/passmanager`. Todo en un archivo, cifrado en reposo. */
+  const passwordsStore = {
+    async get (k) { return readPasswordsFile()?.data?.[k] },
+    async set (k, v) {
+      const d = readPasswordsFile() || { v: 1, data: {}, devices: [] }
+      d.data = { ...(d.data || {}), [k]: v }
+      writePasswordsFile(d)
+    },
+  }
+
+  const passwordDevices = () => readPasswordsFile()?.devices || []
+
+  /**
+   * El acta vigente, en caché.
+   *
+   * `isAllowed`/`encPubOf` del responder son SÍNCRONOS (se llaman por cada mensaje que
+   * entra, y leer el acta ahí sería un await por mensaje), así que se refresca aparte.
+   * Se relee cada pocos segundos: revocar un aparato tarda eso en cortarle el acceso,
+   * no un reinicio.
+   */
+  let actaCache = null
+  const refreshActa = async () => {
+    try { actaCache = (await identity.profileActa?.().catch(() => null))?.acta || null } catch (_) {}
+    return actaCache
+  }
+
+  /**
+   * La llave de la bóveda de contraseñas. Nace con el primer uso y vive cifrada en
+   * reposo, como la identidad: aquí no hace falta envolverla a cada aparato porque
+   * ningún aparato abre la bóveda — piden de a una y el vault responde.
+   */
+  async function passwordsKey () {
+    const d = readPasswordsFile()
+    if (d?.cek) {
+      const raw = Uint8Array.from(Buffer.from(d.cek, 'base64'))
+      return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
+    }
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key))
+    writePasswordsFile({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64'), devices: d?.devices || [] })
+    return key
+  }
+
+  /** Autorizar/retirar un aparato para pedir contraseñas (`dotrino-vault passwords`). */
+  async function setPasswordDevice (pub, { label = '', on = true } = {}) {
+    const d = readPasswordsFile() || { v: 1, data: {}, devices: [] }
+    const resto = (d.devices || []).filter((x) => x.pubkey !== pub)
+    if (on) resto.push({ pubkey: pub, label: String(label || '').slice(0, 60), ts: Date.now() })
+    writePasswordsFile({ ...d, devices: resto })
+    audit('passwords.device', { device: await deviceIdOf(pub).catch(() => null), on: !!on })
+    return { ok: true }
+  }
+
   const approvalsSweeper = setInterval(() => { for (const g of approvals.sweep()) audit('secrets.expired', { id: g.id, ns: g.ns, device: g.deviceId }) }, 30 * 1000); approvalsSweeper.unref?.()
   const secrets = openSecretsStore(dir, {
     sealer: makeSealer(),
@@ -623,6 +699,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
     const pend = approvals.take(id)
     if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
+    // PEDIDOS QUE NO SON DE UN CAJÓN (hoy: la bóveda de contraseñas). Se resuelve ANTES
+    // de tocar `resultFor`, que asume un cajón y una `ek`: aquí no hay nada que sellar,
+    // solo una promesa esperando un sí o un no.
+    if (waiters.has(id)) {
+      const resolver = waiters.get(id)
+      waiters.delete(id)
+      const ok = op === 'approve'
+      audit(ok ? 'passwords.approved' : 'passwords.denied', { device: pend.deviceId, id, by })
+      log(`[vault] passwords: request of ${pend.deviceId} ${ok ? 'approved' : 'DENIED'} by ${by}`)
+      resolver(ok)
+      return answer({ op: `${op}.result`, id, ok: true })
+    }
     if (op === 'deny') {
       audit('secrets.denied', { device: pend.deviceId, ns: pend.ns, id, by })
       log(`[vault] ${pend.ns}: request of ${pend.deviceId} DENIED by ${by}`)
@@ -672,6 +760,63 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       reply(from, { type: MSG.ERROR, error: e.message })
     }
   })
+
+  // ----- LA BÓVEDA DE CONTRASEÑAS -----
+  //
+  // Se monta al final y envuelto: es una pieza opcional y un fallo suyo no puede tumbar
+  // la CA. Solo se levanta si hay algún aparato autorizado — sin eso no hay a quién
+  // responder, y crear la llave por si acaso sería crear un secreto que nadie pidió.
+  let passwords = null
+  try {
+    if (passwordDevices().length) {
+      const { createPasswordDesk } = await import('./passwords.js')
+      await refreshActa()
+      const actaSweeper = setInterval(refreshActa, 5000)
+      actaSweeper.unref?.()
+      passwords = createPasswordDesk({
+        client,
+        store: passwordsStore,
+        cek: await passwordsKey(),
+        // DOS condiciones, y hacen falta las dos: que esta bóveda lo haya autorizado
+        // (su lista) y que el ACTA siga reconociéndolo. Revocar un aparato en el acta
+        // le corta esto también, sin tener que acordarse de dos sitios.
+        isAllowed: (pub) => {
+          if (!passwordDevices().some((d) => d.pubkey === pub)) return false
+          return (actaCache?.members || []).some((m) => m.pub === pub)
+        },
+        encPubOf: (pub) => (actaCache?.members || []).find((m) => m.pub === pub)?.encPub || null,
+        needsApproval: (pub) => needsApproval(pub),
+        // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
+        // Es el mismo camino que ya recorren los cajones de secretos.
+        approve: async ({ pubkey, op }) => {
+          const deviceId = await deviceIdOf(pubkey).catch(() => null)
+          const label = (actaCache?.members || []).find((m) => m.pub === pubkey)?.label || ''
+          const pend = approvals.request({ ns: 'passwords', device: pubkey, deviceId, label, ek: '' })
+          audit('passwords.pending', { device: deviceId, id: pend.id, op })
+          log(`[vault] passwords: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
+          const espera = new Promise((resolve) => {
+            waiters.set(pend.id, resolve)
+            // Si nadie contesta, vence solo: la promesa no se queda colgada para siempre
+            // y el aparato recibe un no en vez de esperar sin fin.
+            const t = setTimeout(() => {
+              if (waiters.delete(pend.id)) {
+                audit('passwords.expired', { device: deviceId, id: pend.id })
+                resolve(false)
+              }
+            }, PENDING_TTL_MS)
+            t.unref?.()
+          })
+          await notifyApprovers(pend, actaCache)
+          return espera
+        },
+        audit,
+        log,
+      }).start()
+      log('[vault] passwords: atendiendo peticiones de %d aparato(s)', passwordDevices().length)
+    }
+  } catch (e) {
+    log('[vault] passwords: no se pudo levantar (%s); el resto sigue igual', e.message)
+  }
 
   log(`[vault] listo · id ${fp} · ${store.getTree().children.length} nodos`)
 
@@ -1569,6 +1714,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     needsApproval,
     setApproval,
     supervised: () => readSupervised(),
+    // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
+    // llave. Lo que no puede es listarla un aparato.
+    passwordDevices,
+    setPasswordDevice,
+    passwordsVault: () => passwords?.vault || null,
     listApprovals: () => approvals.list(),
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
     // dispositivos se entera de que entró alguien, venga de donde venga.

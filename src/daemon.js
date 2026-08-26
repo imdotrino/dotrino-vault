@@ -405,6 +405,11 @@ export async function runDaemon () {
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
           } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+          else if (sec.op === 'passwords') {
+            const r = await vault.setPasswordDevice(sec.pub, { label: sec.label, on: !!sec.on })
+            console.log('[vault] passwords: device %s %s', sec.id || '?', sec.on ? 'ALLOWED' : 'removed')
+            if (sec.on) console.log('[vault] restart the vault so it starts answering password requests')
+          }
           else if (sec.op === 'approval') { const r = await vault.setApproval(sec.pub, !!sec.approval); console.log('[vault] device %s: approval %s', sec.id || '?', r.approval ? 'REQUIRED on every key request' : 'off') }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }

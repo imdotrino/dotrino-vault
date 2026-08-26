@@ -463,6 +463,29 @@ async function cmdApproval (args = []) {
     : `Listo: ${m.id} vuelve a recibir sus claves sin aprobación.`)
 }
 
+/**
+ * `dotrino-vault passwords <ID> on|off` — deja (o no) que ese aparato pida contraseñas
+ * de tu bóveda.
+ *
+ * Es una lista de ESTA bóveda, no del acta, por lo mismo que `approval`: es ella la que
+ * entrega. El acta manda igual — si revocas el aparato allí, deja de pedir aunque siga
+ * en esta lista. Y si además le pones `approval on`, cada arranque suyo te pedirá el
+ * visto bueno en el teléfono.
+ */
+async function cmdPasswords (args = []) {
+  const [id, val] = args
+  if (!id || !['on', 'off'].includes(val)) {
+    console.error('uso: dotrino-vault passwords <ID> on|off')
+    process.exit(1)
+  }
+  const m = await findMember(id)
+  writeReq('secret-request.json', { op: 'passwords', pub: m.pub, id: m.id, label: m.label || '', on: val === 'on' })
+  sendSignal(requireDaemon().pid, 'SIGUSR2')
+  console.log(val === 'on'
+    ? `Listo: ${m.id} puede pedir contraseñas de tu bóveda (de una en una; nunca la lista entera).`
+    : `Listo: ${m.id} deja de poder pedir contraseñas.`)
+}
+
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
@@ -1180,6 +1203,10 @@ function help () {
   secret device set <ID> CLAVE=valor …
   secret device import <ID> [archivo.env]
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
+  passwords <ID> on|off             deja que ese aparato pida CONTRASEÑAS de tu bóveda
+                                    (de una en una; nunca la lista entera). Con
+                                    approval on además te pedirá el visto bueno en el
+                                    teléfono. Reinicia el vault tras el primer on
   secret list                       lista los dos cajones: el valor de las públicas,
                                     tapadas las privadas
   secret show [device] <ns|ID> <CLAVE>
@@ -1254,6 +1281,7 @@ export async function runCtl (argv) {
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
     case 'approval': return cmdApproval(rest)
+    case 'passwords': return cmdPasswords(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':

@@ -145,3 +145,108 @@ test('vault-passwords: ni el vault le deja listar la bóveda a un aparato', asyn
   assert.equal(todas.length, 1)
   assert.equal(todas[0].title, 'Salesforce')
 })
+
+// --- El cableado con el vault ------------------------------------------------
+//
+// Lo de arriba prueba el módulo; esto prueba las piezas que lo enganchan al vault y que
+// NO son suyas: el almacén cifrado en reposo, la llave que nace sola, y la lista de
+// aparatos autorizados. Sin esto el módulo existiría sin que nadie lo montara.
+
+import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { atRestFor } from '../src/atrest.js'
+import fs from 'node:fs'
+
+/** Reproduce lo que `vault.js` monta alrededor del desk, con las mismas piezas. */
+function piezasDelVault (dir) {
+  const file = join(dir, 'passwords.json')
+  const atRest = atRestFor(dir)
+  const leer = () => { try { return JSON.parse(atRest.decrypt(fs.readFileSync(file, 'utf8'))) } catch { return null } }
+  const escribir = (d) => fs.writeFileSync(file, atRest.encrypt(JSON.stringify(d)), { mode: 0o600 })
+
+  return {
+    file,
+    leer,
+    store: {
+      async get (k) { return leer()?.data?.[k] },
+      async set (k, v) {
+        const d = leer() || { v: 1, data: {}, devices: [] }
+        d.data = { ...(d.data || {}), [k]: v }
+        escribir(d)
+      },
+    },
+    devices: () => leer()?.devices || [],
+    setDevice (pub, label) {
+      const d = leer() || { v: 1, data: {}, devices: [] }
+      escribir({ ...d, devices: [...(d.devices || []).filter(x => x.pubkey !== pub), { pubkey: pub, label, ts: 1 }] })
+    },
+    async key () {
+      const d = leer()
+      if (d?.cek) {
+        return crypto.subtle.importKey('raw', Uint8Array.from(Buffer.from(d.cek, 'base64')), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
+      }
+      const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+      const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k))
+      escribir({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64'), devices: d?.devices || [] })
+      return k
+    },
+  }
+}
+
+test('vault-passwords: el archivo queda CIFRADO en reposo, con la llave dentro', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const p = piezasDelVault(dir)
+  const desk = createPasswordDesk({
+    client: red().cliente('X'), store: p.store, cek: await p.key(), isAllowed: () => false,
+  })
+  await desk.vault.put({ title: 'Banco', sites: ['banco.com.ec'], username: 'seyacat', secret: 's3cr3t' })
+
+  // Lo que queda en disco no se puede leer sin la clave de la máquina.
+  const crudo = await readFile(p.file, 'utf8')
+  for (const dato of ['s3cr3t', 'seyacat', 'banco.com.ec', 'Banco']) {
+    assert.ok(!crudo.includes(dato), `«${dato}» quedó legible en el archivo`)
+  }
+
+  // Y abriéndolo, tampoco: la entrada va cifrada con la CEK, aparte del cifrado en reposo.
+  const abierto = JSON.stringify(p.leer())
+  assert.ok(!abierto.includes('s3cr3t'), 'la contraseña se ve al abrir el archivo')
+  assert.ok(abierto.includes('banco.com.ec'), 'los sitios sí van en claro dentro (hacen falta para emparejar)')
+})
+
+test('vault-passwords: la llave nace UNA vez y sobrevive al reinicio', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const p = piezasDelVault(dir)
+
+  const primera = await p.key()
+  const desk1 = createPasswordDesk({ client: red().cliente('A'), store: p.store, cek: primera, isAllowed: () => false })
+  const { id } = await desk1.vault.put({ title: 'X', sites: ['x.com'], secret: 'hunter2' })
+
+  // Segundo arranque: se relee la misma llave, así que la bóveda se abre.
+  const segunda = await p.key()
+  const desk2 = createPasswordDesk({ client: red().cliente('B'), store: p.store, cek: segunda, isAllowed: () => false })
+  assert.equal((await desk2.vault.get(id)).secret, 'hunter2', 'la llave cambió entre arranques')
+})
+
+test('vault-passwords: hacen falta LAS DOS condiciones (lista del vault y acta)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const p = piezasDelVault(dir)
+  p.setDevice('APARATO', 'Chrome')
+
+  // La comprobación tal cual la hace `vault.js`.
+  const isAllowed = (acta) => (pub) =>
+    p.devices().some(d => d.pubkey === pub) && (acta?.members || []).some(m => m.pub === pub)
+
+  const conActa = isAllowed({ members: [{ pub: 'APARATO' }] })
+  assert.equal(conActa('APARATO'), true)
+  assert.equal(conActa('OTRO'), false, 'bastaba con estar en el acta')
+
+  // Revocarlo en el acta le corta el acceso aunque siga en la lista del vault: no hay
+  // que acordarse de quitarlo en dos sitios.
+  const revocado = isAllowed({ members: [] })
+  assert.equal(revocado('APARATO'), false, 'revocar en el acta no le cortó las contraseñas')
+})
