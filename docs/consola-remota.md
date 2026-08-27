@@ -207,10 +207,10 @@ autocompletado es otra cosa y no entra aquí.
 
 ## 7. F5 — La aplicación
 
-**La misma página de siempre, en `vault.dotrino.com/vault`** (ruta canónica desde
-2026-08-26; `/devices` y `/dispositivos` siguen respondiendo porque hay invitaciones
-impresas con esas formas, y la app las manda a la nueva). En el menú se llama **«Mi
-bóveda»**. No hay app nueva ni subdominio nuevo: quien administra ya tiene la identidad en
+**La misma página de siempre, en `vault.dotrino.com/vault`** (ruta única desde
+2026-08-26; las de las dos etapas anteriores, `/devices` y `/dispositivos`, se retiraron
+a mano del dueño y ya no existen — lo que sigue entrando por donde sea es la invitación,
+que viaja en el #fragment y no mira la ruta). En el menú se llama **«Mi bóveda»**. No hay app nueva ni subdominio nuevo: quien administra ya tiene la identidad en
 ese aparato, y el cert **es** la credencial — no hay login ni contraseña.
 
 **Y la página decide sola con quién habla.** Al abrirla mira el certificado de delegación

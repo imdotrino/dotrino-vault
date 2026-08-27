@@ -316,7 +316,7 @@ Qué daño hacía, medido y sin exagerar:
 >       un solo `seq`—, `adoptActa`): falta el camino que las use al emparejar.
 
 > **Parcialmente hecho (2026-07-27).** Mientras el camino A no exista no hay dos opciones
-> que ofrecer, así que las dos UIs (`vault.dotrino.com/dispositivos` y
+> que ofrecer, así que las dos UIs (`vault.dotrino.com/vault` y
 > `profile.dotrino.com/vault`) **avisan antes y explican después** en vez de preguntar:
 > qué va a pasar, que quedas con dos cuentas, y cómo soltar la que no quieras.
 > - [x] Aviso **antes** de emparejar: «se creará aquí una cuenta nueva; la que usas no se toca».

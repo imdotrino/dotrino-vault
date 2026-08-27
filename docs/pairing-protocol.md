@@ -137,9 +137,11 @@ Dos cosas que **no** son opcionales:
    tiene ese problema. `parseInvite` sigue leyendo los formatos viejos (`j`, `b` y los
    que no llevan marca) porque hay enlaces y bóvedas sin actualizar por ahí.
 
-El enlace es `https://vault.dotrino.com/d#v=<invitación>`; `/dispositivos#vault=` sigue
-valiendo. La ruta corta existe por lo mismo que todo lo anterior: 15 caracteres menos
-dentro del QR.
+El enlace es `https://vault.dotrino.com/d#v=<invitación>`. La ruta corta existe por lo
+mismo que todo lo anterior: caracteres menos dentro del QR. Las direcciones largas de las
+etapas anteriores (`/dispositivos`, `/devices`) ya no existen, pero **un enlace emitido
+con ellas sigue emparejando**: `parseInvite` lee el `#fragment` y no mira la ruta, y la
+página cae por `404.html`, que es la propia app.
 
 ---
 

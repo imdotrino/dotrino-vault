@@ -59,19 +59,17 @@ const commitMeta = {
 //  · `d/index.html` — la ruta CORTA a la que apunta el QR de hoy (`/d#v=…`). Es corta
 //    a propósito: dentro de un QR cada carácter se paga en módulos, y los módulos son
 //    filas y columnas de terminal (`lib/src/invite.js`).
-//  · `devices/index.html` y `dispositivos/index.html` — las que fueron canónicas y la
-//    gente ya tiene guardadas (`/dispositivos#vault=…`). Se conservan y la app las manda
-//    a `/vault`: sin esto la página respondía **404**, y un 404 en la puerta de entrada
-//    del emparejamiento es pedir problemas (cachés, navegadores embebidos,
-//    previsualizaciones de enlace).
 //  · `approvals/index.html` — los pedidos de aprobación (el aviso del teléfono abre aquí).
 //  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
-//    enruta en el cliente.
+//    enruta en el cliente. Es también lo que recoge a `/devices` y `/dispositivos`, las
+//    direcciones de las dos etapas anteriores, retiradas a mano del dueño el 2026-08-26:
+//    no responden, pero tampoco dejan a nadie mirando una página de error de GitHub — cae
+//    la app y, si el enlace traía una invitación en el #fragment, empareja igual.
 const spaFallback = {
   name: 'spa-404',
   closeBundle () {
     try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
-    for (const ruta of ['vault', 'd', 'approvals', 'devices', 'dispositivos']) {
+    for (const ruta of ['vault', 'd', 'approvals']) {
       try {
         mkdirSync('dist/' + ruta, { recursive: true })
         copyFileSync('dist/index.html', `dist/${ruta}/index.html`)

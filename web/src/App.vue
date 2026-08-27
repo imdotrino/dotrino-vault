@@ -343,10 +343,11 @@ function copy (text, key) {
    —`/devices` para administrar y `/vault` para ser la bóveda— y había que saber de
    antemano en cuál estabas.
 
-   `/devices` y `/dispositivos` fueron canónicas y SIGUEN respondiendo: hay invitaciones
-   impresas y enlaces guardados con esas formas, y romperlos no arregla nada. Se atienden
-   aquí y la barra se pone en la forma nueva. En todos los casos la invitación viaja en el
-   #fragment, que nunca llega al servidor. */
+   Las direcciones de esas dos etapas (`/devices`, `/dispositivos`) se quitaron a mano
+   del dueño el 2026-08-26: son direcciones que ya no existen, no direcciones viejas que
+   se atienden. Lo que sí sigue entrando por donde sea es la INVITACIÓN: viaja en el
+   #fragment y se atiende antes de mirar la ruta, así que un enlace guardado con la forma
+   larga sigue emparejando. Y el #fragment nunca llega al servidor. */
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
@@ -356,15 +357,7 @@ function routeNow () {
   // pantalla. Una invitación en la URL manda: llegues por donde llegues, se empareja.
   if (/\/d$/.test(p) || invited) view.value = 'pair'
   else if (/\/approvals$/.test(p)) view.value = 'approvals'
-  else if (/\/(vault|devices|dispositivos)$/.test(p)) {
-    view.value = 'vault'
-    // Las direcciones viejas responden, pero la barra queda en la canónica: quien la
-    // copie de ahí reparte la de ahora. No es un salto de página (`replaceState`), así
-    // que no se pierde el «volver» ni se dispara otra vuelta de enrutado.
-    if (!/\/vault$/.test(p)) {
-      try { history.replaceState(null, '', '/vault' + location.search + location.hash) } catch (_) {}
-    }
-  }
+  else if (/\/vault$/.test(p)) view.value = 'vault'
   else view.value = 'home'
 }
 routeNow()

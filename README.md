@@ -834,7 +834,7 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
 - `packaging/` — `build.sh` (binario SEA + tarball), `build-deb.sh`, `build-win.sh`, `install.sh`/`uninstall.sh`, unit systemd.
 - `Dockerfile` — la imagen que publica `.github/workflows/docker.yml` en GHCR.
 - `test/` — las pruebas (`npm test`, `node --test`, sin dependencias).
-- `web/` — `vault.dotrino.com` (Vite + Vue): la página pública **y la consola «Dónde vive tu perfil»**, la única pantalla del ecosistema donde se ven y gestionan los dispositivos de un perfil. Sirve además las rutas del QR (`/d` y `/dispositivos`). La publica `.github/workflows/deploy.yml`.
+- `web/` — `vault.dotrino.com` (Vite + Vue): la página pública **y la consola «Dónde vive tu perfil»**, la única pantalla del ecosistema donde se ven y gestionan los dispositivos de un perfil — en `/vault`, que además decide sola si esta máquina hace de bóveda o se conecta a la que ya hay. Sirve también `/d`, la ruta corta del QR. La publica `.github/workflows/deploy.yml`.
 - `docs/` — las decisiones de diseño, que mandan sobre el código:
   - [`acta-de-perfil.md`](./docs/acta-de-perfil.md) — el modelo vigente: un perfil es un conjunto de llaves con un acta firmada por un solo sellador.
   - [`pairing-protocol.md`](./docs/pairing-protocol.md) — el emparejamiento endurecido: por qué el token dejó de ser autoridad suficiente.

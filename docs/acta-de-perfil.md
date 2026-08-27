@@ -386,7 +386,7 @@ Lo de 2026-07-10 («no comparten código») era una observación, no una regla.
 | Fase | Estado | Dónde quedó |
 |---|---|---|
 | **F0** deuda | ✅ hecha y desplegada | núcleo de enrolamiento compartido, el código se comprueba antes de firmar, autoborrado solo con firma, registros podados |
-| **F1** acta + consola | ✅ hecha y desplegada | `@dotrino/identity/acta`, handlers del acta, consola en `vault.dotrino.com/dispositivos` |
+| **F1** acta + consola | ✅ hecha y desplegada | `@dotrino/identity/acta`, handlers del acta, consola en `vault.dotrino.com/vault` |
 | **F2** traspaso y firma | ✅ hecha y publicada | aprobar admite en el acta, el acta viaja con el cert y con `vault.devices`, `signData` re-enrutado, `joinProfile` |
 | **F3** unir identidades | ✅ hecha y publicada | certificado de continuidad, verificado en el ENROLL y guardado con el miembro |
 | **F4** contenido | ✅ hecha y publicada | `@dotrino/identity/content` + llavero en el acta + rotación al expulsar + **store cifrado de punta a punta** |
@@ -472,7 +472,7 @@ registros dejan de crecer sin límite.
       llave actual), `sealer` = esa misma llave, todas las capacidades. Invisible.
 - [ ] `dotrino-identity/src/index.js` + `index.d.ts` + `src/node.js`: wrappers.
 - [ ] **Consola en `vault.dotrino.com`**: la landing actual (`web/src/App.vue`) queda como
-      home y se agrega `/dispositivos` con: quién es quién, **qué puede hacer cada uno**,
+      home y se agrega `/vault` con: quién es quién, **qué puede hacer cada uno**,
       **quién sella**, admitir y expulsar.
 - [ ] Aviso permanente y en lenguaje llano de la consecuencia de D6: «si pierdes este
       dispositivo, pierdes el perfil». Sin prometer una recuperación que no existe.

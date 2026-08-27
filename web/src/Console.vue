@@ -370,7 +370,7 @@ const t = computed(() => T[props.lang] || T.es)
  * poder probar la consola entera sin salir de la máquina.
  *
  * Solo se acepta si esta página se está sirviendo desde localhost. Es importante: sin ese
- * cerrojo, un enlace del tipo `vault.dotrino.com/dispositivos?vault=…` podría apuntar tu
+ * cerrojo, un enlace del tipo `vault.dotrino.com/vault?vault=…` podría apuntar tu
  * identidad a un iframe ajeno, que es exactamente el ataque que este proyecto evita.
  */
 function identityOptions () {
