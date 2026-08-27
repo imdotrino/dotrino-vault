@@ -461,7 +461,7 @@ test('Perfil vacío: lo dice y explica qué hacer, sin reventar', () => {
 })
 
 
-test('Permisos: los cuatro, en cristiano, con su marca — y admin destacado', () => {
+test('Permisos: los cinco, en cristiano, con su marca — y admin destacado', () => {
   const t = makeTheme()
   const st = baseState({
     screen: 'caps',
@@ -476,7 +476,7 @@ test('Permisos: los cuatro, en cristiano, con su marca — y admin destacado', (
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
   // Se puede elegir cada permiso.
-  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 4)
+  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 5)
 })
 
 /**

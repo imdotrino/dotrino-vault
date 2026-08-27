@@ -193,3 +193,39 @@ test('un solo emparejamiento a la vez: abrir otro invalida el anterior', async (
   await desk.handleEnroll('tok-1', payload)
   assert.match(sent.at(-1).error, /pairing token/)
 })
+
+/**
+ * EL GESTOR DE CONTRASEÑAS entra como cualquier otro aparato, con su permiso puesto.
+ *
+ * Antes había un código aparte —dos públicas en base64— que se pegaba en la extensión y
+ * otro que se pegaba de vuelta en la bóveda. Eso ya no existe: la extensión se empareja
+ * con la invitación de siempre y lo que la deja pedir credenciales es la capacidad
+ * `passwords` del acta, que sale del scope con el que se emparejó.
+ */
+test('contraseñas: el scope del emparejamiento se convierte en la capacidad del acta', async () => {
+  const admitidos = []
+  const { desk, identity } = await mount()
+  identity.admitMember = async (m) => { admitidos.push(m); return { ok: true } }
+  const { qr } = await desk.startPairing({ scope: ['vault:passwords'], ttlMs: 60000, label: 'gestor' })
+  const dev = await deviceEnroll(qr, { label: 'gestor' })
+  await desk.handleEnroll('FROM', dev.payload)
+  const [pend] = desk.listPending()
+  await desk.approve(dev.code, { deviceId: pend.deviceId })
+
+  assert.equal(admitidos.length, 1, 'el aparato no entró en el acta')
+  assert.ok(admitidos[0].caps.includes('passwords'),
+    'emparejar con --scope contrasenas no concedió el permiso: ' + JSON.stringify(admitidos[0].caps))
+})
+
+test('contraseñas: un emparejamiento normal NO concede el permiso', async () => {
+  const admitidos = []
+  const { desk, identity } = await mount()
+  identity.admitMember = async (m) => { admitidos.push(m); return { ok: true } }
+  const { qr } = await desk.startPairing({ scope: ['vault:sign', 'vault:read'], ttlMs: 60000, label: 'cel' })
+  const dev = await deviceEnroll(qr, { label: 'cel' })
+  await desk.handleEnroll('FROM', dev.payload)
+  const [pend] = desk.listPending()
+  await desk.approve(dev.code, { deviceId: pend.deviceId })
+
+  assert.ok(!admitidos[0].caps.includes('passwords'), 'cualquier aparato podía pedir contraseñas')
+})

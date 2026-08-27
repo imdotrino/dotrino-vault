@@ -48,7 +48,7 @@ const T = {
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Master',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     debt_t: 'Este aparato todavía no puede abrir:',
@@ -222,7 +222,7 @@ const T = {
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'Master',
     members: 'Devices', me: 'this device', is_master: 'Master',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     debt_t: 'This device cannot open yet:',
@@ -1423,7 +1423,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           <template v-if="openMembers.has(m.pub)">
           <p v-if="m.noAccess" class="muted svc-note">{{ t.dev_nocert_b }}</p>
           <div class="caps">
-            <button v-for="c in (m.cn ? ['secrets','sign','approve'] : ['sign','store','read','admin','approve'])" :key="c"
+            <button v-for="c in (m.cn ? ['secrets','sign','approve'] : ['sign','store','read','admin','approve','passwords'])" :key="c"
                     class="cap" :class="{ on: m.caps.includes(c) }"
                     :disabled="!isMaster || busy === 'caps-' + m.pub"
                     :data-testid="'cap-' + c + '-' + m.id"

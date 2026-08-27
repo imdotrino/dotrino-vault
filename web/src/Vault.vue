@@ -52,13 +52,9 @@ const T = {
     active: 'Respondiendo a tus aparatos',
     inactive: 'No está respondiendo',
     warning: 'Mientras esta pestaña esté abierta, tu bóveda responde a tus aparatos. Si la cierras, dejan de poder pedir contraseñas — nada se pierde, pero no responden hasta que vuelvas a abrirla.',
-    code: 'Pega este código en tu extensión para enlazarla',
-    copied: 'Copiado',
     devices: 'Aparatos que pueden pedir credenciales',
-    none: 'Ninguno todavía. Enlaza tu extensión con el código de arriba.',
-    authorise: 'Y pega aquí el código que muestra la extensión',
-    authoriseBtn: 'Autorizar',
-    remove: 'Retirar',
+    none: 'Ninguno todavía. Conéctalo como cualquier otro aparato, arriba, y dale el permiso de contraseñas.',
+    manage: 'Se conectan y se quitan arriba, con el resto de tus aparatos.',
     kept: 'Guardado en esta bóveda',
     empty: 'Nada guardado. Importa lo que ya tienes desde otro gestor.',
     importBtn: 'Importar de 1Password, Bitwarden o Chrome',
@@ -75,13 +71,9 @@ const T = {
     active: 'Answering your devices',
     inactive: 'Not answering',
     warning: 'While this tab is open, your vault answers your devices. If you close it they can no longer ask for passwords — nothing is lost, but they get no answer until you open it again.',
-    code: 'Paste this code into your extension to link it',
-    copied: 'Copied',
     devices: 'Devices that may ask for credentials',
-    none: 'None yet. Link your extension with the code above.',
-    authorise: 'And paste here the code your extension shows',
-    authoriseBtn: 'Authorise',
-    remove: 'Remove',
+    none: 'None yet. Connect it like any other device, above, and give it the passwords permission.',
+    manage: 'They are connected and removed above, with the rest of your devices.',
     kept: 'Kept in this vault',
     empty: 'Nothing kept yet. Import what you already have from another manager.',
     importBtn: 'Import from 1Password, Bitwarden or Chrome',
@@ -150,11 +142,8 @@ async function vaultKey () {
 
 const ready = ref(false)
 const error = ref('')
-const code = ref('')
 const devices = ref([])
 const entries = ref([])
-const paste = ref('')
-const pasteError = ref('')
 const note = ref('')
 const asking = ref(null)
 
@@ -162,19 +151,32 @@ let identity = null
 let vault = null
 let responder = null
 
-const listDevices = async () => (await store.get('devices')) || []
+/**
+ * Quién puede pedir credenciales lo dice el ACTA, como cualquier otro permiso: los
+ * miembros con la capacidad `passwords` (`caps <ID> +contrasenas`, o al emparejar con
+ * `--scope contrasenas`). Aquí no hay una segunda lista ni un código que pegar — un
+ * gestor entra como cualquier otro aparato del perfil.
+ */
+async function listDevices () {
+  const r = await identity.profileMembers()
+  return (r?.members || []).filter(m => (m.caps || []).includes('passwords'))
+}
 
 const sealing = {
   async seal (msg, peerEncPub) {
     if (!peerEncPub) throw Object.assign(new Error('no encryption key'), { code: 'unsealed' })
     return {
       app: 'passmanager',
-      sealed: await identity.encrypt([peerEncPub], JSON.stringify(msg)),
+      // Destinatarios como OBJETOS: `encrypt` expande cada uno a todos los aparatos de
+      // esa persona, y una llave suelta se le cae sin envolver nada — el sobre salía
+      // vacío, sin error, y al otro lado era «no es para mí».
+      sealed: await identity.encrypt([{ encryptionPubkey: peerEncPub }], JSON.stringify(msg)),
       from: await identity.getEncryptionPubkey(),
     }
   },
+  // `decrypt` devuelve `{ plaintext }`, no la cadena.
   async open (env) {
-    return JSON.parse(await identity.decrypt(env.from, null, env.sealed))
+    return JSON.parse((await identity.decrypt(env.from, null, env.sealed)).plaintext)
   },
   isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed,
 }
@@ -182,29 +184,6 @@ const sealing = {
 async function refresh () {
   devices.value = await listDevices()
   entries.value = vault ? await vault.list() : []
-}
-
-async function authorise () {
-  pasteError.value = ''
-  try {
-    const b64 = String(paste.value || '').trim().replace(/-/g, '+').replace(/_/g, '/')
-    const c = JSON.parse(atob(b64))
-    if (c?.v !== 1 || !c.sign || !c.enc) throw new Error('bad')
-    const list = await listDevices()
-    await store.set('devices', [
-      ...list.filter(d => !samePubkey(d.pubkey, c.sign)),
-      { pubkey: c.sign, encPub: c.enc, label: 'Extensión', ts: Date.now() },
-    ])
-    paste.value = ''
-    await refresh()
-  } catch {
-    pasteError.value = t('authoriseBtn')
-  }
-}
-
-async function remove (pubkey) {
-  await store.set('devices', (await listDevices()).filter(d => !samePubkey(d.pubkey, pubkey)))
-  await refresh()
 }
 
 async function importFile (ev) {
@@ -215,15 +194,8 @@ async function importFile (ev) {
     for (const e of list) await vault.put(e)
     note.value = t('imported', list.length)
     await refresh()
-  } catch (e) { pasteError.value = e.message }
+  } catch (e) { error.value = e.message }
   ev.target.value = ''
-}
-
-function copy () {
-  navigator.clipboard.writeText(code.value).then(() => {
-    note.value = t('copied')
-    setTimeout(() => { note.value = '' }, 1200)
-  })
 }
 
 /** Aprobar es del usuario y está delante: se le pregunta aquí, no en un log. */
@@ -254,25 +226,25 @@ onMounted(async () => {
     const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
     await client.identify({ data, signature: await signData(data) })
 
+    // El acta en caché: `isAllowed`/`encPubOf` se llaman por cada mensaje que entra y
+    // son SÍNCRONOS, así que se refresca aparte. Quitarle el permiso a un aparato —o
+    // quitarlo del perfil— le corta esto en la siguiente pasada.
     let known = await listDevices()
+    const sweeper = setInterval(() => { listDevices().then(l => { known = l }).catch(() => {}) }, 5000)
+    onBeforeUnmount(() => clearInterval(sweeper))
+
     responder = new VaultResponder({
       client,
       vault,
-      isAllowed: (pub) => known.some(d => samePubkey(d.pubkey, pub)),
-      encPubOf: (pub) => known.find(d => samePubkey(d.pubkey, pub))?.encPub || null,
+      isAllowed: (pub) => known.some(d => samePubkey(d.pub, pub)),
+      encPubOf: (pub) => known.find(d => samePubkey(d.pub, pub))?.encPub || null,
       needsApproval: () => true,
-      approve: async ({ pubkey }) => askUser(known.find(d => samePubkey(d.pubkey, pubkey))?.label || '?'),
-      admin: {
-        async devices () { return listDevices() },
-        async unlink (pub) { await remove(pub); known = await listDevices(); return { ok: true } },
-      },
+      approve: async ({ pubkey }) => askUser(known.find(d => samePubkey(d.pub, pubkey))?.label || '?'),
+      // Sin mostrador de administración: los aparatos se conectan y se quitan en la
+      // consola de arriba, que es la única pantalla del ecosistema donde se hace eso.
       onRequest: async () => { known = await listDevices(); refresh() },
     })
     responder.start()
-
-    code.value = btoa(JSON.stringify({
-      v: 1, sign: publickey, enc: await identity.getEncryptionPubkey(),
-    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
     await refresh()
     ready.value = true
@@ -298,28 +270,17 @@ onBeforeUnmount(() => responder?.stop())
       <div class="state"><span class="dot on"></span><span>{{ t('active') }}</span></div>
       <p class="warn">{{ t('warning') }}</p>
 
-      <h2>{{ t('code') }}</h2>
-      <code class="code" data-testid="vault-code" @click="copy">{{ code }}</code>
-      <p v-if="note" class="hint">{{ note }}</p>
-
       <h2>{{ t('devices') }}</h2>
       <ul v-if="devices.length" class="rows">
-        <li v-for="d in devices" :key="d.pubkey" class="row">
+        <li v-for="d in devices" :key="d.pub" class="row" data-testid="password-device">
           <div>
-            <strong>{{ d.label }}</strong>
-            <div class="hint">{{ new Date(d.ts).toLocaleDateString(lang) }}</div>
+            <strong>{{ d.label || d.id }}</strong>
+            <div class="hint">{{ d.id }}</div>
           </div>
-          <button class="danger" data-testid="remove-device" @click="remove(d.pubkey)">{{ t('remove') }}</button>
         </li>
       </ul>
       <p v-else class="hint">{{ t('none') }}</p>
-
-      <p class="hint">{{ t('authorise') }}</p>
-      <div class="paste">
-        <input v-model="paste" type="text" data-testid="device-code" :placeholder="t('authoriseBtn')">
-        <button data-testid="authorise" @click="authorise">{{ t('authoriseBtn') }}</button>
-      </div>
-      <p v-if="pasteError" class="err">{{ pasteError }}</p>
+      <p v-if="devices.length" class="hint">{{ t('manage') }}</p>
 
       <h2>{{ t('kept') }}</h2>
       <ul v-if="entries.length" class="rows">
@@ -332,6 +293,7 @@ onBeforeUnmount(() => responder?.stop())
         </li>
       </ul>
       <p v-else class="hint">{{ t('empty') }}</p>
+      <p v-if="note" class="hint">{{ note }}</p>
       <label class="import">
         {{ t('importBtn') }}
         <input type="file" accept=".csv,.json,.txt" hidden @change="importFile">
@@ -363,14 +325,9 @@ h2 { font-size: .95rem; margin: 1.4rem 0 .6rem; opacity: .85; }
 .dot.on { background: #35d07f; box-shadow: 0 0 .6rem #35d07f; }
 .warn { margin: .8rem 0 0; padding: .8rem 1rem; border-left: 3px solid #f0b429;
         background: rgba(240,180,41,.08); font-size: .9rem; }
-.code { display: block; word-break: break-all; cursor: pointer; font-size: .8rem;
-        padding: .8rem; border-radius: .5rem; background: rgba(255,255,255,.06); }
 .rows { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
        padding: .7rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
-.paste { display: flex; gap: .5rem; margin-top: .4rem; }
-.paste input { flex: 1; min-width: 0; padding: .55rem .7rem; border-radius: .5rem;
-               border: 1px solid rgba(255,255,255,.18); background: transparent; color: inherit; }
 button, .import { cursor: pointer; padding: .55rem .9rem; border-radius: .5rem; border: 0;
                   background: #2f6df6; color: #fff; font: inherit; }
 button.danger { background: transparent; color: #ff8a8a; border: 1px solid rgba(255,138,138,.4); }

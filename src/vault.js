@@ -102,9 +102,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return { approval: !!on }
   }
   // LA BÓVEDA DE CONTRASEÑAS: entradas y su llave, en el dir del perfil y cifradas en
-  // reposo como todo lo demás. Quién puede pedir es una LISTA DE ESTA BÓVEDA, no del
-  // acta — por lo mismo que `approval.json`: es ella la que entrega. El acta sigue
-  // mandando en que el aparato exista y no esté revocado, y eso se comprueba aparte.
+  // reposo como todo lo demás. QUIÉN PUEDE PEDIR LO DICE EL ACTA (capacidad
+  // `passwords`), como cualquier otro permiso: aquí no hay una segunda lista de
+  // aparatos. Tenerla obligaba a acordarse de dos sitios al quitar un aparato, y era
+  // además un emparejamiento paralelo al del ecosistema.
   const passwordsFile = path.join(dir, 'passwords.json')
   const passwordsAtRest = atRestFor(dir)
   const readPasswordsFile = () => {
@@ -118,13 +119,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const passwordsStore = {
     async get (k) { return readPasswordsFile()?.data?.[k] },
     async set (k, v) {
-      const d = readPasswordsFile() || { v: 1, data: {}, devices: [] }
+      const d = readPasswordsFile() || { v: 1, data: {} }
       d.data = { ...(d.data || {}), [k]: v }
       writePasswordsFile(d)
     },
   }
 
-  const passwordDevices = () => readPasswordsFile()?.devices || []
+  /** Los aparatos que el acta autoriza a pedir credenciales (`caps <ID> +contraseñas`). */
+  const passwordDevices = () => (actaCache?.members || []).filter((m) => Acta.memberCan(actaCache, m.pub, 'passwords'))
 
   /**
    * El acta vigente, en caché.
@@ -153,18 +155,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
     const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key))
-    writePasswordsFile({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64'), devices: d?.devices || [] })
+    writePasswordsFile({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64') })
     return key
-  }
-
-  /** Autorizar/retirar un aparato para pedir contraseñas (`dotrino-vault passwords`). */
-  async function setPasswordDevice (pub, { label = '', on = true } = {}) {
-    const d = readPasswordsFile() || { v: 1, data: {}, devices: [] }
-    const resto = (d.devices || []).filter((x) => x.pubkey !== pub)
-    if (on) resto.push({ pubkey: pub, label: String(label || '').slice(0, 60), ts: Date.now() })
-    writePasswordsFile({ ...d, devices: resto })
-    audit('passwords.device', { device: await deviceIdOf(pub).catch(() => null), on: !!on })
-    return { ok: true }
   }
 
   const approvalsSweeper = setInterval(() => { for (const g of approvals.sweep()) audit('secrets.expired', { id: g.id, ns: g.ns, device: g.deviceId }) }, 30 * 1000); approvalsSweeper.unref?.()
@@ -764,69 +756,94 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // ----- LA BÓVEDA DE CONTRASEÑAS -----
   //
   // Se monta al final y envuelto: es una pieza opcional y un fallo suyo no puede tumbar
-  // la CA. Solo se levanta si hay algún aparato autorizado — sin eso no hay a quién
+  // la CA. Solo se levanta cuando el acta autoriza a alguien — sin eso no hay a quién
   // responder, y crear la llave por si acaso sería crear un secreto que nadie pidió.
+  //
+  // Y se levanta EN CUANTO pasa, no en el siguiente arranque: conceder el permiso ya es
+  // un acto explícito del dueño, y pedirle además que reinicie la bóveda es de las cosas
+  // que se olvidan y luego parecen un fallo del gestor.
   let passwords = null
-  try {
-    if (passwordDevices().length) {
-      const { createPasswordDesk } = await import('./passwords.js')
-      await refreshActa()
-      const actaSweeper = setInterval(refreshActa, 5000)
-      actaSweeper.unref?.()
-      passwords = createPasswordDesk({
-        client,
-        store: passwordsStore,
-        cek: await passwordsKey(),
-        // DOS condiciones, y hacen falta las dos: que esta bóveda lo haya autorizado
-        // (su lista) y que el ACTA siga reconociéndolo. Revocar un aparato en el acta
-        // le corta esto también, sin tener que acordarse de dos sitios.
-        isAllowed: (pub) => {
-          if (!passwordDevices().some((d) => d.pubkey === pub)) return false
-          return (actaCache?.members || []).some((m) => m.pub === pub)
-        },
-        encPubOf: (pub) => (actaCache?.members || []).find((m) => m.pub === pub)?.encPub || null,
-        needsApproval: (pub) => needsApproval(pub),
-        // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
-        // Es el mismo camino que ya recorren los cajones de secretos.
-        approve: async ({ pubkey, op }) => {
-          const deviceId = await deviceIdOf(pubkey).catch(() => null)
-          const label = (actaCache?.members || []).find((m) => m.pub === pubkey)?.label || ''
-          const pend = approvals.request({ ns: 'passwords', device: pubkey, deviceId, label, ek: '' })
-          audit('passwords.pending', { device: deviceId, id: pend.id, op })
-          log(`[vault] passwords: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
-          const espera = new Promise((resolve) => {
-            waiters.set(pend.id, resolve)
-            // Si nadie contesta, vence solo: la promesa no se queda colgada para siempre
-            // y el aparato recibe un no en vez de esperar sin fin.
-            const t = setTimeout(() => {
-              if (waiters.delete(pend.id)) {
-                audit('passwords.expired', { device: deviceId, id: pend.id })
-                resolve(false)
-              }
-            }, PENDING_TTL_MS)
-            t.unref?.()
-          })
-          await notifyApprovers(pend, actaCache)
-          return espera
-        },
-        audit,
-        log,
-      }).start()
-      log('[vault] passwords: atendiendo peticiones de %d aparato(s)', passwordDevices().length)
-      // El código que se pega en la extensión o en la consola web. Lleva las DOS
-      // públicas: por la de firma enruta el proxio, a la de cifrado se le sella el
-      // contenido. Es público: no hay nada aquí que no pueda verse.
-      try {
-        const codigo = Buffer.from(JSON.stringify({
-          v: 1,
-          sign: await client.getPublicKey(),
-          enc: await identity.getEncryptionPubkey(),
-        })).toString('base64url')
-        log('[vault] passwords: enlaza un aparato con este código:\n%s', codigo)
-      } catch (e) {
-        log('[vault] passwords: no se pudo componer el código de enlace: %s', e.message)
+  /**
+   * EL SELLADO del gestor: la misma cripto de los sobres del ecosistema
+   * (`@dotrino/identity/content`), atada a la llave de cifrado de esta bóveda.
+   *
+   * Va aquí y no en el cliente del transporte porque el cliente del vault es UNO y lo
+   * comparte todo: el protocolo de la CA viaja en claro a propósito (un enrolamiento es
+   * público hasta que hay cert). Lo que se sella es lo del gestor, y por eso `isSealed`
+   * mira su marca y no otra.
+   *
+   * Sin esto la bóveda RECIBÍA los sobres y los tiraba —el cliente no tenía con qué
+   * abrirlos— y el aparato se quedaba esperando sin que nada lo dijera.
+   */
+  const passwordSealing = {
+    async seal (msg, peerEncPub) {
+      if (!peerEncPub) throw Object.assign(new Error('no encryption key'), { code: 'unsealed' })
+      return {
+        app: 'passmanager',
+        // Destinatarios como OBJETOS y no como llaves sueltas: `encrypt` expande cada
+        // uno a todos los aparatos de esa persona, y una cadena a secas se le cae por
+        // el `continue` sin envolver nada — el sobre salía vacío y sin error.
+        sealed: await identity.encrypt([{ encryptionPubkey: peerEncPub }], JSON.stringify(msg)),
+        from: await identity.getEncryptionPubkey()
       }
-    }
+    },
+    // `decrypt` devuelve `{ plaintext }`, no la cadena.
+    async open (env) { return JSON.parse((await identity.decrypt(env.from, null, env.sealed)).plaintext) },
+    isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed
+  }
+  const startPasswordDesk = async () => {
+    if (passwords || !passwordDevices().length) return
+    const { createPasswordDesk } = await import('./passwords.js')
+    client.updateConfig({ sealing: passwordSealing })
+    passwords = createPasswordDesk({
+      client,
+      store: passwordsStore,
+      cek: await passwordsKey(),
+      // UNA sola condición, y es del ACTA: el aparato tiene la capacidad `passwords`.
+      // Quitársela —o quitar el aparato— le corta esto en la siguiente pasada, sin
+      // que haya una segunda lista que acordarse de tocar.
+      isAllowed: (pub) => !!actaCache && Acta.memberCan(actaCache, pub, 'passwords'),
+      encPubOf: (pub) => (actaCache?.members || []).find((m) => m.pub === pub)?.encPub || null,
+      needsApproval: (pub) => needsApproval(pub),
+      // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
+      // Es el mismo camino que ya recorren los cajones de secretos.
+      approve: async ({ pubkey, op }) => {
+        const deviceId = await deviceIdOf(pubkey).catch(() => null)
+        const label = (actaCache?.members || []).find((m) => m.pub === pubkey)?.label || ''
+        const pend = approvals.request({ ns: 'passwords', device: pubkey, deviceId, label, ek: '' })
+        audit('passwords.pending', { device: deviceId, id: pend.id, op })
+        log(`[vault] passwords: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
+        const espera = new Promise((resolve) => {
+          waiters.set(pend.id, resolve)
+          // Si nadie contesta, vence solo: la promesa no se queda colgada para siempre
+          // y el aparato recibe un no en vez de esperar sin fin.
+          const t = setTimeout(() => {
+            if (waiters.delete(pend.id)) {
+              audit('passwords.expired', { device: deviceId, id: pend.id })
+              resolve(false)
+            }
+          }, PENDING_TTL_MS)
+          t.unref?.()
+        })
+        await notifyApprovers(pend, actaCache)
+        return espera
+      },
+      audit,
+      log,
+    }).start()
+    log('[vault] passwords: serving %d device(s)', passwordDevices().length)
+  }
+  try {
+    // El acta ANTES de mirarla: es ella la que dice si hay a quién responder, y sin
+    // refrescarla primero el mostrador no se levantaba nunca en un arranque en frío.
+    await refreshActa()
+    const actaSweeper = setInterval(() => {
+      refreshActa().then(startPasswordDesk).catch(() => {})
+    }, 5000)
+    actaSweeper.unref?.()
+    if (passwordDevices().length) await startPasswordDesk()
+    // Ni código de enlace ni pegar nada: un gestor entra como cualquier otro aparato.
+    else log('[vault] passwords: no device may ask yet · pair one with `dotrino-vault pair --scope contrasenas`')
   } catch (e) {
     log('[vault] passwords: no se pudo levantar (%s); el resto sigue igual', e.message)
   }
@@ -1730,7 +1747,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
     // llave. Lo que no puede es listarla un aparato.
     passwordDevices,
-    setPasswordDevice,
     passwordsVault: () => passwords?.vault || null,
     listApprovals: () => approvals.list(),
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus

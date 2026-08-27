@@ -1,6 +1,7 @@
 # La bóveda de contraseñas dentro del vault
 
-> Estado: **cableado** (2026-08-26). 10 tests propios, 259 en la suite del vault.
+> Estado: **cableado** (2026-08-26). Emparejamiento y permiso unificados con el resto del
+> ecosistema el 2026-08-27. 12 tests propios, 266 en la suite del vault.
 
 ## Qué es
 
@@ -10,9 +11,13 @@ es lo mismo **dentro del vault**, que ya tiene lo que allí había que improvisa
 
 | | En `passmanager serve` | En el vault |
 |---|---|---|
-| quién puede pedir | una lista en un JSON | el **acta** |
+| quién puede pedir | el **acta** (la misma pieza, `@dotrino/vault`) | el **acta** |
 | aprobación | una pregunta en la consola | el **teléfono** (`caps +aprueba`) |
 | bitácora | un `console.log` | `activity.log`, la misma de firmas y enrolamientos |
+
+Las dos son bóvedas del ecosistema: los aparatos entran por el enrolamiento de siempre y
+lo que cambia es la disponibilidad, no el modelo. La diferencia real del daemon es que
+sigue encendido con el navegador cerrado.
 
 El protocolo **no cambia**: un aparato pide una credencial por dominio y recibe esa
 sola. `list` no existe en remoto.
@@ -20,13 +25,18 @@ sola. `list` no existe en remoto.
 ## Cómo usarlo
 
 ```bash
-dotrino-vault passwords <ID> on      # ese aparato puede pedir contraseñas
-dotrino-vault approval <ID> on       # y además te pedirá el visto bueno en el teléfono
+dotrino-vault pair --scope contrasenas   # conectar el gestor, ya con su permiso
+dotrino-vault caps <ID> +contrasenas     # o dárselo después a un aparato que ya está
+dotrino-vault approval <ID> on           # y que además te pida el visto bueno en el teléfono
 ```
 
-Tras el primer `on` hay que **reiniciar el vault**: el escritorio solo se levanta si hay
-algún aparato autorizado, porque sin nadie a quien responder crear la llave sería crear
-un secreto que nadie pidió.
+**No hay códigos que pegar.** El gestor se empareja como cualquier otro aparato:
+invitación de la bóveda, seis caracteres que muestra el aparato y se teclean aquí, cert
+firmado por la maestra y entrada en el acta.
+
+El mostrador se levanta **en cuanto** alguien tiene el permiso, sin reiniciar el vault.
+Si no lo tiene nadie no se levanta, porque sin a quién responder crear la llave sería
+crear un secreto que nadie pidió.
 
 ## Las cuatro piezas, y cómo quedaron
 
@@ -38,10 +48,14 @@ un secreto que nadie pidió.
    envuelve a cada aparato, y no es un descuido: **ningún aparato abre la bóveda**, piden
    de a una y el vault responde.
 3. **El permiso.** `memberCanReadSecrets` **no servía**: exige un `cn` y eso es para
-   servicios, no para los aparatos del usuario. Se usa una **lista de esta bóveda**, como
-   `approval.json`, con el mismo argumento que ya está escrito ahí: *es ella la que
-   entrega*. Y hacen falta **las dos** condiciones — estar en la lista **y** seguir en el
-   acta —, así que revocar un aparato le corta esto también, sin acordarse de dos sitios.
+   servicios, no para los aparatos del usuario. La primera versión salió del paso con una
+   **lista de esta bóveda**, como `approval.json` — y eso resultó ser el error: quitar un
+   aparato había que acordárselo en dos sitios, y el gestor acababa emparejándose por un
+   camino propio para poder entrar en esa lista.
+
+   Hoy es una **capacidad del acta**, `passwords` (scope `vault:passwords`), como
+   `admin` o `approve`: se concede al emparejar o después, se quita sola, y revocar el
+   aparato la retira con todo lo demás. Un solo registro y un solo acto.
 4. **La aprobación en dos tiempos.** Un `Map` de `id → resolve` y una rama en
    `handleApproval` **antes** de `resultFor` (que asume un cajón y una `ek`). Con
    vencimiento propio: si nadie contesta en 5 min, la promesa se resuelve en «no» en vez
@@ -51,6 +65,13 @@ Y una quinta que apareció al hacerlo: `isAllowed`/`encPubOf` del responder son
 **síncronos** —se llaman por cada mensaje— así que el acta se lee en **caché refrescada
 cada 5 s**, no con un `await` por mensaje. Revocar tarda eso en surtir efecto, no un
 reinicio.
+
+Y una sexta, que costó un rato encontrar: **el cliente del vault es uno solo y no sabía
+abrir sobres.** El protocolo de la CA viaja en claro a propósito (un enrolamiento es
+público hasta que hay cert), así que el cliente se creaba sin sellado — y las peticiones
+del gestor, que sí van selladas, entraban y se tiraban sin una línea en el log. Se le
+pone un adaptador de sellado (`updateConfig({ sealing })`) cuya marca es la del gestor y
+solo la suya, para no tragarse el protocolo del vault. Hay un test que lo fija.
 
 ## Lo que no cambia
 

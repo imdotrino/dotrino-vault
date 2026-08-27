@@ -195,16 +195,19 @@ async function cmdPair (args = []) {
   if (scIdx >= 0) {
     const raw = args[scIdx + 1]
     if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope sign,read,store,secrets:<ns>'); process.exit(2) }
-    const ALIAS = { firma: 'sign', lee: 'read', guarda: 'store' }
+    const ALIAS = { firma: 'sign', lee: 'read', guarda: 'store', contrasenas: 'passwords', 'contraseñas': 'passwords' }
     scope = []
     for (const tok of raw.split(',').map((t) => t.trim()).filter(Boolean)) {
       const t = ALIAS[tok] || tok
       if (t === 'admin' || t === 'administra') { console.error('`admin` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +administra'); process.exit(2) }
       if (t === 'approve' || t === 'aprueba') { console.error('`approve` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +aprueba'); process.exit(2) }
       if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
+      // El gestor de contraseñas SÍ se empareja con su permiso puesto: es lo único que
+      // va a hacer ese aparato, y pedirlo en dos pasos era el paso que nadie daba.
+      if (t === 'passwords') { scope.push('vault:passwords'); continue }
       const m = /^secrets:([a-z0-9-]{1,32})$/.exec(t)
       if (m) { scope.push('vault:secrets:' + m[1]); continue }
-      console.error('permiso desconocido: %s  (sign | read | store | secrets:<ns>)', tok); process.exit(2)
+      console.error('permiso desconocido: %s  (sign | read | store | contrasenas | secrets:<ns>)', tok); process.exit(2)
     }
     if (service) scope.push('vault:secrets:' + service)
     scope = [...new Set(scope)]
@@ -404,7 +407,7 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +permiso')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +permiso')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
@@ -463,42 +466,20 @@ async function cmdApproval (args = []) {
     : `Listo: ${m.id} vuelve a recibir sus claves sin aprobación.`)
 }
 
-/**
- * `dotrino-vault passwords <ID> on|off` — deja (o no) que ese aparato pida contraseñas
- * de tu bóveda.
- *
- * Es una lista de ESTA bóveda, no del acta, por lo mismo que `approval`: es ella la que
- * entrega. El acta manda igual — si revocas el aparato allí, deja de pedir aunque siga
- * en esta lista. Y si además le pones `approval on`, cada arranque suyo te pedirá el
- * visto bueno en el teléfono.
- */
-async function cmdPasswords (args = []) {
-  const [id, val] = args
-  if (!id || !['on', 'off'].includes(val)) {
-    console.error('uso: dotrino-vault passwords <ID> on|off')
-    process.exit(1)
-  }
-  const m = await findMember(id)
-  writeReq('secret-request.json', { op: 'passwords', pub: m.pub, id: m.id, label: m.label || '', on: val === 'on' })
-  sendSignal(requireDaemon().pid, 'SIGUSR2')
-  if (val === 'on') {
-    console.log(`Listo: ${m.id} puede pedir contraseñas de tu bóveda (de una en una; nunca la lista entera).`)
-    console.log('Reinicia el vault: al arrancar imprime el código de enlace que se pega en la extensión.')
-  } else {
-    console.log(`Listo: ${m.id} deja de poder pedir contraseñas.`)
-  }
-}
-
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+permiso|-permiso')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+permiso|-permiso')
     process.exit(2)
   }
   const CAP_BY_WORD = {
     firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
-    sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve'
+    // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
+    // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
+    contrasenas: 'passwords', 'contraseñas': 'passwords',
+    sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
+    passwords: 'passwords'
   }
   const s = requireDaemon()
   const m = await findMember(id)
@@ -1191,7 +1172,7 @@ function help () {
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
   pair --approval       el aparato que entre pedirá tu aprobación (teléfono) al recibir claves
-  pair --scope <lista>  los PERMISOS del cert: sign,read,store,secrets:<ns> (sin esto: sign,read,store;
+  pair --scope <lista>  los PERMISOS del cert: sign,read,store,contrasenas,secrets:<ns> (sin esto: sign,read,store;
                       se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
@@ -1206,10 +1187,6 @@ function help () {
   secret device set <ID> CLAVE=valor …
   secret device import <ID> [archivo.env]
   secret device rm <ID> <CLAVE>     borra una variable de ese aparato
-  passwords <ID> on|off             deja que ese aparato pida CONTRASEÑAS de tu bóveda
-                                    (de una en una; nunca la lista entera). Con
-                                    approval on además te pedirá el visto bueno en el
-                                    teléfono. Reinicia el vault tras el primer on
   secret list                       lista los dos cajones: el valor de las públicas,
                                     tapadas las privadas
   secret show [device] <ns|ID> <CLAVE>
@@ -1234,7 +1211,7 @@ function help () {
   me                  tu perfil (nombre, foto, datos) tal como lo tiene la bóveda
   members             el acta del perfil: quién es tuyo y qué puede hacer
   label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
-  caps <ID> ±permiso  cambia permisos (+firma -guarda +administra …)
+  caps <ID> ±permiso  cambia permisos (+firma -guarda +administra +contrasenas …)
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio
@@ -1284,7 +1261,6 @@ export async function runCtl (argv) {
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
     case 'approval': return cmdApproval(rest)
-    case 'passwords': return cmdPasswords(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':

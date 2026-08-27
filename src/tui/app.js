@@ -318,7 +318,7 @@ function pairModeRows (st, t) {
  * una marca de si los tiene. El de administrar va aparte y avisado: es el único que deja
  * a ese aparato meter y sacar dispositivos sin venir aquí.
  */
-const CAPS_ORDER = ['sign', 'store', 'read', 'admin']
+const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'passwords']
 
 function capsRows (st, t) {
   const i = L(st)

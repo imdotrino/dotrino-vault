@@ -45,13 +45,15 @@ const es = {
     sign: 'Firmar como tú',
     store: 'Guardar tus datos',
     read: 'Leer tus datos',
-    admin: 'Administrar el perfil'
+    admin: 'Administrar el perfil',
+    passwords: 'Pedir tus contraseñas'
   },
   capHint: {
     sign: 'usar tu identidad en las apps del ecosistema',
     store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
     read: 'ver lo que guardaste',
-    admin: 'conectar y quitar dispositivos desde ese aparato, sin venir aquí'
+    admin: 'conectar y quitar dispositivos desde ese aparato, sin venir aquí',
+    passwords: 'el gestor: pedir una credencial por sitio, nunca la lista entera'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
@@ -341,13 +343,15 @@ const en = {
     sign: 'Sign as you',
     store: 'Save your data',
     read: 'Read your data',
-    admin: 'Manage the profile'
+    admin: 'Manage the profile',
+    passwords: 'Ask for your passwords'
   },
   capHint: {
     sign: 'use your identity across the ecosystem apps',
     store: 'write to your vault (profile, content, sensitive data)',
     read: 'see what you saved',
-    admin: 'connect and remove devices from that device, without coming here'
+    admin: 'connect and remove devices from that device, without coming here',
+    passwords: 'the manager: ask for one credential per site, never the whole list'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,

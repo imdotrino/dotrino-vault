@@ -156,6 +156,7 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { atRestFor } from '../src/atrest.js'
+import * as Acta from '@dotrino/identity/acta'
 import fs from 'node:fs'
 
 /** Reproduce lo que `vault.js` monta alrededor del desk, con las mismas piezas. */
@@ -171,15 +172,10 @@ function piezasDelVault (dir) {
     store: {
       async get (k) { return leer()?.data?.[k] },
       async set (k, v) {
-        const d = leer() || { v: 1, data: {}, devices: [] }
+        const d = leer() || { v: 1, data: {} }
         d.data = { ...(d.data || {}), [k]: v }
         escribir(d)
       },
-    },
-    devices: () => leer()?.devices || [],
-    setDevice (pub, label) {
-      const d = leer() || { v: 1, data: {}, devices: [] }
-      escribir({ ...d, devices: [...(d.devices || []).filter(x => x.pubkey !== pub), { pubkey: pub, label, ts: 1 }] })
     },
     async key () {
       const d = leer()
@@ -188,7 +184,7 @@ function piezasDelVault (dir) {
       }
       const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
       const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k))
-      escribir({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64'), devices: d?.devices || [] })
+      escribir({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64') })
       return k
     },
   }
@@ -231,22 +227,66 @@ test('vault-passwords: la llave nace UNA vez y sobrevive al reinicio', async (t)
   assert.equal((await desk2.vault.get(id)).secret, 'hunter2', 'la llave cambió entre arranques')
 })
 
-test('vault-passwords: hacen falta LAS DOS condiciones (lista del vault y acta)', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
-  t.after(() => rm(dir, { recursive: true, force: true }))
-  const p = piezasDelVault(dir)
-  p.setDevice('APARATO', 'Chrome')
-
+/**
+ * QUIÉN PUEDE PEDIR LO DICE EL ACTA, y solo el acta.
+ *
+ * Hubo una lista aparte, del propio archivo de contraseñas, y con ella quitar un aparato
+ * había que acordárselo en dos sitios. Ahora es la capacidad `passwords`, como cualquier
+ * otro permiso: se concede al emparejar (`pair --scope contrasenas`) o después
+ * (`caps <ID> +contrasenas`), y se quita en un solo sitio.
+ */
+test('vault-passwords: el permiso es del ACTA, y estar en ella no basta', async () => {
   // La comprobación tal cual la hace `vault.js`.
-  const isAllowed = (acta) => (pub) =>
-    p.devices().some(d => d.pubkey === pub) && (acta?.members || []).some(m => m.pub === pub)
+  const isAllowed = (acta) => (pub) => !!acta && Acta.memberCan(acta, pub, 'passwords')
 
-  const conActa = isAllowed({ members: [{ pub: 'APARATO' }] })
-  assert.equal(conActa('APARATO'), true)
-  assert.equal(conActa('OTRO'), false, 'bastaba con estar en el acta')
+  const acta = { members: [
+    { pub: 'GESTOR', caps: ['sign', 'passwords'] },
+    { pub: 'OTRO', caps: ['sign', 'store', 'read'] }
+  ] }
+  assert.equal(isAllowed(acta)('GESTOR'), true)
+  assert.equal(isAllowed(acta)('OTRO'), false, 'estar en el acta bastaba para pedir contraseñas')
+  assert.equal(isAllowed(acta)('DESCONOCIDO'), false)
 
-  // Revocarlo en el acta le corta el acceso aunque siga en la lista del vault: no hay
-  // que acordarse de quitarlo en dos sitios.
-  const revocado = isAllowed({ members: [] })
-  assert.equal(revocado('APARATO'), false, 'revocar en el acta no le cortó las contraseñas')
+  // Quitarle el permiso le corta el acceso sin sacarlo del perfil: son dos cosas, y la
+  // suave tiene que existir.
+  const sinPermiso = { members: [{ pub: 'GESTOR', caps: ['sign'] }] }
+  assert.equal(isAllowed(sinPermiso)('GESTOR'), false, 'quitar el permiso no le cortó las contraseñas')
+
+  // Y sacarlo del perfil también, claro.
+  assert.equal(isAllowed({ members: [] })('GESTOR'), false, 'revocar en el acta no le cortó las contraseñas')
+})
+
+/**
+ * EL SOBRE HAY QUE PODER ABRIRLO.
+ *
+ * La bóveda comparte UN cliente para todo, y el cliente solo abre sobres si le dieron
+ * con qué (`sealing` o `myEncPrivateKey`). Sin eso RECIBÍA la petición del gestor, no
+ * podía abrirla y la tiraba: el aparato se quedaba esperando y en el log no aparecía
+ * nada. Se prueba aquí porque el fallo no está en el mostrador —está en cómo se le
+ * cablea el transporte— y la red de mentira de arriba no puede verlo.
+ */
+test('vault-passwords: el cliente de la bóveda ABRE el sobre del gestor', async () => {
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const client = new WebSocketProxyClient({ url: 'wss://example.invalid', enableWebRTC: false })
+
+  // El mismo adaptador que monta el vault: la cripto es de identity, aquí basta su forma.
+  client.updateConfig({
+    sealing: {
+      async seal (msg) { return { app: 'passmanager', sealed: JSON.stringify(msg), from: 'ENC' } },
+      async open (env) { return JSON.parse(env.sealed) },
+      isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed
+    }
+  })
+
+  const visto = []
+  client.on('message', (from, payload, meta) => visto.push({ payload, sealed: meta?.sealed }))
+
+  await client._deliver('APARATO', { app: 'passmanager', sealed: JSON.stringify({ op: 'find' }), from: 'ENC' }, {})
+  assert.deepEqual(visto.at(-1), { payload: { op: 'find' }, sealed: true }, 'el sobre del gestor llegó cerrado y sin abrir')
+
+  // Y lo de la CA sigue viajando en claro: un enrolamiento es público hasta que hay
+  // cert, así que el `isSealed` del gestor no puede tragarse el protocolo del vault.
+  await client._deliver('APARATO', { type: 'vault.enroll', data: {} }, {})
+  assert.equal(visto.at(-1).sealed, false, 'el protocolo de la CA dejó de entregarse')
+  assert.equal(visto.at(-1).payload.type, 'vault.enroll')
 })
