@@ -74,6 +74,9 @@ export async function runDaemon () {
     writeJson(stateFile, {
       v: 2, version: daemonVersion, fingerprint: cur.fingerprint || null, iss: cur.iss || null,
       proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(),
+      // Cuánto aguanta abierto el candado sin usarse. Va en la foto para que la consola
+      // pueda DECIRLO en vez de llevar su propio número (que se desincronizaría).
+      autoLockMs: mgr.profiles.autoLockMs,
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -105,7 +108,14 @@ export async function runDaemon () {
   const resolveTarget = (req) => {
     try {
       const id = req?.profile ? mgr.resolve(req.profile) : mgr.currentId()
-      return { id, vault: mgr.get(id), locked: mgr.profiles.isLocked(id) }
+      const locked = mgr.profiles.isLocked(id)
+      // ESTO CUENTA COMO USO: el candado se cierra solo a los 5 min de no usarse
+      // (`profiles.js`), y quien lo usa es esta consola. Va aquí y no en cada `case`
+      // porque toda petición de la CLI/TUI pasa por este punto, y así ninguna se olvida.
+      // Lo que un aparato pida por el proxy NO pasa por aquí, que es justo lo que se
+      // quiere: el candado no es suyo y no debe alargarlo.
+      if (!locked) mgr.profiles.touch(id)
+      return { id, vault: mgr.get(id), locked }
     } catch (e) { console.error('[vault] invalid profile in the request:', e.message); return null }
   }
   /** La bóveda destino, o `null` si el perfil está bloqueado (la petición no se atiende). */
@@ -247,8 +257,24 @@ export async function runDaemon () {
     if (r?.rekeyed) console.log('[vault] secrets master re-sealed (%d drawer(s))', r.drawers)
   }
 
+  /**
+   * BORRA la llave derivada en cuanto se usó. Es lo único de la contraseña que se puede
+   * borrar de verdad: un `string` de JS no se puede pisar (lo copia y lo mueve el motor
+   * hasta que pase el recolector), pero un `Uint8Array` sí, y es el que lleva el material
+   * con el que se abre la copia maestra. Vale lo que vale — no hace milagros con un
+   * volcado de memoria tomado en el instante justo —, pero acorta la ventana de horas a
+   * milisegundos, que es la diferencia entre «estaba ahí» y «estuvo».
+   */
+  const wipe = (k) => { try { if (k instanceof Uint8Array) k.fill(0) } catch (_) {} }
+
   async function handleProfileRequest (req) {
-    const ref = () => mgr.resolve(req.profile || mgr.currentId())
+    // Resolver el destino de una orden de perfil CUENTA COMO USO: estira el plazo del
+    // bloqueo automático igual que cualquier otra cosa que se haga desde la consola.
+    const ref = () => {
+      const id = mgr.resolve(req.profile || mgr.currentId())
+      mgr.profiles.touch(id)
+      return id
+    }
     switch (req.op) {
       case 'list': return {} // el volcado de perfiles ya se hace abajo
       // `id`: quien la crea necesita saber CUÁL quedó, no adivinar por nombre (dos
@@ -266,8 +292,9 @@ export async function runDaemon () {
         const id = ref()
         await mgr.profiles.unlock(id, req.password)
         let note = ''
+        let ak = null
         try {
-          const ak = await mgr.profiles.adminKey(id, req.password)
+          ak = await mgr.profiles.adminKey(id, req.password)
           // REHACER el llavero, no solo saldar: con la frase delante se puede dejar cada
           // cajón envuelto para exactamente quien dice el acta — creando lo que falta,
           // reemplazando lo que alguien metiera mal y quitando lo que sobre.
@@ -277,7 +304,8 @@ export async function runDaemon () {
           if (r?.dropped) note = ` · llavero al día (${r.dropped} envoltura(s) de más retirada(s))`
           else if (r?.wrapped) note = ' · llavero al día'
         } catch (e) { console.error('[vault] could not rebuild the keyring on unlock:', e.message) }
-        return { done: 'perfil desbloqueado' + note }
+        finally { wipe(ak) }
+        return { done: 'perfil desbloqueado' + note, autoLockMs: mgr.profiles.autoLockMs }
       }
       case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
       // PONER contraseña: los secretos pasan de abrirse con la llave de la máquina a
@@ -291,7 +319,7 @@ export async function runDaemon () {
         const vieja = tenia ? await mgr.profiles.adminKey(id, req.current) : null
         await mgr.profiles.setPassword(id, req.password)
         const nueva = await mgr.profiles.adminKey(id, req.password)
-        await rekey(id, vieja, nueva)
+        try { await rekey(id, vieja, nueva) } finally { wipe(vieja); wipe(nueva) }
         return { done: 'contraseña guardada' }
       }
       // QUITARLA: al revés. Se abre la copia maestra con la frase y se vuelve a cerrar
@@ -301,7 +329,7 @@ export async function runDaemon () {
         const id = ref()
         if (!req.password) throw new Error('removing the password needs the current one: the secrets must be re-sealed before it goes')
         const vieja = await mgr.profiles.adminKey(id, req.password)
-        await rekey(id, vieja, null)
+        try { await rekey(id, vieja, null) } finally { wipe(vieja) }
         mgr.profiles.removePassword(id)
         return { done: 'contraseña quitada · los secretos ahora se abren con la llave de esta máquina' }
       }
@@ -373,6 +401,7 @@ export async function runDaemon () {
       if (sec?.op) {
         rm(secretReqFile) // puede llevar la contraseña: fuera del disco cuanto antes
         lastSecretError = null
+        let ak // fuera del try para poder BORRARLA pase lo que pase (ver `wipe`)
         try {
           const vault = targetOf(sec)
           // Carga en GRUPO (`secret set ns K=v K2=v2`, `secret import`): todas las
@@ -384,7 +413,7 @@ export async function runDaemon () {
           // convertir el archivo, rotar re-cifrando—: escribir no (§8.1). Sin ella se cae
           // a la llave de la máquina, que es la protección de antes de esto (y el vault lo
           // avisa al arrancar).
-          const ak = sec.password ? await mgr.profiles.adminKey(sec.profile ? mgr.resolve(sec.profile) : mgr.currentId(), sec.password) : undefined
+          ak = sec.password ? await mgr.profiles.adminKey(sec.profile ? mgr.resolve(sec.profile) : mgr.currentId(), sec.password) : undefined
           if (sec.op === 'migrate') {
             // Sin lista a mano: la pone el vault, y es la MISMA que usa cualquier
             // escritura (servicios del cajón + aparatos que administran). Con una lista
@@ -440,7 +469,7 @@ export async function runDaemon () {
             code: e.code || (/wrong password/i.test(e.message) ? 'WRONG_PASSWORD' : 'SECRET_FAILED')
           }
           console.error('[vault] secret failed:', e.message)
-        }
+        } finally { wipe(ak) }
       }
       // Perfiles / candado.
       const preq = readJsonSafe(profileReqFile)

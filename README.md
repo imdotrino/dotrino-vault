@@ -456,18 +456,25 @@ y así un reinicio del PC nunca deja tus apps muertas esperando a que alguien te
 ```sh
 dotrino-vault profile password     # pone o cambia la contraseña (te la pregunta)
 dotrino-vault profile password rm  # la quita
-dotrino-vault unlock               # abre la bóveda en esta consola
-dotrino-vault lock                 # vuelve a cerrarla
+dotrino-vault unlock               # abre la bóveda en esta consola (5 min sin usarse y se cierra sola)
+dotrino-vault lock                 # vuelve a cerrarla ya
 ```
 
 Lo único que se sigue viendo con el candado puesto es que **existe** y que está cerrada
 (`status`, `profile ls`): si no, no habría forma de saber qué abrir.
 
-El perfil se vuelve a bloquear al reiniciar el servicio. La contraseña **no se
-guarda**: solo un verificador con sal (PBKDF2), igual que el candado del navegador.
-Tiene un mínimo de 4 caracteres y, tras 5 intentos fallidos, cada intento nuevo
-espera cada vez más (hasta 5 minutos); la cuenta de fallos se guarda, así que
-reiniciar no la borra.
+**Se vuelve a cerrar solo a los 5 minutos sin usarse**, además de al reiniciar el
+servicio o con `dotrino-vault lock`. El plazo se cuenta desde la última cosa que hiciste
+en la consola, no desde que la abriste: mientras trabajas no te echa, y en cuanto te
+levantas de la silla se cierra. Lo que piden tus aparatos por el proxy **no** cuenta como
+uso —el candado no es suyo—, así que siguen funcionando igual mientras la consola se
+cierra. La TUI, además, **olvida la contraseña** en ese momento: si no, la reabriría sola
+a la siguiente tecla.
+
+La contraseña **no se guarda**: solo un verificador con sal (scrypt), igual que el
+candado del navegador. Tiene un mínimo de 12 caracteres —varias palabras al azar— y,
+tras 5 intentos fallidos, cada intento nuevo espera cada vez más (hasta 5 minutos); la
+cuenta de fallos se guarda, así que reiniciar no la borra.
 
 Con el perfil bloqueado, la CLI **no** te pide la contraseña sobre la marcha: cualquier
 comando que mire o toque esa bóveda falla con «perfil bloqueado» y hay que correr

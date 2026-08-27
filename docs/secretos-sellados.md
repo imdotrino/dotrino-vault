@@ -115,10 +115,12 @@ Desde la **consola de administración**, al enrolar: se pide la contraseña, via
 **dentro del sobre firmado** (nunca en claro por el proxy, con el anti-replay que
 ya hay), el vault deriva la llave, re-sella, y **la borra**.
 
-- Es **por operación**, no una sesión. Hoy `unlocked` es un `Set` que dura hasta
-  que alguien llame a `lock` (`profiles.js:233`); eso está bien para la puerta de
-  administración, pero la **llave derivada** no puede quedarse ahí — si se queda
-  en RAM indefinidamente, todo este diseño no sirve para nada.
+- Es **por operación**, no una sesión. El candado (`unlocked`, en `profiles.js`) es
+  otra cosa: dura hasta que alguien llame a `lock`, **hasta que pasen 5 minutos sin
+  usarse** (bloqueo automático, `AUTO_LOCK_MS`) o hasta que se reinicie el servicio. Eso
+  vale para la puerta de administración, pero la **llave derivada** no puede quedarse
+  ahí — si se queda en RAM indefinidamente, todo este diseño no sirve para nada. Por eso
+  se deriva, se usa y se pisa con ceros (`wipe` en `daemon.js`) en la misma operación.
 - **Si el perfil no tiene contraseña, se hace directo.** Es el default correcto y
   no rompe a nadie, pero la consola tiene que **decir** que en ese perfil las
   privadas se leen desde una copia del disco. Prometer una protección que no está

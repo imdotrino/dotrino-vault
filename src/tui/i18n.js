@@ -126,6 +126,7 @@ const es = {
   vaultUnlocked: 'Bóveda desbloqueada',
   lockingVault: 'Bloqueando…',
   vaultLocked: 'Bóveda bloqueada',
+  autoLocked: (min) => `Se bloqueó sola tras ${min} min sin usarse · la contraseña se olvidó`,
 
   // dispositivos
   pendingDevice: (id) => ` ⧗ PENDIENTE: ${id}`,
@@ -422,6 +423,7 @@ const en = {
   vaultUnlocked: 'Vault unlocked',
   lockingVault: 'Locking…',
   vaultLocked: 'Vault locked',
+  autoLocked: (min) => `Locked itself after ${min} min idle · the password was forgotten`,
 
   pendingDevice: (id) => ` ⧗ PENDING: ${id}`,
   pendingHint: '  — press A to approve, X to reject',

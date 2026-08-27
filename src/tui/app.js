@@ -492,6 +492,72 @@ async function guard (term, st, msg, fn) {
  */
 const activeLocked = (st) => { const p = activeProfile(st); return !!(p?.protected && p.locked) }
 
+/** Los minutos que el daemon aguanta abierto (viene en `state.json`; 5 por defecto). */
+const autoLockMin = (st) => Math.max(1, Math.round((st.state?.autoLockMs || 5 * 60 * 1000) / 60000))
+
+/**
+ * ¿Alguna de las bóvedas que abrió ESTA sesión se cerró sola?
+ *
+ * El plazo lo lleva el daemon (`profiles.js`), no la TUI: aquí solo se MIRA su foto
+ * (`state.json`, que se reescribe cada dos segundos). Así hay un único reloj y no dos
+ * que se desincronizan — y lo que decida el daemon es lo que manda, porque es quien
+ * atiende.
+ */
+const autoLockedIds = (st) => (st.state?.profiles || [])
+  .filter((p) => p.protected && p.locked && (st.sessionPwd?.has(p.id) || st.unlockedHere?.has(p.id)))
+  .map((p) => p.id)
+
+/**
+ * Cuándo hay que despertar para enterarse. Sin esto la TUI se queda dormida en
+ * `readKey()` hasta la siguiente tecla y seguiría enseñando los aparatos y los nombres
+ * de las variables de una bóveda que el daemon ya cerró. Se suman ~2 s porque la foto
+ * se reescribe cada dos: despertar en el instante justo leería la anterior.
+ */
+function autoLockWakeIn (st, now = Date.now()) {
+  let at = 0
+  for (const p of st.state?.profiles || []) {
+    if (!p.until || !(st.sessionPwd?.has(p.id) || st.unlockedHere?.has(p.id))) continue
+    at = at ? Math.min(at, p.until) : p.until
+  }
+  if (!at) return 0
+  const left = at - now + 2200
+  // El plazo ya pasó y la foto sigue diciendo que está abierta: el daemon no la está
+  // reescribiendo (caído o colgado). Se insiste un rato y luego se deja de despertar, o
+  // la TUI se quedaría dando vueltas contra una foto que no va a cambiar.
+  if (left <= 0) return now - at > 15000 ? 0 : 1000
+  return Math.max(250, left)
+}
+
+/**
+ * BLOQUEO AUTOMÁTICO. Se cerró sola: se OLVIDA su contraseña y se sale de lo que se
+ * estaba mirando (dentro se ven los aparatos, las variables y tus datos, que es justo
+ * lo que el candado tapa).
+ *
+ * Olvidarla es la mitad que importa: sin esto la TUI la seguiría teniendo y la
+ * reabriría sola en cuanto alguien pulsara Enter (ver `reunlockSilently`), así que el
+ * candado del daemon no habría cerrado nada.
+ */
+async function forgetAutoLocked (term, st, api = vc) {
+  const ids = autoLockedIds(st)
+  if (!ids.length) return false
+  for (const id of ids) { st.sessionPwd?.delete(id); st.unlockedHere?.delete(id) }
+  const cur = (st.state?.profiles || []).find((p) => p.current)
+  if (ids.includes(cur?.id) && st.screen !== 'profiles') {
+    // Un modal abierto (una pregunta a medias) también se cierra: quien lo dejó abierto
+    // ya no está delante.
+    st.input = null
+    st.confirm = null
+    st.screen = 'profiles'
+  }
+  // Suelta lo cargado y repinta la lista con el candado ya echado (`refreshAll` no pide
+  // el contenido de una bóveda cerrada).
+  await refreshAll(term, st, api)
+  // El aviso va DESPUÉS del refresco: si no, un tropiezo al refrescar lo pisaría con su
+  // error rojo y el candado se cerraría en silencio.
+  flash(st, L(st).autoLocked(autoLockMin(st)), 'warn')
+  return true
+}
+
 // `api` es `vaultControl` — se recibe para poder probar ESTA función (la que se rompió)
 // sin un daemon detrás, que es donde vive la regla de qué se pide y en qué orden.
 async function refreshAll (term, st, api = vc) {
@@ -1608,14 +1674,23 @@ export async function runTui () {
     while (running) {
       st.state = vc.readState()
       st.daemonUp = vc.daemonAlive()
+      // ¿Se cerró sola mientras nadie miraba? Olvida su contraseña y sal de su contenido.
+      await forgetAutoLocked(term, st)
       // caducar el flash a los ~4 s
       if (st.flash && Date.now() - st.flash.at > 4000) st.flash = null
       render(term, st)
 
-      const tick = (st.screen === 'pairing' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
+      const base = (st.screen === 'pairing' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
+      // Despertar a tiempo del bloqueo automático, además del sondeo de la pantalla.
+      const wake = autoLockWakeIn(st)
+      const tick = base && wake ? Math.min(base, wake) : (base || wake)
       const key = await term.readKey(tick)
 
       if (key.name === 'resize') continue
+      // Un despertar del bloqueo automático no es una tecla: ya se atendió arriba, y las
+      // pantallas que NO esperan `tick` (todas menos aparatos y emparejamiento) no tienen
+      // por qué verlo.
+      if (key.name === 'tick' && st.screen !== 'pairing' && st.screen !== 'devices') continue
       // input/confirm se AWAITan: serializa las ops contra el daemon (ver onInputKey).
       // Ctrl-C dentro de un modal lo CANCELA (no sale); fuera de un modal, sale.
       if (st.input) { await onInputKey(st, key); continue }
@@ -1664,4 +1739,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }

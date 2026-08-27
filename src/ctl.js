@@ -1141,8 +1141,13 @@ function askText (prompt) {
 
 async function cmdUnlock () {
   const pwd = await askPassword('Contraseña del perfil: ')
-  reportProfiles(await profileRequest('unlock', { password: pwd }))
-  console.log('Ya puedes editar el perfil. Se vuelve a bloquear al reiniciar el servicio (o con: dotrino-vault lock).')
+  // El daemon devuelve cuánto aguanta abierto: se dice AQUÍ, al abrirlo, que es cuando
+  // sirve de algo. Encontrárselo cerrado sin haberlo leído nunca parece una avería.
+  const out = await profileRequest('unlock', { password: pwd })
+  reportProfiles(out)
+  const min = Math.max(1, Math.round((out?.autoLockMs || 5 * 60 * 1000) / 60000))
+  console.log(`Ya puedes editar el perfil. Se vuelve a bloquear solo tras ${min} min sin usarse` +
+    ' (o al reiniciar el servicio, o con: dotrino-vault lock).')
 }
 
 async function cmdLock () {
@@ -1231,7 +1236,8 @@ dispositivos siguen firmando y leyendo aunque esté bloqueado):
   profile password [set]            pone o cambia la contraseña
   profile password rm               la quita
   unlock                            desbloquea para poder editar
-  lock                              vuelve a bloquear (también al reiniciar el servicio)
+  lock                              vuelve a bloquear (también solo, a los 5 min sin
+                                    usarse, y al reiniciar el servicio)
 
 Arrancar y parar, según dónde corra:
   Linux (servicio)  systemctl --user {start,stop,restart} dotrino-vault

@@ -248,3 +248,82 @@ test('un perfil VIEJO (verificador PBKDF2) se abre igual y asciende a scrypt', a
   assert.equal(otra.isLocked(id), false)
   await assert.rejects(() => openProfiles(root).unlock(id, 'otra-cosa-cualquiera'), { code: 'WRONG_PASSWORD' })
 })
+
+// --------------------------- bloqueo automático ------------------------------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+test('el candado se cierra SOLO a los 5 min sin usarse', async () => {
+  // La regresión que arregla: abrir la bóveda la dejaba abierta hasta que alguien la
+  // cerraba a mano o reiniciaba el servicio — y el servicio de un PC no se reinicia en
+  // semanas. Teclear la contraseña el lunes dejaba la consola abierta el jueves.
+  const cerradas = []
+  const p = openProfiles(tmp(), { autoLockMs: 60, onAutoLock: (id) => cerradas.push(id) })
+  const { id } = p.migrate()
+  await p.setPassword(id, 'frase-de-prueba-larga')
+  await p.unlock(id, 'frase-de-prueba-larga')
+  assert.equal(p.isLocked(id), false)
+
+  await sleep(90)
+  assert.equal(p.isLocked(id), true, 'vencido el plazo, vuelve a hacer falta la contraseña')
+  assert.deepEqual(cerradas, [id], 'y se avisa, para poder decirlo en el log')
+  assert.equal(p.get(id).until, undefined, 'ya no hay plazo que enseñar')
+
+  // El aviso es de UNA vez: preguntar dos veces no lo repite.
+  assert.equal(p.isLocked(id), true)
+  assert.deepEqual(cerradas, [id])
+
+  // Y la contraseña sigue valiendo: cerrarse solo no es olvidarla.
+  await p.unlock(id, 'frase-de-prueba-larga')
+  assert.equal(p.isLocked(id), false)
+})
+
+test('el plazo se cuenta desde el ÚLTIMO USO, no desde que se abrió', async () => {
+  // Quien está trabajando no se puede quedar fuera a media faena: cada cosa que hace la
+  // consola (`touch`) estira el plazo. Lo que un aparato pida por el proxy NO pasa por
+  // ahí, y por eso no lo alarga: el candado es de la consola.
+  const p = openProfiles(tmp(), { autoLockMs: 120 })
+  const { id } = p.migrate()
+  await p.setPassword(id, 'frase-de-prueba-larga')
+  await p.unlock(id, 'frase-de-prueba-larga')
+
+  for (let i = 0; i < 4; i++) {
+    await sleep(50)
+    assert.equal(p.touch(id), true, 'sigue abierta y se le estira el plazo')
+  }
+  assert.equal(p.isLocked(id), false, 'tras 200 ms de USO continuo con plazo de 120 ms')
+
+  await sleep(160)
+  assert.equal(p.isLocked(id), true, 'y en cuanto se para, se cierra')
+  assert.equal(p.touch(id), false, 'a una cerrada no hay plazo que estirarle')
+})
+
+test('sin contraseña no hay nada que cerrar: el plazo no bloquea el perfil', async () => {
+  const p = openProfiles(tmp(), { autoLockMs: 30 })
+  const { id } = p.migrate()
+  await p.unlock(id, '')
+  await sleep(60)
+  assert.equal(p.isLocked(id), false)
+  assert.equal(p.get(id).until, undefined, 'y no se enseña un plazo que no existe')
+})
+
+test('la consola puede enseñar hasta cuándo sigue abierta', async () => {
+  const p = openProfiles(tmp(), { autoLockMs: 5000 })
+  const { id } = p.migrate()
+  await p.setPassword(id, 'frase-de-prueba-larga')
+  const antes = Date.now()
+  await p.unlock(id, 'frase-de-prueba-larga')
+  const { until } = p.get(id)
+  assert.ok(until >= antes + 4000 && until <= Date.now() + 5000, `plazo raro: ${until - Date.now()} ms`)
+  assert.equal(p.autoLockMs, 5000)
+})
+
+test('con autoLockMs 0 no se cierra solo (para pruebas y arranques largos)', async () => {
+  const p = openProfiles(tmp(), { autoLockMs: 0 })
+  const { id } = p.migrate()
+  await p.setPassword(id, 'frase-de-prueba-larga')
+  await p.unlock(id, 'frase-de-prueba-larga')
+  await sleep(30)
+  assert.equal(p.isLocked(id), false)
+  assert.equal(p.get(id).until, undefined)
+})

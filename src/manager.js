@@ -35,14 +35,20 @@ export function assertCanRemove ({ isMaster, memberCount, name = '' }) {
   throw e
 }
 
-export async function startVaultManager ({ root = dataDir(), proxyUrl, log = console.log, onEnrollChallenge } = {}) {
+export async function startVaultManager ({ root = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, autoLockMs } = {}) {
   ensureDir(root)
   // El keypair de transporte del proxy-client es del PROCESO, no de la identidad:
   // se instala apuntando a la RAÍZ (no al dir de un perfil) para que los perfiles
   // no se peleen por el archivo ni se lo lleven al borrarse.
   installNodeGlobals(root)
 
-  const profiles = openProfiles(root)
+  const profiles = openProfiles(root, {
+    ...(autoLockMs === undefined ? {} : { autoLockMs }),
+    // Que se cierre solo tiene que VERSE: si no, quien vuelve y encuentra la consola
+    // pidiendo la contraseña otra vez cree que algo se rompió.
+    onAutoLock: (id) => log('[vault] profile %s locked itself after %d min idle (the console; devices keep working)',
+      id, Math.round(profiles.autoLockMs / 60000))
+  })
   const migrated = profiles.migrate()
   if (migrated?.migrated) log('[vault] identidad mono-perfil migrada al perfil %s', migrated.id)
 

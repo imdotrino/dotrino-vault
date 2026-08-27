@@ -582,3 +582,60 @@ test('la contraseña vale para TODA la sesión: si el daemon pierde el candado, 
   assert.ok(st.input, 'vuelve a preguntar')
   assert.equal(st.sessionPwd.has('p1'), false, 'y no se queda con una que ya no sirve')
 })
+
+// --------------------------- bloqueo automático ------------------------------
+
+test('cuando la bóveda se cierra sola, la TUI OLVIDA su contraseña y sale de su contenido', async () => {
+  // La otra mitad del bloqueo automático. Sin esto la TUI se quedaba con la contraseña
+  // en memoria y la reabría sola a la siguiente tecla (`reunlockSilently`): el candado
+  // del daemon no habría cerrado nada, y la pantalla seguiría enseñando los aparatos y
+  // los nombres de las variables de una bóveda ya cerrada.
+  const cerrada = { id: 'p1', name: 'Perfil 1', protected: true, locked: true, current: true, fingerprint: 'fp1' }
+  const api = { listProfiles: async () => ({ current: 'p1', profiles: [cerrada] }) }
+  const st = baseState({
+    screen: 'secrets',
+    sessionPwd: new Map([['p1', 'frase-de-prueba-larga']]),
+    unlockedHere: new Set(['p1']),
+    devices: { issued: [{ sub: 'AAA' }], revoked: [] },
+    secrets: { ns: { proxy: { TOKEN: null } }, dev: [] },
+    // La foto del daemon dice que ya está cerrada (el plazo lo lleva él).
+    state: { version: 'test', autoLockMs: 5 * 60 * 1000, current: 'p1', profiles: [cerrada] }
+  })
+  const term = fakeTerm(90, 24)
+
+  assert.deepEqual(V.autoLockedIds(st), ['p1'])
+  assert.equal(await V.forgetAutoLocked(term, st, api), true)
+
+  assert.equal(st.sessionPwd.size, 0, 'la contraseña se olvida')
+  assert.equal(st.unlockedHere.size, 0)
+  assert.equal(st.screen, 'profiles', 'y se sale de lo que se estaba mirando')
+  assert.equal(st.devices, null, 'sin dejar en pantalla lo de antes')
+  assert.equal(st.secrets, null)
+  assert.match(st.flash.text, /5 min/, 'se dice por qué, con el plazo')
+
+  // Ya no hay nada que olvidar: no vuelve a avisar en cada vuelta del bucle.
+  assert.equal(await V.forgetAutoLocked(term, st, api), false)
+})
+
+test('la TUI se despierta a tiempo para enterarse del cierre (y no antes)', () => {
+  const abierta = { id: 'p1', protected: true, locked: false, current: true, until: Date.now() + 10000 }
+  const st = baseState({ sessionPwd: new Map([['p1', 'x']]), unlockedHere: new Set(), state: { profiles: [abierta] } })
+  const wake = V.autoLockWakeIn(st)
+  assert.ok(wake > 10000 && wake < 13000, `despierta pasado el plazo, no antes: ${wake}`)
+
+  // Sin nada abierto por esta sesión no hay por qué despertarse: el bucle se queda
+  // dormido en la tecla, como siempre.
+  st.sessionPwd = new Map()
+  assert.equal(V.autoLockWakeIn(st), 0)
+})
+
+test('una bóveda que ESTA sesión no abrió no le hace olvidar nada', () => {
+  // El candado es por bóveda: que se cierre la de trabajo no puede tocar a la personal.
+  const otra = { id: 'p2', protected: true, locked: true, current: false }
+  const st = baseState({
+    sessionPwd: new Map([['p1', 'x']]),
+    unlockedHere: new Set(['p1']),
+    state: { profiles: [{ id: 'p1', protected: true, locked: false, current: true, until: Date.now() + 9000 }, otra] }
+  })
+  assert.deepEqual(V.autoLockedIds(st), [])
+})

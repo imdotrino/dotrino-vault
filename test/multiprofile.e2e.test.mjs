@@ -123,3 +123,41 @@ test('el candado es por perfil: el otro perfil se sigue editando', async () => {
   await store(dev, 'profileSet', { me: { nickname: 'Trabajo' } })
   assert.equal(mgr.get(b.id).threads.methods.profileGet().me.nickname, 'Trabajo')
 })
+
+test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sirviéndose', async () => {
+  // Un vault aparte con el plazo en milisegundos (en producción son 5 min): el candado
+  // no puede quedarse abierto hasta que alguien lo cierre a mano — un servicio de PC no
+  // se reinicia en semanas.
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-autolock-e2e-'))
+  const { startVaultManager } = await import('../src/manager.js')
+  const m2 = await startVaultManager({ root: root2, proxyUrl, log: () => {}, autoLockMs: 300 })
+  try {
+    const [p] = m2.list()
+    const vault = m2.get(p.id)
+    const dev = await pair(vault)
+    await m2.profiles.setPassword(p.id, 'frase-de-prueba-larga')
+
+    // Recién abierto: se edita.
+    await requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Antes' } } })
+    assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
+
+    await new Promise((r) => setTimeout(r, 450))
+    assert.equal(m2.profiles.isLocked(p.id), true, 'se cerró solo, sin que nadie lo cerrara')
+    await assert.rejects(
+      () => requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } }),
+      /locked/, 'y con él cerrado ya no se edita el perfil')
+
+    // LO QUE NO SE CORTA: firmar, leer y guardar. El candado es de la consola.
+    assert.equal((await requestStore({ ...dev, method: 'profileGet' })).me.nickname, 'Antes')
+    await requestStore({ ...dev, method: 'appendMessage', args: { threadKey: 'chat', entry: { id: 'y', text: 'sigo' } } })
+    const signed = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
+    assert.ok(signed.signature, 'la maestra sigue firmando tras el bloqueo automático')
+
+    // Y se vuelve a abrir con la misma contraseña: cerrarse solo no es olvidarla.
+    await m2.profiles.unlock(p.id, 'frase-de-prueba-larga')
+    await requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } })
+    assert.equal(vault.threads.methods.profileGet().me.nickname, 'Después')
+  } finally {
+    try { m2.close() } catch (_) {}
+  }
+})

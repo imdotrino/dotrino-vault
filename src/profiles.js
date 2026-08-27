@@ -53,6 +53,25 @@ const PWD_MIN = 12
 const TRIES_FORGET_MS = 15 * 60 * 1000
 
 /**
+ * BLOQUEO AUTOMÁTICO. Cuánto aguanta abierto el candado sin que nadie lo use.
+ *
+ * Abrir la bóveda dejaba la consola abierta hasta que alguien la cerraba a mano o
+ * reiniciaba el servicio — y el servicio de un PC de escritorio no se reinicia en semanas.
+ * O sea que teclear la contraseña una vez un lunes dejaba la máquina administrable para
+ * quien pasara por delante el jueves. Un candado que solo se cierra reiniciando no es un
+ * candado.
+ *
+ * El plazo se cuenta desde el ÚLTIMO USO (`touch`), no desde que se abrió: quien está
+ * trabajando no se queda fuera a media faena, y quien se levanta de la silla lo encuentra
+ * cerrado. Y vence solo, sin temporizador: se mira la hora al preguntar (`isOpen`), así
+ * que no hay nada que limpiar ni un `setTimeout` que mantenga vivo al proceso.
+ *
+ * Como todo el candado, esto es de la CONSOLA: al vencer, los aparatos ya emparejados
+ * siguen firmando, leyendo y guardando. Lo que se cierra es administrar y mirar.
+ */
+const AUTO_LOCK_MS = 5 * 60 * 1000
+
+/**
  * Archivos de un perfil que en la versión mono-perfil vivían sueltos en la raíz.
  *
  * `atrest.salt` va en la lista y NO es un detalle: los datos van cifrados con una clave
@@ -91,7 +110,13 @@ async function derivePwd (password, saltB64, iter) {
 const newId = () => 'p' + crypto.randomUUID().slice(0, 8)
 const cleanName = (name) => String(name || '').slice(0, MAX_NAME)
 
-export function openProfiles (root = dataDir()) {
+/**
+ * @param {string} root  dir de datos
+ * @param {{ autoLockMs?: number, onAutoLock?: (id: string) => void }} [opts]
+ *   `autoLockMs`: 0 desactiva el bloqueo automático (las pruebas lo acortan).
+ *   `onAutoLock`: se avisa cuando un perfil se cierra solo, para poder decirlo en el log.
+ */
+export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onAutoLock = null } = {}) {
   const file = path.join(root, REGISTRY)
   // CIFRADO EN REPOSO, como todo lo demás. Era el único archivo del vault sin códec, y
   // lleva dentro el verificador del candado. No protege de quien tenga el disco entero
@@ -107,8 +132,24 @@ export function openProfiles (root = dataDir()) {
   const save = () => writeJson(file, data, atRest)
 
   // Perfiles DESBLOQUEADOS en esta ejecución del daemon (en memoria: un reinicio
-  // vuelve a bloquear, igual que cerrar la pestaña en el navegador).
-  const unlocked = new Set()
+  // vuelve a bloquear, igual que cerrar la pestaña en el navegador), cada uno con la
+  // hora a la que se cierra solo si nadie lo usa (ver AUTO_LOCK_MS).
+  const unlocked = new Map() // id -> vence (ms epoch)
+
+  /** ¿Sigue abierto? Vence al MIRARLO, así que no hace falta ningún temporizador. */
+  const isOpen = (id) => {
+    const until = unlocked.get(id)
+    if (until == null) return false
+    if (autoLockMs > 0 && Date.now() >= until) {
+      unlocked.delete(id)
+      // El aviso va después de borrarlo: quien lo escuche verá el perfil ya cerrado.
+      try { onAutoLock?.(id) } catch (_) {}
+      return false
+    }
+    return true
+  }
+  /** Abre (o estira) el plazo. Todo lo que abre el candado pasa por aquí. */
+  const open = (id) => { unlocked.set(id, Date.now() + (autoLockMs > 0 ? autoLockMs : Number.MAX_SAFE_INTEGER)) }
 
   const find = (id) => data.profiles.find((p) => p.id === id) || null
   const dirOf = (id) => path.join(root, 'p', id)
@@ -118,7 +159,10 @@ export function openProfiles (root = dataDir()) {
     name: p.name || '',
     createdAt: p.createdAt || null,
     protected: !!p.pwd,
-    locked: !!p.pwd && !unlocked.has(p.id),
+    locked: !!p.pwd && !isOpen(p.id),
+    // Hasta cuándo sigue abierto si nadie lo toca. Es DATO: la consola lo enseña para
+    // que el cierre no llegue por sorpresa.
+    ...(p.pwd && isOpen(p.id) && autoLockMs > 0 ? { until: unlocked.get(p.id) } : {}),
     current: p.id === data.current,
     // Nació para adoptar la cuenta de un aparato (camino A) y todavía no lo ha hecho.
     ...(p.adopt ? { adopt: true } : {})
@@ -231,7 +275,20 @@ export function openProfiles (root = dataDir()) {
     // ----- candado -----
 
     isProtected: (id) => !!find(id)?.pwd,
-    isLocked: (id) => { const p = find(id); return !!p?.pwd && !unlocked.has(id) },
+    isLocked: (id) => { const p = find(id); return !!p?.pwd && !isOpen(id) },
+    /** Cuánto dura abierto el candado sin usarse (ms). 0 = no se cierra solo. */
+    get autoLockMs () { return autoLockMs },
+    /**
+     * «Se acaba de usar»: estira el plazo del bloqueo automático. Lo llama la consola
+     * al atender CADA petición suya, y solo eso cuenta como uso: que un aparato pida su
+     * configuración no abre nada ni alarga nada, porque el candado no es suyo.
+     * Devuelve si el perfil estaba abierto (a uno cerrado no hay nada que estirarle).
+     */
+    touch (id) {
+      if (!isOpen(id)) return false
+      open(id)
+      return true
+    },
     assertUnlocked (id) {
       if (api.isLocked(id)) throw new Error('profile locked: unlock it with your password (dotrino-vault unlock)')
     },
@@ -258,7 +315,7 @@ export function openProfiles (root = dataDir()) {
 
     async unlock (id, password) {
       const p = assertExists(id)
-      if (!p.pwd) { unlocked.add(id); return { ok: true, locked: false } }
+      if (!p.pwd) { open(id); return { ok: true, locked: false } }
       // Freno de fuerza bruta (una contraseña corta se adivina probando): tras 5
       // fallos, espera exponencial (2^n s, tope 5 min) persistida en el registro.
       // Los fallos VIEJOS se olvidan (ver TRIES_FORGET_MS): si desde el último ha pasado
@@ -296,7 +353,7 @@ export function openProfiles (root = dataDir()) {
       }
       delete p.tries
       save()
-      unlocked.add(id)
+      open(id)
       return { ok: true, locked: false }
     },
 
@@ -314,7 +371,7 @@ export function openProfiles (root = dataDir()) {
       p.pwd = { v: 2, salt, verifier: deriveScryptPwd(password, salt) }
       delete p.tries
       save()
-      unlocked.add(id)
+      open(id)
       return entry(p)
     },
 
@@ -324,7 +381,7 @@ export function openProfiles (root = dataDir()) {
       delete p.pwd
       delete p.tries
       save()
-      unlocked.add(id)
+      open(id)
       return entry(p)
     }
   }
