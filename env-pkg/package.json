@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "dotrino-env": "bin/dotrino-env.js" },
   "files": ["bin", "README.md"],
-  "dependencies": { "@dotrino/vault": "^0.33.2" },
+  "dependencies": { "@dotrino/vault": "^0.35.0" },
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/imdotrino/dotrino-vault.git" },
   "homepage": "https://vault.dotrino.com/"

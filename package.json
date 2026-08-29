@@ -20,8 +20,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@dotrino/identity": "^0.61.0",
-    "@dotrino/passmanager": "^0.1.0",
+    "@dotrino/identity": "^0.62.0",
+    "@dotrino/passmanager": "^0.2.0",
     "@dotrino/proxy-client": "^0.13.1",
     "ws": "^8.18.0"
   },
@@ -44,7 +44,7 @@
     "!lib/src/types.d.ts"
   ],
   "devDependencies": {
-    "@dotrino/remote-agent": "^0.3.2",
+    "@dotrino/remote-agent": "^0.5.3",
     "@types/node": "^22.0.0",
     "typescript": "5.9.3"
   }
