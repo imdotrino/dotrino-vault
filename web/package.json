@@ -14,7 +14,7 @@
     "@dotrino/identity": "0.62.0",
     "@dotrino/install": "0.3.1",
     "@dotrino/nav": "0.3.0",
-    "@dotrino/passmanager": "0.5.1",
+    "@dotrino/passmanager": "0.6.0",
     "@dotrino/proxy-client": "0.13.1",
     "@dotrino/support": "0.8.1",
     "@dotrino/topbar": "0.8.3",
