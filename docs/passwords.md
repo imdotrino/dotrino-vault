@@ -49,6 +49,17 @@ Dos cosas del protocolo lo hacen posible:
   ya no exige leerla antes. Eso, además de quitar la pregunta, quita un fallo: si la
   lectura previa no salía, la escritura de detrás dejaba la entrada a medias.
 
+Con el gestor de registros de la extensión (2026-08-29) se le añadieron dos cosas más, y
+las contesta esta bóveda igual que las otras dos:
+
+- **`patch` con `removeFields`**, y un campo `{ label, private }` **sin `value`** que
+  cambia solo la marca dejando el valor donde está. Es lo que permite quitarle lo privado
+  a un dato sin que quien edita llegue a verlo.
+- **`sites()`**: en qué dominios hay algo guardado y cuántas entradas en cada uno. Ni un
+  id ni un nombre — el dominio ya viajaba en claro, porque es con lo que se empareja la
+  página. **No es `list`**: de aquí no se llega a ninguna entrada, solo a saber por dónde
+  buscarla.
+
 ## Cómo usarlo
 
 ```bash
