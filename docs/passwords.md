@@ -1,7 +1,9 @@
 # La bóveda de contraseñas dentro del vault
 
 > Estado: **cableado** (2026-08-26). Emparejamiento y permiso unificados con el resto del
-> ecosistema el 2026-08-27. 12 tests propios, 266 en la suite del vault.
+> ecosistema el 2026-08-27. Al día con `@dotrino/passmanager` 0.5.1 el 2026-08-29: la
+> aprobación es **solo para lo privado**, y guardar es `patch`. 15 tests propios, 278 en
+> la suite del vault.
 
 ## Qué es
 
@@ -21,6 +23,31 @@ sigue encendido con el navegador cerrado.
 
 El protocolo **no cambia**: un aparato pide una credencial por dominio y recibe esa
 sola. `list` no existe en remoto.
+
+## Cuándo se pide el visto bueno (2026-08-29)
+
+Dos condiciones, y **las dos** tienen que darse:
+
+1. que ese **aparato** esté marcado para aprobar (`approval <ID> on`), que es la política
+   del vault: se pide una vez y vale mientras el vault siga encendido;
+2. y que lo que pide sea **privado** — una contraseña, un código de dos pasos, unas notas,
+   una passkey, o un campo que el usuario marcó como privado.
+
+Rellenar un dato público —tu nombre, tu correo— **no pregunta**, y **guardar tampoco**: al
+guardar no sale nada de la bóveda. Pedir permiso para todo suena más seguro y es lo
+contrario, porque se acaba dando al botón sin leer.
+
+El segundo criterio no se decide aquí: se toma de `VaultResponder.wantsPrivate`, la misma
+pieza que usan la bóveda de la pestaña y la que la extensión lleva dentro. Si cada bóveda
+tuviera su idea de qué es privado, serían bóvedas distintas.
+
+Dos cosas del protocolo lo hacen posible:
+
+- **`get(id, { keys })`** devuelve solo los campos que se piden. Sin eso, rellenar un
+  nombre sacaba la entrada entera —contraseña incluida— y por eso tenía que preguntar.
+- **`patch(id, changes)`** fusiona **dentro** de la bóveda, así que actualizar una entrada
+  ya no exige leerla antes. Eso, además de quitar la pregunta, quita un fallo: si la
+  lectura previa no salía, la escritura de detrás dejaba la entrada a medias.
 
 ## Cómo usarlo
 

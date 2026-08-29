@@ -27,7 +27,8 @@ export const PASSWORDS_CAP = 'passwords'
  *   `cek`         la llave de la bóveda de contraseñas (CryptoKey AES-GCM)
  *   `isAllowed(pubkey)`   qué aparatos pueden pedir — lo decide el acta, no esto
  *   `encPubOf(pubkey)`    su llave de cifrado, para sellarle la respuesta
- *   `needsApproval(pubkey)`  si ese aparato está marcado para aprobar
+ *   `needsApproval(pubkey)`  si ese aparato está marcado para aprobar. Se compone con el
+ *                        criterio del propio protocolo: solo lo PRIVADO pregunta
  *   `approve({ pubkey, op })`  pide el visto bueno (el teléfono) y espera
  *   `devices()` / `unlink(pubkey)`   administración, opcional
  *   `audit(op, info)`  la bitácora del vault
@@ -53,9 +54,19 @@ export function createPasswordDesk (opts = {}) {
     vault,
     isAllowed,
     encPubOf,
-    // La aprobación es del APARATO y dura mientras el vault siga encendido, igual que
-    // los cajones de secretos: una por arranque, sin ventana que vigilar.
-    needsApproval: (op, _payload, pubkey) => op === 'get' && needsApproval(pubkey),
+    // Dos condiciones, y las dos tienen que darse:
+    //
+    //   · que ese APARATO esté marcado para aprobar (la política del vault: se pide una
+    //     vez y dura mientras el vault siga encendido, igual que los cajones de secretos);
+    //   · y que lo que pide sea PRIVADO — una contraseña, un código de dos pasos, o un
+    //     campo que el usuario marcó. Rellenar un nombre no es sacar un secreto, y pedir
+    //     permiso para todo enseña a decir que sí sin mirar.
+    //
+    // El segundo criterio se toma del propio responder (`wantsPrivate`) en vez de
+    // reescribirlo aquí: si cada bóveda tuviera su idea de qué es privado, serían tres
+    // bóvedas distintas otra vez.
+    needsApproval: async (op, payload, pubkey) =>
+      needsApproval(pubkey) && await responder.wantsPrivate(op, payload),
     approve,
     admin: devices && unlink ? { devices, unlink } : null,
     onRequest: (r) => {

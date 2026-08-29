@@ -238,7 +238,10 @@ onMounted(async () => {
       vault,
       isAllowed: (pub) => known.some(d => samePubkey(d.pub, pub)),
       encPubOf: (pub) => known.find(d => samePubkey(d.pub, pub))?.encPub || null,
-      needsApproval: () => true,
+      // Qué exige un dedo encima lo decide el responder por defecto: **solo `get`, y
+      // solo si lo pedido incluye algo privado** (dueño, 2026-08-29). Rellenar un nombre
+      // no es sacar un secreto, y pedir permiso para todo enseña a decir que sí sin
+      // mirar. Aquí decía `() => true`, así que esta bóveda preguntaba hasta para buscar.
       approve: async ({ pubkey }) => askUser(known.find(d => samePubkey(d.pub, pubkey))?.label || '?'),
       // Sin mostrador de administración: los aparatos se conectan y se quitan en la
       // consola de arriba, que es la única pantalla del ecosistema donde se hace eso.

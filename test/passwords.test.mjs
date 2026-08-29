@@ -81,6 +81,16 @@ async function montar (extra = {}) {
   }).start()
 
   await desk.vault.put({ title: 'Salesforce', sites: ['salesforce.com'], username: 'sandrade@dotrino.com', secret: 'hunter2' })
+  // Una entrada de datos con sus dos mitades, para separar lo que pregunta de lo que no.
+  await desk.vault.put({
+    type: 'data',
+    title: 'Mis datos',
+    sites: ['datos.ejemplo'],
+    fields: [
+      { kind: 'tel', label: 'Teléfono', value: '0999111222' },
+      { label: 'Cédula', value: '1700123456', private: true },
+    ],
+  })
 
   const remota = new RemoteVault(new ProxyTransport({
     client: aparato, peerPubkey: 'VAULT', peerEncPub: encVault.encPub, timeoutMs: 600,
@@ -110,10 +120,46 @@ test('vault-passwords: la aprobación es la del vault (el teléfono), una por ap
   assert.deepEqual(avisos, ['APARATO'], 'volvió a molestar al teléfono')
 })
 
+// La condición es DOBLE: que el aparato esté marcado para aprobar, y que lo que pide sea
+// privado. El vault compone su política con el criterio del protocolo en vez de tener el
+// suyo — si cada bóveda decidiera qué es privado, serían bóvedas distintas.
+test('vault-passwords: un dato PÚBLICO no molesta al teléfono, ni con el aparato marcado', async () => {
+  const { remota, avisos } = await montar({ needsApproval: () => true })
+  const [datos] = await remota.find('https://datos.ejemplo/')
+  const open = await remota.get(datos.id, { keys: ['tel'] })
+  assert.deepEqual(avisos, [], 'sonó el teléfono por un teléfono guardado')
+  assert.equal(JSON.parse(open.fields || '[]')[0].value, '0999111222')
+})
+
+test('vault-passwords: y un dato PRIVADO sí, y llega solo él', async () => {
+  const { remota, avisos } = await montar({ needsApproval: () => true })
+  const [datos] = await remota.find('https://datos.ejemplo/')
+  const open = await remota.get(datos.id, { keys: ['label:Cédula'] })
+  assert.deepEqual(avisos, ['APARATO'])
+  const campos = JSON.parse(open.fields || '[]')
+  assert.equal(campos.length, 1, 'llegó más de lo que se pidió')
+  assert.equal(campos[0].value, '1700123456')
+})
+
+test('vault-passwords: guardar encima no molesta al teléfono, y no pierde nada', async () => {
+  const { remota, avisos, desk } = await montar({ needsApproval: () => true })
+  const [datos] = await remota.find('https://datos.ejemplo/')
+  await remota.patch(datos.id, { fields: [{ kind: 'tel', label: 'Teléfono', value: '0988000111' }] })
+  assert.deepEqual(avisos, [], 'guardar pidió aprobación')
+
+  const open = await desk.vault.get(datos.id)
+  const campos = JSON.parse(open.fields || '[]')
+  assert.equal(campos.find(f => f.label === 'Teléfono').value, '0988000111')
+  assert.equal(campos.find(f => f.label === 'Cédula').value, '1700123456', 'quedó a medias')
+  assert.equal(campos.find(f => f.label === 'Cédula').private, true)
+})
+
 test('vault-passwords: sin el visto bueno del teléfono, no sale la credencial', async () => {
   const { remota } = await montar({ needsApproval: () => true, approve: async () => false })
   const [hit] = await remota.find('https://salesforce.com/')
-  await assert.rejects(() => remota.get(hit.id), e => e.code === CODES.DENIED)
+  // `not-approved`, no `denied`: «no lo autoricé» se arregla volviendo a pulsar; «no me
+  // deja pedir» dando permiso al aparato. Son dos cosas distintas y por eso dos códigos.
+  await assert.rejects(() => remota.get(hit.id), e => e.code === CODES.NOT_APPROVED)
 })
 
 test('vault-passwords: la bitácora apunta la operación, NUNCA qué credencial', async () => {
@@ -142,8 +188,7 @@ test('vault-passwords: ni el vault le deja listar la bóveda a un aparato', asyn
 
   // Y aquí, del lado de la llave, listar es lo normal — es la misma bóveda.
   const todas = await desk.vault.list()
-  assert.equal(todas.length, 1)
-  assert.equal(todas[0].title, 'Salesforce')
+  assert.deepEqual(todas.map(e => e.title).sort(), ['Mis datos', 'Salesforce'])
 })
 
 // --- El cableado con el vault ------------------------------------------------
