@@ -22,7 +22,11 @@ import { createTransport, masterPubkeyOf } from './transport.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar } from './secretsStore.js'
-import { createApprovals } from './approvals.js'
+// `PENDING_TTL_MS` se usa abajo, al esperar la firma del aprobador: sin importarlo, esa
+// espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
+// llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
+// que lo recorriera hasta que la hubo (dotrino-test, smoke:demonio, 2026-08-30).
+import { createApprovals, PENDING_TTL_MS } from './approvals.js'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { seal } from '../lib/src/sealed.js'
