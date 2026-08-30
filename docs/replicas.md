@@ -15,6 +15,28 @@ Y hay un reloj peor: **los certificados de aparato duran 30 días** y solo la
 maestra los renueva. Una bóveda apagada un mes no deja un servicio esperando; deja
 el ecosistema entero caducado.
 
+## 1.bis DECIDIDO (2026-08-30): son DOS BÓVEDAS, no una y su réplica
+
+El dueño lo cerró así, y cambia lo que dice el resto de este documento:
+
+1. **Las dos pueden sellar el acta.** `cosealers` en `@dotrino/identity` (hecho). El
+   argumento: *«usualmente no se abren los dos al mismo tiempo»* y *«me resuelve el
+   problema de un desastre que pierda permanentemente un vault»*.
+2. **A la segunda se le envuelven los sobres que se puedan envolver**, también los de los
+   cajones con dueño. Los reparte quien pueda: el propio servicio (ya tiene la CEK, no
+   gana nada) y, lo que falte, **la bóveda A al abrirse** — que es el mecanismo de deuda
+   que ya existía para cualquier miembro que entra tarde.
+3. **La llave de transporte no recibe sobres. Nunca.** Firmar no es leer.
+
+Lo que eso deja obsoleto de las secciones siguientes: **§2 ya no aplica tal cual** (sí hay
+dos selladores) y **§5 tampoco** (no hace falta una CA intermedia para renovar certs: la
+segunda bóveda sella actas, así que puede emitir).
+
+Y el precio, que no se esconde: a partir de aquí son **dos los discos** cuya captura abre
+un cajón, y el empate a igual `seq` deja de ser imposible para ser raro. Lo resuelve
+`canAdopt` con las reglas que ya estaban —gana el traspaso, si no la de hash menor— y lo
+que pierde el desempate **se pierde**, así que falta avisarlo (§2.4.1.5 del acta).
+
 ## 2. La restricción dura: UN SOLO SELLADOR
 
 `acta-de-perfil.md` §2.4 es tajante y no se negocia: con un sellador (D4) y llaves

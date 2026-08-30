@@ -1252,18 +1252,48 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const rewrapWaiters = new Set()
   const onRewrapOk = (fn) => { rewrapWaiters.add(fn); return () => rewrapWaiters.delete(fn) }
 
+  /**
+   * LAS OTRAS BÓVEDAS (`cosealers` del acta) entran en TODOS los cajones, también en los
+   * que tienen dueño. Decidido por el dueño el 2026-08-30.
+   *
+   * Y no contradice la regla de agosto —«un cajón con dueño no se envuelve para quien
+   * administra»—, porque un cosellador **no es quien administra**: es un master. Aquella
+   * regla saca a los aparatos de consola (un navegador, un portátil con la sesión puesta),
+   * cuyo compromiso es probable y cuya necesidad es comodidad. Una segunda bóveda existe
+   * justamente para poder REGENERAR los sobres el día que la primera no esté, y regenerar
+   * exige abrir: dejarla fuera la haría inútil para el único desastre que viene a cubrir.
+   *
+   * El precio, que se dice y no se esconde: a partir de aquí son DOS los discos cuya
+   * captura abre ese cajón. Eso es exactamente lo que cuesta sobrevivir a perder uno.
+   */
+  async function cosealerMembers () {
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const co = Array.isArray(record?.cosealers) ? record.cosealers : []
+    if (!co.length) return []
+    // Sin `encPub` no hay a dónde envolver: se queda en deuda y se ve como `sinLlave`,
+    // igual que cualquier otro miembro incompleto.
+    return (record?.members || []).filter((m) => co.includes(m.pub) && m.encPub && m.pub !== master)
+  }
+
+  /** Sin duplicar: un cosellador puede ser además el dueño del cajón. */
+  const conCoselladores = (base, co) => {
+    const vistos = new Set(base.map((m) => m.pub))
+    return [...base, ...co.filter((m) => !vistos.has(m.pub))]
+  }
+
   async function recipientsOf (owner) {
+    const co = await cosealerMembers()
     if (owner.startsWith('ns:')) {
       const owned = await nsMembers(owner.slice(3))
       // Sin dueño (un cajón personal, o uno cuyo servicio ya no está) sí entra quien
       // administra: si no, no quedaría nadie que pudiera abrirlo sin la frase.
-      return owned.length ? owned : await adminDevices()
+      return conCoselladores(owned.length ? owned : await adminDevices(), co)
     }
     const pub = owner.slice(owner.indexOf(':') + 1)
     const m = await memberOf(pub)
     // El cajón propio de un aparato de SERVICIO es tan suyo como el de su ns.
-    if (m?.cn) return [m]
-    return [...(m ? [m] : []), ...await adminDevices()]
+    if (m?.cn) return conCoselladores([m], co)
+    return conCoselladores([...(m ? [m] : []), ...await adminDevices()], co)
   }
 
   /**
