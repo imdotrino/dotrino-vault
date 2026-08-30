@@ -17,7 +17,7 @@
  */
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
-import { WebSocketProxyClient, getPublicKeyJwk, signData } from '@dotrino/proxy-client'
+import { WebSocketProxyClient } from '@dotrino/proxy-client'
 import { LocalVault, VaultResponder, samePubkey, importAuto } from '@dotrino/passmanager'
 
 const props = defineProps({
@@ -222,9 +222,22 @@ onMounted(async () => {
       sealing,
     })
     await client.connect()
-    const publickey = await getPublicKeyJwk()
+    // SE IDENTIFICA CON LA LLAVE DEL ACTA, no con la del cliente del proxio.
+    //
+    // Aquí estaba `getPublicKeyJwk()` de `@dotrino/proxy-client`, que es una llave SUYA,
+    // guardada en este navegador y sin relación con el perfil. El proxio direcciona por
+    // la llave con la que cada uno se identifica, y quien viene a pedir contraseñas
+    // —la extensión— direcciona por la del ACTA, que es la única que conoce. Registrarse
+    // con otra dejaba esta pestaña escuchando en una dirección a la que nadie escribe:
+    // las peticiones salían, no llegaban a nadie, y del otro lado se veían como «nadie
+    // respondió a tiempo». Con el daemon no pasaba, porque él sí se identifica con la
+    // suya. Encontrado el 2026-08-29 al probar la bóveda de pestaña de punta a punta.
+    const { members } = await identity.profileMembers()
+    const publickey = (members || []).find((m) => m.isMe)?.pub
+    if (!publickey) throw new Error('este navegador no está en el acta de su propio perfil')
     const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
-    await client.identify({ data, signature: await signData(data) })
+    const { signature } = await identity.signData(data)
+    await client.identify({ data, signature })
 
     // El acta en caché: `isAllowed`/`encPubOf` se llaman por cada mensaje que entra y
     // son SÍNCRONOS, así que se refresca aparte. Quitarle el permiso a un aparato —o
