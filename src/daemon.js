@@ -279,7 +279,7 @@ export async function runDaemon () {
       case 'list': return {} // el volcado de perfiles ya se hace abajo
       // `id`: quien la crea necesita saber CUÁL quedó, no adivinar por nombre (dos
       // cuentas pueden llamarse igual). Lo usa «emparejar en una cuenta nueva».
-      case 'add': { const p = await mgr.add(req.name, { adopt: !!req.adopt }); return { done: `perfil creado: ${p.name || p.id}`, id: p.id, adopt: !!req.adopt } }
+      case 'add': { const p = await mgr.add(req.name, { adopt: !!req.adopt, kek: req.kek || null }); return { done: `perfil creado: ${p.name || p.id}${req.kek ? ' (clave del disco en el KMS)' : ''}`, id: p.id, adopt: !!req.adopt } }
       case 'rm': { const r = await mgr.remove(req.profile); return { done: `perfil borrado: ${r.name || r.id}` } }
       case 'rename': { const p = mgr.profiles.rename(ref(), req.name); return { done: `perfil renombrado: ${p.name}` } }
       case 'use': { const p = mgr.profiles.setCurrent(ref()); return { done: `perfil activo: ${p.name || p.id}` } }

@@ -36,6 +36,47 @@ dotrino-vault atrest rekey <config.json> cambia de proveedor recifrando todo
 dotrino-vault atrest rekey --machine     vuelve a la clave de esta máquina
 ```
 
+### Un perfil con raíz en el KMS NACE así, no se migra
+
+> Dicho por el dueño el 2026-08-30, y tiene razón: **`rekey` no da raíz de hardware.**
+
+Recifrar un perfil que ya tiene identidad protege de aquí en adelante y **no deshace
+nada**: su maestra se generó y se escribió bajo la clave de la máquina, así que
+cualquier copia del disco anterior a la migración **la sigue abriendo, para siempre**.
+Vender eso como «ya estoy en el KMS» es peor que no ofrecerlo.
+
+Por eso un perfil con raíz de verdad **nace** con su proveedor puesto:
+
+```
+dotrino-vault profile add <nombre> --kms <config.json>
+```
+
+La config se comprueba y se escribe cuando el directorio existe y **todavía no hay un
+solo byte dentro**, así que la maestra que se genera un instante después nace bajo la
+clave del KMS y no existe nunca bajo otra. Si el KMS no responde, no se crea nada — ni un
+directorio a medias. `atrest rekey` sobre un perfil con identidad **se niega** y explica
+esto mismo; para el caso legítimo (el disco nunca salió de tu control) está `--anyway`.
+
+### Y cómo se pasa una CUENTA existente al KMS
+
+No moviendo bytes: **enrolando una llave nueva y retirando la vieja**. Como una bóveda es
+multicuenta, la cuenta puede estar a la vez con y sin KMS mientras dura el cambio, en la
+misma máquina:
+
+1. `profile add <nombre> --kms <config.json>` — la bóveda nueva, nacida en el KMS.
+2. Enrólala al acta de la cuenta **como un aparato más**.
+3. Pásale el sellado y **revoca el aparato viejo**.
+
+El `profileId` **no cambia**: es la pubkey de la génesis (D3 del acta), el nombre estable
+de la cuenta para siempre. Lo que cambia es quién sella. Reputación, contactos y contenido
+firmado siguen valiendo.
+
+⚠️ **Lo que este camino no cierra solo:** la llave vieja sigue existiendo en cualquier
+copia del disco anterior al traspaso. Después del traspaso no puede nada (§2.4.1 del acta:
+sus actas van firmadas por quien ya no es el sellador y se rechazan), y lo único que la
+frena ante quien **no vio** el traspaso es el pin de `maxSeq`. Cerrar esa ventana del todo
+es el **oráculo de frescura**, que sigue sin construirse — ver `sucesion.md` §5.
+
 **Editar `atrest.json` a mano está bloqueado a propósito**: estrenar una DEK sobre
 datos ya cifrados los dejaría ilegibles para siempre — la maestra incluida — y sin
 un solo aviso. Quien lo intente se lleva un `kek-needs-rekey` y ni un byte tocado.

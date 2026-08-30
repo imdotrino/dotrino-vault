@@ -671,6 +671,28 @@ function cmdAtrest (rest) {
         console.error('No se pudo leer ' + file + ': ' + e.message); process.exitCode = 1; return
       }
     }
+    // FRENO: recifrar un perfil que YA tiene identidad no le da raíz de hardware, y
+    // dejar creer que sí es peor que no ofrecerlo. Su maestra se escribió bajo la clave
+    // vieja; cualquier copia del disco anterior a este momento la sigue abriendo, y eso
+    // no hay recifrado que lo deshaga. Lo que sí sirve está en el mensaje.
+    const tieneIdentidad = fs.existsSync(path.join(dir, 'identity.json'))
+    if (tieneIdentidad && cfg.provider !== 'machine' && !rest.includes('--anyway')) {
+      console.error('Este perfil ya tiene identidad, así que recifrarlo NO le da raíz en el KMS.')
+      console.error('')
+      console.error('Su maestra se generó y se escribió bajo la clave de esta máquina. Una copia')
+      console.error('del disco anterior a este momento la sigue abriendo, para siempre, y eso no')
+      console.error('lo deshace ningún recifrado: solo protege de aquí en adelante.')
+      console.error('')
+      console.error('Para una identidad con raíz en el KMS, tiene que NACER así:')
+      console.error('  1. dotrino-vault profile add <nombre> --kms <config.json>')
+      console.error('  2. enrólalo al acta de la cuenta como un aparato más')
+      console.error('  3. pásale el sellado y revoca el aparato viejo')
+      console.error('  (el profileId no cambia: la génesis sigue siendo el nombre de la cuenta)')
+      console.error('')
+      console.error('Si aun así quieres recifrar —porque el disco nunca salió de tu control—:')
+      console.error('  dotrino-vault atrest rekey %s --anyway', file)
+      process.exitCode = 1; return
+    }
     try {
       const r = rekeyDir(dir, cfg)
       console.log('Listo: ' + r.from + ' → ' + r.to + '. Recifrados ' + r.files.length + ' archivos.')
@@ -1146,7 +1168,13 @@ function reportProfiles (d) {
 }
 
 async function cmdProfile (rest) {
-  const [sub, ...args] = rest
+  const [sub, ...rawArgs] = rest
+  // `--kms <archivo>` se saca ANTES de armar el nombre: el nombre se compone juntando
+  // los argumentos sueltos, así que si no se quita acabaría llamándose «midevault --kms
+  // cfg.json».
+  const kmsAt = rawArgs.indexOf('--kms')
+  const kmsFile = kmsAt !== -1 ? rawArgs[kmsAt + 1] : null
+  const args = kmsAt !== -1 ? rawArgs.filter((_, i) => i !== kmsAt && i !== kmsAt + 1) : rawArgs
   const name = args.join(' ').trim()
   switch (sub || 'ls') {
     case 'ls': {
@@ -1158,8 +1186,24 @@ async function cmdProfile (rest) {
       return
     }
     case 'add': {
-      if (!name) { console.error('uso: dotrino-vault profile add <nombre>'); process.exit(2) }
-      reportProfiles(await profileRequest('add', { name }))
+      if (!name) { console.error('uso: dotrino-vault profile add <nombre> [--kms <config.json>]'); process.exit(2) }
+      // NACER con el KMS es la única forma de que la maestra no haya existido nunca bajo
+      // la clave de esta máquina. Migrar después no da lo mismo y no se ofrece como si
+      // lo diera (ver el freno de `atrest rekey`).
+      let kek = null
+      if (kmsAt !== -1) {
+        if (!kmsFile || kmsFile.startsWith('-')) { console.error('uso: --kms <config.json>'); process.exit(2) }
+        try { kek = JSON.parse(fs.readFileSync(kmsFile, 'utf8')) } catch (e) {
+          console.error('No se pudo leer %s: %s', kmsFile, e.message); process.exit(2)
+        }
+        // Probar aquí ANTES de mandar la orden: si el KMS no responde, mejor enterarse
+        // sin haber creado nada.
+        try { probeKek(dataDir(), kek) } catch (e) {
+          console.error('El KMS no respondió (%s): %s', e.code || 'error', e.message)
+          console.error('No se creó ningún perfil.'); process.exit(1)
+        }
+      }
+      reportProfiles(await profileRequest('add', { name, ...(kek ? { kek } : {}) }))
       console.log('Conecta un dispositivo a este perfil:  dotrino-vault pair --profile "%s"', name)
       return
     }
@@ -1327,6 +1371,10 @@ function help () {
 Perfiles (varias identidades tuyas en el mismo PC; todas atienden a la vez):
   profile ls                        lista los perfiles (* = el activo, el destino por defecto)
   profile add <nombre>              crea un perfil (identidad nueva, vacía)
+  profile add <nombre> --kms <f>    ...y su clave de disco NACE en el KMS que diga <f>.
+                                    Es la única forma de que la maestra no exista nunca
+                                    bajo la clave de esta máquina: migrar después no da
+                                    lo mismo (una copia vieja del disco la sigue abriendo)
   profile use <id|nombre>           elige el perfil activo
   profile rename <nombre>           renombra un perfil
   profile rm <id|nombre>            BORRA un perfil y su identidad (irreversible)

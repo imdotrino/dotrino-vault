@@ -109,8 +109,8 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
      * (camino A): la bóveda pone el sitio y la llave que entrará como miembro, pero la
      * cuenta la trae el dispositivo y se adopta al emparejar.
      */
-    async add (name, { adopt = false } = {}) {
-      const p = profiles.add(name, { adopt })
+    async add (name, { adopt = false, kek = null } = {}) {
+      const p = profiles.add(name, { adopt, kek })
       await open(p.id)
       log('[vault] perfil creado%s: %s (%s)', adopt ? ' (a la espera de adoptar una cuenta)' : '', p.name || '(sin nombre)', p.id)
       return profiles.get(p.id)

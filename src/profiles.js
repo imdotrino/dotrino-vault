@@ -25,6 +25,7 @@ import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
 import { atRestFor, migrateFile, kekFor } from './atrest.js'
+import { probe as probeKek, writeConfig as writeKekConfig } from './atrest.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
@@ -233,9 +234,32 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * leería como pisar una cuenta con datos y se rechazaría, que es lo que tiene que
      * pasar cuando nadie lo pidió.
      */
-    add (name, { adopt = false } = {}) {
+    /**
+     * `kek`: el proveedor de la clave del disco, si el perfil tiene que NACER con él.
+     *
+     * Se escribe aquí y no después porque ese es justo el momento que importa: el
+     * directorio existe y todavía no hay un solo byte dentro. La maestra que genere
+     * `open()` un instante más tarde ya nace bajo esa clave y NUNCA existe bajo otra.
+     *
+     * Migrar un perfil que ya tiene identidad NO da esto, y por eso no se ofrece como
+     * si lo diera: su maestra ya se escribió bajo la clave vieja, y una copia del disco
+     * anterior a la migración la sigue abriendo para siempre. Un perfil con raíz en el
+     * KMS **nace** así (dueño, 2026-08-30).
+     */
+    add (name, { adopt = false, kek = null } = {}) {
       const id = newId()
       ensureDir(dirOf(id))
+      if (kek) {
+        // Comprobar ANTES de dejar rastro: un KMS que no responde no puede dejar a
+        // medio crear un perfil cuya maestra no se va a poder volver a abrir.
+        try {
+          probeKek(dirOf(id), kek)
+          writeKekConfig(dirOf(id), kek)
+        } catch (e) {
+          try { fs.rmSync(dirOf(id), { recursive: true, force: true }) } catch (_) {}
+          throw e
+        }
+      }
       data.profiles.push({ id, name: cleanName(name), createdAt: Date.now(), ...(adopt ? { adopt: true } : {}) })
       if (!data.current) data.current = id
       save()

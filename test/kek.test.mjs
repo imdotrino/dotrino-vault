@@ -214,6 +214,47 @@ test('rekey de un perfil no toca al de al lado', () => {
   rm(raiz)
 })
 
+/**
+ * NACER con el KMS, que es lo único que da raíz de verdad (dueño, 2026-08-30).
+ *
+ * Migrar un perfil existente NO equivale: su maestra ya se escribió bajo la clave vieja,
+ * y una copia del disco anterior la sigue abriendo para siempre. Lo que importa aquí es
+ * que la config quede puesta ANTES de que exista un solo byte del perfil.
+ */
+test('un perfil puede nacer con el KMS: la config está antes que ningún dato', async () => {
+  const { openProfiles } = await import('../src/profiles.js')
+  const root = tmp()
+  const p = openProfiles(root)
+  const creado = p.add('con-kms', { kek: kmsConfig() })
+  const d = p.dirOf(creado.id)
+
+  assert.equal(readConfig(d).provider, 'command', 'nace con el proveedor puesto')
+  // Lo único que puede haber en el directorio recién creado es la config: la maestra
+  // todavía no existe, así que cuando se genere ya nacerá bajo la clave del KMS.
+  assert.deepEqual(fs.readdirSync(d).sort(), ['atrest.json'])
+
+  // Y la clave que usará es la del KMS, no la de la máquina.
+  assert.notDeepEqual(kekFor(d), machineKey(d))
+  rm(root)
+})
+
+test('si el KMS no responde, el perfil NO se crea a medias', async () => {
+  const { openProfiles } = await import('../src/profiles.js')
+  const root = tmp()
+  const p = openProfiles(root)
+
+  process.env.FAKE_KMS_DOWN = '1'
+  try {
+    assert.throws(() => p.add('fallido', { kek: kmsConfig() }), (e) => e.code === 'kek-unavailable')
+  } finally { delete process.env.FAKE_KMS_DOWN }
+
+  assert.equal(p.list().length, 0, 'no queda un perfil registrado')
+  const pDir = path.join(root, 'p')
+  const restos = fs.existsSync(pDir) ? fs.readdirSync(pDir) : []
+  assert.deepEqual(restos, [], 'ni un directorio a medio crear')
+  rm(root)
+})
+
 test('los stores del vault funcionan igual con la clave de un KMS', async () => {
   const { openStore } = await import('../src/store.js')
   const d = tmp()
