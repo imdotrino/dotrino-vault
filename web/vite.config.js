@@ -106,7 +106,17 @@ export default defineConfig({
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'], navigateFallback: '/index.html', cleanupOutdatedCaches: true, skipWaiting: true, clientsClaim: true },
+      // `importScripts`: los manejadores del TIMBRE viven en `public/push-sw.js` y se
+      // inyectan en el SW que genera el plugin. Un SW generado no admite manejadores
+      // propios, y registrar un segundo le pisaría el scope al de la PWA.
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        navigateFallback: '/index.html',
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
+        importScripts: ['/push-sw.js'],
+      },
     }),
   ],
 })

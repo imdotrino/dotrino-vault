@@ -63,6 +63,13 @@ const T = {
     askingText: 'Si le dices que sí, podrá pedir credenciales mientras esta bóveda siga abierta.',
     yes: 'Sí, dásela',
     no: 'No',
+    askNotifTitle: 'Te están pidiendo una contraseña',
+    askNotifBody: (q) => `«${q}» espera tu respuesta. Nadie recibe nada hasta que contestes.`,
+    ring_t: 'Avísame cuando alguien pida algo',
+    ring_b: 'Con esto, tu navegador te avisa aunque esta pestaña esté cerrada: al pulsar el aviso se abre la bóveda y responde lo que quedó esperando.',
+    ring_on: 'Activar los avisos',
+    ring_ok: 'Los avisos están activados.',
+    ring_bad: 'No se pudieron activar los avisos aquí:',
     anySite: 'cualquier sitio',
     noIdentity: 'Hace falta tu perfil de Dotrino. Créalo y vuelve.',
   },
@@ -82,6 +89,13 @@ const T = {
     askingText: 'If you say yes, it can ask for credentials while this vault stays open.',
     yes: 'Yes, give it',
     no: 'No',
+    askNotifTitle: 'Someone is asking for a password',
+    askNotifBody: (q) => `“${q}” is waiting for your answer. Nothing goes out until you reply.`,
+    ring_t: 'Tell me when something asks',
+    ring_b: 'With this on, your browser tells you even when this tab is closed: tapping the notice opens the vault and answers what was waiting.',
+    ring_on: 'Turn on notices',
+    ring_ok: 'Notices are on.',
+    ring_bad: 'Notices could not be turned on here:',
     anySite: 'any site',
     noIdentity: 'Your Dotrino profile is needed. Create it and come back.',
   },
@@ -146,6 +160,10 @@ const devices = ref([])
 const entries = ref([])
 const note = ref('')
 const asking = ref(null)
+// El TIMBRE: si este navegador puede recibir el aviso que despierta la bóveda.
+const pushListo = ref(false)
+const pushError = ref('')
+let encender = null
 
 let identity = null
 let vault = null
@@ -198,13 +216,67 @@ async function importFile (ev) {
   ev.target.value = ''
 }
 
-/** Aprobar es del usuario y está delante: se le pregunta aquí, no en un log. */
+/**
+ * Aprobar es del usuario y está delante: se le pregunta aquí, no en un log.
+ *
+ * Y si NO está delante —la pestaña en segundo plano, o la ventana minimizada—, se le
+ * avisa (dueño, 2026-08-29). Una bóveda que pregunta en una pestaña que nadie mira es
+ * una bóveda que no contesta: el que pidió se queda esperando tres minutos y acaba
+ * viendo «nadie respondió», sin saber que la respuesta estaba a un clic.
+ */
+let avisoAbierto = null
 function askUser (who) {
+  if (typeof document !== 'undefined' && document.hidden) avisar(who)
   return new Promise((resolve) => { asking.value = { who, resolve } })
 }
+async function avisar (who) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    const reg = await navigator.serviceWorker?.ready
+    // Por el service worker y no `new Notification(...)`: así se puede pulsar para
+    // volver a esta pestaña, que es para lo único que sirve el aviso.
+    await reg?.showNotification(t('askNotifTitle'), {
+      body: t('askNotifBody', who),
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: 'dotrino-vault-ask',
+      renotify: true,
+      data: { url: '/vault' },
+    })
+    avisoAbierto = reg
+  } catch (_) { /* sin aviso, la pregunta sigue en la pantalla */ }
+}
+async function cerrarAviso () {
+  try {
+    const ns = await avisoAbierto?.getNotifications({ tag: 'dotrino-vault-ask' })
+    for (const n of ns || []) n.close()
+  } catch (_) {}
+  avisoAbierto = null
+}
+/**
+ * Suscribir ESTE navegador al timbre del proxio, bajo la llave del acta.
+ *
+ * Lo hace el pilar (`enablePush` de `@dotrino/proxy-client`): pide la VAPID al proxio,
+ * se suscribe con el service worker que ya tiene la PWA —no registra otro— y deja la
+ * suscripción firmada en el proxio. Aquí no se escribe nada de eso a mano.
+ */
+async function suscribirTimbre (client, publickey) {
+  try {
+    await client.enablePush({ publicKey: publickey, sign: (data) => identity.signData(data) })
+    pushError.value = ''
+  } catch (e) {
+    // No es un fallo de la bóveda: sigue atendiendo mientras esté abierta. Solo no se
+    // la puede despertar, y eso se dice.
+    pushError.value = e?.message || String(e)
+  }
+}
+
 function answer (yes) {
   asking.value?.resolve(yes)
   asking.value = null
+  // El aviso se va con la respuesta: uno que sigue ahí después de contestar dice algo
+  // que ya no es cierto.
+  cerrarAviso()
 }
 
 onMounted(async () => {
@@ -262,6 +334,22 @@ onMounted(async () => {
     })
     responder.start()
 
+    // EL TIMBRE. Con la bóveda cerrada, la petición de la extensión se queda encolada en
+    // el proxio (24 h) y este navegador recibe un aviso sin contenido; al pulsarlo se
+    // abre `/vault`, la bóveda conecta y **baja la cola sola**. Sin esto, una bóveda que
+    // vive en una pestaña solo existe mientras la pestaña está abierta.
+    //
+    // Se suscribe con la MISMA llave con la que se identifica —la del acta—, porque es
+    // la dirección por la que le llegan las cosas. Best-effort: si el navegador no lo
+    // admite, o el proxio no tiene Web Push, todo lo demás sigue igual.
+    pushListo.value = typeof Notification !== 'undefined' && Notification.permission === 'granted'
+    if (pushListo.value) suscribirTimbre(client, publickey)
+    encender = async () => {
+      const ok = await Notification.requestPermission()
+      pushListo.value = ok === 'granted'
+      if (pushListo.value) await suscribirTimbre(client, publickey)
+    }
+
     await refresh()
     ready.value = true
   } catch (e) {
@@ -310,6 +398,19 @@ onBeforeUnmount(() => responder?.stop())
       </ul>
       <p v-else class="hint">{{ t('empty') }}</p>
       <p v-if="note" class="hint">{{ note }}</p>
+
+      <!-- EL TIMBRE. Es lo único que hace que una bóveda que vive en una pestaña sirva
+           con la pestaña cerrada: el pedido queda esperando en el proxio y el aviso trae
+           al usuario de vuelta. No se pide el permiso solo al abrir —un navegador que
+           pregunta sin que hayas pulsado nada es un navegador que molesta—: se pide aquí,
+           y hasta entonces la bóveda funciona igual mientras esté abierta. -->
+      <h2>{{ t('ring_t') }}</h2>
+      <p class="hint">{{ t('ring_b') }}</p>
+      <p v-if="pushListo && !pushError" class="hint" data-testid="ring-on">{{ t('ring_ok') }}</p>
+      <button v-else-if="!pushListo" class="import" data-testid="ring-enable" @click="encender && encender()">
+        {{ t('ring_on') }}
+      </button>
+      <p v-if="pushError" class="hint" data-testid="ring-error">{{ t('ring_bad') }} {{ pushError }}</p>
       <label class="import">
         {{ t('importBtn') }}
         <input type="file" accept=".csv,.json,.txt" hidden @change="importFile">
