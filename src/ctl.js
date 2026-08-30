@@ -31,6 +31,7 @@ import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
+import { readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
 import { VERSION } from './version.js'
 
 const dir = dataDir()
@@ -591,6 +592,102 @@ function profileDir () {
   // firmó y cuándo con la bóveda cerrada.
   assertOpen(p)
   return path.join(dir, 'p', p.id)
+}
+
+// DE DÓNDE SALE la clave que cifra el disco (`lib/src/kek.js`). Por defecto se deriva de
+// esta máquina; se puede pasar a un KMS, y entonces una copia del disco deja de servir.
+function cmdAtrest (rest) {
+  // OJO: la clave es POR PERFIL. `dir` aquí dentro es el del perfil al que apunta el
+  // comando (--profile, o el activo); la raíz de la bóveda es otra cosa y tiene la suya.
+  const vaultRoot = dataDir()
+  const dir = profileDir()
+  const sub = rest[0] || 'status'
+
+  if (sub === 'status') {
+    const cfg = readKekConfig(dir)
+    const archivos = encryptedFilesIn(dir)
+    if (cfg.provider === 'machine') {
+      console.log('Clave del disco: derivada de ESTA máquina (machine-id + salt).')
+      console.log('  Aviso: el material vive en el mismo disco que los datos, así que una')
+      console.log('  copia del disco entero la abre. Para cerrarlo: dotrino-vault atrest rekey <config.json>')
+    } else {
+      console.log('Clave del disco: envuelta por ' + (cfg.label || cfg.wrap?.cmd || 'un programa externo') + '.')
+      console.log('  Una copia del disco NO basta: hace falta además poder desenvolverla.')
+    }
+    console.log('Archivos cifrados: ' + (archivos.length ? archivos.join(', ') : 'ninguno todavía'))
+
+    // ES POR PERFIL, y eso hay que verlo: en la misma bóveda un perfil puede ir con KMS
+    // y el de al lado con la clave de la máquina. Sin esta lista, «lo puse en el KMS» es
+    // una creencia y no un hecho comprobable.
+    const otros = (readState().profiles || [])
+    if (otros.length > 1) {
+      console.log('')
+      console.log('Los demás perfiles de esta bóveda (cada uno lleva su propia clave):')
+      for (const q of otros) {
+        let pv = 'machine'
+        try { pv = readKekConfig(path.join(vaultRoot, 'p', q.id)).provider } catch (_) { pv = '?' }
+        const marca = q.current ? ' (activo)' : ''
+        console.log('  ' + (q.name || q.id) + marca + ': ' + (pv === 'machine' ? 'esta máquina' : 'programa externo / KMS'))
+      }
+    }
+    // El REGISTRO de perfiles vive en la raíz y tiene su propia clave: poner un perfil en
+    // el KMS no lo cubre. Dentro está el verificador del candado y la lista de perfiles,
+    // no el contenido de ninguno — pero conviene no creer que ya está protegido.
+    let raiz = 'machine'
+    try { raiz = readKekConfig(vaultRoot).provider } catch (_) {}
+    if (raiz === 'machine' && cfg.provider !== 'machine') {
+      console.log('')
+      console.log('Ojo: el registro de perfiles (la raíz de la bóveda) sigue con la clave de')
+      console.log('esta máquina. No guarda el contenido de ningún perfil, pero no está en el KMS.')
+    }
+    return
+  }
+
+  if (sub === 'test') {
+    // Comprueba el ida y vuelta SIN tocar los datos: es lo que hay que correr ANTES de
+    // un rekey, y lo que dice si el KMS sigue respondiendo.
+    try {
+      const r = probeKek(dir)
+      if (r.provider === 'machine') console.log('OK — proveedor «machine»: no hay nada externo que probar.')
+      else console.log('OK — ' + (r.label || 'el programa externo') + ' envuelve y desenvuelve (' + r.wrappedBytes + ' bytes).')
+    } catch (e) {
+      console.error('FALLA (' + (e.code || 'error') + '): ' + e.message)
+      process.exitCode = 1
+    }
+    return
+  }
+
+  if (sub === 'rekey') {
+    const file = rest[1]
+    if (!file) {
+      console.error('Falta el archivo de configuración: dotrino-vault atrest rekey <config.json>')
+      console.error('Para volver a la clave de la máquina: dotrino-vault atrest rekey --machine')
+      process.exitCode = 1; return
+    }
+    let cfg
+    if (file === '--machine') cfg = { provider: 'machine' }
+    else {
+      try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) {
+        console.error('No se pudo leer ' + file + ': ' + e.message); process.exitCode = 1; return
+      }
+    }
+    try {
+      const r = rekeyDir(dir, cfg)
+      console.log('Listo: ' + r.from + ' → ' + r.to + '. Recifrados ' + r.files.length + ' archivos.')
+      if (r.backups.length) {
+        console.log('Copias de seguridad (bórralas cuando compruebes que todo abre):')
+        for (const b of r.backups) console.log('  ' + b)
+      }
+      console.log('Reinicia el servicio para que tome la clave nueva.')
+    } catch (e) {
+      console.error('NO se cambió nada (' + (e.code || 'error') + '): ' + e.message)
+      process.exitCode = 1
+    }
+    return
+  }
+
+  console.error('Uso: dotrino-vault atrest [status|test|rekey <config.json>|rekey --machine]')
+  process.exitCode = 1
 }
 
 // Bitácora de actividad de seguridad (quién firmó/renovó/enroló y qué se rechazó).
@@ -1218,6 +1315,11 @@ function help () {
   label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
   caps <ID> ±permiso  cambia permisos (+firma -guarda +administra +contrasenas …)
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
+  atrest status       de dónde sale la clave que cifra el disco (esta máquina, o un KMS)
+  atrest test         comprueba que el KMS envuelve y desenvuelve, SIN tocar los datos
+  atrest rekey <f>    cambia de proveedor: descifra con la vieja y recifra con la nueva
+                      (--machine para volver a la clave de esta máquina). Editar
+                      atrest.json a mano NO vale: dejaría el perfil ilegible
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
   logs                últimos logs del servicio
   version             muestra la versión instalada
@@ -1267,6 +1369,7 @@ export async function runCtl (argv) {
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
     case 'approval': return cmdApproval(rest)
+    case 'atrest': return cmdAtrest(rest)
     case 'activity': return cmdActivity(Number(rest[0]) || 30)
     case 'logs': return cmdLogs()
     case 'version':

@@ -31,7 +31,7 @@ import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
-import { atRestFor, machineKey, migrateFile } from './atrest.js'
+import { atRestFor, kekFor, migrateFile } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 /**
@@ -60,7 +60,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // máquina (puede leer el mismo material); es subir el listón, no una imposibilidad.
   // La migración verifica antes de reemplazar: si algo falla, el original queda intacto.
   try {
-    const r = migrateFile(path.join(dir, 'identity.json'), machineKey(dir))
+    const r = migrateFile(path.join(dir, 'identity.json'), kekFor(dir))
     if (r === 'migrado') log('[vault] identity encrypted at rest (bound to this machine)')
   } catch (e) { log('[vault] could not encrypt the identity at rest:', e.message) }
   const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
@@ -172,7 +172,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     recipients: (owner) => recipientsOf(owner),
     // La FIRMA del sobre: dice que salió de esta bóveda y con qué acta (§8.8).
     signer: (body) => signSeal(body),
-    defaultKey: () => new Uint8Array(machineKey(dir))
+    defaultKey: () => new Uint8Array(kekFor(dir))
   })
   // SIN CONTRASEÑA NO HAY SECRETO. Escribir no la pide (sellar solo necesita públicas,
   // §8.1), pero la copia de recuperación —la que deja al dueño VER sus valores— se cierra
@@ -1154,7 +1154,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * pero NO es equivalente, y por eso la consola lo dice en voz alta (§2.3 del
    * diseño). Prometer una protección que no está puesta es peor que no tenerla.
    */
-  const adminKeyOr = (adminKey) => adminKey || new Uint8Array(machineKey(dir))
+  const adminKeyOr = (adminKey) => adminKey || new Uint8Array(kekFor(dir))
 
   // `adminKey` es la llave derivada de la contraseña del perfil, y va POR OPERACIÓN: se
   // usa para sellar y se suelta. Solo hace falta para escribir una privada — servir,

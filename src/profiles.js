@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
-import { atRestFor, migrateFile, machineKey } from './atrest.js'
+import { atRestFor, migrateFile, kekFor } from './atrest.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
@@ -125,7 +125,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
   // respaldo o en una carpeta compartida por descuido, que es lo que el códec cubre
   // para el resto. La migración verifica antes de reemplazar y es de una sola vez.
   ensureDir(root)
-  try { migrateFile(file, machineKey(root)) } catch (_) {}
+  try { migrateFile(file, kekFor(root)) } catch (_) {}
   const atRest = atRestFor(root)
   let data = readJson(file, null, atRest)
   if (!data || !Array.isArray(data.profiles)) data = { v: 1, current: null, profiles: [] }

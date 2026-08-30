@@ -1,8 +1,99 @@
-# Llaves de hardware (diferido — versión futura)
+# Llaves de hardware y KMS
 
 > Anotado el 2026-08-30, a raíz de comparar la bóveda con un KMS. **La brecha más
 > grande frente a un KMS no se cierra con código: es la raíz de confianza en
-> hardware.** Esto es el plan; no está implementado y nada depende de ello.
+> hardware.**
+>
+> **La costura YA ESTÁ (0.55, 2026-08-30)** — ver §0. El resto de niveles sigue sin
+> implementar, pero ahora cada uno es un módulo pequeño en vez de una cirugía.
+
+## 0. Lo que ya existe: el proveedor de KEK
+
+`lib/src/kek.js`. De dónde sale la clave que cifra el disco es **configurable por
+perfil**, con dos proveedores:
+
+| Proveedor | Qué hace | Por defecto |
+|---|---|---|
+| `machine` | scrypt(material de la máquina + salt) — **lo de siempre** | **sí** |
+| `command` | envuelve una DEK aleatoria llamando a un programa externo | no |
+
+Con `command` vale **cualquier KMS** —AWS, OpenBao, gcloud, el del cliente, un
+script propio— sin meter un SDK en el binario. Contrato del programa: **base64 por
+la entrada, base64 por la salida**, y nada más.
+
+**Es por perfil, no por bóveda.** Cada perfil vive en `<vault>/p/<id>` y lleva ahí
+su `atrest.json`, así que en la misma máquina un perfil puede ir con KMS y el de
+al lado con la clave de siempre. Tumbar el KMS deja mudo **solo** al que depende de
+él. (El **registro de perfiles**, en la raíz, tiene su propia clave y **no** queda
+cubierto por el KMS de un perfil: guarda la lista y el verificador del candado, no
+el contenido de nadie, pero conviene no creer que ya está protegido. `atrest status`
+lo avisa.)
+
+```
+dotrino-vault atrest status              de dónde sale la clave, perfil por perfil
+dotrino-vault atrest test                ¿responde el KMS? sin tocar los datos
+dotrino-vault atrest rekey <config.json> cambia de proveedor recifrando todo
+dotrino-vault atrest rekey --machine     vuelve a la clave de esta máquina
+```
+
+**Editar `atrest.json` a mano está bloqueado a propósito**: estrenar una DEK sobre
+datos ya cifrados los dejaría ilegibles para siempre — la maestra incluida — y sin
+un solo aviso. Quien lo intente se lleva un `kek-needs-rekey` y ni un byte tocado.
+Cambiar de proveedor es `atrest rekey`, que descifra todo con la clave vieja, lo
+recifra con la nueva, comprueba archivo por archivo y deja copias `.bak-rekey`.
+
+Y la regla que no se toca: **si el proveedor falla, esto revienta.** No hay
+repliegue a `machine`. Un repliegue silencioso convertiría «tumbo la red del vault»
+en «el vault se cifra con la clave débil», que es un agujero disfrazado de
+comodidad.
+
+### Recetas
+
+**AWS KMS** — `kms-wrap.sh` y `kms-unwrap.sh`:
+
+```sh
+#!/bin/sh
+# wrap: entra la DEK en base64, sale el sobre en base64
+set -eu
+base64 -d | aws kms encrypt --key-id "$DOTRINO_KMS_KEY" \
+  --plaintext fileb:///dev/stdin --query CiphertextBlob --output text
+```
+
+```sh
+#!/bin/sh
+# unwrap: entra el sobre en base64, sale la DEK en base64
+set -eu
+base64 -d | aws kms decrypt --ciphertext-blob fileb:///dev/stdin \
+  --query Plaintext --output text
+```
+
+**OpenBao / HashiCorp Vault (motor transit)** — autohospedado, sin tercero:
+
+```sh
+#!/bin/sh
+set -eu
+bao write -field=ciphertext transit/encrypt/dotrino-vault plaintext="$(cat)" | base64 -w0
+```
+
+```sh
+#!/bin/sh
+set -eu
+bao write -field=plaintext transit/decrypt/dotrino-vault ciphertext="$(base64 -d)"
+```
+
+Y el `atrest.json` que los usa:
+
+```json
+{
+  "provider": "command",
+  "label": "AWS KMS alias/dotrino-vault",
+  "wrap":   { "cmd": "/opt/dotrino/kms-wrap.sh" },
+  "unwrap": { "cmd": "/opt/dotrino/kms-unwrap.sh" }
+}
+```
+
+**Antes de aplicarlo**: `atrest test` con esa config comprueba el ida y vuelta sin
+tocar un solo dato. Correrlo primero no es una recomendación, es el orden.
 
 ## 1. El hueco, dicho sin adornos
 
@@ -124,6 +215,7 @@ propiedad que un KMS **no** te da de forma nativa.
 
 > Propuesto por el dueño el 2026-08-30, mientras se escribía este documento.
 > **Es mejor idea que la escalera de arriba**, y la reordena entera.
+> **CONSTRUIDO el mismo día** — ver §0; lo que sigue es el porqué.
 
 Un KMS **es** un HSM al que se le habla por red. Si el problema es que no tenemos
 raíz de hardware, la vía más rápida no es comprar un chip: es **envolver la KEK con
@@ -203,9 +295,8 @@ prefiere eso a un papel impreso.
 tenga una sola forma cableada de conseguir su clave, cada nivel es una cirugía; con
 el proveedor de KEK puesto, cada uno es un módulo de cien líneas que se enchufa.
 
-1. **La costura**: proveedor de KEK (`wrap`/`unwrap`) con `machine` como primera
-   implementación, que es la de hoy. **No cambia el comportamiento**, y sin esto lo
-   demás no se puede empezar.
+1. ~~**La costura**: proveedor de KEK (`wrap`/`unwrap`).~~ **HECHO** (§0), con
+   `machine` y `command` funcionando y 12 pruebas.
 2. **Nivel 5** (teléfono, StrongBox) — casi gratis, la app ya está.
 3. **Nivel 2** (FIDO2/PRF) para el PC del dueño — el salto grande.
 4. **Nivel 3** (TPM sin PCR) **u OpenBao autohospedado** para el VPS del vault —
@@ -216,7 +307,13 @@ el proveedor de KEK puesto, cada uno es un módulo de cien líneas que se enchuf
 
 ## 5. Estado
 
-**Nada de esto está implementado.** `acta-de-perfil.md` §F5 ya listaba «TPM 2.0
-opt-in» como pendiente; este documento lo ordena y añade el resto. La brecha
-frente a un KMS sigue abierta y hay que decirlo así en cualquier copy de
-Enterprise: **hoy la bóveda no tiene raíz de confianza en hardware.**
+**La costura está (§0); los niveles, no.** `machine` sigue siendo el proveedor por
+defecto de todos los perfiles, así que **mientras nadie configure un KMS, la brecha
+sigue exactamente igual de abierta**: la costura hace posible cerrarla, no la cierra.
+
+Lo que se puede decir hoy en la copy de Enterprise, y nada más: **la bóveda se
+conecta al KMS que el cliente ya tenga**. Lo que NO se puede decir: que la bóveda
+tenga raíz de confianza en hardware por defecto, porque no la tiene.
+
+`acta-de-perfil.md` §F5 ya listaba «TPM 2.0 opt-in» como pendiente; este documento
+lo ordena y añade el resto.
