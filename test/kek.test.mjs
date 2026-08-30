@@ -290,3 +290,42 @@ test('los stores del vault funcionan igual con la clave de un KMS', async () => 
   assert.equal(openStore(d).getSetting('nota'), 'CONTENIDO')
   rm(d)
 })
+
+/**
+ * EL FALLO DE DOCKER, que costó una cuenta entera de mentira y podría haber costado una
+ * de verdad: en una imagen Alpine no hay `/etc/machine-id`, así que el material se cae al
+ * `hostname` — y en Docker el hostname es el ID DEL CONTENEDOR. Con los datos en un
+ * volumen (o un EBS), el ciclo normal de `docker rm` + volver a levantar cambiaba la clave
+ * y dejaba la cuenta ilegible PARA SIEMPRE, con un «unable to authenticate data» por toda
+ * explicación.
+ *
+ * Ahora se guarda una huella de quién escribió, y si no coincide se para y se explica.
+ */
+test('si la máquina cambió, se para y lo DICE en vez de fallar en las tripas de AES', async () => {
+  const { assertSameMachine } = await import('../lib/src/kek.js')
+  const d = tmp()
+
+  assertSameMachine(d, 'maquina-uno', false)          // primera vez: anota la huella
+  assert.ok(fs.existsSync(path.join(d, 'atrest.machine')))
+  assertSameMachine(d, 'maquina-uno', true)           // la misma: pasa
+
+  // Otra máquina (otro contenedor) Y con datos ya cifrados: se para.
+  assert.throws(() => assertSameMachine(d, 'maquina-dos', true), (e) => {
+    assert.equal(e.code, 'kek-machine-changed')
+    assert.match(e.message, /container id changing/, 'el mensaje tiene que nombrar la causa más probable')
+    assert.match(e.message, /Nothing was modified/)
+    return true
+  })
+  rm(d)
+})
+
+test('sin datos todavía, cambiar de máquina NO estorba', async () => {
+  const { assertSameMachine } = await import('../lib/src/kek.js')
+  const d = tmp()
+  // Un volumen vacío estrenado en otro contenedor es un caso legítimo: se deja pasar.
+  assert.doesNotThrow(() => {
+    assertSameMachine(d, 'uno', false)
+    assertSameMachine(d, 'dos', false)
+  })
+  rm(d)
+})

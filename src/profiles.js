@@ -25,7 +25,7 @@ import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
 import { atRestFor, migrateFile, kekFor } from './atrest.js'
-import { probe as probeKek, writeConfig as writeKekConfig } from './atrest.js'
+import { probe as probeKek, writeConfig as writeKekConfig, configFromEnv } from './atrest.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
@@ -126,6 +126,21 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
   // respaldo o en una carpeta compartida por descuido, que es lo que el códec cubre
   // para el resto. La migración verifica antes de reemplazar y es de una sola vez.
   ensureDir(root)
+  // LA RAÍZ TAMBIÉN NECESITA EL PROVEEDOR DEL ENTORNO, y esto lo destapó un contenedor:
+  // los perfiles nacían con la clave en el KMS, pero el REGISTRO de perfiles seguía con
+  // la de la máquina — así que al recrear el contenedor la bóveda no arrancaba igual,
+  // solo que fallando un paso antes. No guarda el contenido de ningún perfil (la lista y
+  // el verificador del candado), pero sin él no hay bóveda.
+  //
+  // Solo si está por estrenar: si el registro ya existe cifrado con la clave de antes,
+  // cambiarle el proveedor lo dejaría ilegible. Ahí se migra con `atrest rekey`.
+  if (!fs.existsSync(path.join(root, 'atrest.json'))) {
+    const kek = configFromEnv()
+    if (kek && !fs.existsSync(file)) {
+      probeKek(root, kek)
+      writeKekConfig(root, kek)
+    }
+  }
   try { migrateFile(file, kekFor(root)) } catch (_) {}
   const atRest = atRestFor(root)
   let data = readJson(file, null, atRest)
@@ -218,6 +233,29 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
           if (/^peers\..+\.json$/.test(f)) { try { fs.renameSync(path.join(root, f), path.join(dir, f)) } catch (_) {} }
         }
       }
+      // EL PROVEEDOR DEL ENTORNO, y SOLO en una instalación nueva. Es lo que hace que un
+      // contenedor levantado con `DOTRINO_KMS_KEY_ID` tenga su primer perfil ya con la
+      // clave en el KMS, sin entrar a configurar nada.
+      //
+      // En una MIGRACIÓN no se toca, y el matiz importa: esos archivos ya están cifrados
+      // con la clave de la máquina, así que ponerles ahora un proveedor distinto los
+      // dejaría ilegibles —el guardia lo pararía, pero el usuario se quedaría con una
+      // bóveda que no arranca tras actualizar—. Ahí se migra con `atrest rekey`, a la vista.
+      if (!legacy) {
+        const kek = configFromEnv()
+        if (kek) {
+          try {
+            probeKek(dir, kek)
+            writeKekConfig(dir, kek)
+          } catch (e) {
+            // Si el KMS no responde, NO se cae al proveedor de máquina: eso crearía una
+            // cuenta con la clave débil sin que nadie lo pidiera, y en un contenedor esa
+            // cuenta se pierde al recrearlo. Mejor no arrancar.
+            try { fs.rmSync(dir, { recursive: true, force: true }) } catch (_) {}
+            throw e
+          }
+        }
+      }
       // «Perfil 1» tanto al migrar como en una instalación nueva: es un nombre que
       // el dueño puede cambiar, y evita que la CLI salude con «(sin nombre)».
       data.profiles.push({ id, name: 'Perfil 1', createdAt: Date.now() })
@@ -249,6 +287,10 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     add (name, { adopt = false, kek = null } = {}) {
       const id = newId()
       ensureDir(dirOf(id))
+      // Sin `--kms` explícito, manda el entorno: es lo que permite levantar un contenedor
+      // con KMS pasando variables, sin entrar a escribir un JSON dentro. Solo al CREAR:
+      // un perfil que ya existe manda con su `atrest.json`.
+      kek = kek || configFromEnv()
       if (kek) {
         // Comprobar ANTES de dejar rastro: un KMS que no responde no puede dejar a
         // medio crear un perfil cuya maestra no se va a poder volver a abrir.

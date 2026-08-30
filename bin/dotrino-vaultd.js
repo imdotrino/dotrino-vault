@@ -31,7 +31,33 @@ if (process.argv.includes('--tui') && daemonAlive()) {
   process.exit(0)
 }
 
-const mgr = await runDaemon()
+/**
+ * Un fallo de la CLAVE DEL DISCO no es un error cualquiera: casi siempre significa que el
+ * dueño está a punto de creer que perdió su cuenta. Se muestra como un MENSAJE, con lo
+ * que hay que hacer, en vez de un volcado de Node del que nadie saca nada.
+ *
+ * (Se distingue por `code`, no por la frase: los mensajes se pueden traducir, los códigos
+ * son el contrato.)
+ */
+let mgr
+try {
+  mgr = await runDaemon()
+} catch (e) {
+  if (e?.code && String(e.code).startsWith('kek-')) {
+    console.error('\n  No se pudo abrir la clave con la que están cifrados estos datos.\n')
+    console.error('  ' + e.message + '\n')
+    if (e.code === 'kek-machine-changed') {
+      console.error('  Esto pasa casi siempre en un contenedor: la clave por defecto sale de la')
+      console.error('  máquina, y en Docker «la máquina» es el id del contenedor, que cambia cada vez.')
+      console.error('  Levántalo con una llave que NO dependa de la máquina:\n')
+      console.error('    -e AWS_REGION=…  -e DOTRINO_KMS_KEY_ID=alias/tu-llave')
+      console.error('    (o -e DOTRINO_KEK_CMD=/ruta/a/tu-script  para OpenBao u otro)\n')
+    }
+    console.error('  No se modificó nada.\n')
+    process.exit(3)
+  }
+  throw e
+}
 
 // Atajo de dev: --pair imprime el QR directo en stdout (en producción se usa el CLI).
 // Empareja contra el perfil ACTIVO.

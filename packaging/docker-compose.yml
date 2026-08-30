@@ -1,0 +1,72 @@
+# Dotrino Vault en un contenedor, con la clave en KMS y los datos en un disco aparte.
+#
+#   docker compose -f packaging/docker-compose.yml up -d
+#   docker compose -f packaging/docker-compose.yml exec vault dotrino-vault pair
+#
+# Las dos decisiones que importan están abajo con su porqué: por qué la clave va en KMS y
+# por qué los datos van en un disco montado y no en un volumen de Docker.
+
+services:
+  vault:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: dotrino-vault
+    container_name: dotrino-vault
+    restart: unless-stopped
+
+    # NO hay `ports`, y no es un olvido: la bóveda no escucha nada. Se conecta ella hacia
+    # afuera al proxio del ecosistema, y tus aparatos la alcanzan por ahí. No hay nada que
+    # abrir en el router ni ningún grupo de seguridad de entrada que tocar.
+
+    environment:
+      # --- La clave del disco: EN KMS, y en un contenedor esto no es opcional ---
+      # Sin esto la clave se deriva de la máquina, y en un contenedor «la máquina» es el
+      # id del contenedor: cambia en cada `docker run` y el disco deja de abrirse. La
+      # bóveda ahora se niega a arrancar y lo explica, pero negarse no recupera nada.
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DOTRINO_KMS_KEY_ID: ${DOTRINO_KMS_KEY_ID:?hace falta una llave de KMS (id, ARN o alias/…)}
+      # Credenciales: NO se ponen aquí. En EC2 las da el rol de la instancia por IMDSv2, y
+      # el cliente las coge solo. Un secreto en un compose acaba en git.
+      #
+      # Para OpenBao u otro KMS, en vez de las dos de arriba:
+      #   DOTRINO_KEK_CMD: /opt/dotrino/kek-openbao.sh
+      # (contrato: base64 por la entrada, base64 por la salida)
+
+      PROXY_URL: ${PROXY_URL:-wss://proxy.dotrino.com}
+
+    volumes:
+      # EL DISCO. Un bind a un punto de montaje del host —un EBS— y no un volumen de
+      # Docker, por una razón práctica: un EBS se desprende de una instancia y se engancha
+      # en otra, y con la clave en KMS la bóveda arranca allí sin más. Con un volumen de
+      # Docker eso hay que copiarlo a mano.
+      #
+      # En el host, antes de levantar:
+      #   mkfs.ext4 /dev/nvme1n1            (solo la primera vez, y BORRA el disco)
+      #   mkdir -p /mnt/dotrino-vault
+      #   mount /dev/nvme1n1 /mnt/dotrino-vault
+      #   chown 1000:1000 /mnt/dotrino-vault      (el usuario `node` de la imagen)
+      #   echo '/dev/nvme1n1 /mnt/dotrino-vault ext4 defaults,nofail 0 2' >> /etc/fstab
+      - ${DOTRINO_VAULT_DATA:-/mnt/dotrino-vault}:/data
+
+    # El contenedor no necesita nada de root, y lo dice en vez de confiar en que nadie
+    # se lo dé: sin privilegios nuevos y con el sistema de archivos de solo lectura salvo
+    # `/data` y `/tmp`. La imagen ya corre como `node`.
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+    security_opt:
+      - no-new-privileges:true
+
+    # Que el proceso exista no significa que la bóveda esté sirviendo: se pregunta por su
+    # propio contrato de estado.
+    healthcheck:
+      test: ["CMD-SHELL", "dotrino-vault status > /dev/null 2>&1 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }

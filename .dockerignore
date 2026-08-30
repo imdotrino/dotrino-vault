@@ -5,6 +5,9 @@ dist
 .github
 test
 packaging
+# ...menos el cliente de KMS, que SÍ viaja en la imagen: es lo que le da la clave del
+# disco cuando no puede salir de la máquina (en un contenedor, nunca).
+!packaging/kms-aws.mjs
 twa
 docs
 *.md

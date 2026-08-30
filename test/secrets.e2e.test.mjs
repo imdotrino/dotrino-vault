@@ -765,8 +765,11 @@ test('el servicio descifra AL VUELO: el valor no toca el disco en ningun momento
     }
   }
   andar(svc)
-  // Lo unico que persiste: su identidad, y la sal del cifrado en reposo que la protege.
-  assert.deepEqual(vistos.sort(), ['atrest.salt', 'service-identity.json'],
+  // Lo unico que persiste: su identidad, la sal del cifrado en reposo que la protege, y
+  // la HUELLA de la maquina que la escribio (`atrest.machine`) — que no guarda material,
+  // solo un hash, y esta para que mover este directorio a otra maquina de un error claro
+  // en vez de un fallo de AES. Aplica igual al servicio que a la boveda.
+  assert.deepEqual(vistos.sort(), ['atrest.machine', 'atrest.salt', 'service-identity.json'],
     'un archivo NUEVO en el directorio del servicio es sospechoso: revisa que no sea una cache')
 })
 
