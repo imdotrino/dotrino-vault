@@ -191,6 +191,23 @@ async function cmdPair (args = []) {
   // --approval: el aparato que entre pedirá tu aprobación (teléfono) en cada petición de
   // claves privadas. Por defecto NO pide; se cambia después con `caps <ID> +permiso`.
   const approval = args.includes('--approval')
+  // --kms <config.json>: el sitio que se va a crear (--new-account o --adopt) NACE con
+  // su clave de disco en el KMS. Va aquí y no en un paso posterior porque es el único
+  // momento que sirve: la llave de este aparato se genera al crear el perfil, y una
+  // migración posterior no deshace que haya existido bajo la clave de la máquina.
+  const kmsIdx = args.indexOf('--kms')
+  let pairKek = null
+  if (kmsIdx >= 0) {
+    const f = args[kmsIdx + 1]
+    if (!f || f.startsWith('-')) { console.error('uso: dotrino-vault pair --adopt --kms <config.json>'); process.exit(2) }
+    try { pairKek = JSON.parse(fs.readFileSync(f, 'utf8')) } catch (e) {
+      console.error('No se pudo leer %s: %s', f, e.message); process.exit(2)
+    }
+    try { probeKek(dataDir(), pairKek) } catch (e) {
+      console.error('El KMS no respondió (%s): %s', e.code || 'error', e.message)
+      console.error('No se creó ninguna cuenta.'); process.exit(1)
+    }
+  }
   const scIdx = args.indexOf('--scope')
   let scope = null
   if (scIdx >= 0) {
@@ -221,11 +238,11 @@ async function cmdPair (args = []) {
   if (naIdx >= 0) {
     const next = args[naIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta ${new Date().toISOString().slice(0, 10)}`
-    const d = await profileRequest('add', { name })
+    const d = await profileRequest('add', { name, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
     if (!d.id) { console.error('El daemon no dijo qué cuenta creó.'); process.exit(1) }
     PROFILE = d.id // el emparejamiento y los comandos siguientes apuntan a ELLA
-    console.log('Cuenta nueva: %s  (%s)', name, d.id)
+    console.log('Cuenta nueva%s: %s  (%s)', pairKek ? ' (clave del disco en el KMS)' : '', name, d.id)
   }
   // `--adopt [nombre]`: la TERCERA respuesta a «¿de qué cuenta hablamos?» — el camino A.
   // Aquí la cuenta NO sale de esta bóveda: la trae el aparato y esta bóveda pasa a
@@ -236,12 +253,25 @@ async function cmdPair (args = []) {
   if (adopt) {
     const next = args[adIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta del dispositivo`
-    const d = await profileRequest('add', { name, adopt: true })
+    const d = await profileRequest('add', { name, adopt: true, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
     if (!d.id) { console.error('El daemon no dijo qué cuenta creó.'); process.exit(1) }
     PROFILE = d.id
-    console.log('Cuenta a la espera de adoptar la del dispositivo: %s  (%s)', name, d.id)
+    console.log('Cuenta a la espera de adoptar la del dispositivo%s: %s  (%s)', pairKek ? ' (clave del disco en el KMS)' : '', name, d.id)
   }
+  // `--kms` sin un sitio que crear no hace NADA, y callárselo es lo peor que se puede
+  // hacer aquí: el dueño se quedaría creyendo que su aparato nació en el KMS.
+  if (pairKek && !adopt && naIdx < 0) {
+    console.error('--kms solo sirve cuando se crea el sitio, porque la llave del aparato')
+    console.error('se genera en ese momento. Úsalo con una de las dos:')
+    console.error('  dotrino-vault pair --adopt      --kms <config.json>   (la cuenta la trae el aparato)')
+    console.error('  dotrino-vault pair --new-account --kms <config.json>  (cuenta nueva, nacida aquí)')
+    console.error('')
+    console.error('Emparejar contra una cuenta que ya vive en esta bóveda no cambia su clave de')
+    console.error('disco: esa ya se escribió cuando se creó. Ver docs/llaves-de-hardware.md.')
+    process.exit(2)
+  }
+
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
   writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}) })
@@ -1313,6 +1343,10 @@ function help () {
   tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
   status              estado del servicio + fingerprint
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
+  pair --kms <config.json>
+                      el sitio que se cree (--adopt o --new-account) NACE con su clave
+                      de disco en el KMS. Es el único momento que sirve: la llave del
+                      aparato se genera al crear el perfil
   pair --new-account [nombre]
                       estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
                       (sin la bandera entra a la cuenta activa, o a la de --profile)

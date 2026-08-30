@@ -238,6 +238,27 @@ test('un perfil puede nacer con el KMS: la config está antes que ningún dato',
   rm(root)
 })
 
+/**
+ * La OTRA forma de tener un aparato con KMS: el sitio que nace vacío esperando adoptar
+ * la cuenta que trae un aparato (`pair --adopt`). Es la que importa para pasar una
+ * cuenta existente, porque los perfiles son independientes y una cuenta ajena solo
+ * entra por adopción — nunca «creando un perfil y enrolándolo».
+ */
+test('un sitio para ADOPTAR también nace con el KMS', async () => {
+  const { openProfiles } = await import('../src/profiles.js')
+  const root = tmp()
+  const p = openProfiles(root)
+  const creado = p.add('a la espera', { adopt: true, kek: kmsConfig() })
+  const d = p.dirOf(creado.id)
+
+  assert.equal(readConfig(d).provider, 'command')
+  assert.equal(p.get(creado.id).adopt, true, 'sigue marcado para adoptar')
+  // La llave de miembro se genera DESPUÉS, al preparar la adopción: cuando llegue, la
+  // config ya está puesta y nace bajo la clave del KMS.
+  assert.deepEqual(fs.readdirSync(d).sort(), ['atrest.json'])
+  rm(root)
+})
+
 test('si el KMS no responde, el perfil NO se crea a medias', async () => {
   const { openProfiles } = await import('../src/profiles.js')
   const root = tmp()

@@ -57,25 +57,47 @@ clave del KMS y no existe nunca bajo otra. Si el KMS no responde, no se crea nad
 directorio a medias. `atrest rekey` sobre un perfil con identidad **se niega** y explica
 esto mismo; para el caso legítimo (el disco nunca salió de tu control) está `--anyway`.
 
-### Y cómo se pasa una CUENTA existente al KMS
+### Las DOS formas de tener un aparato-bóveda con KMS
 
-No moviendo bytes: **enrolando una llave nueva y retirando la vieja**. Como una bóveda es
-multicuenta, la cuenta puede estar a la vez con y sin KMS mientras dura el cambio, en la
-misma máquina:
+> Precisado por el dueño el 2026-08-30. **Los perfiles son independientes y una cuenta
+> ajena solo entra por ADOPCIÓN**, así que «crea un perfil y enrólalo a la cuenta» —como
+> decía antes este documento— era sencillamente imposible: un perfil creado con
+> `profile add` trae su propia génesis y no se enrola a nada.
 
-1. `profile add <nombre> --kms <config.json>` — la bóveda nueva, nacida en el KMS.
-2. Enrólala al acta de la cuenta **como un aparato más**.
-3. Pásale el sellado y **revoca el aparato viejo**.
+| | Comando | Qué cuenta acaba llevando |
+|---|---|---|
+| **Enrolando (adoptar)** | `pair --adopt --kms <cfg>` | **la que trae el aparato**: la bóveda pone un sitio vacío, nacido con el KMS, y adopta esa cuenta al emparejar |
+| **Perfil nuevo** | `profile add <n> --kms <cfg>`, o `pair --new-account --kms <cfg>` | una cuenta **nueva**, con su propia génesis |
 
-El `profileId` **no cambia**: es la pubkey de la génesis (D3 del acta), el nombre estable
-de la cuenta para siempre. Lo que cambia es quién sella. Reputación, contactos y contenido
-firmado siguen valiendo.
+En los dos casos el `--kms` va **al crear el sitio**, y no es un capricho de la interfaz:
+la llave de este aparato se genera en ese momento. Por eso `pair --kms` **sin**
+`--adopt` ni `--new-account` no se acepta en silencio — emparejar contra una cuenta que
+ya vive en esta bóveda no cambia su clave de disco, porque esa ya se escribió cuando se
+creó, y dejar creer lo contrario sería el peor final posible.
 
-⚠️ **Lo que este camino no cierra solo:** la llave vieja sigue existiendo en cualquier
-copia del disco anterior al traspaso. Después del traspaso no puede nada (§2.4.1 del acta:
-sus actas van firmadas por quien ya no es el sellador y se rechazan), y lo único que la
-frena ante quien **no vio** el traspaso es el pin de `maxSeq`. Cerrar esa ventana del todo
-es el **oráculo de frescura**, que sigue sin construirse — ver `sucesion.md` §5.
+### Pasar una cuenta que YA existe: falta una pieza
+
+El camino está diseñado y es el **traspaso de master** (`acta-de-perfil.md` §2.1.3), que
+cubre con el mismo mecanismo «dispositivo → bóveda» y «bóveda → bóveda (mudarse de PC)»,
+que es exactamente este caso:
+
+1. `pair --adopt --kms <cfg>` — sitio vacío nacido en el KMS; su llave de miembro se
+   genera bajo esa clave.
+2. El aparato que tiene la cuenta se empareja: el sitio **la adopta** y la llave nueva
+   entra como miembro.
+3. **Traspaso**: el master actual sella un acta que, en el **mismo `seq`**, admite al
+   nuevo y le pasa el `sealer`. Sin ventana intermedia. El nuevo re-emite los certs.
+
+⚠️ **El paso 3 NO está implementado.** No existe `transferSealer` en ningún sitio: está
+especificado al detalle (§1.2.2, §2.1.3) y pendiente en la **fase F2** del acta
+(líneas 496-502), con su prueba F2 también sin escribir. Hasta que se construya, **una
+cuenta existente no se puede pasar al KMS** — solo se puede empezar una nueva ahí.
+
+Y cuando se construya, queda esto en pie: la llave vieja sigue existiendo en cualquier
+copia del disco anterior al traspaso. Después no puede nada (§2.4.1: sus actas van
+firmadas por quien ya no sella y se rechazan), y ante quien **no vio** el traspaso lo
+único que la frena es el pin de `maxSeq`. Cerrar esa ventana es el **oráculo de
+frescura** — ver `sucesion.md` §5.
 
 **Editar `atrest.json` a mano está bloqueado a propósito**: estrenar una DEK sobre
 datos ya cifrados los dejaría ilegibles para siempre — la maestra incluida — y sin
