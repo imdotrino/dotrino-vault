@@ -30,7 +30,7 @@ import { assertVar } from './secretsStore.js'
 import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
-import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
+import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
 import { readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
 import { VERSION } from './version.js'
 
@@ -336,6 +336,54 @@ function cmdApprove (code) {
   writeReq('approve-request.json', { code: String(code) })
   sendSignal(s.pid, 'SIGUSR2')
   console.log('Aprobando con el código %s… verifica con: dotrino-vault devices', code)
+}
+
+/**
+ * `dotrino-vault join <invitación>` — ESTA bóveda entra en la cuenta de OTRA.
+ *
+ * Es el papel contrario a `pair`: aquí no se invita, se acepta. Y lo que entra en el acta
+ * es la llave de ESTA bóveda, no una de aparato inventada — por eso después se le puede
+ * dar `+sella` y que sea el respaldo de verdad de la otra.
+ *
+ * El código que sale por pantalla hay que TIPEARLO en la otra bóveda (`approve`): una
+ * invitación interceptada no basta para entrar.
+ */
+async function cmdJoin (rest) {
+  const texto = (rest || []).filter((a) => !a.startsWith('-')).join(' ').trim()
+  if (!texto) {
+    console.error('uso: dotrino-vault join <invitación>   (lo que imprime «pair» en la otra bóveda)')
+    process.exit(2)
+  }
+  const qr = parseInvite(texto)
+  if (!qr?.sn || !qr?.iss || !qr?.proxy) {
+    console.error('Esa invitación no se entiende. Pega la línea completa que imprime «dotrino-vault pair».')
+    process.exit(2)
+  }
+  const s = requireDaemon()
+  const res = path.join(dir, 'join.json')
+  try { fs.rmSync(res, { force: true }) } catch (_) {}
+  writeReq('join-request.json', { qr, label: 'bóveda' })
+  sendSignal(s.pid, 'SIGUSR2')
+
+  console.log('Entrando en la cuenta de la otra bóveda…')
+  let visto = null
+  for (let i = 0; i < 900; i++) {          // hasta 3 min: hay un humano tipeando al otro lado
+    await sleep(200)
+    const d = readJson(res, null)
+    if (!d) continue
+    if (d.code && d.code !== visto) {
+      visto = d.code
+      console.log('\n  Tipea este código en la OTRA bóveda:   dotrino-vault approve %s\n', d.code)
+    }
+    if (d.state === 'done') {
+      console.log('Listo: esta bóveda ya es miembro de esa cuenta (acta #%s).', d.seq ?? '?')
+      console.log('Para que además pueda SELLAR, en la otra:  dotrino-vault caps <ID> +sella')
+      return
+    }
+    if (d.state === 'error') { console.error('No se pudo entrar: %s', d.error); process.exit(1) }
+  }
+  console.error('Se agotó la espera. ¿Se aprobó el código en la otra bóveda?')
+  process.exit(1)
 }
 
 function cmdReject (deviceId) {
@@ -1389,6 +1437,9 @@ function help () {
                                     y una privada NO se vuelve pública (bórrala y créala).
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
+  join <invitación>   ESTA bóveda ENTRA en la cuenta de otra (el papel contrario a pair).
+                      Entra con su propia llave, así que después se le puede dar +sella
+                      y ser el respaldo de esa cuenta
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
@@ -1447,6 +1498,7 @@ export async function runCtl (argv) {
     case 'lock': return cmdLock()
     case 'status': return cmdStatus()
     case 'pair': return cmdPair(rest)
+    case 'join': return cmdJoin(rest)
     case 'pending': return cmdPending()
     case 'approve': return cmdApprove(rest[0])
     case 'reject': return cmdReject(rest[0])

@@ -183,6 +183,12 @@ test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
     'REWRAP_OK',
     // Renunciar a permisos propios: lo pide un agente headless al arrancar.
     'RENOUNCE',
+    // El aviso de OTRA BÓVEDA de la misma cuenta, con el acta nueva dentro (multivault).
+    // Es una decisión, no una carencia: `startDeviceVault` corre DENTRO de la identidad
+    // (`vault/core.js`), que ya es la dueña de `adoptActa` y ya recibe actas por sus
+    // propios caminos —al renovar el cert y al adoptar—. El daemon necesita el gancho
+    // explícito porque su identidad vive detrás de un RPC y nada más se las da.
+    'ADMIN_EVENT',
   ])
 
   const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))

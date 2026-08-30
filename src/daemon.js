@@ -209,6 +209,10 @@ export async function runDaemon () {
   const rejectReqFile = path.join(dir, 'reject-request.json')
   const revokeReqFile = path.join(dir, 'revoke-request.json')
   const secretReqFile = path.join(dir, 'secret-request.json')
+  // MULTIVAULT: esta bóveda se UNE a la cuenta de otra. Va por aquí y no por `pair` porque
+  // es el papel contrario — aquí no se invita a nadie, se acepta una invitación ajena.
+  const joinReqFile = path.join(dir, 'join-request.json')
+  const joinResFile = path.join(dir, 'join.json')
   const secretsListFile = path.join(dir, 'secrets-list.json')
   /**
    * Por qué falló la última orden de variables. La consola pide el cambio y el volcado
@@ -393,6 +397,41 @@ export async function runDaemon () {
           console.log(req.sub ? '[vault] device removed' : '[vault] revoked nonce=%s', req.nonce || '')
         } catch (e) { console.error('[vault] revocation failed:', e.message) }
         rm(revokeReqFile)
+      }
+      /**
+       * UNIRSE A LA CUENTA DE OTRA BÓVEDA (multivault). La llave que entra como miembro es
+       * la de ESTA bóveda —no una de aparato inventada—, que es lo que después permite
+       * darle `+sella` y que sea el respaldo de verdad de la otra.
+       *
+       * El código de confirmación lo genera esta bóveda y hay que TIPEARLO en la otra: la
+       * misma defensa de siempre, para que una invitación interceptada no baste.
+       */
+      const join = readJsonSafe(joinReqFile)
+      if (join?.qr) {
+        rm(joinReqFile)
+        rm(joinResFile)
+        try {
+          const id = targetOf(join)?.identity
+          if (!id) throw new Error('no identity for that profile')
+          const off = id.onVault?.((e) => {
+            if (e?.phase === 'challenge' && e.code) {
+              console.log('[vault] type this code in the other vault:  %s', e.code)
+              writeJson(joinResFile, { at: Date.now(), code: e.code, state: 'waiting' })
+            }
+          })
+          // `join: 'new'` y no `'current'`: esta bóveda ya tiene su propia cuenta, y
+          // `'current'` la pisaría con la ajena. Con `'new'` nace aquí una cuenta MÁS —con
+          // llave nueva— y es ESA la que entra en el acta de la otra bóveda; lo que ya
+          // había no se toca. Es lo correcto para el multivault: una máquina puede ser el
+          // respaldo de varias cuentas sin dejar de tener la suya.
+          const r = await id.enrollDevice(join.qr, { label: join.label || 'bóveda', join: 'new' })
+          off?.()
+          console.log('[vault] joined the account of the other vault (record #%s)', r?.acta?.seq ?? '?')
+          writeJson(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null })
+        } catch (e) {
+          console.error('[vault] could not join:', e.message)
+          writeJson(joinResFile, { at: Date.now(), state: 'error', error: e.message })
+        }
       }
       // Secretos: `secret set/rm` (por SCOPE) y `secret device set/rm` (por APARATO),
       // del CLI o de la TUI. El archivo con el valor vive un instante en el mismo dir

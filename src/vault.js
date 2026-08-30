@@ -769,10 +769,33 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.REWRAP_OK) return await handleRewrapOk(payload)
       if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
       if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
+      if (payload.type === MSG.ADMIN_EVENT) return await handleAdminEvent(payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
   })
+
+  /**
+   * AVISO DE OTRA BÓVEDA de la misma cuenta (multivault). Trae el acta nueva y aquí se
+   * ADOPTA, que es lo que hace que conceder un permiso surta efecto en la otra máquina en
+   * vez de esperar a que renueve su cert.
+   *
+   * No se comprueba quién lo manda y no hace falta: `adoptActa` aplica §2.4.1 —firma,
+   * encadenado, `seq` que no baja y desempate— así que un acta ajena o vieja se rechaza
+   * sola. Fiarse del remitente sería la comprobación débil; fiarse del acta es la fuerte.
+   */
+  async function handleAdminEvent (payload) {
+    const acta = payload?.acta
+    if (!acta || typeof acta !== 'object') return
+    try {
+      const r = await identity.adoptActa?.(acta)
+      if (r?.adopted) log(`[vault] adopted record #${acta.seq} announced by another vault (${r.reason})`)
+      // Y el RECHAZO también se dice. Callarlo dejaría el peor fallo de todos: se concede
+      // un permiso en una máquina, la otra no se entera, y no hay una sola línea que lo
+      // explique — que es exactamente lo que costó encontrar esto.
+      else log(`[vault] IGNORED the record #${acta.seq} announced by another vault: ${r?.reason || 'no reason given'}`)
+    } catch (e) { log('[vault] could not adopt the announced record:', e.message) }
+  }
 
   // ----- LA BÓVEDA DE CONTRASEÑAS -----
   //
@@ -982,6 +1005,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     try {
       const body = { ev, ...info, ts: Date.now() }
       const { signature } = await identity.signData(body)
+      // EL ACTA VIAJA CON EL AVISO. Sin esto, un miembro se enteraba de que «algo cambió»
+      // pero no de QUÉ, y no veía el acta nueva hasta renovar su cert — hasta 30 días.
+      // Para un aparato eso era lento; para OTRA BÓVEDA es fatal: se le concede `sella` y
+      // no puede sellar, porque su copia del acta no lo dice todavía.
+      // No es un dato secreto (es pública dentro del perfil y estos son sus miembros), y
+      // quien la recibe la adopta por las reglas de §2.4.1, así que una vieja o ajena no
+      // hace daño: se rechaza sola.
+      const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
       const { issued } = await identity.listDelegations()
       // UNO POR LLAVE, no uno por delegación: renovar emite una delegación nueva para la
       // MISMA sub-clave, así que un aparato que lleve tiempo enrolado aparece varias veces
@@ -991,7 +1022,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       for (const d of issued || []) {
         if (!d.sub || seen.has(d.sub)) continue
         seen.add(d.sub)
-        try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {}
+        try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature, acta }) } catch (_) {}
       }
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
   }
