@@ -219,6 +219,7 @@ async function cmdPair (args = []) {
       const t = ALIAS[tok] || tok
       if (t === 'admin' || t === 'administra') { console.error('`admin` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +administra'); process.exit(2) }
       if (t === 'approve' || t === 'aprueba') { console.error('`approve` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +aprueba'); process.exit(2) }
+      if (t === 'sealer' || t === 'sella') { console.error('`sella` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +sella'); process.exit(2) }
       if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
       // El gestor de contraseñas SÍ se empareja con su permiso puesto: es lo único que
       // va a hacer ese aparato, y pedirlo en dos pasos era el paso que nadie daba.
@@ -438,7 +439,7 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +permiso')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +permiso')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
@@ -501,11 +502,15 @@ async function cmdApproval (args = []) {
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+permiso|-permiso')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+sella|-sella|+permiso|-permiso')
     process.exit(2)
   }
   const CAP_BY_WORD = {
     firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
+    // `sella`: SELLAR EL ACTA. Es lo que convierte a otra bóveda en respaldo de esta —
+    // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
+    // quien manda sigue mandando. Como `administra`, no se empareja: se concede aquí.
+    sella: 'sealer', sealer: 'sealer',
     // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
     // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
     contrasenas: 'passwords', 'contraseñas': 'passwords',
@@ -1392,6 +1397,8 @@ function help () {
   members             el acta del perfil: quién es tuyo y qué puede hacer
   label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
   caps <ID> ±permiso  cambia permisos (+firma -guarda +administra +contrasenas …)
+                      +sella = OTRA BÓVEDA que puede sellar el acta de esta cuenta, para
+                      que perder una máquina no se la lleve. No es un traspaso
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
   atrest status       de dónde sale la clave que cifra el disco (esta máquina, o un KMS)
   atrest test         comprueba que el KMS envuelve y desenvuelve, SIN tocar los datos

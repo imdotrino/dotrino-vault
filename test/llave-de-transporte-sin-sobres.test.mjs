@@ -54,16 +54,26 @@ test('sealKeyAt devuelve llaves de sellado y JAMÁS un miembro', () => {
 })
 
 /**
- * Y la otra mitad: no hay ninguna capacidad de MIEMBRO que conceda firmar el transporte.
- * Si la hubiera, se podría pedir «déjame firmar respuestas» y llevarse de paso los sobres
- * que recibe un miembro, que es exactamente lo que esta separación evita.
+ * DOS COSAS QUE AHORA SE LLAMAN CASI IGUAL, y conviene no confundirlas nunca:
  *
- * Esta aserción es a propósito una lista literal: si alguien añade una capacidad al
- * pilar, esta prueba se cae y obliga a preguntarse si acaba de mezclar firmar con leer.
+ *   · el permiso **`sealer`** (2026-08-30) = SELLAR EL ACTA. Lo tiene la otra bóveda, va
+ *     en el acta como cualquier permiso, y quien lo tiene **sí** recibe sobres — tiene que
+ *     poder regenerarlos, para eso existe.
+ *   · la llave **`sealPub`** = FIRMAR EL TRANSPORTE Y LOS SOBRES. No es un miembro, no es
+ *     un permiso y **no recibe nada**.
+ *
+ * Lo que esta prueba fija es la segunda: que no aparezca una capacidad de miembro que
+ * conceda firmar el transporte. Si la hubiera, se podría pedir «déjame firmar respuestas»
+ * y llevarse de paso los sobres que recibe un miembro.
+ *
+ * La lista literal es a propósito: si alguien añade una capacidad al pilar, esto se cae y
+ * obliga a mirar en cuál de las dos columnas acaba de meterla.
  */
-test('ninguna capacidad de miembro concede firmar el transporte', () => {
-  assert.deepEqual([...CAPS].sort(), ['admin', 'approve', 'passwords', 'read', 'secrets', 'sign', 'store'])
+test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
+  assert.deepEqual([...CAPS].sort(), ['admin', 'approve', 'passwords', 'read', 'sealer', 'secrets', 'sign', 'store'])
   for (const c of ['seal', 'transport', 'serve', 'replica']) {
-    assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar no es leer`)
+    assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar el transporte no es leer`)
   }
+  // Y `sealer`, que sí está, es sellar el ACTA — no la llave que firma las respuestas.
+  assert.ok(CAPS.includes('sealer'))
 })

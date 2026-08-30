@@ -1253,8 +1253,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const onRewrapOk = (fn) => { rewrapWaiters.add(fn); return () => rewrapWaiters.delete(fn) }
 
   /**
-   * LAS OTRAS BÓVEDAS (`cosealers` del acta) entran en TODOS los cajones, también en los
-   * que tienen dueño. Decidido por el dueño el 2026-08-30.
+   * LAS OTRAS BÓVEDAS —los miembros con el permiso `sella`— entran en TODOS los cajones,
+   * también en los que tienen dueño. Decidido por el dueño el 2026-08-30.
    *
    * Y no contradice la regla de agosto —«un cajón con dueño no se envuelve para quien
    * administra»—, porque un cosellador **no es quien administra**: es un master. Aquella
@@ -1268,11 +1268,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function cosealerMembers () {
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    const co = Array.isArray(record?.cosealers) ? record.cosealers : []
-    if (!co.length) return []
+    if (!record) return []
     // Sin `encPub` no hay a dónde envolver: se queda en deuda y se ve como `sinLlave`,
     // igual que cualquier otro miembro incompleto.
-    return (record?.members || []).filter((m) => co.includes(m.pub) && m.encPub && m.pub !== master)
+    return (record.members || []).filter((m) =>
+      m.pub !== master && m.encPub && Acta.memberCan(record, m.pub, 'sealer'))
   }
 
   /** Sin duplicar: un cosellador puede ser además el dueño del cajón. */
