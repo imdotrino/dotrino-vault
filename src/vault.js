@@ -633,8 +633,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('secrets.pending', { device: deviceId, ns, id: pend.id })
       log(`[vault] ${ns}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
       const body = { op: 'secrets.pending', ns, id: pend.id, exp: pend.exp, ts: Date.now() }
-      const { signature } = await identity.signData(body)
-      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+      // El acta viaja también aquí: es con lo que el agente sabe qué llave podía firmar
+      // esto. En `secrets.result` va dentro del sobre; en un «pendiente» no hay sobre.
+      reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record || null })
       await notifyApprovers(pend, record)
       return
     }
@@ -658,13 +659,30 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // `seq` con el que se firmaron—. No es un dato secreto: el acta es pública dentro
     // del perfil y el agente ya es miembro. Sin ella podría abrir igual, pero no sabría
     // de dónde salió lo que abre.
+    // El acta va en LOS DOS caminos, también en el v3 heredado: ya no sirve solo para
+    // decir de dónde salieron los sobres, sino para saber qué llave podía firmar esta
+    // respuesta. Sin ella el agente no puede comprobar quién le contestó.
     const payload = b.legacy
-      ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])) }
+      ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])), acta: record || null }
       : { sealed: b, acta: record || null }
     const enc = await seal({ ek, payload })
     const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
-    const { signature } = await identity.signData(body)
-    return { body, signature }
+    // LA MAESTRA NO FIRMA ESTO. Su trabajo es sellar el acta y reenvolver sobres; servir
+    // no es suyo. Quien firma es la LLAVE DE SELLADO que el acta nombra (`sealPub`), la
+    // misma que ya firma cada sobre — y por eso esto se puede servir con el perfil
+    // bloqueado, y algún día desde una réplica que no tiene la maestra ni debe tenerla.
+    return { body, seal: await sealOrFail(body) }
+  }
+
+  /**
+   * Firma con la llave de sellado, o revienta. No hay repliegue a la maestra: si el acta
+   * no nombra una llave de sellado que sea nuestra, esta bóveda no está en condiciones de
+   * servir, y decirlo es mejor que servir firmado por quien no toca.
+   */
+  async function sealOrFail (body) {
+    const s = await signSeal(body)
+    if (!s) throw new Error('this vault has no sealing key named by the record: it cannot serve')
+    return s
   }
 
   /**
@@ -688,8 +706,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const by = await deviceIdOf(chk.device).catch(() => null)
     const answer = async (body) => {
       body = { ...body, ts: Date.now() }
-      const { signature } = await identity.signData(body)
-      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+      reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body) })
     }
     if (op === 'approvals') return answer({ op: 'approvals', items: approvals.list() })
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
