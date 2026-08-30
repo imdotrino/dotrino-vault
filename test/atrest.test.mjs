@@ -11,6 +11,17 @@ import { machineKey, atRestFor, migrateFile, isEncrypted, encryptText, decryptTe
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'atrest-'))
 
+/** Lo mínimo que el store necesita para firmar sus entradas: una llave y `signData`. */
+async function identidadDePrueba () {
+  const { makeDeviceKey, signWithDevice } = await import('@dotrino/identity/capabilities')
+  const k = await makeDeviceKey()
+  return {
+    me: { publickey: k.publickey },
+    signData: async (data) => ({ ...(await signWithDevice({ privateJwk: k.privateJwk, data })), publickey: k.publickey })
+  }
+}
+
+
 test('lo cifrado se vuelve a leer, y con otra clave no', () => {
   const a = tmp(); const b = tmp()
   const blob = encryptText('{"maestra":"secreta"}', machineKey(a))
@@ -70,17 +81,28 @@ test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', a
   fs.writeFileSync(path.join(d, 'secrets.json'), JSON.stringify({ schemaVersion: 1, ns: { proxy: { TURN_KEY_ID: 'TOKEN' } } }))
 
   // Abrir basta para migrar: no se le pide nada al usuario.
-  assert.equal(openStore(d).getSetting('nota'), 'ARBOL')
+  // El store MIGRA lo que había en `vault.json` al registro y aparta el archivo viejo:
+  // no se conservan dos verdades para lo mismo.
+  const idPrueba = await identidadDePrueba()
+  const st = await openStore(d, { identity: idPrueba })
+  assert.equal(st.getSetting('nota'), 'ARBOL')
+  assert.equal(st.migrados, 1, 'se trajo el ajuste que había')
+  assert.ok(!fs.existsSync(path.join(d, 'vault.json')), 'el archivo viejo se aparta')
   assert.equal(openThreadStore(d).methods.listThread({ threadKey: 'k' })[0].texto, 'HILO')
   // Un v1 en claro se lee igual: el store lo sube a v3 y sigue sirviendo sin sellar
   // (sellar exige la contraseña, y abrir no debe pedirla).
   assert.equal(openSecretsStore(d).bundleFor('proxy').entries.TURN_KEY_ID.v, 'TOKEN')
 
-  for (const [f, secreto] of [['vault.json', 'ARBOL'], ['threads.json', 'HILO'], ['secrets.json', 'TOKEN']]) {
+  for (const [f, secreto] of [['threads.json', 'HILO'], ['secrets.json', 'TOKEN']]) {
     const raw = fs.readFileSync(path.join(d, f), 'utf8')
     assert.ok(isEncrypted(raw), f + ' tiene que quedar cifrado')
     assert.ok(!raw.includes(secreto), f + ' no puede dejar el contenido a la vista')
   }
+  // `vault.json` ya no existe: su contenido vive en el REGISTRO, cifrado línea a línea.
+  const { writerFile } = await import('../lib/src/oplog.js')
+  const registro = fs.readFileSync(path.join(d, 'log', writerFile(idPrueba.me.publickey)), 'utf8')
+  assert.ok(isEncrypted(registro.trim()), 'el registro va cifrado')
+  assert.ok(!registro.includes('ARBOL'), 'y no deja el ajuste a la vista')
   fs.rmSync(d, { recursive: true, force: true })
 })
 

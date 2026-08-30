@@ -79,7 +79,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const sealKeys = openSealKeys(dir)
   identity.setSealKeyProvider?.(() => sealKeys.mint())
 
-  const store = openStore(dir)
+  // El store es ahora un REGISTRO DE OPERACIONES (ver store.js): abrirlo lee y proyecta,
+  // así que es asíncrono, y escribir también. `puedeEscribir` sale del acta — un registro
+  // de quien la cuenta no reconoce se descarta.
+  // El acta de AHORA, para saber de quién se aceptan registros. Se lee una vez al abrir:
+  // si más tarde entra un miembro nuevo, sus entradas se leerán en el siguiente `refresh`.
+  // Sin acta (un perfil recién nacido) se acepta todo: todavía no hay a quién comparar.
+  const actaAlAbrir = (await identity.profileActa?.().catch(() => null))?.acta || null
+  const store = await openStore(dir, {
+    identity,
+    puedeEscribir: actaAlAbrir
+      ? (pub) => (actaAlAbrir.members || []).some((m) => m.pub === pub)
+      : null
+  })
+  if (store.migrados) log(`[vault] ${store.migrados} setting(s) moved from vault.json into the op log`)
   const threads = openThreadStore(dir)
   const approvals = createApprovals()
 
@@ -1373,7 +1386,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         return
       }
     } catch (e) {
-      store.setSetting(`rotate-due:${ns}`, String(Date.now()))
+      // Se ESPERA: escribir en el registro es asíncrono desde que el store es un log, y
+      // una escritura sin esperar es un fallo que nadie ve.
+      await store.setSetting(`rotate-due:${ns}`, String(Date.now()))
       log(`[vault] ns:${ns}: PENDING ROTATION - a member left and its key could not be rotated (${e.message})`)
       audit('secret.rotate-due', { ns, reason: e.message })
     }
@@ -1474,7 +1489,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const ns = owner.startsWith('ns:') ? owner.slice(3) : null
     if (ns && store.getSetting(`rotate-due:${ns}`)) {
       const rot = await secrets.rotate(owner, members, adminKey)
-      store.setSetting(`rotate-due:${ns}`, undefined)
+      // Esta importa el doble: si borrar la marca falla y nadie se entera, la rotación se
+      // repetiría en cada arranque para siempre.
+      await store.setSetting(`rotate-due:${ns}`, undefined)
       log(`[vault] ns:${ns}: pending rotation settled (${rot?.rotated ?? 0} variable(s) re-encrypted)`)
       audit('secret.rotate', { ns, keys: rot?.rotated ?? 0, pending: true })
       return rot
