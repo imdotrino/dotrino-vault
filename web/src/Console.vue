@@ -829,6 +829,11 @@ async function connect (qr, mode = 'join') {
   } catch (e) {
     // El error se queda DENTRO del proceso: si se soltara a la consola entera, el
     // dueño acabaría en una pantalla llena de botones sin saber qué salió mal.
+    // Y TAMBIÉN A LA CONSOLA. El mensaje de pantalla es para el dueño; este es para poder
+    // averiguar qué pasó. Sin él, un emparejamiento fallido no dejaba rastro en ninguna
+    // parte —en la app de Dotrino la consola del WebView va al registro del sistema, y
+    // aun así no había nada que leer— y el diagnóstico salía a base de adivinar.
+    console.error('[pair] falló el emparejamiento:', mode, e?.code || '', e?.message || e)
     pairError.value = t.value.pair_fail + (e?.message || e)
   } finally {
     off?.(); pairing.value = false; pairCode.value = ''
