@@ -315,6 +315,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'sign')
+
+    // MANDA EL ACTA, NO EL PAPEL. Esto miraba solo el certificado, y era el único
+    // mostrador que lo hacía —`approve` y los secretos ya preguntaban al acta—. El agujero
+    // que dejaba: `caps <ID> -firma` quita `sign` del acta pero NO reemite ni revoca el
+    // cert del aparato, que sigue diciendo `vault:sign` hasta 30 días. Entonces su
+    // `signData` local veía que ya no puede y se lo PEDÍA a la bóveda… que decía que sí.
+    // O sea que quitarle el permiso de firmar no se lo quitaba: lo cambiaba de firmar él
+    // a que firmaras tú por él.
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (record && !Acta.memberCan(record, chk.device, 'sign')) {
+      audit('rejected', { what: 'sign', reason: 'acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not sign' })
+    }
+
+    // Y CERRADA NO FIRMA NADA (dueño, 2026-08-31). La regla de antes —«el daemon sigue
+    // firmando con el perfil bloqueado, para que un reinicio no deje las apps muertas»— es
+    // ANTERIOR AL MODELO DE SOBRES y queda derogada: con los sobres la bóveda no necesita
+    // firmar nada para servir. Lo que hace abierta es rehacer los sobres.
+    //
+    // Y las apps no se quedan muertas por esto: un aparato al que el acta le da `sign`
+    // firma con SU llave y no pasa por aquí (ver `signData` en el pilar). Leer y guardar
+    // tampoco pasan por aquí, y siguen funcionando con el candado echado.
+    if (isLocked()) {
+      audit('rejected', { what: 'sign', reason: 'locked' })
+      return reply(from, { type: MSG.ERROR, error: 'vault locked: the master key does not sign while the vault is closed' })
+    }
     const toSign = p.data?.payload
     if (toSign == null) return reply(from, { type: MSG.ERROR, error: 'data.payload required' })
     const { signature, publickey } = await identity.signData(toSign)

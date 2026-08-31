@@ -83,7 +83,7 @@ test('un dispositivo de un perfil no puede usar el otro perfil', async () => {
   )
 })
 
-test('con el profile locked: NO se edita el perfil, pero sí se firma y se guarda', async () => {
+test('con el profile locked: NO se edita el perfil ni firma la maestra, pero sí se guarda y se lee', async () => {
   const [a] = mgr.list()
   const vault = mgr.get(a.id)
   const dev = await pair(vault)
@@ -99,20 +99,29 @@ test('con el profile locked: NO se edita el perfil, pero sí se firma y se guard
   await assert.rejects(() => store(dev, 'profileSet', { me: { nickname: 'Hackeado' } }), /profile locked/)
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
-  // …pero leer el perfil, guardar contenido de las apps y FIRMAR siguen
-  // funcionando: un reinicio del PC no puede dejar las apps muertas hasta que
-  // alguien teclee la contraseña.
+  // …pero leer el perfil y guardar contenido de las apps siguen funcionando: un reinicio
+  // del PC no puede dejar las apps muertas hasta que alguien teclee la contraseña.
   assert.equal((await store(dev, 'profileGet')).me.nickname, 'Antes')
   await store(dev, 'appendMessage', { threadKey: 'chat', entry: { id: 'x', text: 'hola' } })
   await store(dev, 'recordOpen', { appId: 'chat' })
-  const signed = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
-  assert.ok(signed.signature, 'la maestra sigue firmando con el profile locked')
-  assert.equal(signed.publickey, vault.master)
 
-  // Desbloqueado: se vuelve a poder editar.
+  // LA MAESTRA, EN CAMBIO, NO FIRMA CERRADA (dueño, 2026-08-31). Este test decía lo
+  // contrario, y era cierto ANTES DEL MODELO DE SOBRES: entonces la bóveda tenía que
+  // firmar para servir. Ya no — con los sobres no firma nada, y abierta lo que hace es
+  // rehacerlos.
+  //
+  // Y las apps no se quedan muertas por esto, que era el miedo de la regla vieja: un
+  // aparato al que el acta le da `sign` firma con SU llave y NO pasa por la bóveda. Este
+  // test la llama a pelo, que es lo que ya no procede.
+  await assert.rejects(() => requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } }),
+    /locked/, 'cerrada, la maestra no firma')
+
+  // Desbloqueado: se vuelve a poder editar, y la maestra vuelve a firmar si se le pide.
   await mgr.profiles.unlock(a.id, 'frase-de-prueba-larga')
   await store(dev, 'profileSet', { me: { nickname: 'Después' } })
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Después')
+  const firmado = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
+  assert.equal(firmado.publickey, vault.master, 'abierta sí, si alguien se lo pide')
 })
 
 test('el candado es por perfil: el otro perfil se sigue editando', async () => {
@@ -147,11 +156,16 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
       () => requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } }),
       /locked/, 'y con él cerrado ya no se edita el perfil')
 
-    // LO QUE NO SE CORTA: firmar, leer y guardar. El candado es de la consola.
+    // LO QUE NO SE CORTA: leer y guardar. Es lo que las apps necesitan para no quedarse
+    // muertas, y no pasa por la maestra.
     assert.equal((await requestStore({ ...dev, method: 'profileGet' })).me.nickname, 'Antes')
     await requestStore({ ...dev, method: 'appendMessage', args: { threadKey: 'chat', entry: { id: 'y', text: 'sigo' } } })
-    const signed = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
-    assert.ok(signed.signature, 'la maestra sigue firmando tras el bloqueo automático')
+
+    // LO QUE SÍ SE CORTA: que firme la MAESTRA. Este test decía lo contrario y era de
+    // antes del modelo de sobres. Firmar no es lo que mantiene vivas a las apps: un
+    // aparato al que el acta le da `sign` firma con su propia llave, sin la bóveda.
+    await assert.rejects(() => requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } }),
+      /locked/, 'cerrada sola, la maestra tampoco firma')
 
     // Y se vuelve a abrir con la misma contraseña: cerrarse solo no es olvidarla.
     await m2.profiles.unlock(p.id, 'frase-de-prueba-larga')
