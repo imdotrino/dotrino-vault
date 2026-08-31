@@ -205,6 +205,17 @@ async function cmdPair (args = []) {
   // --approval: el aparato que entre pedirá tu aprobación (teléfono) en cada petición de
   // claves privadas. Por defecto NO pide; se cambia después con `caps <ID> +permiso`.
   const approval = args.includes('--approval')
+  // --name <n>: CÓMO SE VA A LLAMAR el aparato que entre, decidido aquí y antes de nada.
+  // Sin esto el nombre lo ponía el propio aparato, que por defecto usa el apodo del
+  // PERFIL: acababas con varios dispositivos llamados igual que tú, y para distinguirlos
+  // había que renombrarlos después —cuando ya no sabías cuál era cuál—.
+  const nIdx = args.indexOf('--name')
+  let label = null
+  if (nIdx >= 0) {
+    const v = args[nIdx + 1]
+    if (!v || v.startsWith('-')) { console.error('uso: dotrino-vault pair --name "teléfono de casa"'); process.exit(2) }
+    label = v.slice(0, 60)
+  }
   // --admin: el aparato que entre por esta invitación podrá ADMINISTRAR (la consola).
   // El QR no lleva nada: es una nota local de la bóveda y el permiso se aplica al aprobar
   // con el código que tecleas aquí. Ahorra el `caps <ID> +administra` de después, que en un
@@ -258,9 +269,11 @@ async function cmdPair (args = []) {
   // meter el dispositivo en una cuenta que ya vive aquí, se ESTRENA una (vacía) y
   // entra a ella; las demás no se tocan. En la TUI esto es una pregunta con sus
   // opciones; en la CLI es una bandera, para que siga sirviendo en un script.
+  // `--name` lleva su valor detrás: no puede confundirse con el nombre de la cuenta.
+  const consumido = (i) => nIdx >= 0 && i === nIdx + 1
   const naIdx = args.findIndex((a) => a === '--new-account')
   if (naIdx >= 0) {
-    const next = args[naIdx + 1]
+    const next = consumido(naIdx + 1) ? null : args[naIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta ${new Date().toISOString().slice(0, 10)}`
     const d = await profileRequest('add', { name, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
@@ -275,7 +288,7 @@ async function cmdPair (args = []) {
   const adIdx = args.findIndex((a) => a === '--adopt')
   const adopt = adIdx >= 0
   if (adopt) {
-    const next = args[adIdx + 1]
+    const next = consumido(adIdx + 1) ? null : args[adIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta del dispositivo`
     const d = await profileRequest('add', { name, adopt: true, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
@@ -298,7 +311,7 @@ async function cmdPair (args = []) {
 
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}), ...(admin ? { admin: true } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}), ...(admin ? { admin: true } : {}), ...(label ? { label } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -1469,6 +1482,9 @@ function help () {
                       estrena una cuenta VACÍA en este vault y mete ahí al dispositivo
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
+  pair --name <nombre>  cómo se llamará el aparato que entre. Sin esto el nombre lo pone
+                      ÉL, y por defecto usa el apodo del perfil: acabas con varios
+                      dispositivos llamados igual que tú
   pair --approval       el aparato que entre pedirá tu aprobación (teléfono) al recibir claves
   pair --admin          el aparato que entre podrá ADMINISTRAR (es lo que es una consola).
                       El QR no lleva nada: el permiso se aplica al aprobar el código aquí

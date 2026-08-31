@@ -255,3 +255,49 @@ test('el id de antes de la mudanza sigue resolviendo', async () => {
   assert.equal(p2.resolve(bueno), bueno)
   rm(root)
 })
+
+/**
+ * EL NOMBRE QUE PONE LA BÓVEDA MANDA. El aparato manda el suyo al enrolarse y pisaba
+ * siempre al de aquí — y como usa por defecto el apodo del PERFIL, te quedaban varios
+ * dispositivos llamados igual que tú (dueño, 2026-08-31).
+ *
+ * Se prueba contra la MESA de verdad. Una primera versión de este test copiaba la línea
+ * que decide y la comprobaba a ella: habría seguido verde con la regla invertida, que es
+ * peor que no tener test.
+ */
+test('el nombre puesto en `pair` gana al que trae el aparato', async () => {
+  const { createEnrollDesk } = await import('../lib/src/enroll.js')
+  const { makeDeviceKey, signWithDevice } = await import('@dotrino/identity/capabilities')
+
+  const master = await makeDeviceKey()
+  const aparato = await makeDeviceKey()
+  const vistos = []
+
+  const desk = createEnrollDesk({
+    identity: { signDelegation: async () => ({ cert: {} }) },
+    iss: master.publickey,
+    proxy: 'ws://x',
+    send: () => {}, sendByPubkey: () => {},
+    onChallenge: (c) => vistos.push(c.label)
+  })
+
+  // Dos emparejamientos: uno con nombre puesto aquí y otro sin él. En los dos el aparato
+  // se presenta como «Seyacat», que es lo que hace por defecto (el apodo del perfil).
+  const presentarse = async (label) => {
+    const { token, qr } = await desk.startPairing({ label, ttlMs: 60000 })
+    const data = {
+      v: 1, token, sn: qr.sn, dpub: aparato.publickey,
+      label: 'Seyacat',                       // lo que manda el aparato: el apodo del perfil
+      intent: 'join', ts: Date.now(),
+      commit: 'a'.repeat(64)                  // compromiso del código: aquí solo su forma
+    }
+    const { signature } = await signWithDevice({ privateJwk: aparato.privateJwk, data })
+    await desk.handleEnroll('remitente', { data, signature })
+  }
+
+  await presentarse('teléfono de casa')
+  await presentarse('')
+
+  assert.deepEqual(vistos, ['teléfono de casa', 'Seyacat'],
+    'con nombre puesto gana el tuyo; sin él, vale el que propone el aparato')
+})

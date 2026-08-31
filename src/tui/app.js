@@ -919,11 +919,40 @@ async function descartarCuenta (term, st, id, volverA) {
 }
 
 /**
+ * PRIMERO EL NOMBRE, y luego el QR.
+ *
+ * Sin preguntarlo, el nombre lo pone el propio aparato al enrolarse, y por defecto usa el
+ * apodo del PERFIL: te quedaban tres dispositivos llamados igual que tú y ninguna forma de
+ * saber cuál era cuál sin renombrarlos después —cuando ya no te acordabas—. Se pregunta
+ * ANTES porque después ya estás mirando un QR con el teléfono en la mano.
+ *
+ * Enter en blanco sigue valiendo: deja que lo diga el aparato, que es el comportamiento de
+ * siempre para quien no quiera decidirlo.
+ */
+function beginPairingNamed (term, st, profile, service = null, after = null) {
+  const i = L(st)
+  setInput(st, {
+    label: i.nameDeviceLabel,
+    hint: i.nameDeviceHint,
+    onSubmit: async (nombre) => {
+      st.input = null
+      const ok = await beginPairing(term, st, profile, service, (nombre || '').trim().slice(0, 60) || null)
+      // `after` es para quien tenga que limpiar si el emparejamiento no llega a abrirse
+      // (la cuenta que nació para él). Va aquí porque con el nombre de por medio ya no se
+      // puede mirar el valor de retorno desde fuera.
+      if (after) await after(ok)
+    },
+    onCancel: () => { st.input = null }
+  })
+  return true
+}
+
+/**
  * Abre el emparejamiento contra `profile` y salta a la pantalla del QR. Con `service`,
  * el QR es el de un SERVICIO de ese namespace (cert limitado a sus variables).
  */
-async function beginPairing (term, st, profile, service = null) {
-  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile, ...(service ? { service } : {}) }))
+async function beginPairing (term, st, profile, service = null, label = null) {
+  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile, ...(service ? { service } : {}), ...(label ? { label } : {}) }))
   // `service` se pega al estado porque el daemon no lo devuelve: la pantalla del QR
   // tiene que poder decir qué se está entregando, que no es lo mismo un aparato tuyo
   // que una máquina que solo va a leer la configuración del proxy.
@@ -983,7 +1012,7 @@ async function onKeyPairMode (term, st, key) {
   if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; return true }
   if (key.name !== 'enter' || !cur) return true
 
-  if (cur.mode === 'here') { await beginPairing(term, st, activeId(st)); return true }
+  if (cur.mode === 'here') { return beginPairingNamed(term, st, activeId(st)) }
 
   // SERVICIO: entra a la cuenta activa, pero con un certificado que solo sirve para
   // pedir las variables de SU namespace. El nombre del ns es el que luego pide el
@@ -1025,8 +1054,10 @@ async function onKeyPairMode (term, st, key) {
       // Si el emparejamiento no llega a abrirse, la cuenta que se creó PARA él se va con
       // él: si no, cada intento fallido dejaba una cuenta vacía —y encima activa— que
       // luego había que ir a borrar a mano adivinando cuál era.
-      if (!await beginPairing(term, st, created)) await descartarCuenta(term, st, created, previa)
-      else st.pairing.born = { id: created, from: previa }
+      beginPairingNamed(term, st, created, null, async (ok) => {
+        if (!ok) await descartarCuenta(term, st, created, previa)
+        else st.pairing.born = { id: created, from: previa }
+      })
     },
     onCancel: () => { st.input = null }
   })

@@ -604,10 +604,10 @@ export function pairUrl (qr) {
   return { url: inviteUrl(qr), code, payload: JSON.stringify(qr), b64: code }
 }
 
-export async function startPairing ({ profile, service } = {}) {
+export async function startPairing ({ profile, service, label } = {}) {
   requireAlive()
   rm(F.pair); rm(F.pending)
-  await writeReq(F.pairReq, service ? { service } : {}, profile)
+  await writeReq(F.pairReq, { ...(service ? { service } : {}), ...(label ? { label } : {}) }, profile)
   signalOrCleanup('SIGUSR1', [F.pairReq])
   for (let i = 0; i < 50; i++) {
     await sleep(100)
