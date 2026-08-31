@@ -47,7 +47,7 @@
     "pairing"
   ],
   "peerDependencies": {
-    "@dotrino/identity": ">=0.65.1",
+    "@dotrino/identity": ">=0.66.0",
     "@dotrino/proxy-client": ">=0.13.0"
   },
   "license": "MIT",

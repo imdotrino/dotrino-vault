@@ -307,6 +307,28 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   })
 
+  /**
+   * EL ACTA MANDA, EL PAPEL SOLO ACOMPAÑA. Se pregunta DESPUÉS de verificar la cadena y
+   * ANTES de hacer nada, en todos los mostradores.
+   *
+   * El certificado dice a qué se comprometió esta bóveda cuando conectó el aparato; el
+   * acta dice lo que puede HOY. Y no coinciden: `caps <ID> -lee` sella el acta pero no
+   * reemite ni revoca el papel, que vive hasta 30 días. Sin esto, quitarle un permiso a un
+   * aparato no se lo quitaba — seguía leyendo, guardando o firmando un mes más.
+   *
+   * Va por `memberCanScope` (el pilar) y no a mano en cada sitio: la regla es la misma en
+   * las dos bóvedas y se comprobaba mal en las dos.
+   *
+   * @returns {boolean} `true` si puede seguir; si no, ya contestó el «no».
+   */
+  async function actaAllows (from, chk, scope, what) {
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!record || Acta.memberCanScope(record, chk.device, scope)) return true
+    audit('rejected', { what, reason: 'acta' })
+    reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member no longer has that permission' })
+    return false
+  }
+
   // --- handleSign / handleGet: idénticos (verifyChain de la cadena D←maestra) ---
   async function handleSign (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'sign', reason: 'stale' }); return staleReply(from) }
@@ -323,11 +345,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // `signData` local veía que ya no puede y se lo PEDÍA a la bóveda… que decía que sí.
     // O sea que quitarle el permiso de firmar no se lo quitaba: lo cambiaba de firmar él
     // a que firmaras tú por él.
-    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
-    if (record && !Acta.memberCanSign(record, chk.device)) {
-      audit('rejected', { what: 'sign', reason: 'acta' })
-      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not sign' })
-    }
+    if (!await actaAllows(from, chk, SCOPE.SIGN, 'sign')) return
 
     // Y CERRADA NO FIRMA NADA (dueño, 2026-08-31). La regla de antes —«el daemon sigue
     // firmando con el perfil bloqueado, para que un reinicio no deje las apps muertas»— es
@@ -355,6 +373,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'get')
+    if (!await actaAllows(from, chk, SCOPE.READ, 'get')) return
     const id = p.data?.id || 'root'
     reply(from, { type: MSG.DATA, id, node: store.getNode(id) })
   }
@@ -383,6 +402,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
     }
     if (!chk.ok) return denyChain(from, chk, p, 'store')
+    // El scope que valió es el que hay que preguntarle al acta: un método de lectura pudo
+    // pasar con `read` en vez de `store`, y exigirle `store` al acta lo rechazaría a pesar
+    // de tener permiso para lo que pidió.
+    if (!await actaAllows(from, chk, chk.scope === SCOPE.READ ? SCOPE.READ : SCOPE.STORE, 'store')) return
     try {
       // CIFRADO de punta a punta con la clave de contenido del perfil: el proxy transporta
       // pero no ve nada de lo que el usuario guarda. Si el dispositivo mandó `enc`, se abre
