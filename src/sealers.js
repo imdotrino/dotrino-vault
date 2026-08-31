@@ -12,7 +12,12 @@
  * POR QUÉ SIN SELLAR, y no es un descuido (§4.1 pide sellar los mensajes dirigidos): lo que
  * viaja aquí va a acabar en un repo PÚBLICO, que es su propósito. Es el mismo caso que los
  * canales `publish`/`list` del proxio, exentos por la misma razón: no hay nada que ocultar.
- * Y no filtra de más — quién lo manda ya lo sabe el proxio por el `identify`.
+ * Y no filtra de más — quién lo manda ya lo sabe el proxio por el `identify`. Sellarlo,
+ * además, obligaría a conocer la llave de cifrado del testigo, y depositar tiene que poder
+ * hacerlo cualquiera sin pedirle nada a nadie.
+ *
+ * Va por `sendByPubkey` y no por `send`: al testigo se le conoce por su pubkey, y así lo
+ * depositado entra en la cola de 24 h del proxio si estuviera caído.
  *
  * CUÁNDO: al arrancar y después de cada acta. Publicar de más no cuesta nada (el registro
  * contesta «ya estaba») y así no hay que llevar la cuenta de qué se depositó — un estado
@@ -38,7 +43,7 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
     const cabeza = chain[chain.length - 1]?.seq
     if (cabeza === ultima) return
     try {
-      client.send(registry, { op: OP, chain })
+      await client.sendByPubkey(registry, { op: OP, chain })
       ultima = cabeza
       log(`[sealers] chain up to #${cabeza} deposited (${motivo})`)
     } catch (e) {

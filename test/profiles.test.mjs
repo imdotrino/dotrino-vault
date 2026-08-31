@@ -337,3 +337,46 @@ test('con autoLockMs 0 no se cierra solo (para pruebas y arranques largos)', asy
   assert.equal(p.isLocked(id), false)
   assert.equal(p.get(id).until, undefined)
 })
+
+/**
+ * ABIERTO TIENE QUE SIGNIFICAR ALGO.
+ *
+ * Antes «abierto» era solo una bandera: la llave derivada de la frase se usaba durante el
+ * `unlock` y se borraba en la misma línea. Media hora después, enrolar un servicio con la
+ * bóveda recién abierta fallaba con «wrong password» —envolverle la llave de su cajón
+ * exige abrir la copia de recuperación— y el aparato entraba sin poder leer nada. El fallo
+ * no se parecía a su causa: aparecía en el PRIMER ARRANQUE del servicio, no al enrolarlo.
+ */
+test('mientras está abierto se puede envolver sin volver a pedir la frase', async () => {
+  const p = openProfiles(tmp())
+  const { id } = await p.migrate(llave)
+  await p.setPassword(id, 'frase-de-prueba-larga')
+
+  p.lock(id)
+  assert.equal(p.openKey(id), null, 'cerrado no hay llave, y por eso hay que pedir la frase')
+
+  await p.unlock(id, 'frase-de-prueba-larga')
+  const k = p.openKey(id)
+  assert.ok(k instanceof Uint8Array && k.length === 32, 'abierto, la llave está a mano')
+  assert.deepEqual([...k], [...await p.adminKey(id, 'frase-de-prueba-larga')], 'y es la de la frase')
+
+  // Cerrar no es soltar la referencia: se borra el material. Lo que acota la exposición es
+  // el auto-candado, así que cuando salta tiene que llevarse esto también.
+  p.lock(id)
+  assert.equal(p.openKey(id), null)
+  assert.deepEqual([...k], new Array(32).fill(0), 'la llave se borró, no se olvidó')
+})
+
+test('el auto-candado también se lleva la llave', async () => {
+  const p = openProfiles(tmp(), { autoLockMs: 30 })
+  const { id } = await p.migrate(llave)
+  await p.setPassword(id, 'frase-de-prueba-larga')
+  await p.unlock(id, 'frase-de-prueba-larga')
+  const k = p.openKey(id)
+  assert.ok(k?.length === 32)
+
+  await new Promise((r) => setTimeout(r, 60))
+  assert.equal(p.isLocked(id), true, 'se cerró solo')
+  assert.equal(p.openKey(id), null)
+  assert.deepEqual([...k], new Array(32).fill(0))
+})

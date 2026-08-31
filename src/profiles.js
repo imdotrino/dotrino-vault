@@ -162,12 +162,40 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
   // hora a la que se cierra solo si nadie lo usa (ver AUTO_LOCK_MS).
   const unlocked = new Map() // id -> vence (ms epoch)
 
+  /**
+   * LA LLAVE DERIVADA DE LA FRASE, mientras el perfil está abierto.
+   *
+   * Hasta ahora «abierto» era SOLO una bandera: la llave se derivaba en el `unlock`, se
+   * usaba para rehacer el llavero y se borraba en el `finally` de la misma línea. La
+   * consecuencia se veía media hora después y no se parecía a su causa — enrolar un
+   * servicio con la bóveda recién abierta contestaba «wrong password», porque envolverle
+   * la llave de su cajón exige abrir la copia de recuperación y para eso hace falta la
+   * frase, que ya no estaba. El aparato entraba y descubría al PRIMER ARRANQUE que no
+   * podía leer su cajón (dueño, 2026-08-31: «el rato de enrolar la bóveda está abierta,
+   * así que debía crear los sobres sin preguntar»).
+   *
+   * Lo que se guarda NO es la contraseña: es la llave que sale de ella por scrypt, y solo
+   * mientras el candado esté abierto. Se borra —con `wipe`, no con un `delete`— al
+   * cerrarse, al cerrarse solo por inactividad, al borrar el perfil y al reiniciar el
+   * daemon. Ese es el precio, y es el mismo que ya se paga por poder sellar actas
+   * estando abierta: lo que acota la exposición es el auto-candado, no el olvido.
+   */
+  const llaves = new Map() // id -> Uint8Array (la llave derivada, solo si está abierto)
+
+  /** Borra el material de verdad antes de soltar la referencia. */
+  const olvidar = (id) => {
+    const k = llaves.get(id)
+    if (k) { try { k.fill(0) } catch (_) {} }
+    llaves.delete(id)
+  }
+
   /** ¿Sigue abierto? Vence al MIRARLO, así que no hace falta ningún temporizador. */
   const isOpen = (id) => {
     const until = unlocked.get(id)
     if (until == null) return false
     if (autoLockMs > 0 && Date.now() >= until) {
       unlocked.delete(id)
+      olvidar(id)
       // El aviso va después de borrarlo: quien lo escuche verá el perfil ya cerrado.
       try { onAutoLock?.(id) } catch (_) {}
       return false
@@ -395,6 +423,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       }
       if (data.current === id) data.current = quiere
       if (unlocked.has(id)) { unlocked.set(quiere, unlocked.get(id)); unlocked.delete(id) }
+      if (llaves.has(id)) { llaves.set(quiere, llaves.get(id)); llaves.delete(id) }
       save()
       return quiere
     },
@@ -425,6 +454,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       if (data.current === id) data.current = data.profiles[0].id
       save()
       unlocked.delete(id)
+      olvidar(id)
       try { fs.rmSync(dirOf(id), { recursive: true, force: true }) } catch (_) {}
       return { id, name: p.name || '' }
     },
@@ -511,10 +541,21 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       delete p.tries
       save()
       open(id)
+      // La llave se queda mientras el candado esté abierto: es lo que permite envolverle
+      // su cajón a un servicio que se enrola AHORA, sin volver a pedir la frase.
+      llaves.set(id, await api.adminKey(id, password))
       return { ok: true, locked: false }
     },
 
-    lock (id) { assertExists(id); unlocked.delete(id); return { ok: true, locked: api.isLocked(id) } },
+    lock (id) { assertExists(id); unlocked.delete(id); olvidar(id); return { ok: true, locked: api.isLocked(id) } },
+
+    /**
+     * La llave del perfil ABIERTO, o `null`. Es lo que hace que «la bóveda está abierta»
+     * signifique algo más que una bandera: con ella se envuelve la llave de un cajón sin
+     * volver a pedir la frase. Cerrado —o nunca abierto— devuelve `null` y quien llame
+     * tendrá que pedirla, que es exactamente el comportamiento de antes.
+     */
+    openKey (id) { return isOpen(id) ? (llaves.get(id) || null) : null },
 
     /** Pone o cambia la contraseña. Cambiarla exige haber desbloqueado antes. */
     async setPassword (id, password) {

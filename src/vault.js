@@ -53,7 +53,7 @@ const MAX_REPLY_BYTES = 768 * 1024
  *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
  *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
  */
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, deriveAdminKey = null, forAdoption = false, onAdopted } = {}) {
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, deriveAdminKey = null, openKey = null, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
   // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
   // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando
@@ -177,7 +177,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     recipients: (owner) => recipientsOf(owner),
     // La FIRMA del sobre: dice que salió de esta bóveda y con qué acta (§8.8).
     signer: (body) => signSeal(body),
-    defaultKey: () => new Uint8Array(kekFor(dir))
+    // CON QUÉ se cierra la copia de recuperación cuando quien llama no trajo la frase:
+    // la llave del perfil si está ABIERTO, y si no la de la máquina. El orden importa —
+    // un perfil CON contraseña no se abre con la llave de la máquina, así que sin lo
+    // primero un aparato enrolado con la bóveda abierta se quedaba sin su cajón y solo
+    // se enteraba al arrancar (dueño, 2026-08-31).
+    defaultKey: () => openKey?.() || new Uint8Array(kekFor(dir))
   })
   // SIN CONTRASEÑA NO HAY SECRETO. Escribir no la pide (sellar solo necesita públicas,
   // §8.1), pero la copia de recuperación —la que deja al dueño VER sus valores— se cierra

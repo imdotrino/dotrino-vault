@@ -92,6 +92,10 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       // Para la consola remota: la contraseña llega dentro del sobre firmado y hay que
       // convertirla en la llave que abre la copia maestra de los secretos.
       deriveAdminKey: (password) => profiles.adminKey(id, password),
+      // La llave del perfil MIENTRAS esté abierto, o null. Con ella, enrolar un servicio
+      // con la bóveda abierta le envuelve su cajón en el acto en vez de dejarlo entrar
+      // sin poder leer nada (ver `profiles.js`, `llaves`).
+      openKey: () => profiles.openKey(id),
       // Camino A: nació para adoptar la cuenta de un aparato (ver profiles.add).
       forAdoption: !!p?.adopt,
       // Ya adoptó: la marca se consume (no vuelve a estar «a la espera»).
