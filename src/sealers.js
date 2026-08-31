@@ -6,8 +6,11 @@
  * sellar?* Si a una bóveda le quitaron el permiso, quien tenga el acta vieja no se entera
  * nunca — y seguiría creyéndole. El registro es el sitio donde mirar.
  *
- * QUÉ SE MANDA: solo los eslabones donde CAMBIA quién sella, nunca las actas. Un acta lleva
- * los aparatos de una persona con sus nombres y cuándo entró cada uno; eso no se publica.
+ * QUÉ SE MANDA: los ESLABONES (`sealerLinkOf`), nunca las actas. Y un eslabón no es un acta
+ * recortada: es un documento propio de ocho campos, firmado aparte y metido DENTRO del acta
+ * antes de firmarla (identity >= 0.72). Costó una vuelta descubrirlo — la primera cadena que
+ * llegó al registro se fue con los `label` y los `cn` de cada aparato, porque «un eslabón»
+ * era un acta entera. Un acta lleva el inventario de tu casa: no se publica, ni recortada.
  *
  * POR QUÉ SIN SELLAR, y no es un descuido (§4.1 pide sellar los mensajes dirigidos): lo que
  * viaja aquí va a acabar en un repo PÚBLICO, que es su propósito. Es el mismo caso que los
@@ -23,6 +26,8 @@
  * contesta «ya estaba») y así no hay que llevar la cuenta de qué se depositó — un estado
  * que se desincroniza en cuanto se restaura un disco.
  */
+import * as Acta from '@dotrino/identity/acta'
+
 export const OP = 'sealers.publish'
 
 /** El testigo de Dotrino. Se puede apuntar a otro: el registro no es un privilegio. */
@@ -34,11 +39,16 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
   let ultima = null
 
   async function publicar (motivo) {
-    let chain
-    try { chain = await identity.sealerChain?.() } catch (_) { return }
+    let actas
+    try { actas = await identity.sealerChain?.() } catch (_) { return }
+    if (!Array.isArray(actas)) return
+    // De cada acta sale su eslabón, y las que no cambiaron el sellador no dan ninguno.
+    const chain = actas.map((a) => Acta.sealerLinkOf(a)).filter(Boolean)
     // Una cuenta de una sola bóveda no tiene nada que refrescar: su conjunto de selladores
     // no puede cambiar. El registro la rechazaría, así que ni se molesta en mandarla.
-    if (!Array.isArray(chain) || chain.filter((a) => a?.sealerChanged).length < 2) return
+    // Una cuenta anterior a identity 0.72 tampoco tiene eslabones, y es el mismo caso: no
+    // aparece en el registro hasta que selle un acta nueva.
+    if (chain.length < 2) return
 
     const cabeza = chain[chain.length - 1]?.seq
     if (cabeza === ultima) return
