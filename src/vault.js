@@ -324,7 +324,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // O sea que quitarle el permiso de firmar no se lo quitaba: lo cambiaba de firmar él
     // a que firmaras tú por él.
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
-    if (record && !Acta.memberCan(record, chk.device, 'sign')) {
+    if (record && !Acta.memberCanSign(record, chk.device)) {
       audit('rejected', { what: 'sign', reason: 'acta' })
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not sign' })
     }
