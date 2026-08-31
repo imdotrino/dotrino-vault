@@ -19,6 +19,7 @@ import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.j
 import { createAdminDesk } from '../lib/src/admin.js'
 import { shouldNotifyRevoked } from '../lib/src/revocation.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
+import { startSealersPublisher } from './sealers.js'
 import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
@@ -215,6 +216,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   } catch (e) { log('[vault] could not set up the sealing key:', e.message) }
 
   const { client } = await createTransport({ identity, dir, url: proxyUrl })
+
+  // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
+  // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver
+  // `sealers.js` — es una comodidad para quien lee, nunca una dependencia de la bóveda.
+  startSealersPublisher({ identity, client, log })
 
   async function revocationSet () {
     const { revoked } = await identity.listDelegations()
