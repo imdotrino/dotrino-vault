@@ -1018,16 +1018,36 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // hace daño: se rechaza sola.
       const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
       const { issued } = await identity.listDelegations()
+      // A QUIÉN SE AVISA: a los MIEMBROS DEL ACTA, no solo a quien esta bóveda enroló.
+      //
+      // Esto avisaba únicamente por `issued` —las delegaciones que emitió esta bóveda—, y
+      // eso deja fuera exactamente el caso del multivault: la segunda bóveda entró por
+      // `join`, así que la delegación la emitió la PRIMERA. Cuando la segunda sellaba un
+      // acta nueva (admitir un aparato con su permiso `sella`), su lista de emitidas no
+      // tenía a la primera dentro y el cambio no llegaba a ninguna parte: las dos bóvedas
+      // quedaban con actas distintas y la del dueño sin enterarse de nada.
+      //
+      // El acta es la lista de quién es del perfil: esa es la lista correcta. `issued` se
+      // suma porque cubre a quien tiene cert y todavía no aparece ahí.
+      const miembros = (await identity.profileMembers?.().catch(() => null))?.members || []
+      const yo = identity.me?.publickey || null
       // UNO POR LLAVE, no uno por delegación: renovar emite una delegación nueva para la
       // MISMA sub-clave, así que un aparato que lleve tiempo enrolado aparece varias veces
       // y recibía el mismo aviso repetido —una vez por renovación acumulada—. Mismo
       // cuidado que en `notifyNsChange`.
       const seen = new Set()
-      for (const d of issued || []) {
-        if (!d.sub || seen.has(d.sub)) continue
-        seen.add(d.sub)
-        try { client.sendByPubkey(d.sub, { type: MSG.ADMIN_EVENT, body, signature, acta }) } catch (_) {}
+      const avisar = (pub) => {
+        if (!pub || pub === yo || seen.has(pub)) return
+        seen.add(pub)
+        // El fallo NO se traga. Que un aviso no salga es exactamente lo que deja a dos
+        // bóvedas con actas distintas sin que nadie se entere, y encontrarlo sin una línea
+        // de log cuesta días (la última vez, tres).
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature, acta }) }
+        catch (e) { log(`[vault] could not notify ${pub.slice(0, 24)}… of "${ev}": ${e.message}`) }
       }
+      for (const m of miembros) avisar(m.pub)
+      for (const d of issued || []) avisar(d.sub)
+      log(`[vault] notified ${seen.size} member(s) of "${ev}" (record #${acta?.seq ?? '?'})`)
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
   }
 
@@ -1904,6 +1924,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     isMaster: () => identity.isMaster(),
     setCaps: async (pub, caps) => {
       const r = await identity.setCaps(pub, caps)
+      // ¿SE QUEDÓ ALGUNO POR EL CAMINO? El acta tiene una lista CERRADA de permisos y
+      // `cleanCaps` descarta los que no conoce — correcto al recibir un acta ajena, y
+      // pésimo aquí: conceder `+sella` con una versión del pilar que no sabe qué es
+      // devolvía «Listo», resellaba el acta y no concedía nada. Costó una tarde en un
+      // contenedor, porque la imagen traía la versión de npm y el árbol local otra.
+      try {
+        const quedaron = new Set((await identity.profileMembers()).members.find((m) => m.pub === pub)?.caps || [])
+        const perdidos = caps.filter((c) => !quedaron.has(c))
+        if (perdidos.length) {
+          log(`[vault] WARNING these permissions were DROPPED: ${perdidos.join(', ')} — this build's @dotrino/identity does not know them (record unchanged for those)`)
+        }
+      } catch (_) { /* comprobar es un extra: si falla, no rompe el cambio */ }
       audit('caps', { device: await deviceIdOf(pub).catch(() => null), caps })
       await notifyMembers('caps', { deviceId: await deviceIdOf(pub).catch(() => null), caps })
       return r

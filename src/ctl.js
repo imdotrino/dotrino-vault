@@ -191,6 +191,15 @@ async function cmdPair (args = []) {
   // --approval: el aparato que entre pedirá tu aprobación (teléfono) en cada petición de
   // claves privadas. Por defecto NO pide; se cambia después con `caps <ID> +permiso`.
   const approval = args.includes('--approval')
+  // --admin: el aparato que entre por esta invitación podrá ADMINISTRAR (la consola).
+  // El QR no lleva nada: es una nota local de la bóveda y el permiso se aplica al aprobar
+  // con el código que tecleas aquí. Ahorra el `caps <ID> +administra` de después, que en un
+  // contenedor es otro `docker exec` y una vuelta a buscar el ID.
+  const admin = args.includes('--admin')
+  // --quiet: escupe SOLO la invitación (una línea) y termina. Sin QR y sin esperar.
+  // Para desplegar: en un contenedor no hay quien mire un QR pintado en una terminal, y un
+  // `pair` que se queda 2 minutos y medio esperando no se puede meter en un script.
+  const quiet = args.includes('--quiet')
   // --kms <config.json>: el sitio que se va a crear (--new-account o --adopt) NACE con
   // su clave de disco en el KMS. Va aquí y no en un paso posterior porque es el único
   // momento que sirve: la llave de este aparato se genera al crear el perfil, y una
@@ -275,7 +284,7 @@ async function cmdPair (args = []) {
 
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}), ...(admin ? { admin: true } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -296,9 +305,12 @@ async function cmdPair (args = []) {
   // UNA (la activa, o la de --profile). Decirlo evita enrolar el dispositivo en la
   // equivocada; es la misma línea que muestra la TUI.
   const acct = pair.profileName || pair.profile
+  // --quiet: la invitación y nada más, para poder capturarla desde un script.
+  if (quiet) { console.log(url); return }
   if (acct) console.log('\nCuenta que se comparte: %s%s', acct, pair.profileName && pair.profile ? `  (${pair.profile})` : '')
   console.log('\nEscanea este QR con el dispositivo que quieres conectar (válido %d min):\n', mins)
   console.log(qrToString(url)) // el QR abre la consola de dispositivos y empareja solo
+  if (admin) console.log(`${R}${B}⚠ Y además podrá ADMINISTRAR: admitir y quitar aparatos.${Z}`)
   console.log(`${R}${B}⚠ Este código deja LEER tus datos y FIRMAR con tu identidad.${Z}`)
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
@@ -349,9 +361,34 @@ function cmdApprove (code) {
  * invitación interceptada no basta para entrar.
  */
 async function cmdJoin (rest) {
-  const texto = (rest || []).filter((a) => !a.startsWith('-')).join(' ').trim()
+  const args = rest || []
+  // `--name <n>`: cómo se va a llamar aquí la cuenta ajena. Es un perfil MÁS de esta
+  // bóveda, y en una máquina que respalda a varias hace falta distinguirlas.
+  const nIdx = args.indexOf('--name')
+  const name = nIdx >= 0 && args[nIdx + 1] && !args[nIdx + 1].startsWith('-') ? args[nIdx + 1] : null
+  // `--kms <config.json>`: el perfil que se cree para la cuenta ajena NACE con su clave de
+  // disco en el KMS. Va aquí por la misma razón que en `pair`: es el único momento que
+  // sirve, porque la llave de esta bóveda para esa cuenta se genera al crear el perfil.
+  const kIdx = args.indexOf('--kms')
+  let kek = null
+  if (kIdx >= 0) {
+    const f = args[kIdx + 1]
+    if (!f || f.startsWith('-')) { console.error('uso: dotrino-vault join <invitación> --kms <config.json>'); process.exit(2) }
+    try { kek = JSON.parse(fs.readFileSync(f, 'utf8')) } catch (e) {
+      console.error('No se pudo leer %s: %s', f, e.message); process.exit(2)
+    }
+    try { probeKek(dataDir(), kek) } catch (e) {
+      console.error('El KMS no respondió (%s): %s', e.code || 'error', e.message)
+      console.error('No se creó ninguna cuenta.'); process.exit(1)
+    }
+  }
+  // Lo que queda tras quitar las banderas Y SUS VALORES es la invitación.
+  const consumidos = new Set()
+  for (const [i, v] of [[nIdx, name], [kIdx, kek]]) if (i >= 0) { consumidos.add(i); if (v != null) consumidos.add(i + 1) }
+  const texto = args.filter((a, i) => !consumidos.has(i) && !a.startsWith('-')).join(' ').trim()
   if (!texto) {
-    console.error('uso: dotrino-vault join <invitación>   (lo que imprime «pair» en la otra bóveda)')
+    console.error('uso: dotrino-vault join <invitación> [--name <n>] [--kms <config.json>]')
+    console.error('     (la invitación es lo que imprime «pair» en la otra bóveda)')
     process.exit(2)
   }
   const qr = parseInvite(texto)
@@ -362,7 +399,7 @@ async function cmdJoin (rest) {
   const s = requireDaemon()
   const res = path.join(dir, 'join.json')
   try { fs.rmSync(res, { force: true }) } catch (_) {}
-  writeReq('join-request.json', { qr, label: 'bóveda' })
+  writeReq('join-request.json', { qr, label: 'bóveda', ...(name ? { name } : {}), ...(kek ? { kek } : {}) })
   sendSignal(s.pid, 'SIGUSR2')
 
   console.log('Entrando en la cuenta de la otra bóveda…')
@@ -377,6 +414,7 @@ async function cmdJoin (rest) {
     }
     if (d.state === 'done') {
       console.log('Listo: esta bóveda ya es miembro de esa cuenta (acta #%s).', d.seq ?? '?')
+      if (d.profile) console.log('La cuenta vive aquí como el perfil %s  (dotrino-vault profile ls).', d.profile)
       console.log('Para que además pueda SELLAR, en la otra:  dotrino-vault caps <ID> +sella')
       return
     }
@@ -1405,6 +1443,10 @@ function help () {
                       (sin la bandera entra a la cuenta activa, o a la de --profile)
   pair --service <ns> empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
   pair --approval       el aparato que entre pedirá tu aprobación (teléfono) al recibir claves
+  pair --admin          el aparato que entre podrá ADMINISTRAR (es lo que es una consola).
+                      El QR no lleva nada: el permiso se aplica al aprobar el código aquí
+  pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
+                      esperar. Para desplegar (un contenedor no mira un QR en pantalla)
   pair --scope <lista>  los PERMISOS del cert: sign,read,store,contrasenas,secrets:<ns> (sin esto: sign,read,store;
                       se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
@@ -1437,9 +1479,14 @@ function help () {
                                     y una privada NO se vuelve pública (bórrala y créala).
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
-  join <invitación>   ESTA bóveda ENTRA en la cuenta de otra (el papel contrario a pair).
+  join <invitación> [--name <n>] [--kms <config.json>]
+                      ESTA bóveda ENTRA en la cuenta de otra (el papel contrario a pair).
                       Entra con su propia llave, así que después se le puede dar +sella
-                      y ser el respaldo de esa cuenta
+                      y ser el respaldo de esa cuenta. La cuenta ajena queda aquí como un
+                      PERFIL más (--name la nombra; --kms le pone la clave de disco en el
+                      KMS, y solo vale ahora: el perfil se está creando)
+                      Al desplegar, esto mismo va por el entorno y sin entrar a nada:
+                      DOTRINO_JOIN (o DOTRINO_JOIN_FILE) + DOTRINO_JOIN_NAME
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente

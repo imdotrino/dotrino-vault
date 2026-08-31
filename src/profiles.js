@@ -26,6 +26,7 @@ import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
 import { atRestFor, migrateFile, kekFor } from './atrest.js'
 import { probe as probeKek, writeConfig as writeKekConfig, configFromEnv } from './atrest.js'
+import { keyDirName, keyOwnerOf } from './keyowner.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
@@ -108,7 +109,16 @@ async function derivePwd (password, saltB64, iter) {
   return b64(bits)
 }
 
-const newId = () => 'p' + crypto.randomUUID().slice(0, 8)
+/**
+ * El nombre de la carpeta DE PASO, la que existe solo mientras se acuña la llave.
+ *
+ * La llave se genera antes de escribirse (`crypto.subtle.generateKey` y luego el kv), pero
+ * la única API que tenemos —`Identity.connect({ dir })`— recibe la carpeta por delante y
+ * hace las dos cosas de un tirón: no hay costura donde meterse a preguntar la huella. Así
+ * que se acuña aquí y en cuanto se sabe de quién es, la carpeta se MUEVE a su nombre.
+ * El punto delante la deja fuera de la lista de perfiles si algo se corta a medias.
+ */
+const stagingName = () => '.new-' + crypto.randomUUID().slice(0, 8)
 const cleanName = (name) => String(name || '').slice(0, MAX_NAME)
 
 /**
@@ -208,6 +218,13 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       const hits = data.profiles.filter((p) => (p.name || '').toLowerCase() === needle)
       if (hits.length === 1) return hits[0].id
       if (hits.length > 1) throw new Error(`there are ${hits.length} profiles named "${ref}"; use its id (dotrino-vault profile ls)`)
+      // POR PREFIJO. Desde que el id del perfil es el nombre de su carpeta —y ese sale de
+      // la llave— es largo, y nadie va a teclear 24 caracteres para decir `--profile`. El
+      // trozo que sí se lee y se reconoce es la huella de delante (`0571-465F`), que es la
+      // misma que sale en `members`. Ambiguo se rechaza, no se adivina.
+      const porPrefijo = data.profiles.filter((p) => p.id.toLowerCase().startsWith(needle))
+      if (porPrefijo.length === 1) return porPrefijo[0].id
+      if (porPrefijo.length > 1) throw new Error(`"${ref}" matches ${porPrefijo.length} profiles; give more of the id (dotrino-vault profile ls)`)
       throw new Error('profile does not exist: ' + ref)
     },
 
@@ -217,12 +234,18 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * navegador, que adopta la identidad vieja como «Perfil 1»). `transport.json`
      * se queda en la raíz: es del proceso, no de la identidad.
      */
-    migrate () {
+    async migrate (mintKey) {
       if (data.profiles.length) return null
       const legacy = fs.existsSync(path.join(root, 'identity.json'))
-      const id = newId()
-      const dir = dirOf(id)
-      ensureDir(dir)
+      // EL PROVEEDOR DEL ENTORNO, y SOLO en una instalación nueva. Es lo que hace que un
+      // contenedor levantado con `DOTRINO_KMS_KEY_ID` tenga su primer perfil ya con la
+      // clave en el KMS, sin entrar a configurar nada.
+      //
+      // En una MIGRACIÓN no se toca, y el matiz importa: esos archivos ya están cifrados
+      // con la clave de la máquina, así que ponerles ahora un proveedor distinto los
+      // dejaría ilegibles —el guardia lo pararía, pero el usuario se quedaría con una
+      // bóveda que no arranca tras actualizar—. Ahí se migra con `atrest rekey`, a la vista.
+      const dir = api.stage({ fromEnv: !legacy })
       if (legacy) {
         for (const f of LEGACY_FILES) {
           const from = path.join(root, f)
@@ -233,35 +256,23 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
           if (/^peers\..+\.json$/.test(f)) { try { fs.renameSync(path.join(root, f), path.join(dir, f)) } catch (_) {} }
         }
       }
-      // EL PROVEEDOR DEL ENTORNO, y SOLO en una instalación nueva. Es lo que hace que un
-      // contenedor levantado con `DOTRINO_KMS_KEY_ID` tenga su primer perfil ya con la
-      // clave en el KMS, sin entrar a configurar nada.
-      //
-      // En una MIGRACIÓN no se toca, y el matiz importa: esos archivos ya están cifrados
-      // con la clave de la máquina, así que ponerles ahora un proveedor distinto los
-      // dejaría ilegibles —el guardia lo pararía, pero el usuario se quedaría con una
-      // bóveda que no arranca tras actualizar—. Ahí se migra con `atrest rekey`, a la vista.
-      if (!legacy) {
-        const kek = configFromEnv()
-        if (kek) {
-          try {
-            probeKek(dir, kek)
-            writeKekConfig(dir, kek)
-          } catch (e) {
-            // Si el KMS no responde, NO se cae al proveedor de máquina: eso crearía una
-            // cuenta con la clave débil sin que nadie lo pidiera, y en un contenedor esa
-            // cuenta se pierde al recrearlo. Mejor no arrancar.
-            try { fs.rmSync(dir, { recursive: true, force: true }) } catch (_) {}
-            throw e
-          }
-        }
+      try {
+        // Al migrar, la llave ya existe y esto solo la lee; en una instalación nueva, la crea.
+        const pub = await mintKey(dir)
+        // «Perfil 1» tanto al migrar como en una instalación nueva: es un nombre que
+        // el dueño puede cambiar, y evita que la CLI salude con «(sin nombre)».
+        const p = await api.commit(dir, 'Perfil 1', { pub })
+        data.current = p.id
+        save()
+        return { id: p.id, migrated: legacy }
+      } catch (e) {
+        // En una instalación NUEVA no hay nada que perder y la carpeta de paso se va. En
+        // una MIGRACIÓN sí lo hay —los archivos del dueño ya están dentro—, así que se
+        // queda donde está y se dice en voz alta: borrarla sería borrar su bóveda.
+        if (!legacy) { try { fs.rmSync(dir, { recursive: true, force: true }) } catch (_) {} }
+        else e.message += ` (your data is safe in ${dir}; it could not be given its final name)`
+        throw e
       }
-      // «Perfil 1» tanto al migrar como en una instalación nueva: es un nombre que
-      // el dueño puede cambiar, y evita que la CLI salude con «(sin nombre)».
-      data.profiles.push({ id, name: 'Perfil 1', createdAt: Date.now() })
-      data.current = id
-      save()
-      return { id, migrated: legacy }
     },
 
     /**
@@ -284,28 +295,96 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * anterior a la migración la sigue abriendo para siempre. Un perfil con raíz en el
      * KMS **nace** así (dueño, 2026-08-30).
      */
-    add (name, { adopt = false, kek = null } = {}) {
-      const id = newId()
-      ensureDir(dirOf(id))
+    stage ({ kek = null, fromEnv = true } = {}) {
+      const dir = path.join(root, 'p', stagingName())
+      ensureDir(dir)
       // Sin `--kms` explícito, manda el entorno: es lo que permite levantar un contenedor
       // con KMS pasando variables, sin entrar a escribir un JSON dentro. Solo al CREAR:
       // un perfil que ya existe manda con su `atrest.json`.
-      kek = kek || configFromEnv()
+      kek = kek || (fromEnv ? configFromEnv() : null)
       if (kek) {
         // Comprobar ANTES de dejar rastro: un KMS que no responde no puede dejar a
         // medio crear un perfil cuya maestra no se va a poder volver a abrir.
         try {
-          probeKek(dirOf(id), kek)
-          writeKekConfig(dirOf(id), kek)
+          probeKek(dir, kek)
+          writeKekConfig(dir, kek)
         } catch (e) {
-          try { fs.rmSync(dirOf(id), { recursive: true, force: true }) } catch (_) {}
+          try { fs.rmSync(dir, { recursive: true, force: true }) } catch (_) {}
           throw e
         }
       }
+      return dir
+    },
+
+    /**
+     * La carpeta de paso ya tiene su llave: se le pone SU nombre y entra en el registro.
+     * El `id` del perfil ES el nombre de su carpeta, y sale de la llave (`keyDirName`).
+     */
+    async commit (staging, name, { adopt = false, pub } = {}) {
+      if (!pub) throw new Error('cannot name the folder: the key is missing')
+      const id = await keyDirName(pub)
+      const dest = dirOf(id)
+      // Esa llave ya tiene carpeta. No es un choque de nombres: es la MISMA llave dos
+      // veces, que es justo lo que este esquema existe para que no pase.
+      if (fs.existsSync(dest)) {
+        try { fs.rmSync(staging, { recursive: true, force: true }) } catch (_) {}
+        throw Object.assign(new Error('that key already has a folder here: ' + id), { code: 'key-exists' })
+      }
+      fs.renameSync(staging, dest)
       data.profiles.push({ id, name: cleanName(name), createdAt: Date.now(), ...(adopt ? { adopt: true } : {}) })
       if (!data.current) data.current = id
       save()
       return entry(find(id))
+    },
+
+    /**
+     * Crea un perfil entero: hace el sitio, deja que `mintKey` acuñe la llave dentro y
+     * mueve la carpeta a su nombre. `mintKey(dir)` devuelve la pública, y es cosa de quien
+     * llama porque generar una identidad no es asunto del registro.
+     */
+    async add (name, { adopt = false, kek = null, mintKey } = {}) {
+      if (typeof mintKey !== 'function') throw new Error('add() needs mintKey to know whose folder it is')
+      const staging = api.stage({ kek })
+      try {
+        const pub = await mintKey(staging)
+        return await api.commit(staging, name, { adopt, pub })
+      } catch (e) {
+        // Nada a medias: la carpeta de paso se va con el intento fallido.
+        try { fs.rmSync(staging, { recursive: true, force: true }) } catch (_) {}
+        throw e
+      }
+    },
+
+    /**
+     * PONERLE A UNA CARPETA VIEJA EL NOMBRE DE SU LLAVE.
+     *
+     * Es toda la migración: mover la data a la carpeta que le toca. Se hace con la
+     * identidad CERRADA —antes de abrirla—, porque la identidad se queda con la ruta como
+     * texto y renombrar por debajo la deja escribiendo en una carpeta que ya no existe.
+     *
+     * De quién es la carpeta se sabe por la marca (`key.json`); si no la tiene —una
+     * instalación anterior a que existiera— se abre un momento solo para preguntárselo.
+     */
+    async ensureNamedByKey (id, mintKey) {
+      const dir = dirOf(id)
+      if (!fs.existsSync(dir)) return id
+      let pub = keyOwnerOf(dir)
+      if (!pub && typeof mintKey === 'function') {
+        try { pub = await mintKey(dir) } catch (_) { return id }
+      }
+      if (!pub) return id
+      const quiere = await keyDirName(pub)
+      if (quiere === id) return id
+      if (fs.existsSync(dirOf(quiere))) {
+        throw Object.assign(new Error(`cannot rename ${id}: ${quiere} already exists`), { code: 'key-exists' })
+      }
+      fs.renameSync(dir, dirOf(quiere))
+      const p = find(id)
+      if (p) p.id = quiere
+      if (data.current === id) data.current = quiere
+      if (unlocked.has(id)) { unlocked.set(quiere, unlocked.get(id)); unlocked.delete(id) }
+      save()
+      return quiere
     },
 
     /** Quita la marca de «nació para adoptar» (ya adoptó, o se canceló). */

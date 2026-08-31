@@ -12,6 +12,8 @@ import { startVault } from './vault.js'
 import { openProfiles } from './profiles.js'
 import { installNodeGlobals } from './node-globals.js'
 import { dataDir, ensureDir } from './paths.js'
+import { Identity } from '@dotrino/identity/node'
+import { atRestFor } from './atrest.js'
 
 /**
  * D12 (`docs/acta-de-perfil.md`): la bóveda **no** borra una cuenta que ella manda si
@@ -49,7 +51,26 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     onAutoLock: (id) => log('[vault] profile %s locked itself after %d min idle (the console; devices keep working)',
       id, Math.round(profiles.autoLockMs / 60000))
   })
-  const migrated = profiles.migrate()
+  /**
+   * ACUÑAR (o simplemente LEER) la llave de una carpeta, y cerrarla enseguida.
+   *
+   * Existe porque el nombre de la carpeta sale de la llave y hay que saber cuál es antes
+   * de poder ponérselo. La llave se genera en memoria y se escribe acto seguido —no hay
+   * costura entre las dos cosas en `Identity.connect`—, así que se acuña donde sea y
+   * después se mueve la carpeta.
+   *
+   * Se CIERRA (`destroy`) antes de devolver: quien llama va a renombrar la carpeta, y una
+   * identidad abierta se quedó con la ruta vieja como texto.
+   */
+  async function mintKey (dir) {
+    const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
+    try {
+      if (!identity.me?.publickey) await identity.setMyNickname('')
+      return identity.me?.publickey || null
+    } finally { try { identity.destroy() } catch (_) {} }
+  }
+
+  const migrated = await profiles.migrate(mintKey)
   if (migrated?.migrated) log('[vault] identidad mono-perfil migrada al perfil %s', migrated.id)
 
   const running = new Map() // id -> instancia de startVault
@@ -79,7 +100,15 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
   }
 
   for (const p of profiles.list()) {
-    try { await open(p.id) } catch (e) { log('[vault] no se pudo abrir el perfil %s: %s', p.id, e.message) }
+    // ANTES de abrir: la carpeta tiene que llamarse como su llave. Es toda la migración
+    // (mover la data a la carpeta que le toca) y va aquí porque es el único momento en que
+    // la identidad está cerrada — renombrarla abierta la deja escribiendo en la ruta vieja.
+    let id = p.id
+    try {
+      id = await profiles.ensureNamedByKey(p.id, mintKey)
+      if (id !== p.id) log('[vault] profile %s renamed to %s (the folder is named after its key)', p.id, id)
+    } catch (e) { log('[vault] could not name the folder of %s after its key: %s', p.id, e.message) }
+    try { await open(id) } catch (e) { log('[vault] no se pudo abrir el perfil %s: %s', id, e.message) }
   }
 
   const get = (id) => {
@@ -110,7 +139,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
      * cuenta la trae el dispositivo y se adopta al emparejar.
      */
     async add (name, { adopt = false, kek = null } = {}) {
-      const p = profiles.add(name, { adopt, kek })
+      const p = await profiles.add(name, { adopt, kek, mintKey })
       await open(p.id)
       log('[vault] perfil creado%s: %s (%s)', adopt ? ' (a la espera de adoptar una cuenta)' : '', p.name || '(sin nombre)', p.id)
       return profiles.get(p.id)

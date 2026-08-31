@@ -8,6 +8,12 @@
  *
  *   1. dos procesos sobre el MISMO directorio (`lock.js`)
  *   2. un proceso arrancando con la identidad de OTRO (`keyowner.js`)
+ *
+ * Y la vuelta de tuerca (dueño, 2026-08-30): el nombre de la carpeta SALE de la llave, así
+ * que el segundo accidente deja de ser algo que se detecta y pasa a ser imposible de
+ * escribir — dos llaves no pueden caer en la misma carpeta porque no se llaman igual. La
+ * marca se queda igualmente: el nombre dice la intención, la marca comprueba el hecho (un
+ * respaldo restaurado encima pone los bytes equivocados bajo el nombre correcto).
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -15,7 +21,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { takeLock, LOCK_FILE } from '../lib/src/lock.js'
-import { assertKeyOwnsDir, keyOwnerOf } from '../src/keyowner.js'
+import { assertKeyOwnsDir, keyOwnerOf, keyDirName, OWNER_FILE } from '../src/keyowner.js'
+import { openProfiles } from '../src/profiles.js'
+import { readJson, writeJson } from '../src/paths.js'
+import { atRestFor } from '../src/atrest.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'unaboveda-'))
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true })
@@ -99,4 +108,87 @@ test('sin llave todavía no hay nada que comparar', () => {
   assert.doesNotThrow(() => assertKeyOwnsDir(d, null))
   assert.equal(keyOwnerOf(d), null, 'y no se marca a nadie')
   rm(d)
+})
+
+// ---------- una llave, una carpeta ----------
+
+const nuevaPub = async () => {
+  const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  return JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey))
+}
+
+test('el nombre de la carpeta sale de la llave, y empieza por su huella legible', async () => {
+  const pub = await nuevaPub()
+  const n = await keyDirName(pub)
+  assert.match(n, /^[0-9A-F]{4}-[0-9A-F]{4}-[0-9a-f]{16}$/)
+  assert.equal(await keyDirName(pub), n, 'la misma llave da siempre el mismo nombre')
+  assert.notEqual(await keyDirName(await nuevaPub()), n, 'otra llave, otro nombre')
+})
+
+test('dos llaves no pueden compartir carpeta: el registro las manda a la suya', async () => {
+  const root = tmp()
+  const p = openProfiles(root)
+  const a = await p.add('A', { mintKey: nuevaPub })
+  const b = await p.add('B', { mintKey: nuevaPub })
+
+  assert.notEqual(a.id, b.id)
+  assert.notEqual(p.dirOf(a.id), p.dirOf(b.id))
+  // Y en el disco no queda ni rastro de la carpeta de paso.
+  const hay = fs.readdirSync(path.join(root, 'p')).sort()
+  assert.deepEqual(hay, [a.id, b.id].sort(), 'solo las dos carpetas, con su nombre definitivo')
+  rm(root)
+})
+
+test('la MISMA llave dos veces no crea una segunda carpeta: se dice en voz alta', async () => {
+  const root = tmp()
+  const p = openProfiles(root)
+  const pub = await nuevaPub()
+  await p.add('la primera', { mintKey: async () => pub })
+  await assert.rejects(() => p.add('la misma otra vez', { mintKey: async () => pub }),
+    (e) => e.code === 'key-exists')
+  assert.equal(fs.readdirSync(path.join(root, 'p')).length, 1, 'ni una carpeta de paso suelta')
+  rm(root)
+})
+
+/**
+ * LA MIGRACIÓN, que es toda la que hay: mover la data a la carpeta que le toca. Se hace
+ * con la identidad cerrada, antes de abrirla.
+ */
+test('una carpeta vieja se muda a la carpeta de su llave, con sus datos', async () => {
+  const root = tmp()
+  const p = openProfiles(root)
+  const pub = await nuevaPub()
+  await p.add('Perfil 1', { mintKey: async () => pub })
+
+  // Se le pone a mano el nombre viejo (el dado que se tiraba antes) y se deja su marca.
+  const bueno = await keyDirName(pub)
+  const viejo = 'p3f8a91c2'
+  fs.renameSync(path.join(root, 'p', bueno), path.join(root, 'p', viejo))
+  fs.writeFileSync(path.join(root, 'p', viejo, OWNER_FILE), JSON.stringify({ pub }))
+  fs.writeFileSync(path.join(root, 'p', viejo, 'vault.json'), '{"mio":1}')
+  // El registro va cifrado en reposo como todo lo demás: se toca por donde toca.
+  const regFile = path.join(root, 'profiles.json')
+  const reg = readJson(regFile, null, atRestFor(root))
+  reg.profiles[0].id = viejo
+  reg.current = viejo
+  writeJson(regFile, reg, atRestFor(root))
+
+  const p2 = openProfiles(root)                 // = reiniciar el servicio
+  const ahora = await p2.ensureNamedByKey(viejo, null)
+
+  assert.equal(ahora, bueno, 'se muda a la carpeta de su llave')
+  assert.equal(fs.readFileSync(path.join(root, 'p', bueno, 'vault.json'), 'utf8'), '{"mio":1}',
+    'con sus datos dentro')
+  assert.ok(!fs.existsSync(path.join(root, 'p', viejo)), 'y la vieja ya no está')
+  assert.equal(p2.current(), bueno, 'el registro apunta a la nueva')
+  rm(root)
+})
+
+test('una carpeta que ya se llama como su llave no se toca', async () => {
+  const root = tmp()
+  const p = openProfiles(root)
+  const pub = await nuevaPub()
+  const creado = await p.add('quieto', { mintKey: async () => pub })
+  assert.equal(await p.ensureNamedByKey(creado.id, null), creado.id)
+  rm(root)
 })

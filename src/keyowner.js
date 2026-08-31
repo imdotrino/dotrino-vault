@@ -18,8 +18,35 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { pubkeyId } from '@dotrino/identity/capabilities'
 
 export const OWNER_FILE = 'key.json'
+
+/**
+ * EL NOMBRE DE LA CARPETA SALE DE LA LLAVE.
+ *
+ * Una llave, una carpeta (dueño, 2026-08-30): un proceso con varios perfiles tiene varias
+ * llaves maestras y, por tanto, varias carpetas. Con el nombre derivado de la llave eso
+ * deja de ser algo que se comprueba y pasa a ser imposible por construcción — dos llaves
+ * no pueden caer en la misma carpeta porque no se llaman igual.
+ *
+ * Empieza por la huella que se le enseña a una persona (`AB12-CD34`, la misma que sale en
+ * `members` y en `profile ls`), para poder mirar el disco y reconocer de quién es cada
+ * una; y sigue con 16 hex más, porque para *garantizar* que no chocan hacen falta más bits
+ * de los que caben en algo que se lee en voz alta. Quitándole los guiones, el nombre
+ * EMPIEZA por el mismo id que la bóveda imprime al arrancar (`listo · id 0571465f61a2fac8`),
+ * así que se puede casar el log con la carpeta de un vistazo.
+ *
+ * Ojo con la palabra «maestra»: cuando esta bóveda se une a la cuenta de otra (`join`), su
+ * llave sigue siendo la misma pero pasa a ser MIEMBRO del acta ajena, no su master. Lo que
+ * nombra la carpeta es la llave que esta bóveda tiene para ese perfil, que no cambia
+ * nunca; lo que cambia es su papel.
+ */
+export async function keyDirName (pub) {
+  const h = await pubkeyId(pub)                 // SHA-256 del JWK canónico, 64 hex
+  const label = h.slice(0, 8).toUpperCase()
+  return `${label.slice(0, 4)}-${label.slice(4, 8)}-${h.slice(8, 24)}`
+}
 
 /** De quién es este directorio, o `null` si todavía no lo dice. */
 export function keyOwnerOf (dir) {
@@ -53,4 +80,4 @@ export function assertKeyOwnsDir (dir, pub) {
   return pub
 }
 
-export default { assertKeyOwnsDir, keyOwnerOf, OWNER_FILE }
+export default { assertKeyOwnsDir, keyOwnerOf, keyDirName, OWNER_FILE }

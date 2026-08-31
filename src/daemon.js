@@ -19,6 +19,7 @@ import path from 'node:path'
 import { takeLock } from '../lib/src/lock.js'
 import { startVaultManager } from './manager.js'
 import { dataDir, writeJson, readJson } from './paths.js'
+import { parseInvite } from '../lib/src/invite.js'
 import { VERSION } from './version.js'
 
 const readJsonSafe = (f) => readJson(f, null)
@@ -142,6 +143,19 @@ export async function runDaemon () {
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
   let pendingApproval = false // lo pidió `pair --approval`; se aplica al aprobar
+  /**
+   * Lo pidió `pair --admin`: el aparato que entre por ESTA invitación podrá administrar.
+   *
+   * Sigue en pie la regla de que **ningún QR concede administración**: el QR no lleva
+   * nada. Lo que hay es una nota LOCAL de esta bóveda, y el permiso se aplica en el
+   * mismo gesto que ya era la puerta —aprobar con el código tecleado aquí—, exactamente
+   * igual que `--approval`. Es el mismo `caps <ID> +administra` que harías a mano un
+   * segundo después, sin tener que ir a buscar el ID.
+   *
+   * Existe por el contenedor: allí cada paso cuesta un `docker exec`, y el primer aparato
+   * de una bóveda recién desplegada es SIEMPRE la consola.
+   */
+  let pendingAdmin = false
   const pairReqFile = path.join(dir, 'pair-request.json')
   async function handlePairingRequest () {
     try {
@@ -187,6 +201,7 @@ export async function runDaemon () {
       // `pair --approval`: el aparato que entre por esta invitación pedirá el visto bueno del
       // teléfono cada vez que reciba claves privadas (se aplica al aprobarlo, abajo).
       pendingApproval = !!pairReq?.approval
+      pendingAdmin = !!pairReq?.admin
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
       // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`). El nombre viaja
@@ -371,6 +386,18 @@ export async function runDaemon () {
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
           if (pendingApproval && r?.cert?.sub) { try { await vault.setApproval(r.cert.sub, true); console.log('[vault] the new device will need approval on every key request') } catch (e) { console.error('[vault] could not flag approval: %s', e.message) } }
           pendingApproval = false
+          // `pair --admin`: se le SUMA `admin` a lo que ya tiene, no se le reescriben los
+          // permisos — el aparato acaba de entrar con el scope que pidió la invitación.
+          if (pendingAdmin && r?.deviceId) {
+            try {
+              const rec = await vault.profileMembers()
+              const m = (rec?.members || []).find((x) => x.id === r.deviceId)
+              if (!m?.pub) throw new Error('the device is not in the record yet')
+              await vault.setCaps(m.pub, [...new Set([...(m.caps || []), 'admin'])])
+              console.log('[vault] the new device can ADMINISTER this account (console)')
+            } catch (e) { console.error('[vault] could not grant admin: %s', e.message) }
+          }
+          pendingAdmin = false
           console.log('[vault] aprobado %s', r.deviceId)
           answer({ ok: true, deviceId: r.deviceId || null })
         } catch (e) {
@@ -423,26 +450,47 @@ export async function runDaemon () {
       if (join?.qr) {
         rm(joinReqFile)
         rm(joinResFile)
+        // LA CUENTA AJENA VA EN UN PERFIL DEL GESTOR, no en una cuenta interna de la
+        // identidad. Antes esto usaba `enrollDevice(…, { join: 'new' })`, que crea una
+        // cuenta más DENTRO de la identidad de un perfil que ya existía —y el gestor no se
+        // enteraba—: no había instancia de bóveda para ella, nadie se identificaba en el
+        // proxio con esa llave, y el aviso de la otra bóveda —con el acta donde acababa de
+        // conceder `sella`— no llegaba a ninguna parte. Se unía y no servía para nada.
+        //
+        // Un perfil nace vacío y `adopt: true`, que es la marca que deja a `joinProfile`
+        // cambiar su acta recién nacida por la que traiga la otra bóveda; sin ella, unirse
+        // sería pisar una cuenta con datos y se rechaza, que es lo correcto por defecto.
+        let nacido = null
         try {
-          const id = targetOf(join)?.identity
-          if (!id) throw new Error('no identity for that profile')
+          const p = await mgr.add(join.name || 'cuenta de la otra bóveda', { adopt: true, kek: join.kek || null })
+          nacido = p.id
+          const id = mgr.get(p.id)?.identity
+          if (!id) throw new Error('no identity for the new profile')
           const off = id.onVault?.((e) => {
             if (e?.phase === 'challenge' && e.code) {
               console.log('[vault] type this code in the other vault:  %s', e.code)
-              writeJson(joinResFile, { at: Date.now(), code: e.code, state: 'waiting' })
+              writeJson(joinResFile, { at: Date.now(), code: e.code, state: 'waiting', profile: p.id })
             }
           })
-          // `join: 'new'` y no `'current'`: esta bóveda ya tiene su propia cuenta, y
-          // `'current'` la pisaría con la ajena. Con `'new'` nace aquí una cuenta MÁS —con
-          // llave nueva— y es ESA la que entra en el acta de la otra bóveda; lo que ya
-          // había no se toca. Es lo correcto para el multivault: una máquina puede ser el
-          // respaldo de varias cuentas sin dejar de tener la suya.
-          const r = await id.enrollDevice(join.qr, { label: join.label || 'bóveda', join: 'new' })
+          // `'current'` y no `'new'`: el perfil que se acaba de crear ES el sitio, y su
+          // llave recién hecha es la que entra en el acta de la otra bóveda. Crear ahí
+          // dentro otra cuenta más sería el bug de arriba otra vez, un nivel más abajo.
+          const r = await id.enrollDevice(join.qr, { label: join.label || 'bóveda', join: 'current' })
           off?.()
-          console.log('[vault] joined the account of the other vault (record #%s)', r?.acta?.seq ?? '?')
-          writeJson(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null })
+          // LA CUENTA RECIÉN ADOPTADA PASA A SER LA ACTIVA, y no es un capricho: es la
+          // razón por la que se hizo el `join`. Sin esto, el `Perfil 1` vacío que nace en
+          // el primer arranque sigue siendo el destino por defecto y todo lo que hagas
+          // después —emparejar un aparato, aprobarlo— entra en la cuenta equivocada sin
+          // decir nada. En un contenedor que arranca para respaldar una cuenta, ese perfil
+          // vacío no es más que un accidente del primer arranque.
+          try { mgr.profiles.setCurrent(p.id) } catch (_) {}
+          console.log('[vault] joined the account of the other vault (record #%s) as profile %s (now the active one)', r?.acta?.seq ?? '?', p.id)
+          writeJson(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null, profile: p.id })
         } catch (e) {
           console.error('[vault] could not join:', e.message)
+          // El perfil nació para esto y está vacío: si el intento no llegó a término se va
+          // con él. Si no, cada reintento dejaba una cuenta fantasma en el conmutador.
+          if (nacido) { try { await mgr.remove(nacido) } catch (_) {} }
           writeJson(joinResFile, { at: Date.now(), state: 'error', error: e.message })
         }
       }
@@ -701,6 +749,59 @@ export async function runDaemon () {
   }
   process.on('SIGTERM', () => shutdown('SIGTERM'))
   process.on('SIGINT', () => shutdown('SIGINT'))
+
+  /**
+   * ARRANCAR YA UNIDO A UNA CUENTA — lo que hace desplegable un contenedor.
+   *
+   * El problema del contenedor no es la bóveda: es el PRIMER APARATO. Una bóveda recién
+   * levantada tiene que **enseñar** una invitación y **recibir** de vuelta un código
+   * tecleado, y un contenedor no tiene pantalla ni teclado. Con una sola bóveda no hay
+   * salida: alguien tiene que entrar (`docker exec`, `kubectl exec`, ECS Exec).
+   *
+   * Con dos, sí la hay, y es este camino: **la invitación la hace la bóveda que TIENE un
+   * humano delante** (tu PC) y el contenedor solo la acepta. Entonces todo lo interactivo
+   * pasa del lado donde hay alguien —el código se teclea allí— y el contenedor no
+   * necesita más que dos cosas que ya tiene: la invitación al arrancar, y su registro.
+   *
+   *     docker run -e DOTRINO_JOIN="$(dotrino-vault pair --quiet)" …
+   *     docker logs -f dotrino-vault      → «type this code in the other vault: 123456»
+   *     dotrino-vault approve 123456      (en tu PC)
+   *
+   * `DOTRINO_JOIN_FILE` es lo mismo apuntando a un archivo, y es lo que hay que usar en
+   * serio: una variable de entorno la ve cualquiera con `docker inspect`, y aunque la
+   * invitación caduque y sea de un solo uso, no tiene por qué quedar ahí escrita.
+   *
+   * SE HACE UNA VEZ. La invitación consumida se anota y no se vuelve a intentar aunque la
+   * variable siga puesta: si no, cada reinicio del contenedor pediría entrar otra vez.
+   */
+  function bootstrapJoin () {
+    const raw = process.env.DOTRINO_JOIN_FILE
+      ? (() => { try { return fs.readFileSync(process.env.DOTRINO_JOIN_FILE, 'utf8') } catch (e) { console.error('[vault] could not read DOTRINO_JOIN_FILE: %s', e.message); return '' } })()
+      : (process.env.DOTRINO_JOIN || '')
+    const texto = String(raw).trim()
+    if (!texto) return
+
+    let qr = null
+    try { qr = parseInvite(texto) } catch (_) {}
+    if (!qr?.sn || !qr?.iss || !qr?.proxy) {
+      console.error('[vault] the invitation in DOTRINO_JOIN is not valid; ignoring it')
+      return
+    }
+    const marca = path.join(dir, 'bootstrap.json')
+    const hecho = readJsonSafe(marca)
+    if (hecho?.sn === qr.sn) return // ya se usó: un reinicio no vuelve a pedir entrar
+
+    writeJson(marca, { at: Date.now(), sn: qr.sn, iss: qr.iss })
+    writeJson(path.join(dir, 'join-request.json'), {
+      qr,
+      label: 'bóveda',
+      ...(process.env.DOTRINO_JOIN_NAME ? { name: process.env.DOTRINO_JOIN_NAME } : {})
+    })
+    console.log('[vault] joining the account of another vault (invitation from the deployment)…')
+    console.log('[vault] the code to type in the OTHER vault will appear below')
+    serve()
+  }
+  bootstrapJoin()
 
   console.log('[vault] servicio listo.')
   return mgr

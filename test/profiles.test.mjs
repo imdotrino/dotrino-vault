@@ -13,14 +13,24 @@ import { atRestFor } from '../src/atrest.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-vault-test-'))
 
-test('migra un dir mono-perfil al primer perfil, llevándose sus datos', () => {
+/**
+ * El registro no genera llaves: se las pide a quien llama (`mintKey`), porque el nombre de
+ * la carpeta sale de la llave y acuñar una identidad no es asunto suyo. Aquí basta una
+ * pública de verdad —generarla es barato— para que `keyDirName` tenga qué resumir.
+ */
+const llave = async () => {
+  const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  return JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey))
+}
+
+test('migra un dir mono-perfil al primer perfil, llevándose sus datos', async () => {
   const root = tmp()
   fs.writeFileSync(path.join(root, 'identity.json'), '{"k":1}')
   fs.writeFileSync(path.join(root, 'secrets.json'), '{"s":1}')
   fs.writeFileSync(path.join(root, 'transport.json'), '{"t":1}')
 
   const p = openProfiles(root)
-  const res = p.migrate()
+  const res = await p.migrate(llave)
   assert.equal(res.migrated, true)
 
   const dir = p.dirOf(res.id)
@@ -32,18 +42,18 @@ test('migra un dir mono-perfil al primer perfil, llevándose sus datos', () => {
   assert.equal(p.list()[0].current, true)
 })
 
-test('un dir nuevo arranca con un perfil vacío, sin migrar nada', () => {
+test('un dir nuevo arranca con un perfil vacío, sin migrar nada', async () => {
   const p = openProfiles(tmp())
-  const res = p.migrate()
+  const res = await p.migrate(llave)
   assert.equal(res.migrated, false)
   assert.equal(p.list().length, 1)
 })
 
-test('cada perfil tiene su propio dir y el activo se elige', () => {
+test('cada perfil tiene su propio dir y el activo se elige', async () => {
   const p = openProfiles(tmp())
-  p.migrate()
-  const a = p.add('Trabajo')
-  const b = p.add('Personal')
+  await p.migrate(llave)
+  const a = await p.add('Trabajo', { mintKey: llave })
+  const b = await p.add('Personal', { mintKey: llave })
   assert.notEqual(p.dirOf(a.id), p.dirOf(b.id))
   assert.equal(p.list().length, 3)
   p.setCurrent(b.id)
@@ -51,28 +61,28 @@ test('cada perfil tiene su propio dir y el activo se elige', () => {
   assert.equal(p.get(a.id).current, false)
 })
 
-test('resolve acepta id o nombre, y rechaza el ambiguo en vez de adivinar', () => {
+test('resolve acepta id o nombre, y rechaza el ambiguo en vez de adivinar', async () => {
   const p = openProfiles(tmp())
-  p.migrate()
-  const a = p.add('Trabajo')
+  await p.migrate(llave)
+  const a = await p.add('Trabajo', { mintKey: llave })
   assert.equal(p.resolve('Trabajo'), a.id)
   assert.equal(p.resolve('trabajo'), a.id, 'sin distinguir mayúsculas')
   assert.equal(p.resolve(a.id), a.id)
-  p.add('Trabajo')
+  await p.add('Trabajo', { mintKey: llave })
   assert.throws(() => p.resolve('Trabajo'), /there are 2 profiles/)
   assert.throws(() => p.resolve('nope'), /does not exist/)
 })
 
-test('sin contraseña, el perfil nunca está bloqueado', () => {
+test('sin contraseña, el perfil nunca está bloqueado', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   assert.equal(p.isProtected(id), false)
   assert.equal(p.isLocked(id), false)
 })
 
 test('la contraseña bloquea, y la correcta desbloquea', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   assert.equal(p.isProtected(id), true)
   assert.equal(p.isLocked(id), false, 'ponerla deja el perfil abierto en esta sesión')
@@ -88,7 +98,7 @@ test('la contraseña bloquea, y la correcta desbloquea', async () => {
 test('el candado se relee del disco: un daemon nuevo arranca bloqueado', async () => {
   const root = tmp()
   const p = openProfiles(root)
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
 
   const reopened = openProfiles(root) // = reiniciar el servicio
@@ -101,7 +111,7 @@ test('el candado se relee del disco: un daemon nuevo arranca bloqueado', async (
 test('la contraseña no se guarda: solo un verificador con sal', async () => {
   const root = tmp()
   const p = openProfiles(root)
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   const raw = fs.readFileSync(path.join(root, 'profiles.json'), 'utf8')
   assert.ok(!raw.includes('frase-de-prueba-larga'), 'la contraseña en claro nunca toca el disco')
@@ -117,8 +127,8 @@ test('la contraseña no se guarda: solo un verificador con sal', async () => {
 
 test('con el profile locked no se puede editar ni quitar la contraseña', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
-  p.add('Otro') // que borrar no choque antes con «no se puede borrar el único perfil»
+  const { id } = await p.migrate(llave)
+  await p.add('Otro', { mintKey: llave }) // que borrar no choque antes con «no se puede borrar el único perfil»
   await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   assert.throws(() => p.rename(id, 'otro'), /profile locked/)
@@ -130,8 +140,8 @@ test('con el profile locked no se puede editar ni quitar la contraseña', async 
 
 test('la contraseña es por perfil: bloquear uno no toca al otro', async () => {
   const p = openProfiles(tmp())
-  const { id: a } = p.migrate()
-  const b = p.add('Personal').id
+  const { id: a } = await p.migrate(llave)
+  const b = await p.add('Personal', { mintKey: llave }).id
   await p.setPassword(a, 'frase-de-prueba-larga')
   p.lock(a)
   assert.equal(p.isLocked(a), true)
@@ -139,10 +149,10 @@ test('la contraseña es por perfil: bloquear uno no toca al otro', async () => {
   assert.equal(p.isProtected(b), false)
 })
 
-test('borrar un perfil elimina su dir, y el último no se puede borrar', () => {
+test('borrar un perfil elimina su dir, y el último no se puede borrar', async () => {
   const p = openProfiles(tmp())
-  p.migrate()
-  const b = p.add('Personal')
+  await p.migrate(llave)
+  const b = await p.add('Personal', { mintKey: llave })
   const bdir = p.dirOf(b.id)
   fs.writeFileSync(path.join(bdir, 'identity.json'), '{}')
   p.remove(b.id)
@@ -151,10 +161,10 @@ test('borrar un perfil elimina su dir, y el último no se puede borrar', () => {
   assert.throws(() => p.remove(p.list()[0].id), /only profile/)
 })
 
-test('borrar el perfil activo pasa el activo a otro', () => {
+test('borrar el perfil activo pasa el activo a otro', async () => {
   const p = openProfiles(tmp())
-  const { id: a } = p.migrate()
-  const b = p.add('Personal')
+  const { id: a } = await p.migrate(llave)
+  const b = await p.add('Personal', { mintKey: llave })
   p.setCurrent(b.id)
   p.remove(b.id)
   assert.equal(p.current(), a)
@@ -162,7 +172,7 @@ test('borrar el perfil activo pasa el activo a otro', () => {
 
 test('tras 5 fallos, el freno de fuerza bruta hace esperar', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
@@ -171,7 +181,7 @@ test('tras 5 fallos, el freno de fuerza bruta hace esperar', async () => {
 
 test('la contraseña exige un mínimo', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await assert.rejects(() => p.setPassword(id, '123'), /at least 12/)
   // Y cuatro dígitos tampoco, que es de donde se viene: eran 10.000 combinaciones
   // protegiendo TODO el sellado.
@@ -186,7 +196,7 @@ test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda 
   // para su dueño.
   const root = tmp()
   const p = openProfiles(root)
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
 
@@ -208,7 +218,7 @@ test('el freno OLVIDA los fallos viejos: un despiste de ayer no deja la bóveda 
 
 test('el freno SIGUE frenando una ráfaga: fallos seguidos hacen esperar', async () => {
   const p = openProfiles(tmp())
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   p.lock(id)
   for (let i = 0; i < 5; i++) await assert.rejects(() => p.unlock(id, 'mala'), /wrong password/)
@@ -222,7 +232,7 @@ test('un perfil VIEJO (verificador PBKDF2) se abre igual y asciende a scrypt', a
   // el único momento en que se tiene la contraseña en la mano.
   const root = tmp()
   const p = openProfiles(root)
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
 
   // Se rebaja a mano a v1, tal como lo dejó la versión anterior.
@@ -259,7 +269,7 @@ test('el candado se cierra SOLO a los 5 min sin usarse', async () => {
   // semanas. Teclear la contraseña el lunes dejaba la consola abierta el jueves.
   const cerradas = []
   const p = openProfiles(tmp(), { autoLockMs: 60, onAutoLock: (id) => cerradas.push(id) })
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
   assert.equal(p.isLocked(id), false)
@@ -283,7 +293,7 @@ test('el plazo se cuenta desde el ÚLTIMO USO, no desde que se abrió', async ()
   // consola (`touch`) estira el plazo. Lo que un aparato pida por el proxy NO pasa por
   // ahí, y por eso no lo alarga: el candado es de la consola.
   const p = openProfiles(tmp(), { autoLockMs: 120 })
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
 
@@ -300,7 +310,7 @@ test('el plazo se cuenta desde el ÚLTIMO USO, no desde que se abrió', async ()
 
 test('sin contraseña no hay nada que cerrar: el plazo no bloquea el perfil', async () => {
   const p = openProfiles(tmp(), { autoLockMs: 30 })
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.unlock(id, '')
   await sleep(60)
   assert.equal(p.isLocked(id), false)
@@ -309,7 +319,7 @@ test('sin contraseña no hay nada que cerrar: el plazo no bloquea el perfil', as
 
 test('la consola puede enseñar hasta cuándo sigue abierta', async () => {
   const p = openProfiles(tmp(), { autoLockMs: 5000 })
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   const antes = Date.now()
   await p.unlock(id, 'frase-de-prueba-larga')
@@ -320,7 +330,7 @@ test('la consola puede enseñar hasta cuándo sigue abierta', async () => {
 
 test('con autoLockMs 0 no se cierra solo (para pruebas y arranques largos)', async () => {
   const p = openProfiles(tmp(), { autoLockMs: 0 })
-  const { id } = p.migrate()
+  const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
   await sleep(30)

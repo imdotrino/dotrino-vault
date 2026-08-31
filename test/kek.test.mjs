@@ -18,9 +18,16 @@ import {
   rekeyDir, readConfig, writeConfig, probe
 } from '../src/atrest.js'
 import { clearCache } from '../lib/src/kek.js'
+import { keyDirName } from '../src/keyowner.js'
 
 const FAKE_KMS = fileURLToPath(new URL('./fixtures/fake-kms.mjs', import.meta.url))
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kek-'))
+
+/** Una pública de verdad: es lo único que el registro necesita para nombrar la carpeta. */
+const llavePublica = async () => {
+  const par = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  return JSON.stringify(await crypto.subtle.exportKey('jwk', par.publicKey))
+}
 const rm = (...d) => d.forEach((x) => fs.rmSync(x, { recursive: true, force: true }))
 
 /** Config del proveedor `command` apuntando al KMS de mentira. */
@@ -225,13 +232,25 @@ test('un perfil puede nacer con el KMS: la config está antes que ningún dato',
   const { openProfiles } = await import('../src/profiles.js')
   const root = tmp()
   const p = openProfiles(root)
-  const creado = p.add('con-kms', { kek: kmsConfig() })
+  // El ORDEN es lo que se prueba, y se prueba en el instante exacto: cuando el registro
+  // pide la llave, la config del KMS ya tiene que estar puesta y no puede haber nada más
+  // en la carpeta. Si estuviera al revés, la maestra nacería bajo la clave de la máquina.
+  let alAcuñar = null
+  const pub = await llavePublica()
+  const creado = await p.add('con-kms', {
+    kek: kmsConfig(),
+    mintKey: async (dir) => {
+      alAcuñar = { provider: readConfig(dir)?.provider, archivos: fs.readdirSync(dir).sort() }
+      return pub
+    }
+  })
   const d = p.dirOf(creado.id)
 
+  assert.equal(alAcuñar.provider, 'command', 'la config ya está puesta cuando nace la llave')
+  assert.deepEqual(alAcuñar.archivos, ['atrest.json'], 'y no hay un solo byte más')
   assert.equal(readConfig(d).provider, 'command', 'nace con el proveedor puesto')
-  // Lo único que puede haber en el directorio recién creado es la config: la maestra
-  // todavía no existe, así que cuando se genere ya nacerá bajo la clave del KMS.
-  assert.deepEqual(fs.readdirSync(d).sort(), ['atrest.json'])
+  // Y la carpeta se llama como su llave: una llave, una carpeta.
+  assert.equal(creado.id, await keyDirName(pub), 'el nombre de la carpeta sale de la llave')
 
   // Y la clave que usará es la del KMS, no la de la máquina.
   assert.notDeepEqual(kekFor(d), machineKey(d))
@@ -248,14 +267,17 @@ test('un sitio para ADOPTAR también nace con el KMS', async () => {
   const { openProfiles } = await import('../src/profiles.js')
   const root = tmp()
   const p = openProfiles(root)
-  const creado = p.add('a la espera', { adopt: true, kek: kmsConfig() })
+  let provAlAcuñar = null
+  const creado = await p.add('a la espera', {
+    adopt: true,
+    kek: kmsConfig(),
+    mintKey: async (dir) => { provAlAcuñar = readConfig(dir)?.provider; return llavePublica() }
+  })
   const d = p.dirOf(creado.id)
 
+  assert.equal(provAlAcuñar, 'command', 'la config está antes que la llave de miembro')
   assert.equal(readConfig(d).provider, 'command')
   assert.equal(p.get(creado.id).adopt, true, 'sigue marcado para adoptar')
-  // La llave de miembro se genera DESPUÉS, al preparar la adopción: cuando llegue, la
-  // config ya está puesta y nace bajo la clave del KMS.
-  assert.deepEqual(fs.readdirSync(d).sort(), ['atrest.json'])
   rm(root)
 })
 
@@ -266,7 +288,7 @@ test('si el KMS no responde, el perfil NO se crea a medias', async () => {
 
   process.env.FAKE_KMS_DOWN = '1'
   try {
-    assert.throws(() => p.add('fallido', { kek: kmsConfig() }), (e) => e.code === 'kek-unavailable')
+    await assert.rejects(() => p.add('fallido', { kek: kmsConfig(), mintKey: llavePublica }), (e) => e.code === 'kek-unavailable')
   } finally { delete process.env.FAKE_KMS_DOWN }
 
   assert.equal(p.list().length, 0, 'no queda un perfil registrado')

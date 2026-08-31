@@ -12,9 +12,51 @@
 #   docker run -d --name dotrino-vault --restart unless-stopped \
 #     -e AWS_REGION=us-east-1 -e DOTRINO_KMS_KEY_ID=alias/dotrino-vault \
 #     -v dotrino-vault:/data dotrino-vault
-#   docker exec -it dotrino-vault dotrino-vault pair
 #
 # El volumen es TU CUENTA: si lo borras, se perdió (no hay copia en ningún lado).
+#
+# ---------------------------------------------------------------------------------------
+# EL PRIMER APARATO: los dos caminos, y cuál te toca
+# ---------------------------------------------------------------------------------------
+#
+# El problema de un contenedor no es la bóveda: es el primer aparato. Una bóveda tiene que
+# ENSEÑAR una invitación y RECIBIR de vuelta un código tecleado, y aquí no hay pantalla ni
+# teclado. De ahí salen dos caminos, y la diferencia entre ellos es dónde está el humano.
+#
+# ── 1) CUENTA NUEVA, nacida aquí. Hay que entrar al contenedor: no hay otra ─────────────
+#
+#   Esta bóveda es la única, así que es ella la que tiene que invitar. Alguien tiene que
+#   alcanzarla (`docker exec`, `kubectl exec`, `aws ecs execute-command`) — no es un
+#   defecto, es lo que significa «enseñar algo y recibir una respuesta».
+#
+#     docker exec dotrino-vault dotrino-vault pair --admin --quiet
+#     → escupe UNA línea: la invitación. Ábrela (o pégala) en vault.dotrino.com/vault
+#     → el navegador enseña un código:
+#     docker exec dotrino-vault dotrino-vault approve 123456
+#
+#   `--admin` es lo que la convierte en una CONSOLA (admitir y quitar aparatos). El QR no
+#   lleva el permiso: es una nota local de la bóveda y se aplica al aprobar aquí, así que
+#   una invitación interceptada sigue sin servir de nada.
+#   `--quiet` da la invitación y termina, en vez de pintar un QR y esperar dos minutos.
+#
+# ── 2) YA TIENES UNA BÓVEDA. El contenedor se une a esa cuenta ──────────────────────────
+#
+#   Este es el camino para desplegar, y la razón es que **todo lo interactivo pasa del
+#   lado donde hay un humano**: tu PC invita, el contenedor acepta, y el código que hay que
+#   teclear lo teclas en tu PC. Al contenedor no hay que entrar NUNCA.
+#
+#     dotrino-vault pair --save invite.dpair          (en TU PC)
+#     docker run -d … -e DOTRINO_JOIN_FILE=/run/secrets/invite … dotrino-vault
+#     docker logs -f dotrino-vault   → «type this code in the other vault: 123456»
+#     dotrino-vault approve 123456                    (en TU PC)
+#
+#   La invitación también entra por `DOTRINO_JOIN` a secas, pero un archivo es lo correcto:
+#   una variable de entorno la ve cualquiera con `docker inspect`. Se usa UNA vez y queda
+#   anotada: reiniciar el contenedor no vuelve a pedir entrar.
+#
+#   Y te deja donde quieres estar: dos bóvedas en la misma cuenta. Dale `+sella` a la nueva
+#   (`dotrino-vault caps <ID> +sella` en tu PC) y podrá admitir aparatos ella sola el día
+#   que la primera se pierda. Ver `docs/replicas.md`.
 #
 # ⚠️ EN UN CONTENEDOR, EL KMS NO ES OPCIONAL. Y esto costó descubrirlo:
 #
@@ -61,7 +103,14 @@ ENV DOTRINO_VAULT_DIR=/data
 #   · DOTRINO_KEK_CMD     → cualquier otro: OpenBao, gcloud, un script tuyo.
 #                           Contrato: base64 por la entrada, base64 por la salida.
 ENV DOTRINO_KMS_KEY_ID=""
-ENV DOTRINO_KEK_CMD="" 
+ENV DOTRINO_KEK_CMD=""
+# Entrar ya unido a la cuenta de otra bóveda (camino 2, arriba). Vacías: sin invitación,
+# el contenedor arranca con su propia cuenta nueva y espera a que alguien lo empareje.
+#   · DOTRINO_JOIN_FILE  → archivo con la invitación (lo correcto: un secreto montado)
+#   · DOTRINO_JOIN       → la invitación a secas (la ve `docker inspect`)
+#   · DOTRINO_JOIN_NAME  → cómo se llama aquí esa cuenta
+ENV DOTRINO_JOIN_FILE=""
+ENV DOTRINO_JOIN="" 
 # Para que el CLI diga «docker restart …» y no «systemctl», que aquí no existe.
 ENV DOTRINO_IN_DOCKER=1
 VOLUME ["/data"]
