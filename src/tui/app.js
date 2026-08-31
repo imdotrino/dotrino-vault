@@ -127,6 +127,10 @@ function mergeMembersAndCerts (members, issued) {
       label: m.label || cert?.label || '',
       isMaster: !!m.isMaster,
       cn: m.cn || null,
+      // CUÁNDO ENTRÓ. Venía en el acta y se perdía aquí, así que la lista no podía
+      // enseñarlo por mucho que se quisiera. El nombre lo pone el propio aparato y muchas
+      // veces no distingue nada: la fecha es lo que deja reconocer cuál es cuál.
+      addedAt: m.addedAt || null,
       // El master es la propia bóveda: no tiene (ni necesita) certificado. Un servicio
       // tampoco lleva uno de dispositivo. Marcarlos «sin acceso» sería una alarma falsa.
       noAccess: !cert && !m.isMaster && !m.cn
@@ -260,6 +264,7 @@ function deviceRows (st, t) {
     const label = d.label || t.muted(i.noLabel)
     const vars = devVarsOf(st, d.sub).length
     const debt = debtOf(st, d.sub)
+    const desde = d.addedAt ? t.muted(`  ${i.deviceSince}:${fmtExp(d.addedAt)}`) : ''
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
       (vars ? t.muted(`  vars:${vars}`) : '') +
       // EN DEUDA: en el acta y sin poder abrir lo suyo. Va en color de aviso al lado de
@@ -272,7 +277,7 @@ function deviceRows (st, t) {
       : d.isMaster
         ? t.muted(i.thisVault)
         : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp))
-    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}  ${status}${extra}`, sel: true, meta: d })
+    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}${desde}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -318,7 +323,17 @@ function pairModeRows (st, t) {
  * una marca de si los tiene. El de administrar va aparte y avisado: es el único que deja
  * a ese aparato meter y sacar dispositivos sin venir aquí.
  */
-const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'passwords']
+/**
+ * TODOS los permisos que el acta reconoce para un aparato, en el orden en que se leen: de
+ * lo cotidiano a lo que cambia quién manda.
+ *
+ * `approve` y `sealer` faltaban, y solo se podían conceder por la CLI. Un permiso que
+ * existe y no se ve en la pantalla que se llama «permisos» hace creer que no existe — y
+ * `sealer` es justo el que hay que entender para el multivault. Se ven siempre, aunque en
+ * un teléfono normal `sealer` no lo vaya a usar nadie: verlo apagado explica el modelo
+ * (dueño, 2026-08-31).
+ */
+const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer']
 
 function capsRows (st, t) {
   const i = L(st)

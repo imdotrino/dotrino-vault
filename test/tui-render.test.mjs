@@ -461,7 +461,7 @@ test('Perfil vacío: lo dice y explica qué hacer, sin reventar', () => {
 })
 
 
-test('Permisos: los cinco, en cristiano, con su marca — y admin destacado', () => {
+test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin destacado', () => {
   const t = makeTheme()
   const st = baseState({
     screen: 'caps',
@@ -475,8 +475,13 @@ test('Permisos: los cinco, en cristiano, con su marca — y admin destacado', ()
   assert.match(text, /sin venir aquí/, 'y se explica qué implica administrar')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
-  // Se puede elegir cada permiso.
-  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 5)
+  // Se puede elegir cada permiso, y están LOS SIETE que el acta reconoce. Eran cinco:
+  // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
+  // pantalla que se llama «permisos» — y `sella` es justo el que hay que entender para
+  // el multivault. Si el acta gana o pierde uno, esto se pone rojo a propósito.
+  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 7)
+  assert.match(text, /\[ \].*Sellar el acta/, 'sella se ve aunque esté apagado')
+  assert.match(text, /Solo sirve en otra BÓVEDA/, 'y se dice dónde significa algo')
 })
 
 /**
@@ -638,4 +643,31 @@ test('una bóveda que ESTA sesión no abrió no le hace olvidar nada', () => {
     state: { profiles: [{ id: 'p1', protected: true, locked: false, current: true, until: Date.now() + 9000 }, otra] }
   })
   assert.deepEqual(V.autoLockedIds(st), [])
+})
+
+/**
+ * CUÁNDO ENTRÓ CADA APARATO, en la lista.
+ *
+ * El dato venía en el acta y se perdía en `mergeMembersAndCerts`, así que la pantalla no
+ * podía enseñarlo por mucho que se quisiera — se vio con tres aparatos y ninguna forma de
+ * distinguirlos (dueño, 2026-08-31). Se prueban las dos mitades: que sobrevive al merge y
+ * que sale pintado.
+ */
+test('la lista de aparatos dice desde cuándo está cada uno', () => {
+  const t = makeTheme(false)
+  const cuando = Date.parse('2026-08-31T12:00:00Z')
+  const members = [
+    { pub: 'PUB-A', id: 'AAAA-1111', label: 'CELX', caps: ['sign'], addedAt: cuando }
+  ]
+  const st = baseState({
+    screen: 'devices',
+    members,
+    devices: { issued: [{ sub: 'PUB-A', deviceId: 'AAAA-1111', label: 'CELX', scope: ['vault:sign'], exp: Date.now() + 8.64e7, nonce: 'n1' }], revoked: [] }
+  })
+
+  const fusionado = V.mergeMembersAndCerts(members, st.devices.issued)
+  assert.equal(fusionado[0].addedAt, cuando, 'el merge no puede tirarlo: era el fallo')
+
+  assert.match(V.deviceRows(st, t).map((r) => r.text).join('\n'), /2026-08-31/,
+    'y la fila lo enseña')
 })

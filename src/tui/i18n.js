@@ -46,14 +46,22 @@ const es = {
     store: 'Guardar tus datos',
     read: 'Leer tus datos',
     admin: 'Administrar el perfil',
-    passwords: 'Pedir tus contraseñas'
+    passwords: 'Pedir tus contraseñas',
+    approve: 'Aprobar pedidos',
+    sealer: 'Sellar el acta'
   },
   capHint: {
     sign: 'usar tu identidad en las apps del ecosistema',
     store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
     read: 'ver lo que guardaste',
     admin: 'conectar y quitar dispositivos desde ese aparato, sin venir aquí',
-    passwords: 'el gestor: pedir una credencial por sitio, nunca la lista entera'
+    passwords: 'el gestor: pedir una credencial por sitio, nunca la lista entera',
+    approve: 'dar el visto bueno cuando otro aparato pide claves privadas',
+    // Sellar solo significa algo en un aparato que HAGA de bóveda (otra máquina con el
+    // daemon, o un navegador que se puso de bóveda). En un teléfono normal se concede y no
+    // lo usa nadie. Se enseña igual, y se dice: verlo desactivado explica el modelo;
+    // esconderlo hacía creer que no existe (dueño, 2026-08-31).
+    sealer: 'admitir aparatos y cambiar permisos él solo, si esta bóveda no está. Solo sirve en otra BÓVEDA'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
@@ -140,6 +148,7 @@ const es = {
   cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
   revokedCount: (n) => `  Revocados: ${n}`,
   startingPairing: 'Iniciando emparejamiento…',
+  deviceSince: 'desde',
   nameDeviceLabel: '¿Cómo se va a llamar este aparato?',
   nameDeviceHint: 'Enter para dejar que lo diga él (usará tu apodo, y así no se distinguen)',
   noPending: 'No hay ningún dispositivo pendiente',
@@ -347,14 +356,18 @@ const en = {
     store: 'Save your data',
     read: 'Read your data',
     admin: 'Manage the profile',
-    passwords: 'Ask for your passwords'
+    passwords: 'Ask for your passwords',
+    approve: 'Approve requests',
+    sealer: 'Seal the record'
   },
   capHint: {
     sign: 'use your identity across the ecosystem apps',
     store: 'write to your vault (profile, content, sensitive data)',
     read: 'see what you saved',
     admin: 'connect and remove devices from that device, without coming here',
-    passwords: 'the manager: ask for one credential per site, never the whole list'
+    passwords: 'the manager: ask for one credential per site, never the whole list',
+    approve: 'give the go-ahead when another device asks for private keys',
+    sealer: 'admit devices and change permissions on its own if this vault is gone. Only useful on another VAULT'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,
@@ -437,6 +450,7 @@ const en = {
   cantRemoveMaster: 'This vault is the Master: it does not remove itself.',
   revokedCount: (n) => `  Revoked: ${n}`,
   startingPairing: 'Starting pairing…',
+  deviceSince: 'since',
   nameDeviceLabel: 'What will this device be called?',
   nameDeviceHint: 'Enter to let it say (it will use your nickname, and then they all look alike)',
   noPending: 'No device is waiting',
