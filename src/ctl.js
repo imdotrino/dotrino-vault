@@ -548,7 +548,10 @@ async function cmdMembers () {
   for (const m of record.members) {
     const who = m.label || m.id
     const marks = [
-      m.isMaster ? `${B}Master${Z}` : null,
+      // Ya no hay UN master: la marca dice quién puede sellar, y pueden ser varios. El
+      // permiso también sale abajo en la lista, pero aquí se ve de un vistazo — que es
+      // justo lo que se busca al mirar quién es quién.
+      m.isMaster ? `${B}Sella${Z}` : null,
       m.isMe ? 'este dispositivo' : null,
       m.cn ? `servicio «${m.cn}»` : null
     ].filter(Boolean)

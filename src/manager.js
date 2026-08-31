@@ -24,13 +24,16 @@ import { atRestFor } from './atrest.js'
  * Pura a propósito (recibe el veredicto ya calculado) para poder probar la regla sin
  * levantar un vault entero.
  */
-export function assertCanRemove ({ isMaster, memberCount, name = '' }) {
-  if (!isMaster || memberCount <= 1) return true
+export function assertCanRemove ({ isMaster, memberCount, sealerCount = 1, name = '' }) {
+  // `isMaster` ahora es «¿puedo sellar?». Y con varios selladores, borrar esta bóveda ya
+  // NO deja la cuenta muerta si queda otro que pueda sellar: eso es exactamente para lo
+  // que existe el multivault, y el freno tiene que dejar de estorbar en ese caso.
+  if (!isMaster || memberCount <= 1 || sealerCount > 1) return true
   const others = memberCount - 1
   const e = new Error(
-    `this vault is the master of account "${name}" and it has ${others} more device(s): ` +
-    'hand the master over to one that is connected first. Deleting it like this leaves them ' +
-    'with their key and nobody able to sign the record again.'
+    `this vault is the only one that can seal account "${name}", and it has ${others} more device(s): ` +
+    'give another one the sealing permission first (`caps <ID> +sella`). Deleting it like this ' +
+    'leaves them with their key and nobody able to seal the record again.'
   )
   e.code = 'MASTER_WITH_MEMBERS'
   e.members = memberCount
@@ -159,7 +162,12 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
           v.isMaster().catch(() => false),
           v.profileMembers().catch(() => ({ members: [] }))
         ])
-        assertCanRemove({ isMaster, memberCount: (record?.members || []).length, name: profiles.get(id)?.name || id })
+        assertCanRemove({
+          isMaster,
+          memberCount: (record?.members || []).length,
+          sealerCount: (record?.sealers || []).length || 1,
+          name: profiles.get(id)?.name || id
+        })
       } else {
         log('[vault] profile %s is not open: deleting without being able to check its record', id)
       }
