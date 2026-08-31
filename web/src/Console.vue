@@ -109,6 +109,9 @@ const T = {
     pair_t: 'Conectar este dispositivo a una bóveda',
     pair_b: 'Escanea el código que te muestra tu bóveda, o pégalo aquí.',
     pair_scan: 'Escanear con la cámara', pair_file: 'Abrir imagen o archivo',
+    other_t: 'Conectar a otra bóveda',
+    other_b: 'Este dispositivo ya pertenece a una cuenta. Puedes conectarlo a otra bóveda: se crea aquí una cuenta aparte y la que usas ahora no se toca.',
+    other_go: 'Escanear una invitación',
     pair_paste: 'Pegar el código', pair_go: 'Conectar',
     pair_bad: 'Ese código no vale. Copia otra vez el que te muestra tu bóveda.',
     pair_old: 'Ese código es de una versión antigua. Genera uno nuevo en tu bóveda.',
@@ -269,6 +272,9 @@ const T = {
     pair_t: 'Connect this device to a vault',
     pair_b: 'Scan the code your vault shows you, or paste it here.',
     pair_scan: 'Scan with the camera', pair_file: 'Open image or file',
+    other_t: 'Connect to another vault',
+    other_b: 'This device already belongs to an account. You can connect it to another vault: a separate account is created here and the one you are using is left untouched.',
+    other_go: 'Scan an invitation',
     pair_paste: 'Paste the code', pair_go: 'Connect',
     pair_bad: 'That code is not valid. Copy the one your vault shows again.',
     pair_old: 'That code is from an old version. Generate a new one in your vault.',
@@ -1527,6 +1533,20 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <button class="btn ghost" data-testid="pair-go" :disabled="pairing" @click="connectPasted">{{ t.pair_go }}</button>
       </details>
 
+      </template>
+
+      <!-- LA SALIDA CUANDO EL BLOQUE DE ARRIBA NO APLICA.
+           Este aparato ya vive en una bóveda ajena, así que no se le ofrece conectarse
+           «a una bóveda» —ya lo está—; pero eso dejaba la pantalla SIN NINGUNA forma de
+           leer un QR, y en la app de Dotrino no hay barra de direcciones para escribir
+           `/d` a mano: el lector quedaba inalcanzable. Emparejar es un proceso y tiene su
+           propia pantalla (§5.1), así que aquí va el enlace a ella y no otro lector. -->
+      <template v-else>
+        <h2>{{ t.other_t }}</h2>
+        <p class="muted">{{ t.other_b }}</p>
+        <div class="row">
+          <a class="btn" href="/d" data-testid="pair-elsewhere">{{ t.other_go }}</a>
+        </div>
       </template>
 
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
