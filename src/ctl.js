@@ -505,7 +505,14 @@ async function cmdMembers () {
   assertOpen(record)
   if (!record.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
-  const CAP = { sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves', admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}` }
+  // `sealer` y `passwords` faltaban y salían crudos, en inglés, entre los demás en
+  // español. Se resaltan como `admin` y `approve`: los cuatro cambian lo que ese aparato
+  // puede hacerle a la cuenta, y eso se lee de un vistazo o no se lee.
+  const CAP = {
+    sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves',
+    admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}`,
+    sealer: `${B}sella el acta${Z}`, passwords: `${B}pide contraseñas${Z}`
+  }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
   // misma que se enseña al emparejar y en la lista de miembros.
