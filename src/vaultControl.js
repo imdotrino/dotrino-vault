@@ -224,6 +224,15 @@ export const renameProfile = (profile, name) => profileOp('rename', { profile, n
 export const removeProfile = (profile) => profileOp('rm', { profile })
 export const unlockProfile = (profile, password) => profileOp('unlock', { profile, password })
 export const lockProfile = (profile) => profileOp('lock', { profile })
+/**
+ * «Sigo aquí»: estira el plazo del bloqueo automático sin hacer nada más.
+ *
+ * La pantalla de control la usa al teclear. Sin esto, moverse por ella no tocaba el
+ * daemon —solo lo hacían las acciones—, así que el candado se cerraba a los 5 minutos de
+ * ABRIRLO aunque estuvieras delante. El plazo se cuenta desde el último uso, y teclear es
+ * uso.
+ */
+export const touchProfile = (profile) => profileOp('touch', { profile })
 // `current`: la contraseña que YA tenía el perfil. Hace falta para abrir la copia
 // maestra de los secretos y volver a cerrarla con la nueva — sin ese paso, cambiar la
 // contraseña dejaría las variables privadas ilegibles.

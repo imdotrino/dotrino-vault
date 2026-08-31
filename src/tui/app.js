@@ -552,6 +552,28 @@ function autoLockWakeIn (st, now = Date.now()) {
  * reabriría sola en cuanto alguien pulsara Enter (ver `reunlockSilently`), así que el
  * candado del daemon no habría cerrado nada.
  */
+/** Cada cuánto se le dice al daemon «sigo aquí». Muy por debajo del plazo del candado. */
+const TOUCH_MS = 60_000
+let ultimoToque = 0
+
+/**
+ * Le dice al daemon que sigues delante, sin pedirle nada. Se llama al teclear.
+ *
+ * No se espera (`await`): estirar el candado no puede meterse en medio de lo que estabas
+ * haciendo, y si se pierde un aviso, el siguiente llega un minuto después — con cinco de
+ * plazo, no pasa nada.
+ */
+function seguirAqui (st, api = vc) {
+  const ahora = Date.now()
+  if (ahora - ultimoToque < TOUCH_MS) return
+  const p = (st.state?.profiles || []).find((x) => x.current)
+  // Solo tiene sentido en un perfil con contraseña y abierto: sin candado no hay plazo
+  // que estirar, y cerrado no hay nada que mantener abierto.
+  if (!p?.protected || p.locked) return
+  ultimoToque = ahora
+  try { Promise.resolve(api.touchProfile(p.id)).catch(() => {}) } catch (_) {}
+}
+
 async function forgetAutoLocked (term, st, api = vc) {
   const ids = autoLockedIds(st)
   if (!ids.length) return false
@@ -1743,6 +1765,13 @@ export async function runTui () {
       if (st.confirm) { await onConfirmKey(st, key); continue }
       if (key.name === 'ctrl-c') { running = false; continue }
 
+      // TECLEAR ES USO. El candado se cierra a los 5 min de no usarse, y hasta ahora
+      // «usar» solo contaba cuando algo pedía al daemon: podías estar media hora
+      // navegando esta pantalla y se cerraba igual, que es lo contrario de lo que se
+      // quería. Se avisa como mucho una vez por minuto —el plazo son cinco, así que
+      // sobra— para no escribir un archivo por tecla.
+      seguirAqui(st)
+
       const ch = key.name === 'char' ? key.ch.toLowerCase() : null
       // 'q' global sale.
       if (ch === 'q') { running = false; continue }
@@ -1785,4 +1814,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts }
+export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

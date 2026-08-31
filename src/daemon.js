@@ -340,6 +340,11 @@ export async function runDaemon () {
         finally { wipe(ak) }
         return { done: 'perfil desbloqueado' + note, autoLockMs: mgr.profiles.autoLockMs }
       }
+      // TECLEAR EN LA PANTALLA DE CONTROL CUENTA COMO USO. Sin esto, navegar por ella no
+      // tocaba el daemon —solo lo hacían las acciones—, así que el candado se cerraba a
+      // los 5 minutos de ABRIRLO aunque estuvieras delante trabajando. `ref()` ya estira
+      // el plazo; esta op no hace nada más, y por eso no devuelve ningún volcado.
+      case 'touch': { ref(); return { done: 'ok' } }
       case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
       // PONER contraseña: los secretos pasan de abrirse con la llave de la máquina a
       // abrirse con la frase. Hay que volver a cerrar la copia maestra con la nueva, o

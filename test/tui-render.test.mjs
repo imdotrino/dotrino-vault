@@ -671,3 +671,34 @@ test('la lista de aparatos dice desde cuándo está cada uno', () => {
   assert.match(V.deviceRows(st, t).map((r) => r.text).join('\n'), /2026-08-31/,
     'y la fila lo enseña')
 })
+
+/**
+ * TECLEAR ES USO. El candado se cierra a los 5 min de NO USARSE, pero «usar» solo contaba
+ * cuando algo pedía al daemon: se podía estar media hora navegando esta pantalla y se
+ * cerraba igual — o sea, 5 minutos desde que se ABRIÓ, que es lo contrario de lo que dice
+ * el diseño (dueño, 2026-08-31).
+ */
+test('teclear estira el candado, y no una vez por tecla', () => {
+  const tocados = []
+  const api = { touchProfile: async (id) => { tocados.push(id); return {} } }
+  const st = baseState({ state: { profiles: [{ id: 'P1', current: true, protected: true, locked: false }] } })
+
+  V.resetToque()
+  V.seguirAqui(st, api)
+  V.seguirAqui(st, api)
+  V.seguirAqui(st, api)
+  assert.deepEqual(tocados, ['P1'], 'tres teclas seguidas avisan UNA vez: no un archivo por tecla')
+})
+
+test('sin candado que estirar, no se molesta al daemon', () => {
+  const tocados = []
+  const api = { touchProfile: async (id) => { tocados.push(id); return {} } }
+
+  V.resetToque()
+  V.seguirAqui(baseState({ state: { profiles: [{ id: 'P1', current: true, protected: false, locked: false }] } }), api)
+  assert.deepEqual(tocados, [], 'un perfil sin contraseña no tiene plazo que estirar')
+
+  V.resetToque()
+  V.seguirAqui(baseState({ state: { profiles: [{ id: 'P1', current: true, protected: true, locked: true }] } }), api)
+  assert.deepEqual(tocados, [], 'y uno ya cerrado no se mantiene abierto tecleando')
+})
