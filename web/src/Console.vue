@@ -110,9 +110,6 @@ const T = {
     pair_t: 'Conectar este dispositivo a una bóveda',
     pair_b: 'Escanea el código que te muestra tu bóveda, o pégalo aquí.',
     pair_scan: 'Escanear con la cámara', pair_file: 'Abrir imagen o archivo',
-    other_t: 'Conectar a otra bóveda',
-    other_b: 'Este dispositivo ya pertenece a una cuenta. Puedes conectarlo a otra bóveda: se crea aquí una cuenta aparte y la que usas ahora no se toca.',
-    other_go: 'Escanear una invitación',
     pair_paste: 'Pegar el código', pair_go: 'Conectar',
     pair_bad: 'Ese código no vale. Copia otra vez el que te muestra tu bóveda.',
     pair_old: 'Ese código es de una versión antigua. Genera uno nuevo en tu bóveda.',
@@ -274,9 +271,6 @@ const T = {
     pair_t: 'Connect this device to a vault',
     pair_b: 'Scan the code your vault shows you, or paste it here.',
     pair_scan: 'Scan with the camera', pair_file: 'Open image or file',
-    other_t: 'Connect to another vault',
-    other_b: 'This device already belongs to an account. You can connect it to another vault: a separate account is created here and the one you are using is left untouched.',
-    other_go: 'Scan an invitation',
     pair_paste: 'Paste the code', pair_go: 'Connect',
     pair_bad: 'That code is not valid. Copy the one your vault shows again.',
     pair_old: 'That code is from an old version. Generate a new one in your vault.',
@@ -1546,20 +1540,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
 
       </template>
 
-      <!-- LA SALIDA CUANDO EL BLOQUE DE ARRIBA NO APLICA.
-           Este aparato ya vive en una bóveda ajena, así que no se le ofrece conectarse
-           «a una bóveda» —ya lo está—; pero eso dejaba la pantalla SIN NINGUNA forma de
-           leer un QR, y en la app de Dotrino no hay barra de direcciones para escribir
-           `/d` a mano: el lector quedaba inalcanzable. Emparejar es un proceso y tiene su
-           propia pantalla (§5.1), así que aquí va el enlace a ella y no otro lector. -->
-      <template v-else>
-        <h2>{{ t.other_t }}</h2>
-        <p class="muted">{{ t.other_b }}</p>
-        <div class="row">
-          <a class="btn" href="/d" data-testid="pair-elsewhere">{{ t.other_go }}</a>
-        </div>
-      </template>
-
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
         <span>{{ t.self_pending }}: <code>{{ p.deviceId }}</code></span>
         <input v-model="selfCode" :placeholder="t.self_code_ph" inputmode="numeric" data-testid="self-code" />
@@ -1575,33 +1555,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <Vault :lang="lang" :identity="id" />
       </template>
 
-      <!-- Administrar la bóveda desde aquí: solo si el cert de este aparato lo permite -->
+      <!-- LO QUE PIDE «administra» EN EL CERT: las variables de las aplicaciones y,
+           al final, conectar otro aparato a la bóveda. -->
       <template v-if="canAdmin">
-        <h2>
-          {{ t.adm_t }}
-          <button type="button" class="i" data-testid="info-adm" :aria-expanded="info === 'adm'"
-                  :aria-label="t.info_label" @click="toggleInfo('adm')">i</button>
-        </h2>
-        <p v-if="info === 'adm'" class="muted info-panel">{{ t.adm_b }}</p>
-        <div class="row">
-          <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
-        </div>
-        <div v-if="admQr" class="qrbox" v-html="admQr"></div>
-        <div v-if="admUrl" class="invite" data-testid="adm-invite">
-          <span class="muted">{{ t.invite_url }}</span>
-          <code class="url">{{ admUrl }}</code>
-          <button class="btn ghost sm" data-testid="adm-copy" @click="copyInvite(admUrl, 'adm')">
-            {{ copied === 'adm' ? t.invite_copied : t.invite_copy }}
-          </button>
-        </div>
-        <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
-          <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
-          <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
-          <button class="btn sm" data-testid="adm-approve" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
-          <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
-        </div>
-        <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
-
         <!-- VARIABLES DE ENTORNO. Pantalla administrativa: lo que se ve son las variables
              y los botones. El qué-es-esto (qué significa pública) vive detrás de la (i);
              lo que NO se esconde es la marca de cada una, que es un dato operativo. -->
@@ -1678,6 +1634,34 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                     :disabled="!newGroup.trim()" @click="createGroup">{{ t.var_group_new }}</button>
           </div>
         </template>
+
+        <!-- CONECTAR UN APARATO VA AL FINAL. Es lo que menos se hace de esta pantalla
+             —se conecta un aparato y no se vuelve—, y arriba empujaba las variables, que
+             es a lo que se entra todos los días. -->
+        <h2>
+          {{ t.adm_t }}
+          <button type="button" class="i" data-testid="info-adm" :aria-expanded="info === 'adm'"
+                  :aria-label="t.info_label" @click="toggleInfo('adm')">i</button>
+        </h2>
+        <p v-if="info === 'adm'" class="muted info-panel">{{ t.adm_b }}</p>
+        <div class="row">
+          <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
+        </div>
+        <div v-if="admQr" class="qrbox" v-html="admQr"></div>
+        <div v-if="admUrl" class="invite" data-testid="adm-invite">
+          <span class="muted">{{ t.invite_url }}</span>
+          <code class="url">{{ admUrl }}</code>
+          <button class="btn ghost sm" data-testid="adm-copy" @click="copyInvite(admUrl, 'adm')">
+            {{ copied === 'adm' ? t.invite_copied : t.invite_copy }}
+          </button>
+        </div>
+        <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
+          <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
+          <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
+          <button class="btn sm" data-testid="adm-approve" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
+          <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
+        </div>
+        <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
       </template>
     </template>
   </section>
