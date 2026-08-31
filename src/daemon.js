@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { takeLock } from '../lib/src/lock.js'
 import { startVaultManager } from './manager.js'
 import { dataDir, writeJson, readJson } from './paths.js'
 import { VERSION } from './version.js'
@@ -32,21 +33,33 @@ const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
  * datos, los dos con tu identidad y los dos conectados al proxy; el segundo pisaba el pid
  * de `state.json`, así que el CLI solo le hablaba a uno y el otro quedaba de fantasma.
  *
- * El candado es el propio `state.json`: si el pid que hay sigue vivo, no arrancamos. Un
- * pid muerto (se cortó la luz) no estorba. Con `DOTRINO_VAULT_DIR` distintos conviven
- * cuantas quieras: lo que colisiona es el directorio, no el programa.
+ * El candado vive en `vault.lock` (ver `lib/src/lock.js`) y funciona TAMBIÉN entre
+ * máquinas: `O_EXCL` para la exclusión y un latido para que un corte de luz no deje el
+ * directorio bloqueado para siempre. Antes era un pid, y un pid no cruza contenedores ni
+ * hosts — dos contenedores sobre el mismo volumen arrancaban los dos.
+ *
+ * Con `DOTRINO_VAULT_DIR` distintos conviven cuantas quieras, y es así como se ponen
+ * varias bóvedas en un mismo disco: cada una con su directorio entero, sin nada
+ * compartido. Lo que colisiona es el directorio, no el programa.
  */
 function assertSingleInstance (dir) {
-  let s = null
-  try { s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')) } catch (_) { return }
-  const pid = Number(s?.pid)
-  if (!pid || pid === process.pid) return
-  try { process.kill(pid, 0) } catch (_) { return } // no existe: el candado es de un muerto
-  console.error('A vault is already running on this data (process %d).', pid)
-  console.error('  data: %s', dir)
-  console.error('Two vaults on the same directory step on each other: stop the other one,')
-  console.error('or use DOTRINO_VAULT_DIR to give this one its own directory.')
-  process.exit(3)
+  try {
+    const { release } = takeLock(dir)
+    // Se suelta al salir por las buenas. Si el proceso muere de golpe el candado se queda,
+    // y por eso caduca por latido: uno inmortal sería peor que ninguno.
+    const soltar = () => { try { release() } catch (_) {} }
+    process.once('exit', soltar)
+    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { soltar(); process.exit(0) })
+  } catch (e) {
+    if (e?.code !== 'vault-locked') throw e
+    console.error('A vault is already running on this data.')
+    console.error('  %s', e.message)
+    console.error('  data: %s', dir)
+    console.error('Two vaults on the same directory are not two vaults: they are the SAME one')
+    console.error('running twice — same master key, both sealing records as the same sealer.')
+    console.error('Stop the other one, or use DOTRINO_VAULT_DIR to give this one its own.')
+    process.exit(3)
+  }
 }
 
 export async function runDaemon () {

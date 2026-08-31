@@ -23,17 +23,6 @@ const FAKE_KMS = fileURLToPath(new URL('./fixtures/fake-kms.mjs', import.meta.ur
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kek-'))
 const rm = (...d) => d.forEach((x) => fs.rmSync(x, { recursive: true, force: true }))
 
-/** Lo mínimo que el store necesita para firmar sus entradas: una llave y `signData`. */
-async function identidadDePrueba () {
-  const { makeDeviceKey, signWithDevice } = await import('@dotrino/identity/capabilities')
-  const k = await makeDeviceKey()
-  return {
-    me: { publickey: k.publickey },
-    signData: async (data) => ({ ...(await signWithDevice({ privateJwk: k.privateJwk, data })), publickey: k.publickey })
-  }
-}
-
-
 /** Config del proveedor `command` apuntando al KMS de mentira. */
 const kmsConfig = (extraEnv = null) => ({
   provider: 'command',
@@ -291,17 +280,14 @@ test('los stores del vault funcionan igual con la clave de un KMS', async () => 
   const { openStore } = await import('../src/store.js')
   const d = tmp()
   writeConfig(d, kmsConfig())
-  const id = await identidadDePrueba()
 
-  await (await openStore(d, { identity: id })).setSetting('nota', 'CONTENIDO')
-  // El estado vive ahora en el REGISTRO, una línea cifrada por operación.
-  const { writerFile } = await import('../lib/src/oplog.js')
-  const raw = fs.readFileSync(path.join(d, 'log', writerFile(id.me.publickey)), 'utf8')
-  assert.ok(isEncrypted(raw.trim()))
+  openStore(d).setSetting('nota', 'CONTENIDO')
+  const raw = fs.readFileSync(path.join(d, 'vault.json'), 'utf8')
+  assert.ok(isEncrypted(raw))
   assert.ok(!raw.includes('CONTENIDO'))
 
   clearCache()
-  assert.equal((await openStore(d, { identity: id })).getSetting('nota'), 'CONTENIDO')
+  assert.equal(openStore(d).getSetting('nota'), 'CONTENIDO')
   rm(d)
 })
 
