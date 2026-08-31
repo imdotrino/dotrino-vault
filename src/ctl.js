@@ -68,6 +68,20 @@ const writeReq = (name, obj) => {
 }
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
+const D = '\x1b[2m' // apagado: para el dato que acompaña sin competir con el nombre
+
+/**
+ * La fecha en que entró un aparato, corta y en local. Sin hora: lo que se busca al mirar
+ * esta lista es «¿de cuándo es este?», no el minuto exacto — y una fecha larga en cada
+ * línea convierte la lista en un muro.
+ *
+ * En español, como el resto de esta CLI: con el idioma del sistema salía «Jul 29, 2026»
+ * en medio de una frase en español, que es peor que cualquiera de los dos por separado.
+ */
+function fechaCorta (ms) {
+  try { return new Date(ms).toLocaleDateString('es', { year: 'numeric', month: 'short', day: 'numeric' }) }
+  catch (_) { return '' }
+}
 // La versión se inyecta en build (esbuild --define); en dev cae a 'dev'.
 
 /**
@@ -526,7 +540,13 @@ async function cmdMembers () {
       m.cn ? `servicio «${m.cn}»` : null
     ].filter(Boolean)
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
-    console.log('  %s  %s%s\n      %s', m.id, who, marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
+    // CUÁNDO ENTRÓ. El nombre lo pone el propio aparato al emparejarse y muchas veces no
+    // distingue nada —dos teléfonos con el mismo apodo, o «cli» a secas—, así que la fecha
+    // es lo que deja reconocer cuál es cuál y ver si hay uno que no recuerdas haber
+    // conectado. El acta ya la guardaba (`addedAt`); solo no se enseñaba.
+    console.log('  %s  %s%s%s\n      %s', m.id, who,
+      m.addedAt ? `  ${D}· conectado el ${fechaCorta(m.addedAt)}${Z}` : '',
+      marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
     // Un servicio SIN llave de cifrado no puede leer ninguna variable privada: van
     // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
     // se mira quién es quién — y en la lista de variables ya seria tarde.

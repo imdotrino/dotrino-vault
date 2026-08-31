@@ -20,6 +20,7 @@ import { takeLock } from '../lib/src/lock.js'
 import { startVaultManager } from './manager.js'
 import { dataDir, writeJson, readJson } from './paths.js'
 import { parseInvite } from '../lib/src/invite.js'
+import { watchBinary } from './selfupdate.js'
 import { VERSION } from './version.js'
 
 const readJsonSafe = (f) => readJson(f, null)
@@ -742,7 +743,7 @@ export async function runDaemon () {
 
   // --- apagado limpio ---
   const shutdown = (sig) => {
-    console.log(`\n[vault] ${sig} → deteniendo…`)
+    console.log(`\n[vault] ${sig} → stopping…`)
     rm(pairFile); rm(pendingEnrollFile)
     try { mgr.close() } catch (_) {}
     process.exit(0)
@@ -802,6 +803,16 @@ export async function runDaemon () {
     serve()
   }
   bootstrapJoin()
+
+  // ACTUALIZAR EL PAQUETE = ACTUALIZAR EL SERVICIO. El instalador no puede reiniciarnos
+  // (somos un servicio de USUARIO y él corre como root), así que lo hacemos nosotros: si
+  // el binario cambia en el disco, nos vamos y systemd nos levanta con el nuevo. Solo bajo
+  // systemd; ver `src/selfupdate.js` para por qué eso no es negociable.
+  const vigia = watchBinary({
+    log: console.log,
+    exit: () => shutdown('new binary installed')
+  })
+  if (vigia) console.log('[vault] watching for updates: a new binary restarts the service on its own')
 
   console.log('[vault] servicio listo.')
   return mgr

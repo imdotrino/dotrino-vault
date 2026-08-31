@@ -222,6 +222,10 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       // la llave— es largo, y nadie va a teclear 24 caracteres para decir `--profile`. El
       // trozo que sí se lee y se reconoce es la huella de delante (`0571-465F`), que es la
       // misma que sale en `members`. Ambiguo se rechaza, no se adivina.
+      // El id que tenía antes de que la carpeta se llamara como su llave (ver
+      // `ensureNamedByKey`): un cliente abierto durante la actualización sigue usándolo.
+      const viejo = data.profiles.find((p) => p.wasId && p.wasId.toLowerCase() === needle)
+      if (viejo) return viejo.id
       const porPrefijo = data.profiles.filter((p) => p.id.toLowerCase().startsWith(needle))
       if (porPrefijo.length === 1) return porPrefijo[0].id
       if (porPrefijo.length > 1) throw new Error(`"${ref}" matches ${porPrefijo.length} profiles; give more of the id (dotrino-vault profile ls)`)
@@ -380,7 +384,15 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       }
       fs.renameSync(dir, dirOf(quiere))
       const p = find(id)
-      if (p) p.id = quiere
+      if (p) {
+        p.id = quiere
+        // EL NOMBRE VIEJO SE RECUERDA. Quien tenía una consola o una TUI abierta durante
+        // la actualización sigue pidiendo por el id de antes, y sin esto cada petición
+        // suya contestaba «ese perfil no existe» —que es verdad y no ayuda nada—. Se
+        // traduce en `resolve`, así que el cliente viejo sigue funcionando hasta que se
+        // reinicie, que es cuando dejará de preguntarlo.
+        p.wasId = id
+      }
       if (data.current === id) data.current = quiere
       if (unlocked.has(id)) { unlocked.set(quiere, unlocked.get(id)); unlocked.delete(id) }
       save()

@@ -82,6 +82,7 @@ const T = {
     confirm_remove_me: 'Vas a quitar ESTE dispositivo. Aquí se cierra la cuenta: dejará de firmar, de leer y de guardar, y lo que tenga guardado se borra. Para volver a usarla habría que conectarlo otra vez desde tu bóveda.',
     // Estado de cada aparato: no es documentación, es el dato que hace falta para decidir.
     dev_until: (d) => 'conectado hasta el ' + d,
+    dev_since: (d) => 'se conectó el ' + d,
     dev_nocert: 'sin acceso',
     dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
     // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
@@ -249,6 +250,7 @@ const T = {
     confirm_remove: 'Remove this device from the profile? It will no longer get in, and it will not be able to open anything you save from now on. If it is switched off, what it has stays there until it connects: that is when it is erased.',
     confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
     dev_until: (d) => 'connected until ' + d,
+    dev_since: (d) => 'connected on ' + d,
     dev_nocert: 'no access',
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
     gone_t: 'This device is no longer in the profile',
@@ -1424,6 +1426,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                  sin él, la fila parece un aparato normal y nadie la quita nunca. -->
             <span class="tag out" v-if="m.noAccess" :data-testid="'noaccess-' + m.id">{{ t.dev_nocert }}</span>
             <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
+            <!-- CUÁNDO ENTRÓ. El nombre lo pone el propio aparato y muchas veces no
+                 distingue nada; la fecha es lo que deja saber cuál es cuál, y ver si hay
+                 uno que no recuerdas haber conectado. -->
+            <span class="tag since" v-if="m.addedAt" :data-testid="'since-' + m.id">{{ t.dev_since(shortDate(m.addedAt)) }}</span>
             <code class="mid">{{ m.id }}</code>
           </div>
           <template v-if="openMembers.has(m.pub)">
@@ -1755,6 +1761,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .tag.svc { background: #2a2310; color: #ffd98a; }
 /* «Sin acceso»: está en el acta pero no puede entrar. Es un aviso, y se ve como tal. */
 .tag.out { background: #2a1113; color: #ff9aa2; }
+/* La fecha acompaña; no compite con el nombre ni con las marcas que importan. */
+.tag.since { background: transparent; color: #6b7a90; padding-left: 0; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }

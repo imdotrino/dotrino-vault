@@ -11,7 +11,7 @@
  * estrictamente (firmado por la maestra que vio en el QR, y para SU clave) antes de
  * guardarlo. La maestra nunca sale del vault.
  */
-import { makeDeviceKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId, PEER_SKEW_MS } from '@dotrino/identity/capabilities'
 import { installNodeGlobals } from './node-globals.js'
 import { MSG } from './protocol.js'
 
@@ -84,7 +84,7 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
     const res = await enrolled
 
     // VALIDACIÓN ESTRICTA antes de persistir (cierra inyección de cert / sustitución de maestra).
-    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey })
+    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey, skewMs: PEER_SKEW_MS })
     if (!v.ok) throw new Error('invalid cert: ' + v.reason)
     if (res.cert.iss !== qr.iss) throw new Error('cert signed by a master other than the one you saw (possible malicious proxy)')
     if (res.cert.sub !== device.publickey) throw new Error('cert issued for a different device')
@@ -151,7 +151,7 @@ export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, dir 
     if (res.type === MSG.ERROR) throw new Error(res.error)
     // Se valida antes de devolverlo, igual que en el enrolamiento: un cert que no está
     // firmado por la maestra que ya conocemos, o que no es para esta llave, no se guarda.
-    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey })
+    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey, skewMs: PEER_SKEW_MS })
     if (!v.ok) throw new Error('invalid cert: ' + v.reason)
     if (res.cert.iss !== masterPubkey) throw new Error('cert signed by a master other than the pinned one')
     return { cert: res.cert }

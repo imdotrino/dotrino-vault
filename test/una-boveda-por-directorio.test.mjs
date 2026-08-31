@@ -192,3 +192,66 @@ test('una carpeta que ya se llama como su llave no se toca', async () => {
   assert.equal(await p.ensureNamedByKey(creado.id, null), creado.id)
   rm(root)
 })
+
+// ---------- actualizar el paquete tiene que actualizar el servicio ----------
+
+test('sin systemd que nos levante, NO se vigila el binario', async () => {
+  const { shouldWatch } = await import('../src/selfupdate.js')
+  assert.equal(shouldWatch({}, '/usr/bin/dotrino-vaultd'), false, 'irse sin quien te reinicie es apagar la bóveda')
+  assert.equal(shouldWatch({ INVOCATION_ID: 'x' }, '/usr/bin/node'), false, 'desde el repo o npx no es nuestro binario')
+  assert.equal(shouldWatch({ INVOCATION_ID: 'x' }, '/usr/bin/dotrino-vaultd'), true)
+})
+
+test('el binario nuevo reinicia el servicio, pero solo cuando ya está quieto', async () => {
+  const { watchBinary } = await import('../src/selfupdate.js')
+  const d = tmp()
+  const bin = path.join(d, 'dotrino-vaultd')
+  fs.writeFileSync(bin, 'v1')
+
+  let salidas = 0
+  const w = watchBinary({
+    log: () => {}, exit: () => { salidas++ },
+    env: { INVOCATION_ID: 'x' }, execPath: bin, checkMs: 1000
+  })
+  assert.ok(w, 'con systemd y el binario propio, se vigila')
+
+  const tick = () => new Promise((r) => setTimeout(r, 1200))
+  await tick()
+  assert.equal(salidas, 0, 'sin cambios no se va')
+
+  // Se escribe una versión nueva: la PRIMERA pasada solo la anota (podría estar a medias).
+  fs.writeFileSync(bin, 'v2-mas-largo')
+  await tick()
+  assert.equal(salidas, 0, 'un archivo recién visto todavía no cuenta')
+
+  await tick()
+  assert.equal(salidas, 1, 'visto quieto dos veces: ahora sí')
+  w.stop(); rm(d)
+})
+
+/**
+ * Actualizar renombra la carpeta y con ella el id del perfil. Quien tuviera una consola
+ * abierta sigue pidiendo por el de antes, y contestarle «ese perfil no existe» es cierto
+ * y no sirve para nada: lo vio el dueño con la TUI abierta durante la actualización.
+ */
+test('el id de antes de la mudanza sigue resolviendo', async () => {
+  const root = tmp()
+  const p = openProfiles(root)
+  const pub = await nuevaPub()
+  await p.add('Perfil 1', { mintKey: async () => pub })
+
+  const bueno = await keyDirName(pub)
+  const viejo = 'p42ab0344'
+  fs.renameSync(path.join(root, 'p', bueno), path.join(root, 'p', viejo))
+  fs.writeFileSync(path.join(root, 'p', viejo, OWNER_FILE), JSON.stringify({ pub }))
+  const regFile = path.join(root, 'profiles.json')
+  const reg = readJson(regFile, null, atRestFor(root))
+  reg.profiles[0].id = viejo; reg.current = viejo
+  writeJson(regFile, reg, atRestFor(root))
+
+  const p2 = openProfiles(root)
+  assert.equal(await p2.ensureNamedByKey(viejo, null), bueno)
+  assert.equal(p2.resolve(viejo), bueno, 'el cliente viejo sigue acertando')
+  assert.equal(p2.resolve(bueno), bueno)
+  rm(root)
+})
