@@ -1072,7 +1072,15 @@ async function onKeyCaps (term, st, key) {
     else salir()
     return true
   }
-  if (key.name === 'f5') { st.capsDraft = null; await refreshMembers(term, st); return true }
+  if (key.name === 'f5') {
+    // F5 PREGUNTA IGUAL QUE ESC. Refrescar trae el acta de nuevo y el borrador deja de
+    // tener con qué compararse, así que hay que tirarlo — pero tirarlo callando es perder
+    // trabajo sin decirlo, que es lo mismo que Esc ya no hace.
+    const refrescar = async () => { st.capsDraft = null; await refreshMembers(term, st) }
+    if (sucio) setConfirm(st, { text: i.capsDiscard, onYes: refrescar })
+    else await refrescar()
+    return true
+  }
 
   // GUARDAR: UNA sola acta con todo lo que hayas tocado.
   if (ch === 'g') {

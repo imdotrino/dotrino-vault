@@ -794,3 +794,26 @@ test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', (
   assert.equal(suyas.filter((r) => r.sel).length, 8)
   assert.equal(suyas.find((r) => r.meta?.cap === 'secrets'), undefined, 'no hay cajón que abrir')
 })
+
+/**
+ * F5 TAMPOCO TIRA EL BORRADOR CALLANDO.
+ *
+ * Refrescar trae el acta otra vez y el borrador se queda sin con qué compararse, así que
+ * hay que descartarlo — pero descartarlo sin decirlo es perder trabajo en silencio, que es
+ * justo lo que Esc dejó de hacer. Se pregunta lo mismo, y por la misma razón.
+ */
+test('Permisos: F5 con cambios sin guardar PREGUNTA, igual que Esc', async () => {
+  const t = makeTheme()
+  const st = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign'] }]
+  })
+  st.sel.caps = 1
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  const antes = [...st.capsDraft.caps]
+  await V.onKeyCaps({ t }, st, { name: 'f5' })
+  assert.ok(st.confirm, 'se pregunta antes de refrescar')
+  assert.match(st.confirm.text, /Descartar/i)
+  assert.deepEqual([...st.capsDraft.caps], antes, 'y el borrador sigue ahí hasta que contestes')
+})
