@@ -47,6 +47,7 @@ const T = {
     loading: 'Cargando…',
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Master',
+    copy_id: 'Copiar el identificador completo',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
     caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', sealer: 'Sella el acta (otra bóveda)' },
     service: 'servicio',
@@ -213,6 +214,7 @@ const T = {
     loading: 'Loading…',
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'Master',
+    copy_id: 'Copy the full identifier',
     members: 'Devices', me: 'this device', is_master: 'Master',
     caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', sealer: 'Seals the record (another vault)' },
     service: 'service',
@@ -1361,7 +1363,16 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <!-- Ficha del acta: qué cuenta es, por qué versión va y quién es el Master. Es
            DATO, no explicación, y por eso se queda a la vista. -->
       <ul class="facts" v-if="record">
-        <li>{{ t.profile }} <code data-testid="profile-id">{{ profileIdShort || '—' }}</code></li>
+        <!-- El identificador se enseña ABREVIADO y no se puede seleccionar con el ratón,
+             así que copiarlo a mano era imposible: el botón copia el valor ENTERO. -->
+        <li>
+          {{ t.profile }} <code data-testid="profile-id">{{ profileIdShort || '—' }}</code>
+          <button v-if="record?.profileId" type="button" class="copyid" data-testid="profile-id-copy"
+                  :title="t.copy_id" :aria-label="t.copy_id"
+                  @click="copyInvite(record.profileId, 'pid')">
+            {{ copied === 'pid' ? '✓' : '⧉' }}
+          </button>
+        </li>
         <li>{{ t.version }} <code>#{{ record.seq }}</code></li>
         <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
         <!-- CUÁNDO se confirmó esto con la bóveda. Solo cuando la bóveda es OTRA máquina:
@@ -1709,6 +1720,12 @@ textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #
 .qrbox :deep(svg) { width: 220px; height: 220px; display: block; }
 /* El enlace de la invitación: largo, así que se parte en vez de desbordar, y el botón
    de copiar no se encoge nunca. */
+.copyid {
+  margin-left: 6px; padding: 0 5px; line-height: 1.4;
+  background: none; border: 1px solid #33465c; border-radius: 5px;
+  color: #9fb3c8; font-size: .85em; cursor: pointer;
+}
+.copyid:hover { color: #e6eef7; border-color: #4a6b8a; }
 .invite { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
 .invite .url {
   background: #131c2b; border-radius: 6px; padding: 6px 8px; font-size: 12px;
