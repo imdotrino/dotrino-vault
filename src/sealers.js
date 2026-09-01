@@ -52,25 +52,45 @@ export const DOTRINO_REGISTRY_ID = "{\"key_ops\":[\"verify\"],\"ext\":true,\"kty
 /** El canal donde el testigo se anuncia (ver `@dotrino/sealers`). */
 export const CANAL = 'dotrino.sealers'
 
+/** Se le pregunta a cada anunciado quién es; contesta con su cert (ver `@dotrino/sealers`). */
+export const WHOIS = 'sealers.whois'
+
 export function startSealersPublisher ({ identity, client, log = console.log, registryId = DOTRINO_REGISTRY_ID, canal = CANAL } = {}) {
   if (!registryId) return () => {}
 
+  /** Una respuesta a `sealers.whois`, o null si no contesta a tiempo. */
+  function preguntarQuienEs (token, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      const fin = (v) => { try { off() } catch (_) {} ; clearTimeout(t); resolve(v) }
+      const off = client.on('message', (_f, p) => { if (p?.op === WHOIS + '.result') fin(p) })
+      const t = setTimeout(() => fin(null), timeoutMs)
+      t.unref?.()
+      try { client.send(token, { op: WHOIS }) } catch (_) { fin(null) }
+    })
+  }
+
   /**
-   * ¿A qué pubkey le mando esto? Al que esté anunciado en el canal CON UN CERT DE LA
-   * IDENTIDAD que llevamos en el código. Sin esa comprobación cualquiera se anuncia ahí y
-   * se queda con los depósitos: no filtraría nada —el eslabón es público— pero se los
-   * tragaría en silencio, que es peor que un error.
+   * ¿A QUIÉN LE MANDO ESTO? Al que esté anunciado en el canal y demuestre ser de la
+   * IDENTIDAD que llevamos en el código.
+   *
+   * El canal dice DÓNDE mirar y nada más: `list` del proxio devuelve tokens sueltos — el
+   * `extraData` del `publish` no vuelve, comprobado contra el servidor. Así que a cada uno
+   * se le pregunta quién es (`sealers.whois`) y contesta con su cert. Que el cert venga del
+   * propio testigo y no del anuncio es además mejor: llega fresco.
+   *
+   * Sin comprobar el cert, cualquiera se anuncia ahí y se queda con los depósitos. No
+   * filtraría nada —el eslabón es público— pero se los tragaría EN SILENCIO, que es peor
+   * que un error.
    */
   async function testigo () {
-    let anunciados
-    try { anunciados = await client.list(canal) } catch (e) { return null }
-    for (const t of anunciados || []) {
-      const cert = t?.data?.cert
-      const sub = cert?.sub
-      if (!cert || !sub || cert.iss !== registryId) continue
-      const v = await verifyDelegation({ cert, expectedSub: sub }).catch(() => ({ ok: false }))
-      if (!v?.ok) continue
-      return sub
+    let tokens
+    try { tokens = await client.list(canal) } catch (_) { return null }
+    for (const token of tokens || []) {
+      const r = await preguntarQuienEs(token)
+      const cert = r?.cert
+      if (!cert?.sub || cert.iss !== registryId) continue
+      const v = await verifyDelegation({ cert, expectedSub: cert.sub }).catch(() => ({ ok: false }))
+      if (v?.ok) return cert.sub
     }
     return null
   }

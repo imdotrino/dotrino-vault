@@ -31,11 +31,15 @@ async function anunciado (dueño) {
   const cert = await signDelegationWith(dueño.priv, dueño.pub, {
     sub: d.publickey, scope: SCOPE, iat, exp: iat + 3600_000, nonce: crypto.randomUUID()
   })
-  return { d, entrada: { data: { role: 'sealers', repo: 'x/y', cert } } }
+  return { d, cert, token: 'tok-' + d.publickey.slice(20, 32) }
 }
 
-/** Una bóveda de mentira: dos actas encadenadas, con eslabón, y un cliente que apunta. */
-async function boveda (canal) {
+/**
+ * Una bóveda de mentira, con un cliente que habla como el proxio DE VERDAD: `list` devuelve
+ * TOKENS sueltos (no el `extraData` del anuncio — eso costó una vuelta) y el cert se
+ * consigue preguntando `sealers.whois` al token.
+ */
+async function boveda (anunciados) {
   const { genesisActa, sealActa, applyChanges } = await import('@dotrino/identity/acta')
   const A = await makeDeviceKey(); const B = await makeDeviceKey()
   const g = await sealActa({ acta: genesisActa({ pub: A.publickey, label: 'A' }), privateJwk: A.privateJwk })
@@ -45,19 +49,28 @@ async function boveda (canal) {
   dos = await sealActa({ acta: dos, privateJwk: A.privateJwk })
 
   const enviados = []
+  const oyentes = new Set()
   const client = {
-    async list () { return canal },
+    async list () { return anunciados.map((a) => a.token) },
+    on (_ev, cb) { oyentes.add(cb); return () => oyentes.delete(cb) },
+    send (token, msg) {
+      if (msg?.op !== 'sealers.whois') return
+      const quien = anunciados.find((a) => a.token === token)
+      // Contesta como el testigo: con su cert.
+      queueMicrotask(() => { for (const cb of oyentes) cb(token, { op: 'sealers.whois.result', ok: true, cert: quien?.cert || null }) })
+    },
     async sendByPubkey (to, msg) { enviados.push({ to, msg }) }
   }
   return { identity: { sealerChain: async () => [g, dos], onVault: () => () => {} }, client, enviados }
 }
 
-const esperar = () => new Promise((r) => setTimeout(r, 30))
+const esperar = () => new Promise((r) => setTimeout(r, 120))
 
 test('deposita en el testigo anunciado con un cert de la identidad esperada', async () => {
   const dotrino = await cuenta()
-  const { d, entrada } = await anunciado(dotrino)
-  const { identity, client, enviados } = await boveda([entrada])
+  const anuncio = await anunciado(dotrino)
+  const d = anuncio.d
+  const { identity, client, enviados } = await boveda([anuncio])
 
   startSealersPublisher({ identity, client, log: () => {}, registryId: dotrino.pub })
   await esperar()
@@ -71,8 +84,8 @@ test('un impostor en el canal NO se lleva los depósitos', async () => {
   const dotrino = await cuenta()
   const otro = await cuenta()
   // Se anuncia con un cert perfectamente válido… emitido por SU cuenta, no por la nuestra.
-  const { entrada } = await anunciado(otro)
-  const { identity, client, enviados } = await boveda([entrada])
+  const anuncio = await anunciado(otro)
+  const { identity, client, enviados } = await boveda([anuncio])
 
   startSealersPublisher({ identity, client, log: () => {}, registryId: dotrino.pub })
   await esperar()
@@ -84,7 +97,7 @@ test('re-enrolar el testigo no rompe nada: el cert es otro, la identidad la mism
   const dotrino = await cuenta()
   const viejo = await anunciado(dotrino)
   const nuevo = await anunciado(dotrino)          // re-enrolado: otra llave, otro cert
-  const { identity, client, enviados } = await boveda([nuevo.entrada])
+  const { identity, client, enviados } = await boveda([nuevo])
 
   startSealersPublisher({ identity, client, log: () => {}, registryId: dotrino.pub })
   await esperar()
