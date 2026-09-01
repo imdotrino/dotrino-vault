@@ -1158,3 +1158,9 @@ test('un servicio ve sus revocaciones y el acta, pero NO la lista de aparatos', 
     assert.deepEqual(res.devices, [], 'pero tu inventario no lo ve: no es asunto suyo')
   } finally { client.close() }
 })
+
+// AQUÍ IRÍA el test de «un papel del modelo viejo pide uno nuevo en cuanto habla», y no
+// está porque no se puede escribir honestamente desde aquí: forjar uno quitándole el `seq`
+// rompe su firma (el cuerpo canónico de un papel viejo lleva `exp`, y se firmó sobre ese),
+// y esta bóveda ya no sabe emitir de los viejos. Se comprobó contra los diez papeles de
+// verdad que hay en el VPS, mirando la bitácora: `renew` seguido de `secrets` servido.
