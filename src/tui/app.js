@@ -347,20 +347,31 @@ function capsRows (st, t) {
   const member = (st.members || []).find((m) => m.pub === target.pub)
   if (!member) return [{ text: t.muted(i.capsNoMember), sel: false }]
 
-  const has = new Set(member.caps || [])
+  // EL BORRADOR manda sobre lo que hay en el acta: es lo que estás a punto de dejar.
+  const real = new Set(member.caps || [])
+  const has = st.capsDraft?.pub === member.pub ? new Set(st.capsDraft.caps) : real
+
   const rows = [
     { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
     { text: '', sel: false }
   ]
+  let tocados = 0
   for (const cap of CAPS_ORDER) {
     const mark = has.has(cap) ? '[x]' : '[ ]'
     const name = i.capName[cap]
-    const line = ` ${mark}  ${cap === 'admin' ? t.bold(name) : name}`
+    // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
+    // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
+    const cambia = has.has(cap) !== real.has(cap)
+    if (cambia) tocados++
+    const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })
     rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
   }
   rows.push({ text: '', sel: false })
-  rows.push({ text: t.muted(' ' + i.capsApplyHint), sel: false })
+  rows.push({
+    text: tocados ? ' ' + t.bold(i.capsPending(tocados)) : t.muted(' ' + i.capsApplyHint),
+    sel: false
+  })
   return rows
 }
 
@@ -929,6 +940,8 @@ async function onKeyDevices (term, st, key) {
     })
   } else if (ch === 'c' && cur?.sub) {
     st.capsFor = { pub: cur.sub, deviceId: cur.deviceId }
+    // Borrador limpio al entrar: arrastrar el de otro aparato sería firmar lo que no viste.
+    st.capsDraft = null
     st.sel.caps = 0
     await refreshMembers(term, st)
     st.screen = 'caps'
@@ -1003,9 +1016,19 @@ async function beginPairing (term, st, profile, service = null, label = null) {
 }
 
 /**
- * Enter marca o desmarca un permiso y lo aplica en el acto. Sin botón de «guardar»: cada
- * cambio se sella en el acta y se avisa a los demás aparatos, así que acumularlos en
- * pantalla solo serviría para que el acta y lo que ves dijeran cosas distintas.
+ * UN BORRADOR QUE SE GUARDA O SE DESCARTA (dueño, 2026-09-01).
+ *
+ * Antes cada Enter sellaba un acta. Cambiar cuatro permisos eran cuatro actas, cuatro
+ * avisos a todos los aparatos y cuatro renovaciones de certificado — absurdo, y encima
+ * dejaba la cuenta pasando por estados intermedios que nadie quiso (un aparato con
+ * `admin` pero todavía sin `read`, por ejemplo).
+ *
+ * Ahora Enter mueve un borrador LOCAL —nada firmado, nada avisado— y `G` lo aplica de
+ * golpe. `applyChanges` ya tomaba una LISTA de cambios y producía UNA acta: el borrador es
+ * esa lista, sin firmar, hasta que confirmas.
+ *
+ * Lo que se cambia va marcado con `*` y contado abajo: un borrador que no se distingue del
+ * acta es peor que no tenerlo, porque firmas sin saber qué.
  */
 async function onKeyCaps (term, st, key) {
   const i = L(st)
@@ -1015,31 +1038,51 @@ async function onKeyCaps (term, st, key) {
   const cur = sels[Math.min(st.sel.caps || 0, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
-  if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.capsFor = null; return true }
-  if (key.name === 'f5') { await refreshMembers(term, st); return true }
-  if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
-
   const member = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
-  if (!member) return true
-  const caps = new Set(member.caps || [])
-  const giving = !caps.has(cur.cap)
-  if (giving) caps.add(cur.cap); else caps.delete(cur.cap)
-
-  const apply = async () => {
-    const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...caps], activeId(st)))
-    if (!r.ok) return
-    applyDump(st, r.v)
-    await refreshMembers(term, st)
-    flash(st, giving ? i.capGiven(i.capName[cur.cap]) : i.capTaken(i.capName[cur.cap]))
-  }
-
-  // Administrar se PREGUNTA: es el permiso que deja a ese aparato admitir y expulsar
-  // dispositivos sin pasar por aquí. Los otros tres se marcan y ya.
-  if (cur.cap === 'admin' && giving) {
-    setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: apply })
+  if (!member) {
+    if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.capsFor = null }
     return true
   }
-  await apply()
+  const real = new Set(member.caps || [])
+  if (st.capsDraft?.pub !== member.pub) st.capsDraft = { pub: member.pub, caps: [...real] }
+  const draft = new Set(st.capsDraft.caps)
+  const sucio = [...new Set([...draft, ...real])].some((c) => draft.has(c) !== real.has(c))
+
+  const salir = () => { st.screen = 'devices'; st.capsFor = null; st.capsDraft = null }
+  if (key.name === 'escape' || ch === 'b') {
+    // SALIR CON CAMBIOS SIN GUARDAR SE PREGUNTA. Tirarlos callando es perder trabajo sin
+    // decirlo, y es justo lo que un borrador no debe hacer.
+    if (sucio) setConfirm(st, { text: i.capsDiscard, onYes: async () => { salir() } })
+    else salir()
+    return true
+  }
+  if (key.name === 'f5') { st.capsDraft = null; await refreshMembers(term, st); return true }
+
+  // GUARDAR: UNA sola acta con todo lo que hayas tocado.
+  if (ch === 'g') {
+    if (!sucio) { flash(st, i.capsNothing); return true }
+    const cuantos = [...new Set([...draft, ...real])].filter((c) => draft.has(c) !== real.has(c)).length
+    const guardar = async () => {
+      const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...draft], activeId(st)))
+      if (!r.ok) return
+      applyDump(st, r.v)
+      st.capsDraft = null
+      await refreshMembers(term, st)
+      flash(st, i.capsSaved(cuantos))
+    }
+    // Administrar se PREGUNTA, y se pregunta AL GUARDAR: es cuando pasa a ser verdad.
+    if (draft.has('admin') && !real.has('admin')) {
+      setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: guardar })
+      return true
+    }
+    await guardar()
+    return true
+  }
+
+  if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
+  // Enter solo mueve el BORRADOR: no firma, no avisa, no se puede equivocar caro.
+  if (draft.has(cur.cap)) draft.delete(cur.cap); else draft.add(cur.cap)
+  st.capsDraft = { pub: member.pub, caps: [...draft] }
   return true
 }
 
@@ -1819,4 +1862,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

@@ -40,7 +40,11 @@ const es = {
   titleCaps: 'Permisos del dispositivo',
   capsFor: (id, name) => `Permisos de ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (este dispositivo ya no está en el acta)',
-  capsApplyHint: 'Enter marca o desmarca. Cada cambio se aplica y se avisa a tus otros aparatos.',
+  capsApplyHint: 'Enter marca o desmarca · G guarda los cambios · Esc sale',
+  capsPending: (n) => `${n} cambio(s) sin guardar (*) · G para guardarlos en UNA sola acta · Esc para descartarlos`,
+  capsSaved: (n) => `${n} cambio(s) guardados en una sola acta`,
+  capsNothing: 'No has cambiado nada',
+  capsDiscard: '¿Descartar los cambios sin guardar?',
   capName: {
     sign: 'Firmar como tú',
     store: 'Guardar tus datos',
@@ -70,7 +74,7 @@ const es = {
   capTaken: (n) => `Quitado: ${n}`,
   applyingCaps: 'Aplicando…',
   loadingMembers: 'Cargando el acta…',
-  helpCaps: ['↑↓', 'Enter marcar', 'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'],
+  helpCaps: ['↑↓', 'Enter marcar', 'G guardar', 'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'],
   // Perfil del usuario (lo que sincronizan los dispositivos). Solo lectura: se edita en
   // el aparato, no en la máquina donde vive la bóveda.
   loadingProfile: 'Cargando el perfil…',
@@ -352,7 +356,11 @@ const en = {
   titleCaps: 'Device permissions',
   capsFor: (id, name) => `Permissions for ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (this device is no longer in the record)',
-  capsApplyHint: 'Enter ticks or unticks. Each change applies and your other devices are told.',
+  capsApplyHint: 'Enter ticks or unticks · G saves · Esc leaves',
+  capsPending: (n) => `${n} unsaved change(s) (*) · G to save them in ONE record · Esc to discard`,
+  capsSaved: (n) => `${n} change(s) saved in a single record`,
+  capsNothing: 'You have not changed anything',
+  capsDiscard: 'Discard the unsaved changes?',
   capName: {
     sign: 'Sign as you',
     store: 'Save your data',
@@ -378,7 +386,7 @@ const en = {
   capTaken: (n) => `Removed: ${n}`,
   applyingCaps: 'Applying…',
   loadingMembers: 'Loading the record…',
-  helpCaps: ['↑↓', 'Enter tick', 'F5 refresh', 'Esc devices', 'l Español', 'q quit'],
+  helpCaps: ['↑↓', 'Enter tick', 'G save', 'F5 refresh', 'Esc devices', 'l Español', 'q quit'],
   loadingProfile: 'Loading profile…',
   noProfile: '  (this vault has no profile yet)',
   noProfileHint: '  Edit your name or photo on a paired device and press F5.',

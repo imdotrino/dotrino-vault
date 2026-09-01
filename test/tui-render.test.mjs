@@ -707,3 +707,57 @@ test('sin candado que estirar, no se molesta al daemon', () => {
   V.seguirAqui(baseState({ state: { profiles: [{ id: 'P1', current: true, protected: true, locked: true }] } }), api)
   assert.deepEqual(tocados, [], 'y uno ya cerrado no se mantiene abierto tecleando')
 })
+
+/**
+ * EL BORRADOR: se toca, se ve lo que cambia, y se firma UNA VEZ.
+ *
+ * Antes cada Enter sellaba un acta. Cambiar cuatro permisos eran cuatro actas, cuatro
+ * avisos a todos los aparatos y cuatro renovaciones — y la cuenta pasaba por estados
+ * intermedios que nadie quiso (un aparato con `admin` pero todavía sin `read`).
+ */
+test('Permisos: Enter mueve un BORRADOR y no firma nada', async () => {
+  const t = makeTheme()
+  const st = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign', 'read'] }]
+  })
+  const enter = { name: 'enter' }
+  // Se marca «guarda» (que no tenía) y se desmarca «firma» (que sí).
+  st.sel.caps = 1                                    // store
+  await V.onKeyCaps({ t }, st, enter)
+  st.sel.caps = 0                                    // sign
+  await V.onKeyCaps({ t }, st, enter)
+
+  assert.deepEqual([...st.capsDraft.caps].sort(), ['read', 'store'], 'el borrador se movió')
+  assert.deepEqual(st.members[0].caps, ['sign', 'read'], 'y el acta NO: no se firmó nada')
+
+  const text = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(text, /\*/, 'lo que cambia va marcado')
+  assert.match(text, /2 cambio\(s\) sin guardar/, 'y se dice cuántos, para no firmar a ciegas')
+})
+
+test('Permisos: salir con cambios sin guardar PREGUNTA antes de tirarlos', async () => {
+  const t = makeTheme()
+  const st = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign'] }]
+  })
+  st.sel.caps = 1
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  await V.onKeyCaps({ t }, st, { name: 'escape' })
+  assert.equal(st.screen, 'caps', 'no se sale de golpe')
+  assert.ok(st.confirm, 'se pregunta')
+  assert.match(st.confirm.text, /Descartar/i)
+
+  // Y sin cambios se sale sin preguntar: confirmar por nada es ruido.
+  const limpio = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign'] }]
+  })
+  await V.onKeyCaps({ t }, limpio, { name: 'escape' })
+  assert.equal(limpio.screen, 'devices')
+  assert.equal(limpio.confirm, null)
+})

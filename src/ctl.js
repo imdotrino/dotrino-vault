@@ -546,7 +546,11 @@ async function cmdMembers () {
   const CAP = {
     sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves',
     admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}`,
-    sealer: `${B}sella el acta${Z}`, passwords: `${B}pide contraseñas${Z}`
+    sealer: `${B}sella el acta${Z}`, passwords: `${B}pide contraseñas${Z}`,
+    // Resaltado como los otros cuatro: dice si esa máquina se lleva tus claves privadas
+    // sola o si te lo pregunta. Sin traducción salía el identificador en crudo
+    // (`unattended`) en una lista que lee un humano.
+    unattended: `${B}recibe claves sin aprobación${Z}`
   }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
