@@ -159,6 +159,8 @@ const T = {
     adm_no_t: 'Este dispositivo solo mira',
     adm_no_b: 'Para que pueda conectar y quitar dispositivos, dale el permiso en la computadora de tu bóveda: dotrino-vault caps <ID> +administra',
     adm_pair: 'Conectar un dispositivo',
+    // No es documentación: es el estado que explica por qué los botones no hacen nada.
+    adm_locked: 'Tu bóveda está cerrada. Ábrela en su computadora para poder administrarla.',
     // El QR solo sirve si el otro aparato tiene cámara y está delante. El enlace sirve
     // siempre, y es lo mismo: la misma invitación, escrita.
     invite_url: 'O pásale este enlace:',
@@ -315,6 +317,7 @@ const T = {
     adm_no_t: 'This device can only look',
     adm_no_b: 'To let it connect and remove devices, grant the permission on your vault computer: dotrino-vault caps <ID> +administra',
     adm_pair: 'Connect a device',
+    adm_locked: 'Your vault is closed. Open it on its computer to manage it.',
     invite_url: 'Or send it this link:',
     invite_copy: 'Copy link', invite_copied: 'Copied',
     adm_pending: 'A device wants to connect',
@@ -1015,6 +1018,10 @@ const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
 
 const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
 const admPending = ref([])       // los que esperan aprobación
+// El candado del perfil, tal como lo cuenta la bóveda. Cerrada NO se administra (el
+// candado es de la consola), así que los botones se apagan y se dice por qué en vez de
+// dejar que se pulsen para recibir un error.
+const admLocked = ref(false)
 const admQr = ref(null)
 const admUrl = ref('')
 const admCode = ref('')
@@ -1038,6 +1045,7 @@ async function refreshAdmin () {
     if (!canAdmin.value) return
     const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
     admPending.value = p.pending || []
+    admLocked.value = !!p.locked
     // Una vez, al entrar: `refreshAdmin` también corre cada 2 s mientras hay un
     // emparejamiento abierto, y no hay por qué bajar la configuración entera en cada vuelta.
     if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
@@ -1644,8 +1652,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
                   :aria-label="t.info_label" @click="toggleInfo('adm')">i</button>
         </h2>
         <p v-if="info === 'adm'" class="muted info-panel">{{ t.adm_b }}</p>
+        <p v-if="admLocked" class="muted warn" data-testid="adm-locked">{{ t.adm_locked }}</p>
         <div class="row">
-          <button class="btn" data-testid="adm-pair" @click="admPair">{{ t.adm_pair }}</button>
+          <button class="btn" data-testid="adm-pair" :disabled="admLocked" @click="admPair">{{ t.adm_pair }}</button>
         </div>
         <div v-if="admQr" class="qrbox" v-html="admQr"></div>
         <div v-if="admUrl" class="invite" data-testid="adm-invite">
@@ -1658,8 +1667,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
         <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
           <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
           <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
-          <button class="btn sm" data-testid="adm-approve" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
-          <button class="btn ghost sm" data-testid="adm-reject" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
+          <button class="btn sm" data-testid="adm-approve" :disabled="admLocked" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
+          <button class="btn ghost sm" data-testid="adm-reject" :disabled="admLocked" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
         </div>
         <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
       </template>

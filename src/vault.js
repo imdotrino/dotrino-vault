@@ -1210,6 +1210,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     deviceIdOf,
     ttlMs: DEVICE_TTL_MS,
     audit,
+    // El MISMO candado que frena `sign` y editar el perfil. Sin esto la consola remota
+    // emparejaba y aprobaba con el perfil cerrado —y aprobar firma un cert con la
+    // maestra—, justo lo que el candado existe para impedir.
+    isLocked,
     notify: notifyMembers,
     readActivity,
     vars: varsDesk,
@@ -1268,7 +1272,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // handlers); el resto de la regla vive en el módulo puro.
     if (!isFresh(p.data)) return staleReply(from)
     const r = await admin.handle(p.data, { signature: p.signature, cert: p.cert })
-    if (!r.ok) return reply(from, { type: MSG.ERROR, error: r.error })
+    // El `code` viaja aparte del texto: el texto está en inglés y puede cambiar, el código
+    // es lo que empareja quien llama (`vault-locked` ≠ «no autorizado»).
+    if (!r.ok) return reply(from, { type: MSG.ERROR, error: r.error, ...(r.code ? { code: r.code } : {}) })
     reply(from, { type: MSG.ADMIN_RESULT, op: p.data.op, result: r.result })
   }
 

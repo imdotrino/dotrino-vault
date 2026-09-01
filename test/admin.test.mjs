@@ -248,3 +248,65 @@ test('BORRAR variables no existe a distancia (un aparato robado no te deja sin c
     assert.match(r.error, /invalid operation/)
   }
 })
+
+/**
+ * EL CANDADO ES DE LA CONSOLA, Y ESTO ES LA CONSOLA.
+ *
+ * Faltaba: `admin.pair` y `admin.approve` pasaban con el perfil cerrado, y aprobar firma
+ * un certificado de 30 días con la maestra. O sea que cerrar el perfil frenaba
+ * `dotrino-vault pair` en la máquina y no frenaba lo mismo por la red.
+ */
+test('con el perfil CERRADO no se administra: ni emparejar, ni aprobar, ni quitar, ni configurar', async () => {
+  const { admin, desk, audits } = mount({ isLocked: () => true, vars: fakeVars() })
+
+  const casos = [
+    { op: 'pair', label: 'celular' },
+    { op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P' },
+    { op: 'reject', deviceId: 'XQ7F-3K9P' },
+    { op: 'revoke', sub: 'DPUB' },
+    { op: 'var.set', ns: 'proxy', key: 'K', enc: { epk: 'E', iv: 'I', ct: 'C' } }
+  ]
+  for (const [i, c] of casos.entries()) {
+    const r = await admin.handle({ ...c, nonce: nonce(String(i)) })
+    assert.equal(r.ok, false, c.op)
+    assert.equal(r.code, 'vault-locked', `${c.op} tiene que decirlo por código, no solo por texto`)
+  }
+  assert.deepEqual(desk.calls, [], 'no se tocó el mostrador ni una vez')
+  assert.equal(audits.filter(([op, i]) => op === 'rejected' && i.reason === 'locked').length, casos.length)
+})
+
+test('cerrada se sigue MIRANDO, y `pending` dice que está cerrada', async () => {
+  const vars = fakeVars()
+  const { admin } = mount({ isLocked: () => true, vars })
+
+  const p = await admin.handle({ op: 'pending', nonce: nonce('p') })
+  assert.equal(p.ok, true)
+  assert.equal(p.result.locked, true, 'sin esto la consola no puede decir por qué no funciona')
+  assert.equal(p.result.pending.length, 1)
+
+  assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
+  assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
+})
+
+test('abierta, `pending` no miente al revés', async () => {
+  const { admin } = mount()
+  const p = await admin.handle({ op: 'pending', nonce: nonce('s') })
+  assert.equal(p.result.locked, false)
+})
+
+/**
+ * El rechazo por candado va ANTES de marcar el nonce: quien reintente después de abrir la
+ * bóveda no tiene por qué inventarse otro. Si se quemara aquí, abrir el perfil no
+ * arreglaría el reintento y el error diría «nonce ya usado», que no es lo que pasó.
+ */
+test('el candado no quema el nonce', async () => {
+  let cerrada = true
+  const { admin, desk } = mount({ isLocked: () => cerrada })
+  const msg = { op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('t') }
+
+  assert.equal((await admin.handle({ ...msg })).code, 'vault-locked')
+  cerrada = false
+  const r = await admin.handle({ ...msg })
+  assert.equal(r.ok, true, 'el MISMO mensaje vale una vez abierta')
+  assert.equal(desk.calls.filter(([c]) => c === 'approve').length, 1)
+})

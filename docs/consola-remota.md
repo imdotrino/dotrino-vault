@@ -136,7 +136,7 @@ ventana de frescura ±5 min. Responde `vault.admin.result`.
 
 | `data.op` | Campos | Qué hace |
 |---|---|---|
-| `pending` | `{ ts, nonce }` | devuelve `desk.listPending()` |
+| `pending` | `{ ts, nonce }` | devuelve `desk.listPending()` y `locked` (el candado del perfil) |
 | `pair` | `{ scope?, label?, ts, nonce }` | `desk.startPairing()`; responde la **invitación ya codificada** (`lib/src/invite.js`) para que la app pinte el QR |
 | `approve` | `{ code, deviceId, ts, nonce }` | `desk.approve(code, { deviceId })` |
 | `reject` | `{ deviceId, ts, nonce }` | `desk.reject(deviceId)` |
@@ -146,7 +146,7 @@ ventana de frescura ±5 min. Responde `vault.admin.result`.
 | `var.set` | `{ ns \| pub, key, enc, public?, ts, nonce }` | crea o cambia una variable. `enc` es el valor **sellado** con la clave de contenido del perfil; sin él se rechaza. Exactamente un destino: un scope (`ns`) o un aparato (`pub`) |
 | `var.setMany` | `{ ns \| pub, enc, public?, ts, nonce }` | **varias de una vez**: `enc` sella `{ items: [{ key, value, public? }] }` —los nombres también van dentro—. Mismo permiso y misma frontera que `var.set` (borrar sigue sin delegarse); lo que cambia es que la bóveda las guarda juntas y manda **un solo aviso de cambio**, o sea que el servicio se reinicia una vez con la configuración entera en vez de una vez por variable |
 
-Tres cosas que **no** son opcionales:
+Cuatro cosas que **no** son opcionales:
 
 1. **`nonce` de un solo uso.** `sign`/`get` son idempotentes y les basta la ventana de ±5
    min; `approve` y `revoke` **cambian estado**, así que un replay dentro de la ventana
@@ -158,6 +158,20 @@ Tres cosas que **no** son opcionales:
 3. **Auditar el actor.** Cada entrada de bitácora de una op remota lleva **qué
    dispositivo** la pidió (`by: <deviceId>`), no solo qué pasó. Hoy `audit('approve', …)`
    no distingue quién aprobó porque solo podía ser el PC.
+4. **Con el perfil CERRADO no se administra** (2026-08-31). El candado es de la consola
+   —los aparatos ya emparejados siguen leyendo, guardando y firmando con su llave—, así
+   que cerrar el perfil tiene que cerrar **esto**, que es la consola. Se atienden solo las
+   de mirar (`ADMIN_OPS_WHILE_LOCKED`: `pending`, `audit`, `vars`) y el resto responde con
+   el **código** `vault-locked`; `pending` devuelve además `locked`, que es lo que la
+   consola ya sondea, para poder apagar los botones y decir por qué en vez de dejar que se
+   pulsen para recibir un error.
+
+   **Qué faltaba, dicho en voz alta:** `pair` y `approve` pasaban con el perfil cerrado, y
+   `approve` firma un **certificado de 30 días con la maestra**. O sea que el candado
+   frenaba `dotrino-vault pair` **en la máquina** (`src/daemon.js`) y no frenaba lo mismo
+   **por la red**, que es el camino que importa. El rechazo va después de autorizar (a un
+   desconocido no se le cuenta el estado del perfil) y **antes** de quemar el nonce: quien
+   reintente tras abrir la bóveda no tiene por qué inventarse otro.
 
 Lo que **no** se expone, y conviene dejarlo escrito para que nadie lo agregue «por
 simetría»: `caps`, `handover`, borrado de perfil, `lock`/`unlock`, **el valor de una
