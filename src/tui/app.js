@@ -340,6 +340,19 @@ function pairModeRows (st, t) {
  */
 const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended']
 
+/**
+ * Los permisos que se le pueden dar A ESTE miembro, en orden.
+ *
+ * `secrets` solo existe para un SERVICIO (los que tienen `cn`), y por eso faltaba: la
+ * lista era fija y no cabía algo que depende de quién sea. Pero para un servicio es EL
+ * permiso —el que decide si abre su cajón— y no verlo aquí hacía creer que no existe,
+ * igual que pasaba con `unattended`. Se enseña primero, que es su importancia real.
+ *
+ * A un aparato SIN `cn` no se le ofrece: no hay cajón que abrir, el acta lo filtra
+ * (`allowedCaps`) y enseñar una casilla que no hace nada es peor que no enseñarla.
+ */
+const capsForMember = (member) => (member?.cn ? ['secrets', ...CAPS_ORDER] : CAPS_ORDER)
+
 function capsRows (st, t) {
   const i = L(st)
   const target = st.capsFor
@@ -356,16 +369,19 @@ function capsRows (st, t) {
     { text: '', sel: false }
   ]
   let tocados = 0
-  for (const cap of CAPS_ORDER) {
+  for (const cap of capsForMember(member)) {
     const mark = has.has(cap) ? '[x]' : '[ ]'
-    const name = i.capName[cap]
+    // El nombre de `secrets` lleva el cajón dentro: «las claves de proxy» dice qué abre,
+    // «lee sus claves» te deja preguntándote cuáles.
+    const name = typeof i.capName[cap] === 'function' ? i.capName[cap](member.cn) : i.capName[cap]
     // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
     // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
     const cambia = has.has(cap) !== real.has(cap)
     if (cambia) tocados++
     const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })
-    rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
+    const hint = typeof i.capHint[cap] === 'function' ? i.capHint[cap](member.cn) : i.capHint[cap]
+    rows.push({ text: t.muted('      ' + hint), sel: false })
   }
   rows.push({ text: '', sel: false })
   rows.push({

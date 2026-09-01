@@ -761,3 +761,36 @@ test('Permisos: salir con cambios sin guardar PREGUNTA antes de tirarlos', async
   assert.equal(limpio.screen, 'devices')
   assert.equal(limpio.confirm, null)
 })
+
+/**
+ * A UN SERVICIO SE LE ENSEÑA SU CAJÓN; a un aparato tuyo, no.
+ *
+ * `secrets` faltaba en esta pantalla y es EL permiso de un servicio — el que decide si
+ * abre su cajón. No verlo hacía creer que no existe, exactamente lo mismo que pasaba con
+ * `unattended` y con `sealer`. Y a un aparato sin `cn` no se le ofrece: no hay cajón que
+ * abrir, el acta lo filtra, y una casilla que no hace nada es peor que ninguna.
+ */
+test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', () => {
+  const t = makeTheme()
+  const servicio = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'proxy1', cn: 'proxy', caps: ['secrets'] }]
+  })
+  const filas = V.capsRows(servicio, t)
+  const texto = filas.map((r) => r.text).join('\n')
+  assert.match(texto, /\[x\].*Leer las claves de «proxy»/, 'se ve, marcado, y dice QUÉ cajón')
+  assert.match(texto, /SU cajón y ninguno más/, 'y que no puede abrir otro')
+  assert.equal(filas.filter((r) => r.sel).length, 9, 'ocho de aparato + el suyo')
+  assert.equal(filas.find((r) => r.meta?.cap === 'secrets') !== undefined, true)
+
+  // Un aparato TUYO no tiene cajón: no se le ofrece.
+  const aparato = baseState({
+    screen: 'caps',
+    capsFor: { pub: 'PUB2', deviceId: 'EF56-7890' },
+    members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'teléfono', caps: ['sign'] }]
+  })
+  const suyas = V.capsRows(aparato, t)
+  assert.equal(suyas.filter((r) => r.sel).length, 8)
+  assert.equal(suyas.find((r) => r.meta?.cap === 'secrets'), undefined, 'no hay cajón que abrir')
+})

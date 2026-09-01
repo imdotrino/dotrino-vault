@@ -46,6 +46,9 @@ const es = {
   capsNothing: 'No has cambiado nada',
   capsDiscard: '¿Descartar los cambios sin guardar?',
   capName: {
+    // Lleva el cajón dentro: «las claves de proxy» dice QUÉ abre; «lee sus claves» te deja
+    // preguntándote cuáles. Solo se le ofrece a un servicio (los que tienen `cn`).
+    secrets: (cn) => `Leer las claves de «${cn}»`,
     sign: 'Firmar como tú',
     store: 'Guardar tus datos',
     read: 'Leer tus datos',
@@ -56,6 +59,7 @@ const es = {
     unattended: 'Recibir claves sin aprobación'
   },
   capHint: {
+    secrets: (cn) => `abrir SU cajón y ninguno más: las variables de «${cn}»`,
     sign: 'usar tu identidad en las apps del ecosistema',
     store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
     read: 'ver lo que guardaste',
@@ -362,6 +366,7 @@ const en = {
   capsNothing: 'You have not changed anything',
   capsDiscard: 'Discard the unsaved changes?',
   capName: {
+    secrets: (cn) => `Read the «${cn}» keys`,
     sign: 'Sign as you',
     store: 'Save your data',
     read: 'Read your data',
