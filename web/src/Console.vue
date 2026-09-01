@@ -154,8 +154,6 @@ const T = {
     self_code_ph: 'Los 6 dígitos que muestra',
     self_approve: 'Aprobar', self_reject: 'Rechazar',
     // --- Administrar la bóveda desde aquí (consola remota) ---
-    // No es documentación: es el estado que explica por qué los botones no hacen nada.
-    adm_locked: 'Tu bóveda está cerrada. Ábrela en su computadora para poder administrarla.',
     // El QR solo sirve si el otro aparato tiene cámara y está delante. El enlace sirve
     // siempre, y es lo mismo: la misma invitación, escrita.
     invite_url: 'O pásale este enlace:',
@@ -303,7 +301,6 @@ const T = {
     self_pair: 'Create the code',
     self_pending: 'A device wants to connect',
     pass_t: 'Passwords kept in this vault',
-    adm_locked: 'Your vault is closed. Open it on its computer to manage it.',
     invite_url: 'Or send it this link:',
     invite_copy: 'Copy link', invite_copied: 'Copied',
     apv_t: 'Requests',
@@ -999,10 +996,6 @@ const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
 // esta pantalla: la bóveda vuelve a comprobarlo en cada petición.
 
 const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
-// El candado del perfil, tal como lo cuenta la bóveda. Cerrada NO se administra (el
-// candado es de la consola), así que los botones se apagan y se dice por qué en vez de
-// dejar que se pulsen para recibir un error.
-const admLocked = ref(false)
 
 /**
  * AGREGAR APARATOS DESDE AQUÍ SE QUITÓ (dueño, 2026-08-31). El multivault quita la
@@ -1026,8 +1019,6 @@ async function refreshAdmin () {
     // refrescaba. Primero se sincroniza (`refresh`), y luego se decide.
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
-    const st = await id.value.vaultAdmin('status').catch(() => ({ locked: false }))
-    admLocked.value = !!st.locked
     if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
   } catch (_) { canAdmin.value = false }
 }
@@ -1608,10 +1599,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           </div>
         </template>
 
-        <!-- El candado, arriba de lo que se puede tocar: con la bóveda cerrada ni se quita
-             un aparato ni se guarda una variable, y eso hay que decirlo antes de que
-             alguien pulse un botón para llevarse un error. -->
-        <p v-if="admLocked" class="muted warn" data-testid="adm-locked">{{ t.adm_locked }}</p>
       </template>
     </template>
   </section>

@@ -228,7 +228,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   try {
     const info = await identity.profileActa?.()
     const acta = info?.acta
-    if (info?.isMaster && acta && (!acta.sealPub || !sealKeys.has(acta.sealPub))) {
+    // CON EL PERFIL ABIERTO. Estrenar la llave de sellado SELLA EL ACTA, y una bóveda
+    // cerrada no sella nada — la misma regla que el bloque de abajo. Cerrada se queda sin
+    // llave y los sobres salen sin firma (lo que ya pasaba antes de §8.8), y se arregla sola
+    // la primera vez que alguien abra el perfil.
+    if (info?.isMaster && acta && !isLocked() && (!acta.sealPub || !sealKeys.has(acta.sealPub))) {
       const r = await identity.rotateSealKey()
       // Sin `%s`: este `log` va con un prefijo por delante, así que el formato no es lo
       // primero y `console.log` no lo sustituye (salía «record #%s 2»).
@@ -252,7 +256,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   try {
     const info = await identity.profileActa?.()
     const acta = info?.acta
-    if (acta && !identity.masterLocked) {
+    // CON EL PERFIL ABIERTO, y `isLocked()` es la pregunta correcta — no `masterLocked`.
+    //
+    // Se coló así: en la PRIMERA arrancada tras actualizar, la maestra todavía está guardada
+    // en claro (se sella al abrir el perfil), o sea que `masterLocked` es `false` aunque el
+    // perfil esté cerrado. Con ese guardián, la bóveda de producción admitió su llave de
+    // comunicación y SELLÓ UN ACTA NUEVA (#76 → #77) estando cerrada — justo lo que la regla
+    // prohíbe, y encima rotando de paso la llave de sellado sin que nadie lo pidiera.
+    if (acta && !isLocked() && !identity.masterLocked) {
       const pub = await commKey.ensure()
       const yaEsta = (acta.members || []).some((m) => m?.pub === pub)
       if (!yaEsta && info?.isMaster) {

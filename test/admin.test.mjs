@@ -90,9 +90,9 @@ test('un cert inválido no le quema los nonces a un admin legítimo', async () =
   const { admin } = mount({ verify: async () => (authorized ? { ok: true, device: 'D' } : { ok: false, reason: 'firma' }) })
 
   const n = nonce('c')
-  assert.equal((await admin.handle({ op: 'status', nonce: n })).ok, false, 'el impostor no pasa')
+  assert.equal((await admin.handle({ op: 'audit', nonce: n })).ok, false, 'el impostor no pasa')
   authorized = true
-  assert.equal((await admin.handle({ op: 'status', nonce: n })).ok, true, 'y el nonce sigue sirviendo')
+  assert.equal((await admin.handle({ op: 'audit', nonce: n })).ok, true, 'y el nonce sigue sirviendo')
 })
 
 /**
@@ -275,29 +275,25 @@ test('con el perfil CERRADO no se administra: ni quitar, ni configurar', async (
   assert.equal(audits.filter(([op, i]) => op === 'rejected' && i.reason === 'locked').length, casos.length)
 })
 
-test('cerrada se sigue MIRANDO, y `status` dice que está cerrada', async () => {
-  const vars = fakeVars()
-  const { admin } = mount({ isLocked: () => true, vars })
 
-  const p = await admin.handle({ op: 'status', nonce: nonce('p') })
-  assert.equal(p.ok, true)
-  assert.equal(p.result.locked, true, 'sin esto la consola no puede decir por qué no funciona')
-
-  assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
-  assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
-})
-
-test('abierta, `status` no miente al revés', async () => {
-  const { admin } = mount()
-  const p = await admin.handle({ op: 'status', nonce: nonce('s') })
-  assert.equal(p.result.locked, false)
-})
 
 /**
  * El rechazo por candado va ANTES de marcar el nonce: quien reintente después de abrir la
  * bóveda no tiene por qué inventarse otro. Si se quemara aquí, abrir el perfil no
  * arreglaría el reintento y el error diría «nonce ya usado», que no es lo que pasó.
  */
+/**
+ * Cerrada se sigue MIRANDO: la bitácora y los nombres de las variables. Lo que no se hace
+ * es cambiar nada. (Antes había aquí un `status` que solo servía para que la consola
+ * dijera «tu bóveda está cerrada»; el dueño lo quitó: esa frase no pinta nada en una
+ * pantalla administrativa, así que la operación tampoco.)
+ */
+test('cerrada se sigue mirando: bitácora y variables', async () => {
+  const { admin } = mount({ isLocked: () => true, vars: fakeVars() })
+  assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
+  assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
+})
+
 test('el candado no quema el nonce', async () => {
   let cerrada = true
   const { admin, desk } = mount({ isLocked: () => cerrada })

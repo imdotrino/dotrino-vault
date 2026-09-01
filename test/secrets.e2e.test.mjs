@@ -1089,3 +1089,33 @@ test('a un servicio al que el acta ya no reconoce: ni le sirven el cajón ni le 
   // el acta cambió, el servicio pide papel nuevo y el que le dan ya no trae el cajón.
   await assert.rejects(() => fetchSecrets({ dir }), /scope|cn —/, 'servir el cajón dice que no')
 })
+
+/**
+ * LA LLAVE DE COMUNICACIÓN ENTRA EN EL ACTA SOLO CON EL PERFIL ABIERTO.
+ *
+ * Esto se coló EN PRODUCCIÓN y por eso queda clavado aquí. El guardián preguntaba
+ * `identity.masterLocked`, y en la primera arrancada tras actualizar la maestra todavía está
+ * guardada en claro —se sella al abrir el perfil—, así que `masterLocked` es `false` aunque
+ * el perfil esté CERRADO. La bóveda del VPS se admitió sola y selló un acta nueva (#76 → #77)
+ * con el candado echado, rotando de paso la llave de sellado sin que nadie lo pidiera.
+ *
+ * Son dos preguntas distintas y hay que hacer las dos: «¿tengo con qué firmar?» y «¿me dejan?».
+ */
+test('con el perfil CERRADO la bóveda no se mete sola en su propia acta', async () => {
+  const { startVault } = await import('../src/vault.js')
+  const dir = tmp('vault-cerrada-')
+  const cerrada = await startVault({ dir, proxyUrl, log: () => {}, isLocked: () => true })
+  try {
+    const acta = (await cerrada.identity.profileActa()).acta
+    assert.equal(acta.seq, 1, 'no se selló ninguna acta nueva al arrancar')
+    assert.equal(acta.members.length, 1, 'y no se metió a sí misma como miembro')
+  } finally { cerrada.close() }
+
+  // Abierta sí: entra, y con `cn` de servicio — habla por la bóveda, no firma por la persona.
+  const abierta = await startVault({ dir, proxyUrl, log: () => {}, isLocked: () => false })
+  try {
+    const suya = (await abierta.identity.profileActa()).acta.members.find((m) => m.cn === 'vault')
+    assert.ok(suya, 'abierta, la llave de comunicación entra en el acta')
+    assert.deepEqual(suya.caps, ['sign'])
+  } finally { abierta.close() }
+})
