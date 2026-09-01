@@ -30,18 +30,47 @@ import * as Acta from '@dotrino/identity/acta'
 
 export const OP = 'sealers.publish'
 
-/** El testigo de Dotrino. Se puede apuntar a otro: el registro no es un privilegio. */
-export const DEFAULT_REGISTRY = process.env.DOTRINO_SEALERS || ''
+/**
+ * EL TESTIGO DE DOTRINO, como constante y no como variable de entorno (dueño, 2026-08-31:
+ * «¿DOTRINO_SEALERS es una variable?»).
+ *
+ * No es un secreto ni configuración de la máquina: es una dirección pública, y a dónde va
+ * una cadena es propiedad de la IDENTIDAD, no del servidor donde corra su bóveda. Dejarlo
+ * en el entorno se saltaba justo la garantía del `chainUrl` del génesis —que nadie pueda
+ * redirigirte a su rama— porque lo decidía quien tuviera el servidor.
+ *
+ * Que venga por defecto no arriesga nada: el eslabón es público, así que depositarlo en el
+ * testigo equivocado no filtra nada — simplemente no sirve de nada. La variable se queda
+ * como escape para desarrollo, no como la forma normal de decirlo.
+ */
+export const DOTRINO_REGISTRY = "{\"key_ops\":[\"verify\"],\"ext\":true,\"kty\":\"EC\",\"x\":\"X09h_5ufwjABrXIY3WI99LLP8hSe8QMYK0P3ue4vyf0\",\"y\":\"nmq93S4_0YaV91V5ean6Db-R-ZjqIXPKDadTLBc8SfU\",\"crv\":\"P-256\"}"
+
+export const DEFAULT_REGISTRY = process.env.DOTRINO_SEALERS || DOTRINO_REGISTRY
 
 export function startSealersPublisher ({ identity, client, log = console.log, registry = DEFAULT_REGISTRY } = {}) {
   if (!registry) return () => {}
 
   let ultima = null
 
+  let avisadoDeOtroTestigo = false
+
   async function publicar (motivo) {
     let actas
     try { actas = await identity.sealerChain?.() } catch (_) { return }
     if (!Array.isArray(actas)) return
+
+    // SI LA CUENTA DECLARÓ SU PROPIO TESTIGO, no se deposita en el de Dotrino. No es que
+    // hacerlo filtre algo —el eslabón es público— sino que el `chainUrl` del génesis es la
+    // forma que tiene una cuenta de decir dónde vive su cadena, y decidir por ella sería
+    // exactamente lo que ese campo existe para impedir. Se dice una vez y se calla.
+    const genesis = actas[0]
+    if (genesis?.chainUrl && registry === DOTRINO_REGISTRY) {
+      if (!avisadoDeOtroTestigo) {
+        avisadoDeOtroTestigo = true
+        log(`[sealers] this account names its own registry (${genesis.chainUrl}): not depositing into Dotrino's`)
+      }
+      return
+    }
     // De cada acta sale su eslabón, y las que no cambiaron el sellador no dan ninguno.
     const chain = actas.map((a) => Acta.sealerLinkOf(a)).filter(Boolean)
     // Una cuenta de una sola bóveda no tiene nada que refrescar: su conjunto de selladores
