@@ -154,18 +154,12 @@ const T = {
     self_code_ph: 'Los 6 dígitos que muestra',
     self_approve: 'Aprobar', self_reject: 'Rechazar',
     // --- Administrar la bóveda desde aquí (consola remota) ---
-    adm_t: 'Administrar tu bóveda desde aquí',
-    adm_b: 'Este dispositivo puede conectar y quitar otros sin que vayas a la computadora donde vive tu bóveda.',
-    adm_no_t: 'Este dispositivo solo mira',
-    adm_no_b: 'Para que pueda conectar y quitar dispositivos, dale el permiso en la computadora de tu bóveda: dotrino-vault caps <ID> +administra',
-    adm_pair: 'Conectar un dispositivo',
     // No es documentación: es el estado que explica por qué los botones no hacen nada.
     adm_locked: 'Tu bóveda está cerrada. Ábrela en su computadora para poder administrarla.',
     // El QR solo sirve si el otro aparato tiene cámara y está delante. El enlace sirve
     // siempre, y es lo mismo: la misma invitación, escrita.
     invite_url: 'O pásale este enlace:',
     invite_copy: 'Copiar enlace', invite_copied: 'Copiado',
-    adm_pending: 'Un dispositivo quiere conectarse',
     // PEDIDOS DE APROBACIÓN: un cajón con aprobación por uso espera la firma de este aparato.
     apv_t: 'Pedidos',
     apv_none: 'Nadie está pidiendo nada.',
@@ -174,8 +168,6 @@ const T = {
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda:  dotrino-vault caps <ID> +aprueba',
-    adm_code_ph: 'Los 6 dígitos que muestra',
-    adm_approve: 'Aprobar', adm_reject: 'Rechazar',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
@@ -215,7 +207,6 @@ const T = {
       dup: `línea ${e.line}: ${e.key} ya venía en la línea ${e.first}`,
       empty: 'No hay ninguna variable ahí'
     })[e.code],
-    adm_warn: 'Aprueba solo si esos dígitos son los que ves en la pantalla del otro aparato. Nadie debería dictártelos.',
     back: 'Volver'
   },
   en: {
@@ -312,15 +303,9 @@ const T = {
     self_pair: 'Create the code',
     self_pending: 'A device wants to connect',
     pass_t: 'Passwords kept in this vault',
-    adm_t: 'Manage your vault from here',
-    adm_b: 'This device can connect and remove others without you going to the computer where your vault lives.',
-    adm_no_t: 'This device can only look',
-    adm_no_b: 'To let it connect and remove devices, grant the permission on your vault computer: dotrino-vault caps <ID> +administra',
-    adm_pair: 'Connect a device',
     adm_locked: 'Your vault is closed. Open it on its computer to manage it.',
     invite_url: 'Or send it this link:',
     invite_copy: 'Copy link', invite_copied: 'Copied',
-    adm_pending: 'A device wants to connect',
     apv_t: 'Requests',
     apv_none: 'Nobody is asking for anything.',
     apv_asks: 'asks for your keys of',
@@ -328,8 +313,6 @@ const T = {
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     apv_nocap: 'This device does not approve requests. Grant it from the vault:  dotrino-vault caps <ID> +aprueba',
-    adm_code_ph: 'The 6 digits it shows',
-    adm_approve: 'Approve', adm_reject: 'Reject',
     var_t: 'Your apps\u2019 variables',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
@@ -362,7 +345,6 @@ const T = {
     var_value_ph: 'value',
     var_private_ask: 'Private',
     var_private_final: 'A private variable cannot be made public: delete it and create it again.',
-    adm_warn: 'Approve only if those digits are the ones on the other device screen. Nobody should be reading them out to you.',
     self_code_ph: 'The 6 digits it shows',
     self_approve: 'Approve', self_reject: 'Reject',
     back: 'Back'
@@ -1017,21 +999,22 @@ const selfReject = (deviceId) => run('sr-' + deviceId, async () => {
 // esta pantalla: la bóveda vuelve a comprobarlo en cada petición.
 
 const canAdmin = ref(false)      // ¿mi cert lleva `vault:admin`?
-const admPending = ref([])       // los que esperan aprobación
 // El candado del perfil, tal como lo cuenta la bóveda. Cerrada NO se administra (el
 // candado es de la consola), así que los botones se apagan y se dice por qué en vez de
 // dejar que se pulsen para recibir un error.
 const admLocked = ref(false)
-const admQr = ref(null)
-const admUrl = ref('')
-const admCode = ref('')
-let admTimer = null
 
 /**
- * Esta sección NO lista dispositivos: la lista es una sola y está arriba (`devices`). Aquí
- * solo queda lo que de verdad es administrar a distancia: dejar entrar a alguien nuevo.
- * Quitar se hace en la fila del aparato, junto a su nombre y su estado, que es donde se ve
- * a quién estás quitando.
+ * AGREGAR APARATOS DESDE AQUÍ SE QUITÓ (dueño, 2026-08-31). El multivault quita la
+ * fricción que lo justificaba —cualquier otra selladora abierta admite el aparato— y a
+ * cambio pedía lo caro: que la maestra firmara a distancia, cuando su trabajo es sellar el
+ * acta y reenvolver sobres, y con la bóveda cerrada no firma nada.
+ *
+ * Quitado de raíz: no hay operación en la bóveda, ni mensaje, ni botón. Esconder el botón
+ * habría dejado la puerta abierta y el código volvería solo en el siguiente refactor.
+ *
+ * Lo que queda administrando a distancia: mirar, QUITAR un aparato (en su fila, junto a su
+ * nombre, que es donde se ve a quién quitas) y las variables de entorno.
  */
 async function refreshAdmin () {
   try {
@@ -1043,11 +1026,8 @@ async function refreshAdmin () {
     // refrescaba. Primero se sincroniza (`refresh`), y luego se decide.
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
-    const p = await id.value.vaultAdmin('pending').catch(() => ({ pending: [] }))
-    admPending.value = p.pending || []
-    admLocked.value = !!p.locked
-    // Una vez, al entrar: `refreshAdmin` también corre cada 2 s mientras hay un
-    // emparejamiento abierto, y no hay por qué bajar la configuración entera en cada vuelta.
+    const st = await id.value.vaultAdmin('status').catch(() => ({ locked: false }))
+    admLocked.value = !!st.locked
     if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
   } catch (_) { canAdmin.value = false }
 }
@@ -1215,22 +1195,7 @@ function createGroup () {
   newGroup.value = ''
 }
 
-const admPair = () => run('admpair', async () => {
-  const r = await id.value.vaultAdmin('pair')
-  admUrl.value = r?.qr ? inviteUrl(r.qr) : ''
-  admQr.value = admUrl.value ? qrSvg(admUrl.value) : null
-  clearInterval(admTimer)
-  admTimer = setInterval(refreshAdmin, 2000)
-})
-const admApprove = (deviceId) => run('aa-' + deviceId, async () => {
-  await id.value.vaultAdmin('approve', { deviceId, code: admCode.value.trim() })
-  admCode.value = ''; admQr.value = null; admUrl.value = ''; clearInterval(admTimer); await refreshAdmin()
-})
-const admReject = (deviceId) => run('ar-' + deviceId, async () => {
-  await id.value.vaultAdmin('reject', { deviceId }); await refreshAdmin()
-})
-
-onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
+onBeforeUnmount(() => { clearInterval(selfTimer) })
 </script>
 
 <template>
@@ -1643,34 +1608,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer); clearInterval(admTimer) })
           </div>
         </template>
 
-        <!-- CONECTAR UN APARATO VA AL FINAL. Es lo que menos se hace de esta pantalla
-             —se conecta un aparato y no se vuelve—, y arriba empujaba las variables, que
-             es a lo que se entra todos los días. -->
-        <h2>
-          {{ t.adm_t }}
-          <button type="button" class="i" data-testid="info-adm" :aria-expanded="info === 'adm'"
-                  :aria-label="t.info_label" @click="toggleInfo('adm')">i</button>
-        </h2>
-        <p v-if="info === 'adm'" class="muted info-panel">{{ t.adm_b }}</p>
+        <!-- El candado, arriba de lo que se puede tocar: con la bóveda cerrada ni se quita
+             un aparato ni se guarda una variable, y eso hay que decirlo antes de que
+             alguien pulse un botón para llevarse un error. -->
         <p v-if="admLocked" class="muted warn" data-testid="adm-locked">{{ t.adm_locked }}</p>
-        <div class="row">
-          <button class="btn" data-testid="adm-pair" :disabled="admLocked" @click="admPair">{{ t.adm_pair }}</button>
-        </div>
-        <div v-if="admQr" class="qrbox" v-html="admQr"></div>
-        <div v-if="admUrl" class="invite" data-testid="adm-invite">
-          <span class="muted">{{ t.invite_url }}</span>
-          <code class="url">{{ admUrl }}</code>
-          <button class="btn ghost sm" data-testid="adm-copy" @click="copyInvite(admUrl, 'adm')">
-            {{ copied === 'adm' ? t.invite_copied : t.invite_copy }}
-          </button>
-        </div>
-        <div v-for="p in admPending" :key="p.deviceId" class="pending" data-testid="adm-pending">
-          <span>{{ t.adm_pending }}: <code>{{ p.deviceId }}</code></span>
-          <input v-model="admCode" :placeholder="t.adm_code_ph" inputmode="numeric" data-testid="adm-code" />
-          <button class="btn sm" data-testid="adm-approve" :disabled="admLocked" @click="admApprove(p.deviceId)">{{ t.adm_approve }}</button>
-          <button class="btn ghost sm" data-testid="adm-reject" :disabled="admLocked" @click="admReject(p.deviceId)">{{ t.adm_reject }}</button>
-        </div>
-        <p v-if="admPending.length" class="muted warn">{{ t.adm_warn }}</p>
       </template>
     </template>
   </section>

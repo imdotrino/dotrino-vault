@@ -29,7 +29,8 @@ async function anunciado (dueño) {
   const d = await makeDeviceKey()
   const iat = Date.now()
   const cert = await signDelegationWith(dueño.priv, dueño.pub, {
-    sub: d.publickey, scope: SCOPE, iat, exp: iat + 3600_000, nonce: crypto.randomUUID()
+    // El papel ya no vence: lleva el `seq` del acta con el que se emitió.
+    sub: d.publickey, scope: SCOPE, iat, seq: 1, nonce: crypto.randomUUID()
   })
   return { d, cert, token: 'tok-' + d.publickey.slice(20, 32) }
 }

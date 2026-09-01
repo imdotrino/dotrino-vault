@@ -33,17 +33,38 @@ async function deviceIdentity () {
   const iss = JSON.stringify(await crypto.subtle.exportKey('jwk', pair.publicKey))
   const issued = []
   const revoked = []
+  // ACTA de mentira con la forma que importa: quién es miembro, qué puede y su `seq`. Hace
+  // falta porque el papel ya no se juzga solo — lleva el `seq` del acta con el que se emitió
+  // y todos los mostradores cruzan el cert con lo que el acta dice HOY.
+  const acta = {
+    v: 5, profileId: iss, sealedBy: iss, seq: 1,
+    members: [{ pub: iss, label: 'esta bóveda', caps: ['sign', 'read', 'store', 'sealer'] }],
+    renounced: []
+  }
   return {
     me: { publickey: iss, encryptionPubkey: null },
     iss,
     issued,
     revoked,
-    async signDelegation (sub, scope, { ttlMs = 60000, label = '' } = {}) {
+    acta,
+    async profileActa () { return { acta, isMaster: true } },
+    async admitMember ({ pub, label = '', cn = null, caps = [] }) {
+      acta.members.push({ pub, label, ...(cn ? { cn } : {}), caps })
+      acta.seq++
+      return { ok: true, seq: acta.seq }
+    },
+    async setCaps (pub, caps) {
+      const m = acta.members.find((x) => x.pub === pub)
+      if (m) m.caps = caps
+      acta.seq++
+      return { ok: true, seq: acta.seq }
+    },
+    async signDelegation (sub, scope, { label = '' } = {}) {
       const iat = Date.now()
       const cert = await signDelegationWith(pair.privateKey, iss, {
-        sub, scope, iat, exp: iat + ttlMs, nonce: crypto.randomUUID()
+        sub, scope, iat, seq: acta.seq, nonce: crypto.randomUUID()
       })
-      issued.push({ nonce: cert.nonce, sub, scope, iat, exp: cert.exp, label })
+      issued.push({ nonce: cert.nonce, sub, scope, iat, seq: cert.seq, label })
       return { cert }
     },
     async signData (data) {
@@ -90,10 +111,19 @@ function makeBus () {
 }
 
 /** Una máquina ya enrolada: llave propia + cert `D ← P` firmado por la bóveda. */
-async function enrolledLink (identity, { ttlMs, label = 'ia-agent' } = {}) {
+/**
+ * Una máquina ya enrolada: llave propia, sitio en el ACTA y papel firmado por la bóveda.
+ *
+ * El papel ya no lleva vencimiento: lleva el `seq` del acta con el que se emitió. Lo que la
+ * máquina puede HOY lo dice el acta, y por eso hace falta admitirla — un cert suelto sin
+ * miembro detrás no autoriza nada.
+ */
+async function enrolledLink (identity, { label = 'ia-agent', caps = ['sign'] } = {}) {
   const device = await makeDeviceKey({ label })
-  const { cert } = await identity.signDelegation(device.publickey, ['vault:sign'], { ttlMs, label })
-  return { device, cert, iss: identity.iss, proxy: 'wss://bus.invalid', label, at: Date.now() }
+  await identity.admitMember({ pub: device.publickey, label, caps })
+  const { cert } = await identity.signDelegation(device.publickey, ['vault:sign'], { label })
+  const acta = (await identity.profileActa()).acta
+  return { device, cert, acta, actaSeq: acta.seq, iss: identity.iss, proxy: 'wss://bus.invalid', label, at: Date.now() }
 }
 
 test('E2E: el agente renueva su cert contra la bóveda de un dispositivo', async () => {
@@ -103,11 +133,14 @@ test('E2E: el agente renueva su cert contra la bóveda de un dispositivo', async
   // La bóveda del navegador, atendiendo por el bus.
   const vault = await startDeviceVault(identity, { client: bus.endpoint('tok-vault') })
 
-  // El agente: enrolado hace tiempo, a su cert le quedan 3 días (< los 7 del umbral).
+  // El agente: enrolado, y el dueño le acaba de cambiar los permisos en el acta. ESO es lo
+  // que dispara la renovación ahora — no el calendario.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-e2e-'))
-  const link = await enrolledLink(identity, { ttlMs: 3 * DAY })
+  const link = await enrolledLink(identity)
+  const viejoSeq = link.cert.seq
+  await identity.setCaps(link.device.publickey, ['sign', 'read'])
+  link.actaSeq = (await identity.profileActa()).acta.seq
   fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify(link, null, 2))
-  const oldExp = link.cert.exp
 
   const agent = await startRemoteAgent({ dir, quiet: true, client: bus.endpoint('tok-agent') })
 
@@ -115,8 +148,7 @@ test('E2E: el agente renueva su cert contra la bóveda de un dispositivo', async
   await new Promise((r) => setTimeout(r, 400))
 
   const saved = JSON.parse(fs.readFileSync(path.join(dir, 'link.json'), 'utf8'))
-  assert.ok(saved.cert.exp > oldExp, 'el cert guardado tiene que quedar con más vida que el viejo')
-  assert.ok(saved.cert.exp - Date.now() > 25 * DAY, 'la renovación devuelve la ventana completa (30 días)')
+  assert.ok(saved.cert.seq > viejoSeq, 'el papel guardado se ata al acta nueva, no a la vieja')
   assert.equal(saved.cert.sub, link.device.publickey, 'sigue siendo el cert de ESTA máquina')
   assert.equal(saved.cert.iss, identity.iss, 'y lo firma la misma bóveda')
   assert.notEqual(saved.cert.nonce, link.cert.nonce, 'es un cert nuevo, no el mismo')

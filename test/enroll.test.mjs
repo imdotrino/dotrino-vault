@@ -20,15 +20,28 @@ async function fakeIdentity () {
   const publicJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
   const iss = JSON.stringify(publicJwk)
   const issued = []
+  // Acta de mentira con la forma que importa: el papel lleva su `seq`, y quien verifica
+  // necesita saber quién puede sellar en este perfil.
+  const acta = {
+    v: 5, profileId: iss, sealedBy: iss, seq: 1,
+    members: [{ pub: iss, label: 'bóveda', caps: ['sign', 'read', 'store', 'sealer'] }],
+    renounced: []
+  }
   return {
     iss,
     issued,
-    async signDelegation (sub, scope, { ttlMs = 60000, label = '' } = {}) {
+    acta,
+    async profileActa () { return { acta, isMaster: true } },
+    async admitMember ({ pub, label = '', cn = null, caps = [] }) {
+      acta.members.push({ pub, label, ...(cn ? { cn } : {}), caps }); acta.seq++
+      return { ok: true, seq: acta.seq }
+    },
+    async signDelegation (sub, scope, { label = '' } = {}) {
       const iat = Date.now()
       const cert = await signDelegationWith(pair.privateKey, iss, {
-        sub, scope, iat, exp: iat + ttlMs, nonce: crypto.randomUUID()
+        sub, scope, iat, seq: acta.seq, nonce: crypto.randomUUID()
       })
-      issued.push({ nonce: cert.nonce, sub, scope, iat, exp: cert.exp, label })
+      issued.push({ nonce: cert.nonce, sub, scope, iat, seq: cert.seq, label })
       return { cert }
     },
     async signData (data) {
@@ -82,7 +95,13 @@ test('flujo feliz: con el código correcto se emite un cert válido para ESE dis
   assert.equal(enrolled.type, 'vault.enrolled')
   assert.equal(enrolled.to, 'tok-1')
   assert.equal(enrolled.code, code, 'el código se echa de vuelta para que el dispositivo confíe')
-  const v = await verifyDelegation({ cert: enrolled.cert, expectedSub: device.publickey, expectedScope: 'vault:sign' })
+  // Se juzga con el acta que viaja junto al papel, que es lo que sustituyó a «lo firmó la
+  // maestra»: quien lo emitió tiene que ser SELLADORA de este perfil.
+  assert.ok(enrolled.acta, 'el acta viaja con el papel')
+  const v = await verifyDelegation({
+    cert: enrolled.cert, expectedSub: device.publickey, expectedScope: 'vault:sign',
+    actaSeq: enrolled.acta.seq, sealers: enrolled.acta.members.filter((m) => m.caps.includes('sealer')).map((m) => m.pub)
+  })
   assert.equal(v.ok, true, v.reason)
   assert.equal(enrolled.cert.iss, identity.iss)
   assert.equal(desk.listPending().length, 0, 'el pendiente se consume al aprobar')

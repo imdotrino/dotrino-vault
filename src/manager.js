@@ -51,8 +51,14 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     ...(autoLockMs === undefined ? {} : { autoLockMs }),
     // Que se cierre solo tiene que VERSE: si no, quien vuelve y encuentra la consola
     // pidiendo la contraseña otra vez cree que algo se rompió.
-    onAutoLock: (id) => log('[vault] profile %s locked itself after %d min idle (the console; devices keep working)',
-      id, Math.round(profiles.autoLockMs / 60000))
+    onAutoLock: (id) => {
+      log('[vault] profile %s locked itself after %d min idle (the console; devices keep working)',
+        id, Math.round(profiles.autoLockMs / 60000))
+      // Y la maestra se va con el candado. Cerrarse solo tiene que soltarla igual que
+      // cerrarla a mano: si no, bastaba con esperar a que se cerrara sola para tenerla
+      // descifrada en memoria sin candado que valga.
+      running.get(id)?.dropMasterKey?.().catch(() => {})
+    }
   })
   /**
    * ACUÑAR (o simplemente LEER) la llave de una carpeta, y cerrarla enseguida.
@@ -124,6 +130,27 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     return v
   }
 
+  /**
+   * ABRIR Y CERRAR EL PERFIL, con la maestra siguiendo al candado.
+   *
+   * Va aquí y no en `profiles.js` porque el registro de perfiles no sabe de bóvedas
+   * corriendo: sabe de contraseñas. Quien tiene las dos cosas delante es esto.
+   */
+  async function unlock (id, password) {
+    const r = await profiles.unlock(id, password)
+    // `takeMasterKey` además la deja SELLADA la primera vez: un perfil que ya tenía
+    // contraseña guardaba la maestra bajo la llave de máquina, y se migra aquí, que es el
+    // único momento en que la llave del perfil está en la mano.
+    try { await running.get(id)?.takeMasterKey?.() } catch (e) { log('[vault] could not take the master key: %s', e.message) }
+    return r
+  }
+
+  async function lock (id) {
+    const r = profiles.lock(id)
+    try { await running.get(id)?.dropMasterKey?.() } catch (_) {}
+    return r
+  }
+
   /** Resumen para state.json / `profile ls`: identidad + candado de cada perfil. */
   const summary = () => profiles.list().map((p) => {
     const v = running.get(p.id)
@@ -132,6 +159,10 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
 
   return {
     profiles,
+    // Abrir y cerrar pasan por AQUÍ, no por `profiles`: son las que mueven la maestra
+    // dentro y fuera de la memoria. Llamar a `profiles.lock` a secas deja la llave puesta.
+    unlock,
+    lock,
     running,
     get,
     list: () => profiles.list(),

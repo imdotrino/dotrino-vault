@@ -8,8 +8,8 @@
  * Cubre lo que promete el diseño:
  *   · dos perfiles conviven: identidades distintas, conexiones distintas
  *   · un dispositivo enrolado en un perfil NO puede tocar el otro
- *   · el candado (contraseña) bloquea EDITAR el perfil…
- *   · …y NO bloquea firmar / leer / guardar contenido de las apps
+ *   · el candado (contraseña) bloquea EDITAR el perfil y SUELTA la maestra de memoria…
+ *   · …y NO bloquea leer / guardar contenido de las apps: eso lo sirve la bóveda sin firmar
  *
  * Correr:  npm test   (node --test test/)
  */
@@ -93,7 +93,10 @@ test('con el profile locked: NO se edita el perfil ni firma la maestra, pero sí
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
   await mgr.profiles.setPassword(a.id, 'frase-de-prueba-larga')
-  mgr.profiles.lock(a.id)
+  // Abrir y cerrar POR EL MANAGER, no por `profiles`: son las que mueven la maestra dentro
+  // y fuera de la memoria. `profiles.lock` a secas solo apunta que está cerrada.
+  await mgr.unlock(a.id, 'frase-de-prueba-larga')   // aquí se SELLA la maestra que existía
+  await mgr.lock(a.id)
 
   // Bloqueado: editar el perfil se rechaza y el dato NO cambia.
   await assert.rejects(() => store(dev, 'profileSet', { me: { nickname: 'Hackeado' } }), /profile locked/)
@@ -105,19 +108,28 @@ test('con el profile locked: NO se edita el perfil ni firma la maestra, pero sí
   await store(dev, 'appendMessage', { threadKey: 'chat', entry: { id: 'x', text: 'hola' } })
   await store(dev, 'recordOpen', { appId: 'chat' })
 
-  // LA MAESTRA, EN CAMBIO, NO FIRMA CERRADA (dueño, 2026-08-31). Este test decía lo
-  // contrario, y era cierto ANTES DEL MODELO DE SOBRES: entonces la bóveda tenía que
-  // firmar para servir. Ya no — con los sobres no firma nada, y abierta lo que hace es
-  // rehacerlos.
-  //
-  // Y las apps no se quedan muertas por esto, que era el miedo de la regla vieja: un
-  // aparato al que el acta le da `sign` firma con SU llave y NO pasa por la bóveda. Este
-  // test la llama a pelo, que es lo que ya no procede.
+  // LA MAESTRA NO FIRMA CERRADA, y no por un `if`: NO ESTÁ. Se guarda sellada con la llave
+  // que sale de la contraseña, y cerrar la suelta de memoria. Esto es lo que separa un
+  // candado de una bandera — antes era un booleano al lado de una llave descifrada, y con
+  // el perfil «cerrado» se firmaban certificados de 30 días igual.
+  assert.equal(vault.identity.masterLocked, true, 'la privada NO está en memoria')
   await assert.rejects(() => requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } }),
     /locked/, 'cerrada, la maestra no firma')
 
+  // Y EN EL DISCO tampoco está: se descifra el archivo con la llave de MÁQUINA —la que
+  // tiene cualquiera que se lleve el disco— y aun así la privada no aparece. Eso es lo que
+  // el candado no hacía antes: `atrest` protege contra llevarse el archivo, no contra tener
+  // la máquina, y la maestra dependía solo de eso.
+  const { atRestFor } = await import('../src/atrest.js')
+  const claro = JSON.parse(atRestFor(vault.dir).decrypt(fs.readFileSync(path.join(vault.dir, 'identity.json'), 'utf8')))
+  const entrada = JSON.parse(claro[Object.keys(claro).find((k) => k.endsWith('keypair'))])
+  assert.ok(entrada.sealed, 'la privada está sellada con la llave de la contraseña')
+  assert.equal(entrada.privateJwk, undefined, 'y no queda una copia en claro al lado')
+  assert.ok(!JSON.stringify(claro).includes('"d"'), 'ni el campo `d` asoma con la llave de máquina')
+
   // Desbloqueado: se vuelve a poder editar, y la maestra vuelve a firmar si se le pide.
-  await mgr.profiles.unlock(a.id, 'frase-de-prueba-larga')
+  await mgr.unlock(a.id, 'frase-de-prueba-larga')
+  assert.equal(vault.identity.masterLocked, false, 'abrir la devuelve a memoria')
   await store(dev, 'profileSet', { me: { nickname: 'Después' } })
   assert.equal(vault.threads.methods.profileGet().me.nickname, 'Después')
   const firmado = await requestSign({ ...dev, payload: { op: 'hola', ts: Date.now() } })
@@ -127,7 +139,7 @@ test('con el profile locked: NO se edita el perfil ni firma la maestra, pero sí
 test('el candado es por perfil: el otro perfil se sigue editando', async () => {
   const [a, b] = mgr.list()
   assert.equal(mgr.profiles.isProtected(a.id), true) // lo protegió el test anterior
-  mgr.profiles.lock(a.id)
+  await mgr.lock(a.id)
   const dev = await pair(mgr.get(b.id))
   await store(dev, 'profileSet', { me: { nickname: 'Trabajo' } })
   assert.equal(mgr.get(b.id).threads.methods.profileGet().me.nickname, 'Trabajo')

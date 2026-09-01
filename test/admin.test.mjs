@@ -68,21 +68,21 @@ test('sin cert `vault:admin` no se administra nada', async () => {
   assert.ok(audits.every(([op]) => op === 'rejected'), 'y todo quedó en la bitácora')
 })
 
-test('el nonce es obligatorio y de un solo uso (approve no se reproduce)', async () => {
+test('el nonce es obligatorio y de un solo uso (revocar no se reproduce)', async () => {
   const { admin, desk } = mount()
 
-  const sinNonce = await admin.handle({ op: 'approve', code: '418027' })
+  const sinNonce = await admin.handle({ op: 'revoke', certNonce: 'n-1' })
   assert.equal(sinNonce.ok, false)
   assert.match(sinNonce.error, /nonce/)
 
-  const first = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
+  const first = await admin.handle({ op: 'revoke', certNonce: 'n-1', nonce: nonce('b') })
   assert.equal(first.ok, true)
 
   // El mismo mensaje otra vez, dentro de la ventana de frescura: no vale.
-  const dos = await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('b') })
+  const dos = await admin.handle({ op: 'revoke', certNonce: 'n-1', nonce: nonce('b') })
   assert.equal(dos.ok, false)
   assert.match(dos.error, /already used/)
-  assert.equal(desk.calls.filter(([c]) => c === 'approve').length, 1, 'se aprobó UNA vez')
+  assert.equal(desk.calls.filter(([c]) => c === 'revoke').length, 1, 'se revocó UNA vez')
 })
 
 test('un cert inválido no le quema los nonces a un admin legítimo', async () => {
@@ -90,25 +90,30 @@ test('un cert inválido no le quema los nonces a un admin legítimo', async () =
   const { admin } = mount({ verify: async () => (authorized ? { ok: true, device: 'D' } : { ok: false, reason: 'firma' }) })
 
   const n = nonce('c')
-  assert.equal((await admin.handle({ op: 'pending', nonce: n })).ok, false, 'el impostor no pasa')
+  assert.equal((await admin.handle({ op: 'status', nonce: n })).ok, false, 'el impostor no pasa')
   authorized = true
-  assert.equal((await admin.handle({ op: 'pending', nonce: n })).ok, true, 'y el nonce sigue sirviendo')
+  assert.equal((await admin.handle({ op: 'status', nonce: n })).ok, true, 'y el nonce sigue sirviendo')
 })
 
-test('EL LÍMITE: un admin no concede «administra» ni claves de servicio', async () => {
-  const { admin, desk, audits } = mount()
+/**
+ * AGREGAR APARATOS SE QUITÓ DE AQUÍ (dueño, 2026-08-31), y de raíz: no hay operación, ni
+ * mensaje, ni botón. El multivault quita la fricción que justificaba esto —cualquier otra
+ * selladora abierta admite el aparato—, así que dejó de comprar nada y seguía pidiendo lo
+ * caro: que la maestra firmara a distancia.
+ *
+ * Antes había aquí un test del LÍMITE (que un admin no se concediera `vault:admin` ni un
+ * cajón de servicio al emparejar). Ya no hace falta un límite: no existe la puerta.
+ */
+test('agregar un aparato NO se puede desde la consola: la operación no existe', async () => {
+  const { admin, desk } = mount()
 
-  for (const bad of [['vault:admin'], ['vault:read', 'vault:admin'], ['vault:secrets:proxy']]) {
-    const r = await admin.handle({ op: 'pair', scope: bad, nonce: nonce(String(bad)) })
-    assert.equal(r.ok, false, `${bad} debe rechazarse`)
-    assert.match(r.error, /vault machine/, 'y decir dónde SÍ se hace')
+  for (const op of ['pair', 'approve', 'reject', 'pending']) {
+    const r = await admin.handle({ op, scope: ['vault:read'], code: '418027', deviceId: 'X', nonce: nonce(op.padEnd(32, 'z')) })
+    assert.equal(r.ok, false, op)
+    assert.match(r.error, /invalid operation/, `${op} no debe ni reconocerse`)
   }
-  assert.deepEqual(desk.calls, [], 'ningún emparejamiento llegó a abrirse')
-  assert.ok(audits.some(([, i]) => i?.reason === 'forbidden-scope'))
-
-  const good = await admin.handle({ op: 'pair', scope: ['vault:read'], nonce: nonce('d') })
-  assert.equal(good.ok, true)
-  assert.equal(good.result.qr, 'cAAAA')
+  assert.deepEqual(desk.calls, [], 'el mostrador de emparejamiento no se toca desde aquí')
+  assert.ok(!ADMIN_OPS.includes('pair') && !ADMIN_OPS.includes('approve'))
 })
 
 test('no existen las operaciones que no se delegan', async () => {
@@ -121,17 +126,14 @@ test('no existen las operaciones que no se delegan', async () => {
   }
 })
 
-test('admitir y expulsar avisan a todos los miembros', async () => {
+test('expulsar avisa a todos los miembros', async () => {
   const { admin, notices } = mount()
 
-  await admin.handle({ op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('e') })
   await admin.handle({ op: 'revoke', certNonce: 'n-42', nonce: nonce('f') })
-  // Rechazar no cambia el perfil: no hay nada que avisar.
-  await admin.handle({ op: 'reject', deviceId: 'XQ7F-3K9P', nonce: nonce('g') })
 
-  assert.deepEqual(notices.map(([ev]) => ev), ['enrolled', 'revoked'])
+  assert.deepEqual(notices.map(([ev]) => ev), ['revoked'])
   assert.equal(notices[0][1].by, 'AD01-AD01', 'el aviso dice QUIÉN lo hizo')
-  assert.equal(notices[1][1].certNonce, 'n-42')
+  assert.equal(notices[0][1].certNonce, 'n-42')
 })
 
 /**
@@ -170,9 +172,9 @@ test('la bitácora se lee acotada y con el actor en cada acción', async () => {
   assert.equal(r.ok, true)
   assert.ok(r.result.entries.length <= 500, 'el tope se respeta')
 
-  await admin.handle({ op: 'pair', nonce: nonce('i') })
-  const pair = audits.find(([op]) => op === 'admin.pair')
-  assert.equal(pair[1].by, 'AD01-AD01', 'queda escrito qué dispositivo lo pidió')
+  await admin.handle({ op: 'revoke', certNonce: 'n-7', nonce: nonce('i') })
+  const rev = audits.find(([op]) => op === 'admin.revoke')
+  assert.equal(rev[1].by, 'AD01-AD01', 'queda escrito qué dispositivo lo pidió')
 })
 
 // --------------------------- variables de entorno ---------------------------
@@ -256,14 +258,12 @@ test('BORRAR variables no existe a distancia (un aparato robado no te deja sin c
  * un certificado de 30 días con la maestra. O sea que cerrar el perfil frenaba
  * `dotrino-vault pair` en la máquina y no frenaba lo mismo por la red.
  */
-test('con el perfil CERRADO no se administra: ni emparejar, ni aprobar, ni quitar, ni configurar', async () => {
+test('con el perfil CERRADO no se administra: ni quitar, ni configurar', async () => {
   const { admin, desk, audits } = mount({ isLocked: () => true, vars: fakeVars() })
 
   const casos = [
-    { op: 'pair', label: 'celular' },
-    { op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P' },
-    { op: 'reject', deviceId: 'XQ7F-3K9P' },
     { op: 'revoke', sub: 'DPUB' },
+    { op: 'revoke', certNonce: 'n-9' },
     { op: 'var.set', ns: 'proxy', key: 'K', enc: { epk: 'E', iv: 'I', ct: 'C' } }
   ]
   for (const [i, c] of casos.entries()) {
@@ -275,22 +275,21 @@ test('con el perfil CERRADO no se administra: ni emparejar, ni aprobar, ni quita
   assert.equal(audits.filter(([op, i]) => op === 'rejected' && i.reason === 'locked').length, casos.length)
 })
 
-test('cerrada se sigue MIRANDO, y `pending` dice que está cerrada', async () => {
+test('cerrada se sigue MIRANDO, y `status` dice que está cerrada', async () => {
   const vars = fakeVars()
   const { admin } = mount({ isLocked: () => true, vars })
 
-  const p = await admin.handle({ op: 'pending', nonce: nonce('p') })
+  const p = await admin.handle({ op: 'status', nonce: nonce('p') })
   assert.equal(p.ok, true)
   assert.equal(p.result.locked, true, 'sin esto la consola no puede decir por qué no funciona')
-  assert.equal(p.result.pending.length, 1)
 
   assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
   assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
 })
 
-test('abierta, `pending` no miente al revés', async () => {
+test('abierta, `status` no miente al revés', async () => {
   const { admin } = mount()
-  const p = await admin.handle({ op: 'pending', nonce: nonce('s') })
+  const p = await admin.handle({ op: 'status', nonce: nonce('s') })
   assert.equal(p.result.locked, false)
 })
 
@@ -302,11 +301,11 @@ test('abierta, `pending` no miente al revés', async () => {
 test('el candado no quema el nonce', async () => {
   let cerrada = true
   const { admin, desk } = mount({ isLocked: () => cerrada })
-  const msg = { op: 'approve', code: '418027', deviceId: 'XQ7F-3K9P', nonce: nonce('t') }
+  const msg = { op: 'revoke', certNonce: 'n-3', nonce: nonce('t') }
 
   assert.equal((await admin.handle({ ...msg })).code, 'vault-locked')
   cerrada = false
   const r = await admin.handle({ ...msg })
   assert.equal(r.ok, true, 'el MISMO mensaje vale una vez abierta')
-  assert.equal(desk.calls.filter(([c]) => c === 'approve').length, 1)
+  assert.equal(desk.calls.filter(([c]) => c === 'revoke').length, 1)
 })

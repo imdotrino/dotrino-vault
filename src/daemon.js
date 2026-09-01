@@ -323,7 +323,7 @@ export async function runDaemon () {
       // paga; el dueño no tiene que acordarse de un comando aparte.
       case 'unlock': {
         const id = ref()
-        await mgr.profiles.unlock(id, req.password)
+        await mgr.unlock(id, req.password)   // por el manager: mueve la maestra a memoria y la sella
         let note = ''
         let ak = null
         try {
@@ -345,7 +345,9 @@ export async function runDaemon () {
       // los 5 minutos de ABRIRLO aunque estuvieras delante trabajando. `ref()` ya estira
       // el plazo; esta op no hace nada más, y por eso no devuelve ningún volcado.
       case 'touch': { ref(); return { done: 'ok' } }
-      case 'lock': { mgr.profiles.lock(ref()); return { done: 'perfil bloqueado' } }
+      // Por el manager, no por `profiles`: cerrar tiene que SOLTAR la maestra, no solo
+      // apuntar que está cerrada.
+      case 'lock': { await mgr.lock(ref()); return { done: 'perfil bloqueado' } }
       // PONER contraseña: los secretos pasan de abrirse con la llave de la máquina a
       // abrirse con la frase. Hay que volver a cerrar la copia maestra con la nueva, o
       // quedarían ilegibles. Si el perfil YA tenía contraseña, hace falta la vieja para

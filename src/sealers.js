@@ -89,7 +89,19 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
       const r = await preguntarQuienEs(token)
       const cert = r?.cert
       if (!cert?.sub || cert.iss !== registryId) continue
-      const v = await verifyDelegation({ cert, expectedSub: cert.sub }).catch(() => ({ ok: false }))
+      // AQUÍ SOMOS EXTRAÑOS: no tenemos el acta del registro, así que no podemos preguntarle
+      // quién sella. Lo que sí tenemos es su `profileId` quemado en el código —inmutable, a
+      // diferencia de la dirección de un aparato— y eso es lo que se ancla: aceptamos un
+      // papel firmado POR ESA LLAVE, para el acta que él diga.
+      //
+      // Es exactamente la misma fuerza que antes (`cert.iss === registryId` + firma válida),
+      // dicho con la forma nueva. Y tiene un límite que conviene decir: si el registro
+      // llegara a tener una SEGUNDA selladora, sus papeles no entrarían por aquí hasta que
+      // presente su cadena de eslabones — que es, con gracia, justo lo que este registro
+      // publica.
+      const v = await verifyDelegation({
+        cert, expectedSub: cert.sub, actaSeq: cert.seq, sealers: [registryId]
+      }).catch(() => ({ ok: false }))
       if (v?.ok) return cert.sub
     }
     return null

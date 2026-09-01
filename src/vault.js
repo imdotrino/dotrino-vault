@@ -31,9 +31,10 @@ import { openSecretsStore, assertVar } from './secretsStore.js'
 import { createApprovals, PENDING_TTL_MS } from './approvals.js'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
+import { openCommKey, COMM_CN, COMM_CAPS } from './commKey.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
-import { atRestFor, kekFor, migrateFile } from './atrest.js'
+import { atRestFor, kekFor, migrateFile, encryptText, decryptText } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 /**
@@ -65,7 +66,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const r = migrateFile(path.join(dir, 'identity.json'), kekFor(dir))
     if (r === 'migrado') log('[vault] identity encrypted at rest (bound to this machine)')
   } catch (e) { log('[vault] could not encrypt the identity at rest:', e.message) }
-  const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
+  /**
+   * EL CANDADO DE LA MAESTRA. La mitad privada se guarda sellada con la llave que sale de
+   * la contraseña del perfil (`openKey`), no con la de la máquina: cerrada, la maestra no
+   * está en memoria y no hay con qué sacarla del disco.
+   *
+   * `open` devuelve `null` con el perfil cerrado, y el pilar entonces carga la identidad
+   * SIN con qué firmar — se sabe quién eres, no se puede hablar por ti. Un perfil sin
+   * contraseña no tiene `openKey`: se queda como estaba, bajo la llave de máquina, y la
+   * consola ya lo dice en voz alta.
+   */
+  const keyLock = {
+    seal: async (texto) => { const k = openKey?.(); return k ? encryptText(texto, k) : null },
+    open: async (blob) => { const k = openKey?.(); if (!k) return null; try { return decryptText(blob, k) } catch (_) { return null } }
+  }
+  const identity = await Identity.connect({ dir, atRest: atRestFor(dir), keyLock })
   // ESTE DIRECTORIO ES DE ESTA LLAVE. Es lo único que hay que proteger cuando varias
   // bóvedas viven en un mismo disco: cada una con el suyo, para que nunca se mezclen.
   assertKeyOwnsDir(dir, identity.me?.publickey || null)
@@ -82,6 +97,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // abre nada, así que se usa sin la frase; su autoridad se la da el acta, que la nombra
   // y que sella únicamente la maestra. Se estrena una por acta: aquí está el proveedor.
   const sealKeys = openSealKeys(dir)
+  const commKey = openCommKey(dir)
   identity.setSealKeyProvider?.(() => sealKeys.mint())
 
   const store = openStore(dir)
@@ -220,7 +236,33 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   } catch (e) { log('[vault] could not set up the sealing key:', e.message) }
 
-  const { client } = await createTransport({ identity, dir, url: proxyUrl })
+  /**
+   * LA LLAVE DE COMUNICACIÓN, dentro del acta.
+   *
+   * La maestra sella el acta y reenvuelve sobres; hablar por la red no es suyo. Esta es la
+   * que se identifica ante el proxio, y su autoridad la dice el ACTA: entra como un miembro
+   * más, con `cn: 'vault'`, así que el acta la trata como un servicio del perfil — puede
+   * hablar por la bóveda, no firmar por la persona.
+   *
+   * Solo se puede meter con el perfil ABIERTO (admitir un miembro es sellar el acta, y eso
+   * es de la maestra). Con el perfil cerrado no se toca nada: si ya está, se usa; y si no,
+   * `identify` se repliega a la maestra y lo dice. Por eso una bóveda que se actualiza
+   * tiene que abrirse UNA vez, y a partir de ahí ya puede vivir cerrada.
+   */
+  try {
+    const info = await identity.profileActa?.()
+    const acta = info?.acta
+    if (acta && !identity.masterLocked) {
+      const pub = await commKey.ensure()
+      const yaEsta = (acta.members || []).some((m) => m?.pub === pub)
+      if (!yaEsta && info?.isMaster) {
+        await identity.admitMember({ pub, label: 'esta bóveda', cn: COMM_CN, caps: [...COMM_CAPS] })
+        log('[vault] this vault is now a member of its own record: it talks with its own key, not the master one')
+      }
+    }
+  } catch (e) { log('[vault] could not put the communication key in the record:', e.message) }
+
+  const { client } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
 
   // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
   // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver
@@ -332,9 +374,35 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * @returns {boolean} `true` si puede seguir; si no, ya contestó el «no».
    */
+  /**
+   * CON QUÉ SE JUZGA UN PAPEL: el acta que tiene esta bóveda.
+   *
+   * Sustituye a `trustedIssuer: master`, que comparaba contra UNA llave fija y por eso el
+   * multivault no podía existir — una segunda selladora sellaba el acta y luego sus papeles
+   * los rechazaban los diez mostradores. Ahora se compara contra la lista que dice el acta.
+   *
+   * Sin acta se devuelven nulos a propósito: `verifyDelegation` responde `no-acta` y el
+   * mostrador deniega. Es lo contrario de un repliegue — no hay con qué decidir, así que no
+   * se decide que sí.
+   */
+  async function contextoActa () {
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!acta) return { actaSeq: null, sealers: null }
+    return { actaSeq: acta.seq, sealers: Acta.sealersOf(acta) }
+  }
+
   async function actaAllows (from, chk, scope, what) {
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
-    if (!record || Acta.memberCanScope(record, chk.device, scope)) return true
+    // SIN ACTA NO SE ATIENDE. Esto era `if (!record || puede())`, o sea: sin acta, pasa. Un
+    // repliegue no dice «por si falta el dato», dice «si falta el dato, di que sí» — y el
+    // acta falta justo cuando algo se rompió (un archivo a medias, un `catch` que devolvió
+    // null), que es cuando menos hay que fiarse. Toda cuenta tiene acta desde hace versiones.
+    if (!record) {
+      audit('rejected', { what, reason: 'sin-acta' })
+      reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
+      return false
+    }
+    if (Acta.memberCanScope(record, chk.device, scope)) return true
     audit('rejected', { what, reason: 'acta' })
     reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member no longer has that permission' })
     return false
@@ -345,7 +413,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) { audit('rejected', { what: 'sign', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.SIGN, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'sign')
 
@@ -381,7 +449,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.READ, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'get')
     if (!await actaAllows(from, chk, SCOPE.READ, 'get')) return
@@ -408,9 +476,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'profile locked: unlock it on the vault machine (dotrino-vault unlock) to edit it' })
     }
     const revoked = await revocationSet()
-    let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
+    let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, ...(await contextoActa()), revoked })
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
-      chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
+      chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, ...(await contextoActa()), revoked })
     }
     if (!chk.ok) return denyChain(from, chk, p, 'store')
     // El scope que valió es el que hay que preguntarle al acta: un método de lectura pudo
@@ -534,8 +602,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
-    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, null)
+    // La lista de aparatos es el perfil: quién eres, cómo se llama cada máquina y qué puede.
+    // Este mostrador no preguntaba al acta, así que un aparato al que le quitaste `lee`
+    // seguía viendo tu inventario entero hasta que caducara su papel.
+    if (!await actaAllows(from, chk, SCOPE.READ, 'devices')) return
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -593,7 +665,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000
   async function handleRenew (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
-    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, 'renew')
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
@@ -605,18 +677,23 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // QUITARLO tampoco surtía efecto hasta que el cert caducara, hasta un mes después.
     // Si el miembro ya no está en el acta, no se renueva nada: lo echaron.
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    let scope = p.cert.scope
-    if (record) {
-      scope = Acta.memberScopes(record, p.cert.sub)
-      if (!scope.length) {
-        audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
-        return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
-      }
+    // Sin acta no se renueva: caer al scope del papel viejo es reconceder a ciegas lo que
+    // el acta ya no dice. Un repliegue así no protege de nada, tapa.
+    if (!record) {
+      audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
+    }
+    const scope = Acta.memberScopes(record, p.cert.sub)
+    if (!scope.length) {
+      audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
     }
     const { cert } = await identity.signDelegation(p.cert.sub, scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
     audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope })
     log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} (30 days)`)
-    reply(from, { type: MSG.RENEWED, cert })
+    // El acta viaja con el papel: sin ella quien lo recibe no puede comprobar que lo firmó
+    // una selladora del perfil, que es lo que sustituyó a «lo firmó la maestra».
+    reply(from, { type: MSG.RENEWED, cert, acta: record })
   }
 
   // SECRETOS de servicios: un servicio enrolado (cert `vault:secrets:<ns>`)
@@ -639,9 +716,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'enckey: invalid namespace' })
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'enckey')
+    // MISMA FRONTERA QUE SERVIR EL CAJÓN, y por la misma razón: esto no solo apunta una
+    // llave pública, acto seguido le ENVUELVE la del cajón (`spreadKey`, más abajo). Aquí
+    // solo se miraba el certificado, así que a un aparato al que el acta ya le había
+    // quitado `secrets` se le entregaba la llave igual, hasta 30 días. Es el mismo fallo
+    // que se cerró en `handleSign`, en otro mostrador.
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: 'enckey', ns, reason: record ? 'cn' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
+    }
     try {
       await identity.setMemberEncPub({ pub: chk.device, encPub: p.data.encPub })
       audit('enckey', { device: await deviceIdOf(chk.device).catch(() => null), ns })
@@ -673,15 +760,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'secrets')
     // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
     // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
     // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    if (record && !Acta.memberCanReadSecrets(record, chk.device, ns)) {
-      audit('rejected', { what: 'secrets', ns, reason: 'cn' })
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: 'secrets', ns, reason: record ? 'cn' : 'sin-acta' })
       return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
     }
     // APROBACIÓN: si este APARATO está marcado (`dotrino-vault approval <ID> on`), liberarle
@@ -759,12 +846,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const op = p.data?.op
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.APPROVE, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.APPROVE, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'approval')
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    if (record && !Acta.memberCan(record, chk.device, 'approve')) {
-      audit('rejected', { what: 'approval', reason: 'acta' })
+    if (!record || !Acta.memberCan(record, chk.device, 'approve')) {
+      audit('rejected', { what: 'approval', reason: record ? 'acta' : 'sin-acta' })
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not approve' })
     }
     const by = await deviceIdOf(chk.device).catch(() => null)
@@ -1208,11 +1295,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const admin = createAdminDesk({
     desk,
     deviceIdOf,
-    ttlMs: DEVICE_TTL_MS,
     audit,
-    // El MISMO candado que frena `sign` y editar el perfil. Sin esto la consola remota
-    // emparejaba y aprobaba con el perfil cerrado —y aprobar firma un cert con la
-    // maestra—, justo lo que el candado existe para impedir.
+    // El MISMO candado que frena firmar y editar el perfil: revocar reescribe el acta y
+    // configurar toca los secretos, y ninguna de las dos se hace con la bóveda cerrada.
     isLocked,
     notify: notifyMembers,
     readActivity,
@@ -1224,7 +1309,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     verify: async ({ data, signature, cert }) => {
       const chk = await verifyChain({
         data, signature, cert,
-        expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
+        expectedScope: SCOPE.ADMIN, ...(await contextoActa()), revoked: await revocationSet()
       })
       // Quitarse a UNO MISMO desde la consola remota entra por aquí: la segunda petición
       // que mande el aparato ya llega con el certificado retirado. Que se entere con el
@@ -1234,7 +1319,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         return chk
       }
       const record = (await identity.profileActa?.().catch(() => null))?.acta
-      if (record && !Acta.memberCan(record, chk.device, 'admin')) return { ok: false, reason: 'acta' }
+      if (!record || !Acta.memberCan(record, chk.device, 'admin')) return { ok: false, reason: record ? 'acta' : 'sin-acta' }
       return chk
     }
   })
@@ -1908,6 +1993,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   return {
     identity, client, store, threads, secrets, master, fingerprint: fp, dir,
+    /**
+     * SOLTAR LA MAESTRA. Cerrar el perfil tiene que sacarla de la memoria, no solo dejar de
+     * cargarla en el siguiente arranque: si no, el candado seguiría siendo una bandera al
+     * lado de una llave descifrada, que es exactamente lo que se quitó de en medio.
+     *
+     * Se recarga el par: sin la llave del perfil el pilar lo deja SIN privada, así que a
+     * partir de aquí firmar se niega con `vault-locked`. Servir sigue igual — eso lo hace la
+     * llave de comunicación, que no depende de la contraseña.
+     */
+    async dropMasterKey () {
+      const r = await identity.reloadMasterKey?.()
+      return { locked: r?.locked !== false }
+    },
+    /** Al abrir: recuperar la maestra y, si venía en claro de antes, dejarla sellada. */
+    async takeMasterKey () {
+      const r = await identity.reloadMasterKey?.()
+      if (r?.locked === false) { try { await identity.sealMasterKey?.() } catch (_) {} }
+      return { locked: r?.locked !== false }
+    },
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,

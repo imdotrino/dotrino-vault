@@ -94,7 +94,32 @@ hace daño acotado y **reversible desde el PC** (se le revoca); sin esa frontera
 traspasarse el mando y dejarte fuera de tu propia cuenta, que es irreversible por diseño
 (no hay recuperación ni frase de respaldo).
 
-### Por qué aprobar de forma remota es aceptable
+### ⛔ AGREGAR APARATOS DESDE AQUÍ: QUITADO (dueño, 2026-08-31)
+
+`pending`, `pair`, `approve` y `reject` **ya no existen** — ni la operación, ni el mensaje,
+ni el botón. No están escondidos: quitados.
+
+**Por qué.** Existían para ahorrarse ir hasta la máquina de la bóveda. El **multivault**
+quita esa fricción de raíz: cualquier otra selladora abierta —el teléfono, un segundo PC—
+admite el aparato, y lo hace firmando de verdad, no pidiéndoselo a otro. Así que esto dejó
+de comprar nada y seguía pidiendo lo caro.
+
+**Lo caro.** Admitir a alguien es **emitir un certificado Y sellar el acta**, y las dos son
+de la maestra. La regla del acta dice que la maestra solo sella el acta y reenvuelve sobres,
+y que **con la bóveda cerrada no firma nada**. Una consola que admite aparatos obliga a
+tener la maestra disponible a distancia, que es exactamente lo que el candado impide.
+
+Se estudió una variante —dejar sellar al admin *solo si el acta únicamente agrega un
+aparato*— y se descartó: un miembro trae `caps`, así que «solo agrega un aparato» incluye
+«agrega otra selladora» salvo que se acoten; y aun acotándolos, convierte una regla de una
+línea (`canSeal(anterior, sealedBy)`) en una regla de **diff** que tendrían que implementar
+igual el proxio, cada aparato y el registro de selladores. Cada implementación distinta es
+una toma de cuenta.
+
+**Lo que queda a distancia:** mirar el acta y la bitácora, **quitar** un aparato y las
+variables de entorno.
+
+### Por qué aprobar de forma remota era aceptable (histórico)
 
 Porque el código de 6 dígitos es un **compromiso**, no un secreto que viaja: lo genera el
 dispositivo nuevo, lo muestra en su pantalla, y la bóveda solo firma el cert si el código
@@ -136,11 +161,8 @@ ventana de frescura ±5 min. Responde `vault.admin.result`.
 
 | `data.op` | Campos | Qué hace |
 |---|---|---|
-| `pending` | `{ ts, nonce }` | devuelve `desk.listPending()` y `locked` (el candado del perfil) |
-| `pair` | `{ scope?, label?, ts, nonce }` | `desk.startPairing()`; responde la **invitación ya codificada** (`lib/src/invite.js`) para que la app pinte el QR |
-| `approve` | `{ code, deviceId, ts, nonce }` | `desk.approve(code, { deviceId })` |
-| `reject` | `{ deviceId, ts, nonce }` | `desk.reject(deviceId)` |
-| `revoke` | `{ certNonce, ts, nonce }` | `desk.revoke(certNonce)` |
+| `status` | `{ ts, nonce }` | `{ locked }` — el candado del perfil, para que la consola pueda explicarse |
+| `revoke` | `{ certNonce \| sub, ts, nonce }` | retira un papel, o QUITA el aparato entero por su llave |
 | `audit` | `{ limit?, ts, nonce }` | últimas N entradas de la bitácora (tope 500) |
 | `vars` | `{ ts, nonce }` | los dos cajones de variables **sellados**: nombres y visibilidad de todas, y el **valor solo de las públicas** |
 | `var.set` | `{ ns \| pub, key, enc, public?, ts, nonce }` | crea o cambia una variable. `enc` es el valor **sellado** con la clave de contenido del perfil; sin él se rechaza. Exactamente un destino: un scope (`ns`) o un aparato (`pub`) |
