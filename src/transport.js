@@ -1,9 +1,19 @@
 /**
  * Transporte headless del vault: el cliente OFICIAL `@dotrino/proxy-client`
  * corriendo en Node (mismo patrón que `dotrino-bots/src/core/transport.js`).
- * Hace el `identify` firmado por la maestra del vault — liga el token efímero de
- * la conexión a la pubkey estable, habilitando el direccionamiento por pubkey
- * (`sendByPubkey`) y la cola offline de 24 h del proxy.
+ * Hace el `identify` — liga el token efímero de la conexión a una pubkey estable,
+ * habilitando el direccionamiento por pubkey (`sendByPubkey`) y la cola offline
+ * de 24 h del proxy.
+ *
+ * QUIÉN FIRMA ESE `identify`, que es lo que cambió: **la llave de comunicación**
+ * (`commKey.js`), no la maestra. La maestra sella el acta y reenvuelve sobres, y
+ * nada más; si además tuviera que firmar aquí no podría vivir bajo llave, porque
+ * esto se firma en cada conexión Y en cada reconexión — una bóveda cerrada no
+ * existiría en la red.
+ *
+ * Lo que ata el token al PERFIL entonces ya no es un certificado sino el ACTA: el
+ * proxio comprueba que quien habla sea miembro (`verifyActaMembership`) y ata el
+ * token también al `profileId`. Por eso se manda el acta siempre.
  *
  * IMPORTANTE: `me.publickey` puede ser null en el primer arranque (solo se puebla
  * al fijar un nickname), así que la pubkey maestra se obtiene de forma robusta
@@ -26,7 +36,7 @@ export async function masterPubkeyOf (identity) {
  * @param {string} [opts.url] URL del proxy (default wss://proxy.dotrino.com).
  * @returns {Promise<{ client, token:string, identify():Promise<void> }>}
  */
-export async function createTransport ({ identity, dir, url = DEFAULT_PROXY }) {
+export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {} }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
   // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
@@ -47,13 +57,27 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY }) {
   await client.connect()
 
   const identify = async () => {
+    if (!client.token) return
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const comm = commKey?.pub?.() || null
+    // ¿Nos nombra el acta? Con `cn` o sin él, lo que el proxio mira es la pertenencia.
+    const esMiembro = comm && (record?.members || []).some((m) => m?.pub === comm)
+
+    if (comm && esMiembro) {
+      const data = { op: 'identify', publickey: comm, token: client.token, ts: Date.now() }
+      const signature = await commKey.sign(data)
+      if (signature) return client.identify({ data, signature, acta: record })
+    }
+
+    // REPLIEGUE, y solo para migrar: una bóveda que todavía no ha metido su llave de
+    // comunicación en el acta se identifica con la maestra, como siempre. Exige el perfil
+    // ABIERTO —la maestra bajo llave no firma— y por eso se dice en voz alta: mientras se
+    // esté aquí, cerrar el perfil deja la bóveda sin voz.
     const publickey = await masterPubkeyOf(identity)
-    if (!publickey || !client.token) return
+    if (!publickey) return
     const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
     const { signature } = await identity.signData(data)
-    // Con el acta, el proxy bindea también el `profileId`: escribirle a la PERSONA llega
-    // a cualquiera de sus dispositivos, no solo a esta bóveda.
-    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    log('[vault] identifying with the master key: this vault is not in its own record yet (open the profile once to fix it)')
     await client.identify({ data, signature, acta: record })
   }
   await identify()

@@ -31,9 +31,10 @@ import { openSecretsStore, assertVar } from './secretsStore.js'
 import { createApprovals, PENDING_TTL_MS } from './approvals.js'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
+import { openCommKey, COMM_CN, COMM_CAPS } from './commKey.js'
 import { seal } from '../lib/src/sealed.js'
 import { dataDir, ensureDir } from './paths.js'
-import { atRestFor, kekFor, migrateFile } from './atrest.js'
+import { atRestFor, kekFor, migrateFile, encryptText, decryptText } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
 /**
@@ -65,7 +66,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const r = migrateFile(path.join(dir, 'identity.json'), kekFor(dir))
     if (r === 'migrado') log('[vault] identity encrypted at rest (bound to this machine)')
   } catch (e) { log('[vault] could not encrypt the identity at rest:', e.message) }
-  const identity = await Identity.connect({ dir, atRest: atRestFor(dir) })
+  /**
+   * EL CANDADO DE LA MAESTRA. La mitad privada se guarda sellada con la llave que sale de
+   * la contraseña del perfil (`openKey`), no con la de la máquina: cerrada, la maestra no
+   * está en memoria y no hay con qué sacarla del disco.
+   *
+   * `open` devuelve `null` con el perfil cerrado, y el pilar entonces carga la identidad
+   * SIN con qué firmar — se sabe quién eres, no se puede hablar por ti. Un perfil sin
+   * contraseña no tiene `openKey`: se queda como estaba, bajo la llave de máquina, y la
+   * consola ya lo dice en voz alta.
+   */
+  const keyLock = {
+    seal: async (texto) => { const k = openKey?.(); return k ? encryptText(texto, k) : null },
+    open: async (blob) => { const k = openKey?.(); if (!k) return null; try { return decryptText(blob, k) } catch (_) { return null } }
+  }
+  const identity = await Identity.connect({ dir, atRest: atRestFor(dir), keyLock })
   // ESTE DIRECTORIO ES DE ESTA LLAVE. Es lo único que hay que proteger cuando varias
   // bóvedas viven en un mismo disco: cada una con el suyo, para que nunca se mezclen.
   assertKeyOwnsDir(dir, identity.me?.publickey || null)
@@ -82,6 +97,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // abre nada, así que se usa sin la frase; su autoridad se la da el acta, que la nombra
   // y que sella únicamente la maestra. Se estrena una por acta: aquí está el proveedor.
   const sealKeys = openSealKeys(dir)
+  const commKey = openCommKey(dir)
   identity.setSealKeyProvider?.(() => sealKeys.mint())
 
   const store = openStore(dir)
@@ -220,7 +236,33 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   } catch (e) { log('[vault] could not set up the sealing key:', e.message) }
 
-  const { client } = await createTransport({ identity, dir, url: proxyUrl })
+  /**
+   * LA LLAVE DE COMUNICACIÓN, dentro del acta.
+   *
+   * La maestra sella el acta y reenvuelve sobres; hablar por la red no es suyo. Esta es la
+   * que se identifica ante el proxio, y su autoridad la dice el ACTA: entra como un miembro
+   * más, con `cn: 'vault'`, así que el acta la trata como un servicio del perfil — puede
+   * hablar por la bóveda, no firmar por la persona.
+   *
+   * Solo se puede meter con el perfil ABIERTO (admitir un miembro es sellar el acta, y eso
+   * es de la maestra). Con el perfil cerrado no se toca nada: si ya está, se usa; y si no,
+   * `identify` se repliega a la maestra y lo dice. Por eso una bóveda que se actualiza
+   * tiene que abrirse UNA vez, y a partir de ahí ya puede vivir cerrada.
+   */
+  try {
+    const info = await identity.profileActa?.()
+    const acta = info?.acta
+    if (acta && !identity.masterLocked) {
+      const pub = await commKey.ensure()
+      const yaEsta = (acta.members || []).some((m) => m?.pub === pub)
+      if (!yaEsta && info?.isMaster) {
+        await identity.admitMember({ pub, label: 'esta bóveda', cn: COMM_CN, caps: [...COMM_CAPS] })
+        log('[vault] this vault is now a member of its own record: it talks with its own key, not the master one')
+      }
+    }
+  } catch (e) { log('[vault] could not put the communication key in the record:', e.message) }
+
+  const { client } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
 
   // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
   // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver
@@ -1908,6 +1950,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   return {
     identity, client, store, threads, secrets, master, fingerprint: fp, dir,
+    /**
+     * SOLTAR LA MAESTRA. Cerrar el perfil tiene que sacarla de la memoria, no solo dejar de
+     * cargarla en el siguiente arranque: si no, el candado seguiría siendo una bandera al
+     * lado de una llave descifrada, que es exactamente lo que se quitó de en medio.
+     *
+     * Se recarga el par: sin la llave del perfil el pilar lo deja SIN privada, así que a
+     * partir de aquí firmar se niega con `vault-locked`. Servir sigue igual — eso lo hace la
+     * llave de comunicación, que no depende de la contraseña.
+     */
+    async dropMasterKey () {
+      const r = await identity.reloadMasterKey?.()
+      return { locked: r?.locked !== false }
+    },
+    /** Al abrir: recuperar la maestra y, si venía en claro de antes, dejarla sellada. */
+    async takeMasterKey () {
+      const r = await identity.reloadMasterKey?.()
+      if (r?.locked === false) { try { await identity.sealMasterKey?.() } catch (_) {} }
+      return { locked: r?.locked !== false }
+    },
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
