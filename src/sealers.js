@@ -27,28 +27,53 @@
  * que se desincroniza en cuanto se restaura un disco.
  */
 import * as Acta from '@dotrino/identity/acta'
+import { verifyDelegation } from '@dotrino/identity/capabilities'
 
 export const OP = 'sealers.publish'
 
 /**
- * EL TESTIGO DE DOTRINO, como constante y no como variable de entorno (dueño, 2026-08-31:
- * «¿DOTRINO_SEALERS es una variable?»).
+ * LA IDENTIDAD DEL TESTIGO DE DOTRINO — no su aparato (dueño, 2026-08-31: «¿no me puedes
+ * quemar un device en el código?»).
  *
- * No es un secreto ni configuración de la máquina: es una dirección pública, y a dónde va
- * una cadena es propiedad de la IDENTIDAD, no del servidor donde corra su bóveda. Dejarlo
- * en el entorno se saltaba justo la garantía del `chainUrl` del génesis —que nadie pueda
- * redirigirte a su rama— porque lo decidía quien tuviera el servidor.
+ * Tenía razón y era el mismo fallo que ya costó caro con el `nodeId` del proxio: la pubkey
+ * de un APARATO muere en cuanto lo revocas o lo re-enrolas, y todo lo que la tuviera
+ * apuntada se queda hablando con una dirección muerta. Lo que no cambia nunca es la
+ * IDENTIDAD: el `profileId` es el nombre de la cuenta y es para siempre.
  *
- * Que venga por defecto no arriesga nada: el eslabón es público, así que depositarlo en el
- * testigo equivocado no filtra nada — simplemente no sirve de nada. La variable se queda
- * como escape para desarrollo, no como la forma normal de decirlo.
+ * Así que aquí va la identidad, y el aparato se DESCUBRE: el testigo se anuncia en el canal
+ * con su cert, y se acepta al que traiga uno emitido por esta identidad. Re-enrolarlo da un
+ * cert nuevo de la misma identidad y todo sigue solo; revocarlo lo saca del acta y su
+ * anuncio deja de valer.
+ *
+ * Y nadie configura nada: esto es una dirección pública, como `wss://proxy.dotrino.com`.
  */
-export const DOTRINO_REGISTRY = "{\"key_ops\":[\"verify\"],\"ext\":true,\"kty\":\"EC\",\"x\":\"X09h_5ufwjABrXIY3WI99LLP8hSe8QMYK0P3ue4vyf0\",\"y\":\"nmq93S4_0YaV91V5ean6Db-R-ZjqIXPKDadTLBc8SfU\",\"crv\":\"P-256\"}"
+export const DOTRINO_REGISTRY_ID = "{\"key_ops\":[\"verify\"],\"ext\":true,\"kty\":\"EC\",\"x\":\"McyhKieRw_Jcl3TY9EvLovL-ALzGoWqMOrfnFjT7XpA\",\"y\":\"V7tfpDWN37tPnhXnIFUlMaTepcTzzxPWTj_72PkpKPw\",\"crv\":\"P-256\"}"
 
-export const DEFAULT_REGISTRY = process.env.DOTRINO_SEALERS || DOTRINO_REGISTRY
+/** El canal donde el testigo se anuncia (ver `@dotrino/sealers`). */
+export const CANAL = 'dotrino.sealers'
 
-export function startSealersPublisher ({ identity, client, log = console.log, registry = DEFAULT_REGISTRY } = {}) {
-  if (!registry) return () => {}
+export function startSealersPublisher ({ identity, client, log = console.log, registryId = DOTRINO_REGISTRY_ID, canal = CANAL } = {}) {
+  if (!registryId) return () => {}
+
+  /**
+   * ¿A qué pubkey le mando esto? Al que esté anunciado en el canal CON UN CERT DE LA
+   * IDENTIDAD que llevamos en el código. Sin esa comprobación cualquiera se anuncia ahí y
+   * se queda con los depósitos: no filtraría nada —el eslabón es público— pero se los
+   * tragaría en silencio, que es peor que un error.
+   */
+  async function testigo () {
+    let anunciados
+    try { anunciados = await client.list(canal) } catch (e) { return null }
+    for (const t of anunciados || []) {
+      const cert = t?.data?.cert
+      const sub = cert?.sub
+      if (!cert || !sub || cert.iss !== registryId) continue
+      const v = await verifyDelegation({ cert, expectedSub: sub }).catch(() => ({ ok: false }))
+      if (!v?.ok) continue
+      return sub
+    }
+    return null
+  }
 
   let ultima = null
 
@@ -64,7 +89,7 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
     // forma que tiene una cuenta de decir dónde vive su cadena, y decidir por ella sería
     // exactamente lo que ese campo existe para impedir. Se dice una vez y se calla.
     const genesis = actas[0]
-    if (genesis?.chainUrl && registry === DOTRINO_REGISTRY) {
+    if (genesis?.chainUrl && registryId === DOTRINO_REGISTRY_ID) {
       if (!avisadoDeOtroTestigo) {
         avisadoDeOtroTestigo = true
         log(`[sealers] this account names its own registry (${genesis.chainUrl}): not depositing into Dotrino's`)
@@ -82,7 +107,9 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
     const cabeza = chain[chain.length - 1]?.seq
     if (cabeza === ultima) return
     try {
-      await client.sendByPubkey(registry, { op: OP, chain })
+      const a = await testigo()
+      if (!a) { log('[sealers] no witness announced in ' + canal + ': the chain stays for the next time'); return }
+      await client.sendByPubkey(a, { op: OP, chain })
       ultima = cabeza
       log(`[sealers] chain up to #${cabeza} deposited (${motivo})`)
     } catch (e) {
@@ -97,4 +124,4 @@ export function startSealersPublisher ({ identity, client, log = console.log, re
   return () => { try { off?.() } catch (_) {} }
 }
 
-export default { startSealersPublisher, OP, DEFAULT_REGISTRY }
+export default { startSealersPublisher, OP, DOTRINO_REGISTRY_ID, CANAL }
