@@ -70,7 +70,9 @@ test('sealKeyAt devuelve llaves de sellado y JAMÁS un miembro', () => {
  * obliga a mirar en cuál de las dos columnas acaba de meterla.
  */
 test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
-  assert.deepEqual([...CAPS].sort(), ['admin', 'approve', 'passwords', 'read', 'sealer', 'secrets', 'sign', 'store'])
+  // La lista va a mano, no derivada: que crezca sin que nadie la mire es el fallo que
+  // esta prueba existe para impedir. \`unattended\` entró el 2026-09-01.
+  assert.deepEqual([...CAPS].sort(), ['admin', 'approve', 'passwords', 'read', 'sealer', 'secrets', 'sign', 'store', 'unattended'])
   for (const c of ['seal', 'transport', 'serve', 'replica']) {
     assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar el transporte no es leer`)
   }

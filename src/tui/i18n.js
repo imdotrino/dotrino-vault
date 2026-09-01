@@ -48,7 +48,8 @@ const es = {
     admin: 'Administrar el perfil',
     passwords: 'Pedir tus contraseñas',
     approve: 'Aprobar pedidos',
-    sealer: 'Sellar el acta'
+    sealer: 'Sellar el acta',
+    unattended: 'Recibir claves sin aprobación'
   },
   capHint: {
     sign: 'usar tu identidad en las apps del ecosistema',
@@ -61,7 +62,8 @@ const es = {
     // daemon, o un navegador que se puso de bóveda). En un teléfono normal se concede y no
     // lo usa nadie. Se enseña igual, y se dice: verlo desactivado explica el modelo;
     // esconderlo hacía creer que no existe (dueño, 2026-08-31).
-    sealer: 'admitir aparatos y cambiar permisos él solo, si esta bóveda no está. Solo sirve en otra BÓVEDA'
+    sealer: 'admitir aparatos y cambiar permisos él solo, si esta bóveda no está. Solo sirve en otra BÓVEDA',
+    unattended: 'llevarse claves privadas SIN preguntarte. Apagado, cada vez que arranque tienes que aprobarlo desde un aparato con «Aprobar»'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
@@ -358,7 +360,8 @@ const en = {
     admin: 'Manage the profile',
     passwords: 'Ask for your passwords',
     approve: 'Approve requests',
-    sealer: 'Seal the record'
+    sealer: 'Seal the record',
+    unattended: 'Take keys without approval'
   },
   capHint: {
     sign: 'use your identity across the ecosystem apps',
@@ -367,7 +370,8 @@ const en = {
     admin: 'connect and remove devices from that device, without coming here',
     passwords: 'the manager: ask for one credential per site, never the whole list',
     approve: 'give the go-ahead when another device asks for private keys',
-    sealer: 'admit devices and change permissions on its own if this vault is gone. Only useful on another VAULT'
+    sealer: 'admit devices and change permissions on its own if this vault is gone. Only useful on another VAULT',
+    unattended: 'take private keys WITHOUT asking you. Off, you must approve it from a device with «Approve» every time it starts'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,

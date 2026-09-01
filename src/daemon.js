@@ -143,7 +143,6 @@ export async function runDaemon () {
 
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
-  let pendingApproval = false // lo pidió `pair --approval`; se aplica al aprobar
   /**
    * Lo pidió `pair --admin`: el aparato que entre por ESTA invitación podrá administrar.
    *
@@ -199,9 +198,6 @@ export async function runDaemon () {
       // La etiqueta por defecto de un servicio es su ns a secas: la lista ya marca [servicio «ns»],
       // y el prefijo «service:» confundía (el cajón se llama claude, no service:claude).
       const label = pairReq?.label || (isService ? pairReq.service : 'cli')
-      // `pair --approval`: el aparato que entre por esta invitación pedirá el visto bueno del
-      // teléfono cada vez que reciba claves privadas (se aplica al aprobarlo, abajo).
-      pendingApproval = !!pairReq?.approval
       pendingAdmin = !!pairReq?.admin
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
@@ -392,8 +388,6 @@ export async function runDaemon () {
           const vault = targetOf(appr)
           if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
-          if (pendingApproval && r?.cert?.sub) { try { await vault.setApproval(r.cert.sub, true); console.log('[vault] the new device will need approval on every key request') } catch (e) { console.error('[vault] could not flag approval: %s', e.message) } }
-          pendingApproval = false
           // `pair --admin`: se le SUMA `admin` a lo que ya tiene, no se le reescriben los
           // permisos — el aparato acaba de entrar con el scope que pidió la invitación.
           if (pendingAdmin && r?.deviceId) {
@@ -542,7 +536,6 @@ export async function runDaemon () {
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
           } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
-          else if (sec.op === 'approval') { const r = await vault.setApproval(sec.pub, !!sec.approval); console.log('[vault] device %s: approval %s', sec.id || '?', r.approval ? 'REQUIRED on every key request' : 'off') }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
           // Saldar lo que quedó a deber: heredarle a un aparato nuevo lo ya guardado y

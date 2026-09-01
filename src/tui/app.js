@@ -332,8 +332,13 @@ function pairModeRows (st, t) {
  * `sealer` es justo el que hay que entender para el multivault. Se ven siempre, aunque en
  * un teléfono normal `sealer` no lo vaya a usar nadie: verlo apagado explica el modelo
  * (dueño, 2026-08-31).
+ *
+ * `unattended` entró por lo mismo (dueño, 2026-09-01): era una marca local de la bóveda
+ * —invisible aquí y solo tocable por la CLI— y encima con el sentido invertido. Es EL
+ * permiso que hay que entender para un servidor: dice si esa máquina se lleva tus claves
+ * privadas sola o si te lo pregunta. Verlo apagado es la mitad del mensaje.
  */
-const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer']
+const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended']
 
 function capsRows (st, t) {
   const i = L(st)

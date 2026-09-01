@@ -21,6 +21,43 @@ const proxyServerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), name))
 
+/**
+ * Enrolar Y esperar a que el permiso esté puesto.
+ *
+ * `enrollService` termina en cuanto llega el papel, que es ANTES de que `setCaps` acabe:
+ * pedir los secretos justo después era una carrera que a veces perdía. El envoltorio
+ * espera las dos cosas, así que el test comprueba lo que quiere comprobar y no el reloj.
+ */
+async function enrolar (opts) {
+  // Se importa AQUÍ: en este fichero `enrollService` entra por un `import()` dentro de
+  // cada test, así que a nivel de módulo no existe.
+  const { enrollService } = await import('../lib/src/service.js')
+  let permiso = null
+  const r = await enrollService({ ...opts, onCode: ({ code }) => { permiso = aprobarYPermitir(code) } })
+  await permiso
+  return r
+}
+
+/**
+ * Aprobar el emparejamiento Y concederle `unattended`.
+ *
+ * Desde 2026-09-01 recibir claves privadas SIN aprobación es un permiso del acta, y el
+ * defecto es pedirla: un servicio recién enrolado se queda esperando a que un aparato con
+ * `approve` lo firme. Aquí no hay teléfono, así que sin esto CADA test de este fichero se
+ * cuelga — que es, literalmente, lo que le pasa a un servicio de verdad al que no se le
+ * concede. Se hace en el arnés y no en el pilar a propósito: que el permiso haya que darlo
+ * es el punto, no un estorbo del que escaparse.
+ */
+async function aprobarYPermitir (code) {
+  const r = await vault.approveDevice(code)
+  const sub = r?.cert?.sub
+  if (sub) {
+    const m = (await vault.identity.profileActa()).acta.members.find((x) => x.pub === sub)
+    await vault.setCaps(sub, [...new Set([...(m?.caps || []), 'unattended'])])
+  }
+  return r
+}
+
 let proxy, proxyUrl, vault, svcDir
 
 before(async () => {
@@ -56,9 +93,8 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'service:proxy', ttlMs: 24 * 60 * 60 * 1000 })
 
   const { enrollService, fetchSecrets, readServiceIdentity } = await import('../lib/src/service.js')
-  const { device, cert } = await enrollService({
-    qr, ns: 'proxy', dir: svcDir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  const { device, cert } = await enrolar({
+    qr, ns: 'proxy', dir: svcDir
   })
   assert.ok(device?.publickey && cert?.sig)
   assert.deepEqual(cert.scope, ['vault:secrets:proxy'])
@@ -79,10 +115,12 @@ test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecret
   await vault.setSecret('eco', 'BUFFER_API_KEY', 'b-789')
   const { qr } = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:eco'], label: 'social-bot', ttlMs: 60000 })
   const { enrollWithVault, fetchSecrets } = await import('../lib/src/service.js')
+  let permisoBot = null
   const link = await enrollWithVault({
     qr, label: 'social-bot', expectedScope: 'vault:secrets:eco',
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+    onCode: ({ code }) => { permisoBot = aprobarYPermitir(code) }
   })
+  await permisoBot   // el papel llega antes que el permiso: esperar los dos
   assert.deepEqual(link.cert.scope, ['vault:sign', 'vault:secrets:eco'])
   assert.ok(link.device?.privateJwk && link.enc?.privateJwk && link.enc?.publickey, 'las dos llaves')
   // En el acta entra con TODAS sus capacidades (identity ≥ 0.57: permisos, no tipos):
@@ -90,7 +128,10 @@ test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecret
   const me = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === link.device.publickey)
   assert.ok(me, 'está en el acta')
   assert.equal(me.cn, 'eco')
-  assert.deepEqual([...me.caps].sort(), ['secrets', 'sign'])
+  // `unattended` lo añade el arnés (`aprobarYPermitir`), no el emparejamiento: entrar NO
+  // lo concede —como `admin`, se da a mano— y sin él este bot se quedaría esperando a un
+  // teléfono. Aquí se ve el modelo entero: lo que trae la invitación y lo que decides tú.
+  assert.deepEqual([...me.caps].sort(), ['secrets', 'sign', 'unattended'])
   assert.equal(link.iss, qr.iss)
   const secrets = await fetchSecrets({ ns: 'eco', proxyUrl, masterPubkey: link.iss, device: link.device, cert: link.cert, enc: link.enc })
   assert.deepEqual(secrets, { BUFFER_API_KEY: 'b-789' })
@@ -164,9 +205,8 @@ test('enrolar acepta la invitación TAL COMO la imprime el vault (no JSON)', asy
     const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
     const dir = tmp('svc-' + ns + '-')
 
-    await enrollService({
-      qr: comoLoDa(qr), ns, dir,                       // ← un STRING, como lo pega un humano
-      onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+    await enrolar({
+      qr: comoLoDa(qr), ns, dir                        // ← un STRING, como lo pega un humano
     })
     assert.deepEqual(await fetchSecretsFrom(dir), { API_KEY: 'v-' + ns }, `falló pegando la ${nombre}`)
   }
@@ -190,10 +230,9 @@ test('un agente tiene UNA identidad: re-enrolar reemplaza y avisa qué descarta'
 
   const enroll = async (onReplace) => {
     const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
-    return enrollService({
-      qr: encodeInvite(qr), ns, dir, onReplace,
-      onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
-    })
+    return enrolar({
+      qr: encodeInvite(qr), ns, dir, onReplace
+  })
   }
 
   const first = await enroll()
@@ -472,9 +511,8 @@ test('el proxio arranca SIN variables y las recibe después: eso no es un cambio
   // servicio, después se enrola— y aquí además evita medir el eco de la preparación.
   await new Promise((r) => setTimeout(r, 600))
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
-  await enrollService({
-    qr: encodeInvite(qr), ns, dir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  await enrolar({
+    qr: encodeInvite(qr), ns, dir
   })
 
   const changes = []
@@ -528,9 +566,8 @@ test('quitar el aparato se lleva sus variables', async () => {
   const { encodeInvite } = await import('../lib/src/invite.js')
   const dir = tmp('svc-fugaz-')
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:fugaz'], label: 'servicio:fugaz', ttlMs: 60000 })
-  await enrollService({
-    qr: encodeInvite(qr), ns: 'fugaz', dir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  await enrolar({
+    qr: encodeInvite(qr), ns: 'fugaz', dir
   })
   const pub = readServiceIdentity(dir).device.publickey
   await vault.setDeviceSecret(pub, 'PORT', '1234')
@@ -595,11 +632,18 @@ test('un cert revocado deja de poder leer', async () => {
   // retirarlo al emitir convertía cualquier renovación que fallara después en una expulsión
   // permanente (le pasó a dos servicios en la migración del VPS). Ahora pueden convivir
   // varios del mismo aparato, así que «el último» ya no identifica a nadie.
-  const { readServiceIdentity } = await import('../lib/src/service.js')
-  const mio = readServiceIdentity(svcDir)
+  // CON SU PROPIO DIRECTORIO, no el compartido: revocar el papel que usa `svcDir` deja sin
+  // credencial a todos los tests que vienen después, y el fallo aparece lejos de aquí.
+  const { readServiceIdentity, fetchSecrets } = await import('../lib/src/service.js')
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:revocado'], label: 'service:revocado', ttlMs: 60_000 })
+  const dir = tmp('svc-revocado-')
+  await enrolar({ qr, ns: 'revocado', dir })
+  const mio = readServiceIdentity(dir)
   assert.ok(mio?.cert?.nonce, 'el servicio tiene su papel guardado')
+  assert.deepEqual(await fetchSecrets({ dir }), {}, 'antes de revocar, entra')
+
   await vault.revokeDevice(mio.cert.nonce)
-  await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)
+  await assert.rejects(fetchSecrets({ dir }), /unauthorized: revoked/)
 })
 
 /**
@@ -619,9 +663,8 @@ test('cargar varias de una vez avisa UNA sola vez (y una a una, una por variable
   const svcDir = tmp('svc-lote-')
   await vault.setSecret(ns, 'YA_ESTABA', '0')
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
-  await enrollService({
-    qr: encodeInvite(qr), ns, dir: svcDir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  await enrolar({
+    qr: encodeInvite(qr), ns, dir: svcDir
   })
 
   const notices = []
@@ -685,7 +728,7 @@ test('un agente VIEJO consigue su llave de cifrado SIN re-enrolarse', async () =
   const svc = tmp('svc-viejo-')
   await vault.setSecret(ns, 'TURN_KEY', 'secreto-del-ns')
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'proxy-viejo', ttlMs: 60000 })
-  await enrollService({ qr: encodeInvite(qr), ns, dir: svc, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  await enrolar({ qr: encodeInvite(qr), ns, dir: svc })
 
   // Rebajar la identidad a v1 (sin `enc`): asi estan hoy los dos proxios.
   const f = path.join(svc, 'service-identity.json')
@@ -747,7 +790,7 @@ test('el servicio descifra AL VUELO: el valor no toca el disco en ningun momento
   const VALOR = 'esto-no-puede-aparecer-en-ningun-archivo'
   await vault.setSecret(ns, 'SECRETO', VALOR)
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'alvuelo', ttlMs: 60000 })
-  await enrollService({ qr: encodeInvite(qr), ns, dir: svc, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  await enrolar({ qr: encodeInvite(qr), ns, dir: svc })
 
   assert.equal((await fetchSecrets({ dir: svc })).SECRETO, VALOR, 'lo lee')
 
@@ -853,9 +896,8 @@ test('un cajón con servicio dueño NO lleva envoltura de quien administra', asy
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   const dir = tmp('svc-dueno-')
   const { enrollService } = await import('../lib/src/service.js')
-  const svc = await enrollService({
-    qr, ns, dir, label: 'service:' + ns,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  const svc = await enrolar({
+    qr, ns, dir, label: 'service:' + ns
   })
 
   await vault.secrets.set(ns, 'TOKEN', 'el-secreto-del-servicio')
@@ -890,10 +932,9 @@ test('un servicio le reparte la llave del cajón a otro que entra después', asy
   const join = async (label) => {
     const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label, ttlMs: 60000 })
     const dir = tmp('svc-' + label + '-')
-    const svc = await enrollService({
-      qr, ns, dir, label,
-      onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
-    })
+    const svc = await enrolar({
+      qr, ns, dir, label
+  })
     return { dir, ...svc }
   }
   const until = async (fn, ms = 8000) => {
@@ -937,7 +978,7 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
   const join = async (label) => {
     const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label, ttlMs: 60000 })
     const dir = tmp('svc-' + label + '-')
-    return { dir, ...await enrollService({ qr, ns, dir, label, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } }) }
+    return { dir, ...await enrolar({ qr, ns, dir, label }) }
   }
 
   const first = await join('service:one')          // enrolado, pero SIN escuchar
@@ -971,20 +1012,27 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
 
   // El agente (Claude): lee el cajón `claude`. La variable entra DESPUÉS de enrolarlo.
   const inv1 = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:claude'], label: 'claude', ttlMs: ttl })
-  const agent = await enrollWithVault({ qr: inv1.qr, label: 'claude', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  let permAgent = null
+  const agent = await enrollWithVault({ qr: inv1.qr, label: 'claude', onCode: ({ code }) => { permAgent = aprobarYPermitir(code) } })
+  await permAgent
   await vault.setSecret('claude', 'DEEPSEEK_API_KEY', 'sk-1')
   const args = { ns: 'claude', proxyUrl, masterPubkey: vault.master, device: agent.device, cert: agent.cert, enc: agent.enc }
-  // Por defecto NO pide permiso: entrega directa.
-  assert.equal(vault.needsApproval(agent.device.publickey), false)
+  // CON el permiso `unattended` (se lo puso el arnés al aprobarlo): entrega directa.
+  assert.equal(await vault.needsApproval(agent.device.publickey), false)
   assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
-  // Se marca como un permiso más.
-  assert.deepEqual(await vault.setApproval(agent.device.publickey, true), { approval: true })
-  assert.equal(vault.needsApproval(agent.device.publickey), true)
-  assert.deepEqual(vault.supervised(), [agent.device.publickey])
+
+  // Se le QUITA, y con eso vuelve a pedir permiso. Antes esto era `setApproval` —una marca
+  // local de la bóveda, invertida y fuera del acta—; ahora es un permiso más, así que se
+  // quita como cualquier otro y lo respeta cualquier bóveda de la cuenta.
+  const suyas = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === agent.device.publickey).caps
+  await vault.setCaps(agent.device.publickey, suyas.filter((c) => c !== 'unattended'))
+  assert.equal(await vault.needsApproval(agent.device.publickey), true)
 
   // El teléfono: un aparato normal al que el dueño le concede `approve` a mano.
   const inv2 = await vault.startPairing({ scope: ['vault:sign'], label: 'phone', ttlMs: ttl })
-  const phone = await enrollWithVault({ qr: inv2.qr, label: 'phone', onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  let permPhone = null
+  const phone = await enrollWithVault({ qr: inv2.qr, label: 'phone', onCode: ({ code }) => { permPhone = aprobarYPermitir(code) } })
+  await permPhone
   await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
   const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
   assert.ok(phoneCert.scope.includes('vault:approve'))
@@ -1039,15 +1087,20 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   await rpc({ op: 'approve', id: p3.id }, phoneCert, phone.device)
   assert.deepEqual(await again, { DEEPSEEK_API_KEY: 'sk-1' })
 
-  // 4) Lo no atendido vence solo; y quitar la marca vuelve a la entrega directa.
+  // 4) Lo no atendido vence solo; y DEVOLVERLE el permiso vuelve a la entrega directa.
   const { createApprovals } = await import('../src/approvals.js')
   let t = 0
   const a = createApprovals({ now: () => t, pendingTtlMs: 10 })
   const r = a.request({ ns: 'x', device: 'd', deviceId: 'D', ek: 'e' })
   t = 11
   assert.deepEqual(a.sweep().map((x) => x.id), [r.id])
-  await vault.setApproval(agent.device.publickey, false)
-  assert.deepEqual(vault.supervised(), [])
+
+  // Antes esto era `setApproval(..., false)` sobre una lista local. Ahora es conceder el
+  // permiso en el acta, y por eso se ve aquí lo que importa: surte efecto en la siguiente
+  // petición, sin reiniciar nada ni renovar ningún papel.
+  const caps = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === agent.device.publickey).caps
+  await vault.setCaps(agent.device.publickey, [...new Set([...caps, 'unattended'])])
+  assert.equal(await vault.needsApproval(agent.device.publickey), false)
   assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
 })
 
@@ -1067,9 +1120,8 @@ test('a un servicio al que el acta ya no reconoce: ni le sirven el cajón ni le 
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:sonda'], label: 'service:sonda', ttlMs: 60_000 })
   const dir = tmp('svc-sonda-')
   const { enrollService, fetchSecrets, registerEncKey } = await import('../lib/src/service.js')
-  const { device, cert } = await enrollService({
-    qr, ns: 'sonda', dir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  const { device, cert } = await enrolar({
+    qr, ns: 'sonda', dir
   })
   // EL PAPEL ORIGINAL, guardado aparte: es el que dice `vault:secrets:sonda`. Con él en la
   // mano y el acta en contra se prueba justo el hueco que había.
@@ -1138,9 +1190,8 @@ test('un servicio ve sus revocaciones y el acta, pero NO la lista de aparatos', 
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:mirador'], label: 'service:mirador', ttlMs: 60_000 })
   const dir = tmp('svc-mirador-')
   const { enrollService } = await import('../lib/src/service.js')
-  const { device, cert } = await enrollService({
-    qr, ns: 'mirador', dir,
-    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  const { device, cert } = await enrolar({
+    qr, ns: 'mirador', dir
   })
 
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
@@ -1200,4 +1251,48 @@ test('una respuesta demasiado grande se cambia por un error, no revienta el sock
     v.reply('token-de-prueba', { type: 'vault.devices.result', devices: [] })
     assert.equal(enviados[1].type, 'vault.devices.result')
   } finally { v.close() }
+})
+
+/**
+ * RECIBIR CLAVES PRIVADAS SIN APROBACIÓN ES UN PERMISO, Y EL DEFECTO ES PEDIRLA.
+ *
+ * Antes era al revés y vivía fuera del acta: una lista local de «estos SÍ piden permiso».
+ * Así que un aparato nuevo nacía pudiendo llevarse las claves y nadie elegía eso — se
+ * elegía por omisión, que es la peor forma de decidir algo así. Y al no estar en el acta
+ * no se veía en la pantalla de permisos ni lo respetaba otra bóveda de la cuenta.
+ *
+ * Ahora se concede a propósito (`+desatendido`) y, si falta, se pide permiso.
+ */
+test('un servicio SIN el permiso espera aprobación; con él, se sirve solo', async () => {
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:vigilado'], label: 'service:vigilado', ttlMs: 60_000 })
+  const dir = tmp('svc-vigilado-')
+  const { enrollService, fetchSecrets } = await import('../lib/src/service.js')
+  const { device } = await enrollService({
+    qr, ns: 'vigilado', dir,
+    // A propósito SIN el atajo: este test prueba justo que sin el permiso no se sirve.
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+
+  // Recién enrolado NO tiene `unattended`: pedir sus claves se queda esperando a que
+  // alguien con `aprueba` lo firme. Nadie lo tiene aquí, así que se agota — y eso es
+  // exactamente lo que debe pasar.
+  const pendiente = []
+  await assert.rejects(
+    () => fetchSecrets({ dir, timeoutMs: 3000, approvalTimeoutMs: 3000, onPending: (p) => pendiente.push(p) }),
+    /approval|timeout/i,
+    'sin el permiso no se entrega nada'
+  )
+  assert.equal(pendiente.length, 1, 'y se dice que está esperando, no se calla')
+  assert.equal(pendiente[0].ns, 'vigilado')
+
+  // Se le concede, y ya se sirve solo. El secreto se guarda DESPUÉS de que el aparato esté
+  // dentro: un cajón escrito antes no tiene envoltura para quien llega luego, y el fallo
+  // sería «no key to open», que no es lo que este test mira.
+  await vault.setCaps(device.publickey, ['secrets', 'unattended'])
+  await vault.setSecret('vigilado', 'TOKEN', 't-1')
+  assert.deepEqual(await fetchSecrets({ dir }), { TOKEN: 't-1' }, 'con el permiso, sin preguntar a nadie')
+
+  // Y quitárselo lo devuelve a pedir permiso, en el acto.
+  await vault.setCaps(device.publickey, ['secrets'])
+  await assert.rejects(() => fetchSecrets({ dir, timeoutMs: 3000, approvalTimeoutMs: 3000 }), /approval|timeout/i)
 })

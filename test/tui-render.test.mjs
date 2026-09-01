@@ -475,13 +475,18 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   assert.match(text, /sin venir aquí/, 'y se explica qué implica administrar')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
-  // Se puede elegir cada permiso, y están LOS SIETE que el acta reconoce. Eran cinco:
+  // Se puede elegir cada permiso, y están LOS OCHO que el acta reconoce. Eran cinco:
   // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
-  // pantalla que se llama «permisos» — y `sella` es justo el que hay que entender para
-  // el multivault. Si el acta gana o pierde uno, esto se pone rojo a propósito.
-  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 7)
+  // pantalla que se llama «permisos»; y `desatendido` era peor —una marca local de la
+  // bóveda, invisible aquí y con el sentido invertido—. Si el acta gana o pierde uno,
+  // esto se pone rojo a propósito.
+  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 8)
   assert.match(text, /\[ \].*Sellar el acta/, 'sella se ve aunque esté apagado')
   assert.match(text, /Solo sirve en otra BÓVEDA/, 'y se dice dónde significa algo')
+  // El que decide si un servidor se lleva tus claves solo. Verlo APAGADO es media
+  // explicación: dice que hoy te lo pregunta.
+  assert.match(text, /\[ \].*Recibir claves sin aprobación/, 'desatendido se ve aunque esté apagado')
+  assert.match(text, /SIN preguntarte/, 'y se dice qué significa tenerlo encendido')
 })
 
 /**

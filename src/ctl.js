@@ -202,9 +202,10 @@ async function cmdPair (args = []) {
   // `secrets:<ns>`, y los dos se combinan (`--service eco --scope sign` = un bot que
   // firma como aparato del acta y lee solo su cajón). `admin` no se empareja: se
   // concede desde el PC (`caps <ID> +administra`).
-  // --approval: el aparato que entre pedirá tu aprobación (teléfono) en cada petición de
-  // claves privadas. Por defecto NO pide; se cambia después con `caps <ID> +permiso`.
-  const approval = args.includes('--approval')
+  // (Aquí vivía `--approval`. Ya no hace falta: PEDIR APROBACIÓN ES EL DEFECTO, y lo
+  // contrario —`unattended`— no se empareja, por el mismo motivo que `admin`: un QR que
+  // circula no puede conceder «llévate mis claves privadas sin preguntar». Se concede
+  // después y a mano con `caps <ID> +desatendido`.)
   // --name <n>: CÓMO SE VA A LLAMAR el aparato que entre, decidido aquí y antes de nada.
   // Sin esto el nombre lo ponía el propio aparato, que por defecto usa el apodo del
   // PERFIL: acababas con varios dispositivos llamados igual que tú, y para distinguirlos
@@ -311,7 +312,7 @@ async function cmdPair (args = []) {
 
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(approval ? { approval: true } : {}), ...(admin ? { admin: true } : {}), ...(label ? { label } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(admin ? { admin: true } : {}), ...(label ? { label } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -575,7 +576,7 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +permiso')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +desatendido')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
@@ -617,28 +618,22 @@ async function findMember (id) {
   return m
 }
 
-/**
- * `dotrino-vault approval <ID> on|off` — ese aparato solo recibe claves privadas con el
- * visto bueno de un aparato con `aprueba` (el teléfono). Es propiedad del APARATO, no del
- * cajón: el VPS desatendido no pide; la PC del dueño sí. Pide en cada petición, que para un
- * servicio bien hecho es una por arranque.
+/*
+ * Aquí vivía `dotrino-vault approval <ID> on|off`. Ya no existe: pedir aprobación para
+ * recibir claves privadas dejó de ser una marca local de esta bóveda y pasó a ser un
+ * PERMISO DEL ACTA (`unattended`, dueño 2026-09-01). Se concede y se quita como cualquier
+ * otro, y por lo tanto viaja, se ve en la pantalla de permisos y lo respeta cualquier
+ * bóveda de la cuenta:
+ *
+ *   dotrino-vault caps <ID> +desatendido    ← se lleva las claves solo
+ *   dotrino-vault caps <ID> -desatendido    ← vuelve a pedir permiso (el defecto)
  */
-async function cmdApproval (args = []) {
-  const [id, val] = args
-  if (!id || !['on', 'off'].includes(val)) { console.error('uso: dotrino-vault approval <ID> on|off'); process.exit(2) }
-  const m = await findMember(id)
-  writeReq('secret-request.json', { op: 'approval', pub: m.pub, id: m.id, approval: val === 'on' })
-  sendSignal(requireDaemon().pid, 'SIGUSR2')
-  console.log(val === 'on'
-    ? `Listo: ${m.id} solo recibirá claves privadas cuando un aparato con  caps <ID> +aprueba  lo apruebe (en cada arranque).`
-    : `Listo: ${m.id} vuelve a recibir sus claves sin aprobación.`)
-}
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+sella|-sella|+permiso|-permiso')
+    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+sella|-sella|+desatendido|-desatendido')
     process.exit(2)
   }
   const CAP_BY_WORD = {
@@ -650,25 +645,34 @@ async function cmdCaps (args = []) {
     // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
     // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
     contrasenas: 'passwords', 'contraseñas': 'passwords',
+    // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
+    // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
+    //
+    // No se llama `permiso` —como la marca local de antes— a propósito: aquella significaba
+    // «este aparato PIDE permiso» y esta significa lo contrario. Reusar la palabra con el
+    // sentido invertido es la clase de trampa que se paga una madrugada.
+    desatendido: 'unattended', unattended: 'unattended',
     sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
     passwords: 'passwords'
   }
   const s = requireDaemon()
   const m = await findMember(id)
 
-  // `+permiso` / `-permiso` no es una capacidad del acta: es la marca de la bóveda «este
-  // aparato pide aprobación al recibir claves». Se cambia aquí, como cualquier permiso.
-  const rest = []
+  // El desvío de `+permiso` a una marca local de la bóveda se fue: ahora TODO es un
+  // permiso del acta y sigue el mismo camino, incluido `desatendido`.
+  //
+  // Y `permiso` se rechaza en voz alta en vez de ignorarse: significaba lo CONTRARIO
+  // («este aparato pide aprobación»), así que quien lo teclee de memoria estaría pidiendo
+  // justo lo opuesto a lo que cree.
   for (const c of changes) {
     const w = c.slice(1).toLowerCase()
-    if ((c[0] === '+' || c[0] === '-') && (w === 'permiso' || w === 'approval')) {
-      writeReq('secret-request.json', { op: 'approval', pub: m.pub, id: m.id, approval: c[0] === '+' })
-      sendSignal(s.pid, 'SIGUSR2')
-      console.log(c[0] === '+' ? `Listo: ${m.id} pedirá tu aprobación en cada petición de claves.` : `Listo: ${m.id} ya no pide aprobación.`)
-      await sleep(300)
-    } else rest.push(c)
+    if (w === 'permiso' || w === 'approval') {
+      console.error('`%s` ya no existe. Pedir aprobación es el DEFECTO; lo que se concede es lo contrario:', w)
+      console.error('  dotrino-vault caps %s +desatendido   ← se lleva las claves privadas sin aprobación', m.id)
+      process.exit(2)
+    }
   }
-  if (!rest.length) return
+  const rest = changes
   const caps = new Set(m.caps)
   for (const c of rest) {
     const sign = c[0]
@@ -1495,7 +1499,6 @@ function help () {
   pair --name <nombre>  cómo se llamará el aparato que entre. Sin esto el nombre lo pone
                       ÉL, y por defecto usa el apodo del perfil: acabas con varios
                       dispositivos llamados igual que tú
-  pair --approval       el aparato que entre pedirá tu aprobación (teléfono) al recibir claves
   pair --admin          el aparato que entre podrá ADMINISTRAR (es lo que es una consola).
                       El QR no lleva nada: el permiso se aplica al aprobar el código aquí
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin

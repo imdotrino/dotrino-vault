@@ -22,6 +22,23 @@ import { encodeInvite } from '../lib/src/invite.js'
 import { readJson } from '../src/paths.js'
 import { atRestFor } from '../src/atrest.js'
 
+/**
+ * Aprobar el emparejamiento Y conceder `unattended`.
+ *
+ * Desde 2026-09-01 recibir claves privadas sin aprobación es un permiso del acta y el
+ * DEFECTO es pedirla: sin esto, cada servicio de este fichero se queda esperando a un
+ * teléfono que aquí no existe. Es lo mismo que le pasa a un servicio de verdad al que no
+ * se le concede — el permiso hay que darlo, y eso es el punto.
+ */
+async function aprobarYPermitir (vault, code) {
+  const r = await vault.approveDevice(code)
+  const sub = r?.cert?.sub
+  if (!sub) return r
+  const m = (await vault.identity.profileActa()).acta.members.find((x) => x.pub === sub)
+  await vault.setCaps(sub, [...new Set([...(m?.caps || []), 'unattended'])])
+  return r
+}
+
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p))
 const req = createRequire(import.meta.url)
 process.env.NODE_ENV = 'test'
@@ -50,7 +67,7 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
 
   // --- 2) El servicio se enrola: estrena llave de cifrado y lee en claro (v3).
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:proxy'], label: 'proxy1', ttlMs: 60000 })
-  await enrollService({ qr: encodeInvite(qr), ns: 'proxy', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
+  await enrollService({ qr: encodeInvite(qr), ns: 'proxy', dir: svcDir, onCode: ({ code }) => aprobarYPermitir(vault, code).catch(() => {}) })
   const ident = readJson(path.join(svcDir, 'service-identity.json'), null, atRestFor(svcDir))
   ok('el agente guarda su llave de cifrado (v2)', ident.v === 2 && !!ident.enc?.privateJwk)
   const m = (await vault.profileMembers()).members.find((x) => x.cn === 'proxy')
@@ -114,7 +131,7 @@ test('un aparato que llega DESPUES del sellado queda anotado, y la siguiente esc
   // Y AHORA llega el servicio nuevo. Se le admite sin dar la contrasena, que es lo que
   // pasa cuando se aprueba desde vault.dotrino.com.
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:tarde'], label: 'tardon', ttlMs: 60000 })
-  await enrollService({ qr: encodeInvite(qr), ns: 'tarde', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
+  await enrollService({ qr: encodeInvite(qr), ns: 'tarde', dir: svcDir, onCode: ({ code }) => aprobarYPermitir(vault, code).catch(() => {}) })
 
   const debe = await vault.secretDebts()
   assert.deepEqual(Object.keys(debe), ['ns:tarde'], 'se VE (calculado, no anotado ni perdido en un log)')
@@ -151,7 +168,7 @@ test('con el perfil BLOQUEADO la boveda sirve, y aun asi no puede leer una priva
   const vault = await startVault({ dir, proxyUrl: url, log: () => {}, isLocked: () => bloqueado })
   await vault.setSecret('candado', 'TURN_KEY', 'lo-que-hay-que-proteger', false)
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:candado'], label: 'svc', ttlMs: 60000 })
-  await enrollService({ qr: encodeInvite(qr), ns: 'candado', dir: svcDir, onCode: ({ code }) => vault.approveDevice(code).catch(() => {}) })
+  await enrollService({ qr: encodeInvite(qr), ns: 'candado', dir: svcDir, onCode: ({ code }) => aprobarYPermitir(vault, code).catch(() => {}) })
 
   // Se le pone contraseña al perfil: la copia maestra pasa a cerrarse con la frase.
   assert.equal((await vault.rekeySecrets(null, CLAVE)).rekeyed, true)

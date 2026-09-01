@@ -113,18 +113,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * dos clases de espera.
    */
   const waiters = new Map()
-  // APARATOS QUE PIDEN APROBACIÓN: una lista de llaves en `approval.json` (cifrado en reposo
-  // como todo el dir). Es decisión de esta bóveda, no del acta: es ella la que entrega.
-  const approvalFile = path.join(dir, 'approval.json')
-  const approvalAtRest = atRestFor(dir)
-  const readSupervised = () => { try { const d = JSON.parse(approvalAtRest.decrypt(fs.readFileSync(approvalFile, 'utf8'))); return Array.isArray(d?.members) ? d.members : [] } catch (_) { return [] } }
-  const needsApproval = (pub) => readSupervised().includes(pub)
-  async function setApproval (pub, on) {
-    const cur = new Set(readSupervised())
-    if (on) cur.add(pub); else cur.delete(pub)
-    fs.writeFileSync(approvalFile, approvalAtRest.encrypt(JSON.stringify({ v: 1, members: [...cur] })), { mode: 0o600 })
-    audit('approval', { device: await deviceIdOf(pub).catch(() => null), on: !!on })
-    return { approval: !!on }
+  /**
+   * ¿ESTE APARATO TIENE QUE PEDIR PERMISO PARA RECIBIR CLAVES PRIVADAS?
+   *
+   * Lo dice el ACTA, con el permiso `unattended`: quien lo tiene se las lleva solo; quien
+   * no, espera a que un aparato con `approve` lo firme.
+   *
+   * Antes era al revés y vivía aquí: una lista local de «estos SÍ piden permiso», así que
+   * un aparato nuevo nacía pudiendo llevarse las claves y nadie elegía eso — se elegía por
+   * omisión. Ahora hay que conceder a propósito quién puede llevárselas solo, y **si falta
+   * el dato se pide permiso**, que es lo que hay que hacer cuando no se sabe (dueño,
+   * 2026-09-01).
+   *
+   * Y al estar en el acta lo respeta cualquier bóveda de la cuenta, se ve en la pantalla de
+   * permisos como los demás, y se quita quitándolo — sin acordarse de un registro escondido
+   * en una máquina.
+   */
+  function needsApproval (pub, record) {
+    if (!record) return true          // sin acta no se decide que sí: se pide permiso
+    return !Acta.memberCan(record, pub, 'unattended')
   }
   // LA BÓVEDA DE CONTRASEÑAS: entradas y su llave, en el dir del perfil y cifradas en
   // reposo como todo lo demás. QUIÉN PUEDE PEDIR LO DICE EL ACTA (capacidad
@@ -835,7 +842,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // claves en memoria y no vuelve a pedir. El pedido se apunta, se avisa a quien aprueba y se
     // contesta «pendiente»; la respuesta de verdad sale cuando el teléfono firme
     // (`handleApproval`), sellada a la misma `ek`.
-    if (needsApproval(chk.device)) {
+    if (needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
       const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek })
@@ -1057,7 +1064,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // que haya una segunda lista que acordarse de tocar.
       isAllowed: (pub) => !!actaCache && Acta.memberCan(actaCache, pub, 'passwords'),
       encPubOf: (pub) => (actaCache?.members || []).find((m) => m.pub === pub)?.encPub || null,
-      needsApproval: (pub) => needsApproval(pub),
+      // EN VIVO, no del caché: conceder o quitar `unattended` tiene que surtir efecto en
+      // el acto. Con el caché, la mesa de contraseñas seguía decidiendo con la foto del
+      // último refresco — y en el sentido peligroso: un aparato al que le acabas de quitar
+      // el permiso se seguía sirviendo solo.
+      needsApproval: async (pub) => needsApproval(pub, await refreshActa()),
       // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
       // Es el mismo camino que ya recorren los cajones de secretos.
       approve: async ({ pubkey, op }) => {
@@ -2076,11 +2087,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
-    // Cajones con aprobación por uso (`approvals.js`).
-    // Aparatos que piden aprobación al recibir claves (`approvals.js`).
-    needsApproval,
-    setApproval,
-    supervised: () => readSupervised(),
+    // ¿Pide permiso este aparato para recibir claves privadas? Lo dice el ACTA
+    // (`unattended`), no una lista de esta máquina — por eso ya no hay `setApproval` ni
+    // `supervised`: se concede y se quita como cualquier otro permiso, con `caps`.
+    needsApproval: async (pub) => needsApproval(pub, await refreshActa()),
     // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
     // llave. Lo que no puede es listarla un aparato.
     passwordDevices,

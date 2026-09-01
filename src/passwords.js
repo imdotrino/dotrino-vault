@@ -27,7 +27,8 @@ export const PASSWORDS_CAP = 'passwords'
  *   `cek`         la llave de la bóveda de contraseñas (CryptoKey AES-GCM)
  *   `isAllowed(pubkey)`   qué aparatos pueden pedir — lo decide el acta, no esto
  *   `encPubOf(pubkey)`    su llave de cifrado, para sellarle la respuesta
- *   `needsApproval(pubkey)`  si ese aparato está marcado para aprobar. Se compone con el
+ *   `needsApproval(pubkey)`  (async) si ese aparato tiene que pedir aprobación según el
+ *                            ACTA (`unattended`). Se compone con el
  *                        criterio del propio protocolo: solo lo PRIVADO pregunta
  *   `approve({ pubkey, op })`  pide el visto bueno (el teléfono) y espera
  *   `devices()` / `unlink(pubkey)`   administración, opcional
@@ -66,7 +67,11 @@ export function createPasswordDesk (opts = {}) {
     // reescribirlo aquí: si cada bóveda tuviera su idea de qué es privado, serían tres
     // bóvedas distintas otra vez.
     needsApproval: async (op, payload, pubkey) =>
-      needsApproval(pubkey) && await responder.wantsPrivate(op, payload),
+      // `await` OBLIGATORIO: `needsApproval` pasó a ser asíncrona (lee el acta en vivo), y
+      // una promesa SIEMPRE es verdadera. Sin el await esto decía «sí, pide aprobación»
+      // para todo el mundo, y en el otro sentido —si algún día devuelve false— diría que
+      // no hace falta. Un `&&` sobre una promesa es una comprobación que no comprueba.
+      await needsApproval(pubkey) && await responder.wantsPrivate(op, payload),
     approve,
     admin: devices && unlink ? { devices, unlink } : null,
     onRequest: (r) => {
