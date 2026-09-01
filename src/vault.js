@@ -374,6 +374,23 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * @returns {boolean} `true` si puede seguir; si no, ya contestó el «no».
    */
+  /**
+   * CON QUÉ SE JUZGA UN PAPEL: el acta que tiene esta bóveda.
+   *
+   * Sustituye a `trustedIssuer: master`, que comparaba contra UNA llave fija y por eso el
+   * multivault no podía existir — una segunda selladora sellaba el acta y luego sus papeles
+   * los rechazaban los diez mostradores. Ahora se compara contra la lista que dice el acta.
+   *
+   * Sin acta se devuelven nulos a propósito: `verifyDelegation` responde `no-acta` y el
+   * mostrador deniega. Es lo contrario de un repliegue — no hay con qué decidir, así que no
+   * se decide que sí.
+   */
+  async function contextoActa () {
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!acta) return { actaSeq: null, sealers: null }
+    return { actaSeq: acta.seq, sealers: Acta.sealersOf(acta) }
+  }
+
   async function actaAllows (from, chk, scope, what) {
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
     // SIN ACTA NO SE ATIENDE. Esto era `if (!record || puede())`, o sea: sin acta, pasa. Un
@@ -396,7 +413,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) { audit('rejected', { what: 'sign', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.SIGN, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.SIGN, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'sign')
 
@@ -432,7 +449,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.READ, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.READ, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'get')
     if (!await actaAllows(from, chk, SCOPE.READ, 'get')) return
@@ -459,9 +476,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'profile locked: unlock it on the vault machine (dotrino-vault unlock) to edit it' })
     }
     const revoked = await revocationSet()
-    let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, trustedIssuer: master, revoked })
+    let chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.STORE, ...(await contextoActa()), revoked })
     if (!chk.ok && STORE_READ_METHODS.has(d.method)) {
-      chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, trustedIssuer: master, revoked })
+      chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.READ, ...(await contextoActa()), revoked })
     }
     if (!chk.ok) return denyChain(from, chk, p, 'store')
     // El scope que valió es el que hay que preguntarle al acta: un método de lectura pudo
@@ -585,7 +602,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   async function handleDevices (from, p) {
     if (!isFresh(p.data)) return staleReply(from)
-    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, null)
     // La lista de aparatos es el perfil: quién eres, cómo se llama cada máquina y qué puede.
     // Este mostrador no preguntaba al acta, así que un aparato al que le quitaste `lee`
@@ -648,7 +665,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000
   async function handleRenew (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
-    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, 'renew')
     // Reusar el label del cert original (si sigue registrado en delegations).
     const { issued } = await identity.listDelegations()
@@ -674,7 +691,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const { cert } = await identity.signDelegation(p.cert.sub, scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
     audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope })
     log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} (30 days)`)
-    reply(from, { type: MSG.RENEWED, cert })
+    // El acta viaja con el papel: sin ella quien lo recibe no puede comprobar que lo firmó
+    // una selladora del perfil, que es lo que sustituyó a «lo firmó la maestra».
+    reply(from, { type: MSG.RENEWED, cert, acta: record })
   }
 
   // SECRETOS de servicios: un servicio enrolado (cert `vault:secrets:<ns>`)
@@ -697,7 +716,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'enckey: invalid namespace' })
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'enckey')
     // MISMA FRONTERA QUE SERVIR EL CAJÓN, y por la misma razón: esto no solo apunta una
@@ -741,7 +760,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'secrets')
     // FRONTERA DEL CN (acta): además del scope del cert, el acta tiene que decir que este
@@ -827,7 +846,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const op = p.data?.op
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.APPROVE, trustedIssuer: master, revoked: await revocationSet()
+      expectedScope: SCOPE.APPROVE, ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'approval')
     const record = (await identity.profileActa?.().catch(() => null))?.acta
@@ -1290,7 +1309,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     verify: async ({ data, signature, cert }) => {
       const chk = await verifyChain({
         data, signature, cert,
-        expectedScope: SCOPE.ADMIN, trustedIssuer: master, revoked: await revocationSet()
+        expectedScope: SCOPE.ADMIN, ...(await contextoActa()), revoked: await revocationSet()
       })
       // Quitarse a UNO MISMO desde la consola remota entra por aquí: la segunda petición
       // que mande el aparato ya llega con el certificado retirado. Que se entere con el

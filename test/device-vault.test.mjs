@@ -21,17 +21,38 @@ async function fakeIdentity () {
   const iss = JSON.stringify(publicJwk)
   const issued = []
   const revoked = []
+  // ACTA de mentira, pero con la forma que importa: quién es miembro, qué puede y su `seq`.
+  // Hace falta porque el papel ya no se juzga solo —lleva el `seq` del acta con el que se
+  // emitió— y todos los mostradores cruzan el cert con lo que el acta dice HOY.
+  const acta = {
+    v: 5, profileId: iss, sealedBy: iss, seq: 1,
+    members: [{ pub: iss, label: 'esta bóveda', caps: ['sign', 'read', 'store', 'sealer'] }],
+    renounced: []
+  }
   return {
     me: { publickey: iss, encryptionPubkey: null },
     iss,
     issued,
     revoked,
-    async signDelegation (sub, scope, { ttlMs = 60000, label = '' } = {}) {
+    acta,
+    async profileActa () { return { acta, isMaster: true } },
+    async admitMember ({ pub, label = '', cn = null, caps = [] }) {
+      acta.members.push({ pub, label, ...(cn ? { cn } : {}), caps })
+      acta.seq++
+      return { ok: true, seq: acta.seq }
+    },
+    async setCaps (pub, caps) {
+      const m = acta.members.find((x) => x.pub === pub)
+      if (m) m.caps = caps
+      acta.seq++
+      return { ok: true, seq: acta.seq }
+    },
+    async signDelegation (sub, scope, { label = '' } = {}) {
       const iat = Date.now()
       const cert = await signDelegationWith(pair.privateKey, iss, {
-        sub, scope, iat, exp: iat + ttlMs, nonce: crypto.randomUUID()
+        sub, scope, iat, seq: acta.seq, nonce: crypto.randomUUID()
       })
-      issued.push({ nonce: cert.nonce, sub, scope, iat, exp: cert.exp, label })
+      issued.push({ nonce: cert.nonce, sub, scope, iat, seq: cert.seq, label })
       return { cert }
     },
     async signData (data) {
@@ -72,9 +93,18 @@ async function mount () {
 }
 
 /** Enrola una máquina «a mano» (el flujo con código ya está probado en enroll.test). */
-async function enrolledMachine (identity, { ttlMs = 60_000, label = 'agente' } = {}) {
+/**
+ * Una máquina enrolada de verdad: papel Y sitio en el acta.
+ *
+ * Antes bastaba con emitirle el certificado. Ya no, y es el cambio de fondo: el papel dice
+ * que una selladora la avaló alguna vez; lo que puede HOY lo dice el acta, y todos los
+ * mostradores cruzan las dos cosas. Un cert suelto sin miembro detrás no autoriza nada — que
+ * es exactamente lo que se quería.
+ */
+async function enrolledMachine (identity, { label = 'agente', caps = ['sign'] } = {}) {
   const device = await makeDeviceKey({ label })
-  const { cert } = await identity.signDelegation(device.publickey, ['vault:sign'], { ttlMs, label })
+  await identity.admitMember({ pub: device.publickey, label, caps })
+  const { cert } = await identity.signDelegation(device.publickey, ['vault:sign'], { label })
   return { device, cert }
 }
 
@@ -94,9 +124,17 @@ test('RENEW: una máquina con cert vigente obtiene uno fresco sin aprobación', 
 
   const out = client.sent.at(-1)
   assert.equal(out.type, 'vault.renewed', 'la bóveda del dispositivo tiene que renovar, no ignorar')
-  const v = await verifyDelegation({ cert: out.cert, expectedSub: device.publickey, expectedScope: 'vault:sign' })
+  // Se juzga con el acta que la bóveda manda junto al papel: es lo que sustituye a
+  // «lo firmó la maestra», y sin ella no se puede comprobar quién lo firmó.
+  assert.ok(out.acta, 'el acta viaja con el papel')
+  const v = await verifyDelegation({
+    cert: out.cert, expectedSub: device.publickey, expectedScope: 'vault:sign',
+    actaSeq: out.acta.seq, sealers: out.acta.members.filter((m) => m.caps.includes('sealer')).map((m) => m.pub)
+  })
   assert.equal(v.ok, true, v.reason)
-  assert.ok(out.cert.exp > cert.exp, 'el cert nuevo extiende la ventana')
+  // Ya no hay ventana que extender: el papel no vence. Lo que cambia es el ACTA a la que se
+  // ata, y que es otro papel — el anterior queda retirado.
+  assert.ok(out.cert.seq >= cert.seq, 'el papel nuevo se ata a un acta que no es más vieja')
   assert.notEqual(out.cert.nonce, cert.nonce)
   assert.equal(identity.issued.at(-1).label, 'agente', 'conserva el label del cert original')
   vault.close()
