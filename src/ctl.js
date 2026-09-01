@@ -419,7 +419,14 @@ async function cmdJoin (rest) {
     process.exit(2)
   }
   const qr = parseInvite(texto)
-  if (!qr?.sn || !qr?.iss || !qr?.proxy) {
+  // QUÉ HACE FALTA DE VERDAD: el nonce de la sesión (`sn`) y una forma de alcanzar a la
+  // otra bóveda — la CITA del proxio (`conn`) en la invitación corta, o su llave (`iss`)
+  // en la larga. Quien la consume es `enrollDevice`, que sabe canjear la cita.
+  //
+  // Esto exigía `iss` SIEMPRE, y la invitación corta no lo lleva (la llave dejó de viajar
+  // cuando el QR se acortó, `lib/src/invite.js`). O sea que `join` rechazaba todas las
+  // invitaciones que emite `pair` hoy: el multivault entero no se podía montar.
+  if (!qr?.sn || !(qr?.conn || qr?.iss)) {
     console.error('Esa invitación no se entiende. Pega la línea completa que imprime «dotrino-vault pair».')
     process.exit(2)
   }

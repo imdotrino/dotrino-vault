@@ -791,7 +791,10 @@ export async function runDaemon () {
 
     let qr = null
     try { qr = parseInvite(texto) } catch (_) {}
-    if (!qr?.sn || !qr?.iss || !qr?.proxy) {
+    // Lo mismo que `dotrino-vault join` (ver `ctl.js`): basta `sn` + la cita del proxio o
+    // la llave. Exigir `iss` dejaba fuera a la invitación corta, que es la única que emite
+    // `pair` hoy — así que este camino de despliegue no había forma de que funcionara.
+    if (!qr?.sn || !(qr?.conn || qr?.iss)) {
       console.error('[vault] the invitation in DOTRINO_JOIN is not valid; ignoring it')
       return
     }
@@ -799,7 +802,7 @@ export async function runDaemon () {
     const hecho = readJsonSafe(marca)
     if (hecho?.sn === qr.sn) return // ya se usó: un reinicio no vuelve a pedir entrar
 
-    writeJson(marca, { at: Date.now(), sn: qr.sn, iss: qr.iss })
+    writeJson(marca, { at: Date.now(), sn: qr.sn, ...(qr.iss ? { iss: qr.iss } : {}) })
     writeJson(path.join(dir, 'join-request.json'), {
       qr,
       label: 'bóveda',
