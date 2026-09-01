@@ -14,6 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { signWithDevice } from '@dotrino/identity/capabilities'
 
 const require = createRequire(import.meta.url)
 const proxyServerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dotrino-proxy', 'server.js')
@@ -1118,4 +1119,42 @@ test('con el perfil CERRADO la bóveda no se mete sola en su propia acta', async
     assert.ok(suya, 'abierta, la llave de comunicación entra en el acta')
     assert.deepEqual(suya.caps, ['sign'])
   } finally { abierta.close() }
+})
+
+/**
+ * UN SERVICIO PREGUNTA POR SUS REVOCACIONES SIN VER TU INVENTARIO.
+ *
+ * `vault.devices` responde dos cosas distintas según quién pregunte, y esto lo fija porque
+ * lo rompí en producción: le exigí `lee` al mostrador entero y dejé ciegos a los servicios
+ * —quedaron dos `rejected devices/acta` en la bitácora del VPS antes de que lo viera—.
+ * Un servicio necesita saber si le revocaron el papel y cuál es el acta vigente; eso no es
+ * tu inventario. La lista de aparatos, que sí lo es, sigue pidiendo `lee`.
+ */
+test('un servicio ve sus revocaciones y el acta, pero NO la lista de aparatos', async () => {
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:mirador'], label: 'service:mirador', ttlMs: 60_000 })
+  const dir = tmp('svc-mirador-')
+  const { enrollService } = await import('../lib/src/service.js')
+  const { device, cert } = await enrollService({
+    qr, ns: 'mirador', dir,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const client = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+  await client.connect()
+  try {
+    const data = { op: 'devices', publickey: device.publickey, ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+    const res = await new Promise((resolve, reject) => {
+      const off = client.on('message', (_f, p) => {
+        if (p?.type === 'vault.devices.result') { off(); resolve(p) }
+        else if (p?.type === 'vault.error') { off(); reject(new Error(p.error)) }
+      })
+      setTimeout(() => { off(); reject(new Error('timeout')) }, 10000)
+      client.sendByPubkey(vault.master, { type: 'vault.devices', data, signature, cert })
+    })
+    assert.ok(Array.isArray(res.revoked), 'se entera de las revocaciones')
+    assert.ok(res.acta?.seq, 'y del acta vigente, que es con lo que juzga a quien le hable')
+    assert.deepEqual(res.devices, [], 'pero tu inventario no lo ve: no es asunto suyo')
+  } finally { client.close() }
 })

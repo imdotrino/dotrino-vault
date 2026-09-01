@@ -615,14 +615,29 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, null)
-    // La lista de aparatos es el perfil: quién eres, cómo se llama cada máquina y qué puede.
-    // Este mostrador no preguntaba al acta, así que un aparato al que le quitaste `lee`
-    // seguía viendo tu inventario entero hasta que caducara su papel.
-    if (!await actaAllows(from, chk, SCOPE.READ, 'devices')) return
+    // DOS RESPUESTAS, PORQUE SON DOS PREGUNTAS DISTINTAS.
+    //
+    // Un SERVICIO pregunta aquí para enterarse de dos cosas suyas: si le revocaron el papel
+    // y cuál es el acta vigente. Eso no es tu inventario y no puede exigir `lee` — se lo
+    // exigí, y en producción dejó ciegos a los servicios (`rejected devices/acta` en la
+    // bitácora del VPS, dos veces, antes de que lo viera).
+    //
+    // La LISTA DE APARATOS sí es el perfil —cómo se llama cada máquina y qué puede— y esa
+    // sigue pidiendo `lee`. Antes no preguntaba nada, así que un aparato al que le quitaste
+    // el permiso seguía viéndolo todo hasta que su papel caducara.
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const puedeVerTodo = !!record && Acta.memberCanScope(record, chk.device, SCOPE.READ)
     const { issued, revoked } = await identity.listDelegations()
+    if (!puedeVerTodo) {
+      if (!record) {
+        audit('rejected', { what: 'devices', reason: 'sin-acta' })
+        return reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
+      }
+      audit('devices', { device: await deviceIdOf(chk.device).catch(() => null), solo: 'revocaciones' })
+      return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, acta: record })
+    }
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
-    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
     // Si el dispositivo estuvo apagado y viene con un `seq` viejo, se le manda la CADENA
     // que falta (ventana de retención, §1.3) para que compruebe el encadenamiento en vez
     // de tragarse un salto a ciegas. Si se salió de la ventana, llega vacía y toca
