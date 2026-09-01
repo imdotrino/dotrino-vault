@@ -1276,11 +1276,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const admin = createAdminDesk({
     desk,
     deviceIdOf,
-    ttlMs: DEVICE_TTL_MS,
     audit,
-    // El MISMO candado que frena `sign` y editar el perfil. Sin esto la consola remota
-    // emparejaba y aprobaba con el perfil cerrado —y aprobar firma un cert con la
-    // maestra—, justo lo que el candado existe para impedir.
+    // El MISMO candado que frena firmar y editar el perfil: revocar reescribe el acta y
+    // configurar toca los secretos, y ninguna de las dos se hace con la bóveda cerrada.
     isLocked,
     notify: notifyMembers,
     readActivity,
