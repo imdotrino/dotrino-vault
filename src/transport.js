@@ -66,7 +66,16 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
     if (comm && esMiembro) {
       const data = { op: 'identify', publickey: comm, token: client.token, ts: Date.now() }
       const signature = await commKey.sign(data)
-      if (signature) return client.identify({ data, signature, acta: record })
+      if (signature) {
+        await client.identify({ data, signature, acta: record })
+        // SE DICE QUE SE IDENTIFICÓ, y con qué llave. Este camino era MUDO: al pasar de la
+        // maestra a la llave de comunicación, el único rastro de «estoy alcanzable» que
+        // quedaba en el log era el del repliegue. Así que cuando la consola decía «no
+        // contesta», no había forma de saber desde aquí si la bóveda estaba atada al proxio
+        // o no. Una línea por reconexión es barata; no tenerla cuesta una hora de sondeos.
+        log('[vault] identified on the proxy with the communication key · record #%s', record?.seq ?? '?')
+        return
+      }
     }
 
     // REPLIEGUE, y solo para migrar: una bóveda que todavía no ha metido su llave de

@@ -285,8 +285,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return new Set(revoked.map((r) => r.nonce))
   }
 
+  /**
+   * CONTESTAR SIN MATAR LA CONEXIÓN.
+   *
+   * El proxio corta los frames a 1 MB (`maxPayload`), y `ws` no «descarta» el que se pasa:
+   * CIERRA EL SOCKET con un 1009. La bóveda se queda muda, sin un solo error en su log, y
+   * desde fuera se ve igual que si estuviera apagada. Eso ya pasó y duró tres días.
+   *
+   * Así que una respuesta que no quepa no se manda: se sustituye por un error, que sí cabe.
+   * Una bóveda que dice «no cabe» se arregla; una muda no se puede ni diagnosticar.
+   */
   const reply = (to, obj) => {
-    try { client.send(to, obj) } catch (e) { log('[vault] could not reply:', e.message) }
+    try {
+      const bytes = Buffer.byteLength(JSON.stringify(obj))
+      if (bytes > MAX_REPLY_BYTES) {
+        log(`[vault] the reply to ${obj?.type} does not fit (${bytes} bytes > ${MAX_REPLY_BYTES}): sending an error instead of killing the connection`)
+        audit('reply-too-big', { type: obj?.type || null, bytes })
+        return client.send(to, { type: MSG.ERROR, error: `reply too big (${bytes} bytes): ask for less at a time` })
+      }
+      client.send(to, obj)
+    } catch (e) { log('[vault] could not reply:', e.message) }
   }
 
   // FRESCURA anti-replay: toda petición firmada debe traer `data.ts` dentro de una
@@ -680,7 +698,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!msg.chain?.length) msg.chain = null
     const left = msg.chain?.length || 0
     log(`[vault] record chain trimmed to fit the transport: ${left}/${full} link(s), ${size(msg)} bytes`)
-    if (size(msg) > MAX_REPLY_BYTES) log(`[vault] ⚠ the reply STILL does not fit (${size(msg)} bytes): the proxy will drop it`)
+    // Si tras podar la cadena SIGUE sin caber, no se avisa y se manda igual —eso mataba la
+    // conexión—: se devuelve tal cual y `reply` lo sustituye por un error. El aviso de aquí
+    // sobra porque el de `reply` dice lo mismo y además dice qué hizo.
     return msg
   }
 
@@ -2031,6 +2051,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   return {
     identity, client, store, threads, secrets, master, fingerprint: fp, dir,
+    // Se expone para poder PROBAR que una respuesta que no cabe no mata la conexión: es el
+    // único punto por el que sale todo, y el fallo que cierra vive justo ahí.
+    reply,
     /**
      * SOLTAR LA MAESTRA. Cerrar el perfil tiene que sacarla de la memoria, no solo dejar de
      * cargarla en el siguiente arranque: si no, el candado seguiría siendo una bandera al

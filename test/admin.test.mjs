@@ -258,13 +258,12 @@ test('BORRAR variables no existe a distancia (un aparato robado no te deja sin c
  * un certificado de 30 días con la maestra. O sea que cerrar el perfil frenaba
  * `dotrino-vault pair` en la máquina y no frenaba lo mismo por la red.
  */
-test('con el perfil CERRADO no se administra: ni quitar, ni configurar', async () => {
+test('con el perfil CERRADO no se puede QUITAR: eso reescribe el acta', async () => {
   const { admin, desk, audits } = mount({ isLocked: () => true, vars: fakeVars() })
 
   const casos = [
     { op: 'revoke', sub: 'DPUB' },
-    { op: 'revoke', certNonce: 'n-9' },
-    { op: 'var.set', ns: 'proxy', key: 'K', enc: { epk: 'E', iv: 'I', ct: 'C' } }
+    { op: 'revoke', certNonce: 'n-9' }
   ]
   for (const [i, c] of casos.entries()) {
     const r = await admin.handle({ ...c, nonce: nonce(String(i)) })
@@ -288,10 +287,27 @@ test('con el perfil CERRADO no se administra: ni quitar, ni configurar', async (
  * dijera «tu bóveda está cerrada»; el dueño lo quitó: esa frase no pinta nada en una
  * pantalla administrativa, así que la operación tampoco.)
  */
-test('cerrada se sigue mirando: bitácora y variables', async () => {
-  const { admin } = mount({ isLocked: () => true, vars: fakeVars() })
+/**
+ * CERRADA SÍ SE CONFIGURA, y esto es lo que se entendió mal al principio.
+ *
+ * Guardar una variable NO necesita la maestra: sellar un valor usa las llaves PÚBLICAS de
+ * quien va a leerlo. Meterlo en el mismo saco que revocar dejaba la consola sin poder hacer
+ * su trabajo de todos los días con el perfil cerrado — y el perfil se cierra SOLO a los 5
+ * minutos, así que era casi siempre.
+ */
+test('cerrada se mira Y se configura; lo que no se puede es quitar', async () => {
+  const vars = fakeVars()
+  const { admin } = mount({ isLocked: () => true, vars })
   assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
   assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
+
+  const g = await admin.handle({ op: 'var.set', ns: 'aws', key: 'AWS_REGION', enc: { epk: 'E', iv: 'I', ct: 'C' }, nonce: nonce('u') })
+  assert.equal(g.ok, true, 'guardar una variable con el candado echado TIENE que funcionar')
+  assert.equal(vars.calls.at(-1)[0], 'set', 'y llega al mostrador de verdad, no se finge')
+
+  const m = await admin.handle({ op: 'var.setMany', ns: 'aws', enc: { epk: 'E', iv: 'I', ct: 'C' }, nonce: nonce('v') })
+  assert.equal(m.ok, false, 'este mostrador de mentira no sabe `setMany`…')
+  assert.match(m.error, /several variables at once/, '…y lo dice por eso, no por el candado')
 })
 
 test('el candado no quema el nonce', async () => {

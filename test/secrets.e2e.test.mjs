@@ -1168,3 +1168,36 @@ test('un servicio ve sus revocaciones y el acta, pero NO la lista de aparatos', 
 // rompe su firma (el cuerpo canónico de un papel viejo lleva `exp`, y se firmó sobre ese),
 // y esta bóveda ya no sabe emitir de los viejos. Se comprobó contra los diez papeles de
 // verdad que hay en el VPS, mirando la bitácora: `renew` seguido de `secrets` servido.
+
+/**
+ * UNA RESPUESTA QUE NO CABE NO MATA LA CONEXIÓN.
+ *
+ * El proxio corta los frames a 1 MB (`maxPayload`) y `ws` no «descarta» el que se pasa:
+ * CIERRA el socket con un 1009. La bóveda se queda muda, sin un error en su log, y desde
+ * fuera se ve igual que si estuviera apagada. Eso ya pasó y duró tres días.
+ *
+ * Antes se avisaba y se mandaba igual. Ahora se sustituye por un error, que sí cabe: una
+ * bóveda que dice «no cabe» se arregla; una muda no se puede ni diagnosticar.
+ */
+test('una respuesta demasiado grande se cambia por un error, no revienta el socket', async () => {
+  const { startVault } = await import('../src/vault.js')
+  const dir = tmp('vault-frame-')
+  const v = await startVault({ dir, proxyUrl, log: () => {} })
+  try {
+    const enviados = []
+    const original = v.client.send.bind(v.client)
+    v.client.send = (to, obj) => { enviados.push(obj); return original(to, obj) }
+
+    // Se pide una respuesta imposible por el mismo camino que usa el mostrador.
+    v.reply('token-de-prueba', { type: 'vault.devices.result', relleno: 'x'.repeat(900 * 1024) })
+
+    assert.equal(enviados.length, 1, 'se contesta: callarse es el fallo que se está cerrando')
+    assert.equal(enviados[0].type, 'vault.error', 'y lo que sale es un error, no el mensajón')
+    assert.match(enviados[0].error, /reply too big/)
+    assert.ok(Buffer.byteLength(JSON.stringify(enviados[0])) < 1024, 'que cabe de sobra')
+
+    // Y lo que sí cabe pasa tal cual.
+    v.reply('token-de-prueba', { type: 'vault.devices.result', devices: [] })
+    assert.equal(enviados[1].type, 'vault.devices.result')
+  } finally { v.close() }
+})
