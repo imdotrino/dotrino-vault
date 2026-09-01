@@ -376,7 +376,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function actaAllows (from, chk, scope, what) {
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
-    if (!record || Acta.memberCanScope(record, chk.device, scope)) return true
+    // SIN ACTA NO SE ATIENDE. Esto era `if (!record || puede())`, o sea: sin acta, pasa. Un
+    // repliegue no dice «por si falta el dato», dice «si falta el dato, di que sí» — y el
+    // acta falta justo cuando algo se rompió (un archivo a medias, un `catch` que devolvió
+    // null), que es cuando menos hay que fiarse. Toda cuenta tiene acta desde hace versiones.
+    if (!record) {
+      audit('rejected', { what, reason: 'sin-acta' })
+      reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
+      return false
+    }
+    if (Acta.memberCanScope(record, chk.device, scope)) return true
     audit('rejected', { what, reason: 'acta' })
     reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member no longer has that permission' })
     return false
@@ -578,6 +587,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!isFresh(p.data)) return staleReply(from)
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, trustedIssuer: master, revoked: await revocationSet() })
     if (!chk.ok) return denyChain(from, chk, p, null)
+    // La lista de aparatos es el perfil: quién eres, cómo se llama cada máquina y qué puede.
+    // Este mostrador no preguntaba al acta, así que un aparato al que le quitaste `lee`
+    // seguía viendo tu inventario entero hasta que caducara su papel.
+    if (!await actaAllows(from, chk, SCOPE.READ, 'devices')) return
     const { issued, revoked } = await identity.listDelegations()
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -647,13 +660,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // QUITARLO tampoco surtía efecto hasta que el cert caducara, hasta un mes después.
     // Si el miembro ya no está en el acta, no se renueva nada: lo echaron.
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    let scope = p.cert.scope
-    if (record) {
-      scope = Acta.memberScopes(record, p.cert.sub)
-      if (!scope.length) {
-        audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
-        return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
-      }
+    // Sin acta no se renueva: caer al scope del papel viejo es reconceder a ciegas lo que
+    // el acta ya no dice. Un repliegue así no protege de nada, tapa.
+    if (!record) {
+      audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
+    }
+    const scope = Acta.memberScopes(record, p.cert.sub)
+    if (!scope.length) {
+      audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
     }
     const { cert } = await identity.signDelegation(p.cert.sub, scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
     audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope })
@@ -684,6 +700,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       expectedScope: secretsScope(ns), trustedIssuer: master, revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'enckey')
+    // MISMA FRONTERA QUE SERVIR EL CAJÓN, y por la misma razón: esto no solo apunta una
+    // llave pública, acto seguido le ENVUELVE la del cajón (`spreadKey`, más abajo). Aquí
+    // solo se miraba el certificado, así que a un aparato al que el acta ya le había
+    // quitado `secrets` se le entregaba la llave igual, hasta 30 días. Es el mismo fallo
+    // que se cerró en `handleSign`, en otro mostrador.
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: 'enckey', ns, reason: record ? 'cn' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
+    }
     try {
       await identity.setMemberEncPub({ pub: chk.device, encPub: p.data.encPub })
       audit('enckey', { device: await deviceIdOf(chk.device).catch(() => null), ns })
@@ -722,8 +748,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // miembro es el servicio `ns`. Así el límite no depende solo de qué cert se emitió: la
     // llave del proxy no ve nada que no sea del proxy, y está escrito donde se puede comprobar.
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    if (record && !Acta.memberCanReadSecrets(record, chk.device, ns)) {
-      audit('rejected', { what: 'secrets', ns, reason: 'cn' })
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: 'secrets', ns, reason: record ? 'cn' : 'sin-acta' })
       return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
     }
     // APROBACIÓN: si este APARATO está marcado (`dotrino-vault approval <ID> on`), liberarle
@@ -805,8 +831,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     })
     if (!chk.ok) return denyChain(from, chk, p, 'approval')
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    if (record && !Acta.memberCan(record, chk.device, 'approve')) {
-      audit('rejected', { what: 'approval', reason: 'acta' })
+    if (!record || !Acta.memberCan(record, chk.device, 'approve')) {
+      audit('rejected', { what: 'approval', reason: record ? 'acta' : 'sin-acta' })
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member does not approve' })
     }
     const by = await deviceIdOf(chk.device).catch(() => null)
@@ -1276,7 +1302,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         return chk
       }
       const record = (await identity.profileActa?.().catch(() => null))?.acta
-      if (record && !Acta.memberCan(record, chk.device, 'admin')) return { ok: false, reason: 'acta' }
+      if (!record || !Acta.memberCan(record, chk.device, 'admin')) return { ok: false, reason: record ? 'acta' : 'sin-acta' }
       return chk
     }
   })

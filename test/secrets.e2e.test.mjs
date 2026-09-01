@@ -1045,3 +1045,46 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.deepEqual(vault.supervised(), [])
   assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
 })
+
+/**
+ * QUITARLE EL PERMISO SURTE EFECTO YA — TAMBIÉN EN `enckey`.
+ *
+ * `handleEncKey` no le preguntaba al acta, solo al certificado. Y no es un mostrador
+ * inocente: acto seguido le ENVUELVE al aparato la llave de su cajón (`spreadKey`). O sea
+ * que a un servicio al que el dueño ya le había quitado el cajón se le seguía entregando
+ * la llave, hasta 30 días — lo que dure el papel. Es el mismo fallo que se cerró en
+ * `handleSign`, escondido en otro sitio.
+ *
+ * Se prueban los DOS mostradores: el que sirve el cajón (que ya miraba, pero con un
+ * repliegue que decía «sin acta, pasa») y el que registra la llave (que no miraba).
+ */
+test('a un servicio al que el acta ya no reconoce: ni le sirven el cajón ni le registran la llave', async () => {
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:sonda'], label: 'service:sonda', ttlMs: 60_000 })
+  const dir = tmp('svc-sonda-')
+  const { enrollService, fetchSecrets, registerEncKey, readServiceIdentity } = await import('../lib/src/service.js')
+  const { device, cert } = await enrollService({
+    qr, ns: 'sonda', dir,
+    onCode: ({ code }) => { vault.approveDevice(code).catch((e) => { throw e }) }
+  })
+  assert.ok(device?.publickey && cert?.sig)
+  // El papel vigente lo lee del disco: `enrollService` puede haber emitido otro después, y
+  // el anterior queda retirado (una llave, un certificado vigente).
+  const link = { ns: 'sonda', proxyUrl, masterPubkey: vault.master }
+
+  // Mientras el acta lo reconoce, los dos mostradores le atienden.
+  assert.deepEqual(await fetchSecrets({ dir }), {}, 'su cajón está vacío, pero se lo sirven')
+  await registerEncKey({ dir, ...link })
+
+  // El dueño le quita EL CAJÓN en el acta, y le deja `firma`: así el aparato sigue siendo
+  // miembro y su papel sigue vivo diciendo `vault:secrets:sonda`. Dejarlo sin ningún
+  // permiso lo echa del acta y entonces lo para la revocación, que es otro camino — aquí
+  // se quiere probar justo el que no estaba: papel válido, acta en contra.
+  await vault.setCaps(device.publickey, ['sign'])
+
+  // Se exige el motivo EXACTO, no un `unauthorized` cualquiera: «revoked» también lo
+  // contiene, y entonces el test pasaría sin haber probado nada del acta.
+  await assert.rejects(() => fetchSecrets({ dir }), /cn —/, 'servir el cajón dice que no, POR EL ACTA')
+  await assert.rejects(() => registerEncKey({ dir, ...link }), /cn —/,
+    'y registrar la llave también, que era por donde se colaba')
+  assert.ok(readServiceIdentity(dir), 'el aparato sigue teniendo su papel: lo que cambió es el acta')
+})
