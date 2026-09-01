@@ -688,7 +688,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // cert fresco (misma sub-clave y scope) sin QR ni aprobación — sigue siendo el
   // mismo dispositivo enrolado, solo extiende la ventana. Un cert vencido o
   // revocado NO puede renovarse (ahí sí toca re-emparejar con aprobación).
-  const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000
   async function handleRenew (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'renew', reason: 'stale' }); return staleReply(from) }
     const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
@@ -714,9 +713,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('rejected', { what: 'renew', device: await deviceIdOf(p.cert.sub), reason: 'not-a-member' })
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: the record no longer lists this device' })
     }
-    const { cert } = await identity.signDelegation(p.cert.sub, scope, { ttlMs: RENEW_TTL_MS, label: prev?.label || '' })
-    audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope })
-    log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} (30 days)`)
+    // RENOVAR NO RETIRA EL PAPEL ANTERIOR (`supersede: false`), y esto costó dos servicios.
+    //
+    // Retirarlo al emitir parece limpio —un aparato, un papel— pero convierte cualquier
+    // renovación que falle DESPUÉS de emitirse en una expulsión permanente: la máquina se
+    // queda con el papel viejo, que acaba de quedar revocado, y ya no puede ni pedir otro.
+    // Pasó dos veces en la migración del VPS (el registro de selladores y el bot social):
+    // el papel nuevo salió, la respuesta no llegó a guardarse, y al reintentar la bóveda
+    // contestaba `unauthorized: revoked`. Re-emparejar a mano, con TTY, por una renovación.
+    //
+    // Que convivan dos papeles del mismo aparato ya no es el problema que era: ninguno
+    // vence, pero lo que pueden hacer lo decide el ACTA en cada mostrador, así que el
+    // viejo no autoriza nada que el nuevo no autorice. Y quitar el aparato de verdad sigue
+    // siendo `revokeDevice`, que los retira TODOS de una vez.
+    const { cert } = await identity.signDelegation(p.cert.sub, scope, { label: prev?.label || '', supersede: false })
+    audit('renew', { device: await deviceIdOf(p.cert.sub), label: prev?.label || '', scope, seq: cert.seq })
+    log(`[vault] cert renewed for ${await deviceIdOf(p.cert.sub)} · record #${cert.seq}`)
     // El acta viaja con el papel: sin ella quien lo recibe no puede comprobar que lo firmó
     // una selladora del perfil, que es lo que sustituyó a «lo firmó la maestra».
     reply(from, { type: MSG.RENEWED, cert, acta: record })

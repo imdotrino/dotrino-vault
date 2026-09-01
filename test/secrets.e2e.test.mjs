@@ -589,12 +589,16 @@ test('el scope corta el acceso a otro namespace', async () => {
 })
 
 test('un cert revocado deja de poder leer', async () => {
-  const { issued } = await vault.listDevices()
-  // La etiqueta por defecto de un servicio es su ns a secas (sin «service:»); el que vale
-  // es el ÚLTIMO cert emitido para el cajón proxy (re-enrolar re-emite).
-  const mine = issued.filter((d) => (d.scope || []).includes('vault:secrets:proxy')).at(-1)
-  assert.ok(mine, 'el servicio enrolado aparece en delegations')
-  await vault.revokeDevice(mine.nonce)
+  // Se revoca EL PAPEL QUE EL SERVICIO TIENE EN LA MANO, no «el último emitido».
+  //
+  // Eso valía cuando renovar retiraba el anterior —un aparato, un papel—, y eso se quitó:
+  // retirarlo al emitir convertía cualquier renovación que fallara después en una expulsión
+  // permanente (le pasó a dos servicios en la migración del VPS). Ahora pueden convivir
+  // varios del mismo aparato, así que «el último» ya no identifica a nadie.
+  const { readServiceIdentity } = await import('../lib/src/service.js')
+  const mio = readServiceIdentity(svcDir)
+  assert.ok(mio?.cert?.nonce, 'el servicio tiene su papel guardado')
+  await vault.revokeDevice(mio.cert.nonce)
   await assert.rejects(fetchNsWithSavedCert('proxy'), /unauthorized: revoked/)
 })
 
