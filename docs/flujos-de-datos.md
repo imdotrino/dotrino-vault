@@ -54,9 +54,19 @@ IP en ninguna tabla.**
 
 Sin cookies. Solo en producción — no cuenta en `localhost` ni en la LAN.
 
-> ⚠️ **Retención: ninguna.** `data_retention` está en `0`, así que las visitas se guardan
-> indefinidamente. Es lo mismo que le pasaba al throttling y **está sin decidir**: hay que
-> fijar un número.
+**Retención: la visita suelta vive UN DÍA.** Decidido por el dueño el 2026-09-02 —*«el
+conteo único diario basta»*— y aplicado: una poda diaria borra las filas de `hits` de más de
+24 h y deja intactos los agregados (`hit_stats`, `hit_counts`, `*_stats`), que es de donde
+sale el panel. Se pasó de 4.949 visitas guardadas a 30, conservando los conteos desde el 23
+de mayo.
+
+**No se usa la retención de GoatCounter, y hay que decir por qué** (mirado en su código,
+`Site.DeleteOlderThan`): rechaza cualquier plazo **menor de 14 días**, y borra **también los
+agregados** — se llevaría justo lo que se quiere conservar. Por eso la poda es un cron
+propio (`~/bin/goat-podar.sh` en proxy1).
+
+⚠️ **No reindexar GoatCounter después de esto**: un reindex reconstruye los agregados desde
+`hits`, y si ya no están, los dejaría en cero.
 
 ### `dotrino-content` — `content.dotrino.com`, bytes en R2 (`c.dotrino.com`)
 
@@ -107,8 +117,7 @@ Lo que **ninguno** ve: el contenido que viaja por `#fragment`, y lo que va sella
 
 ## 5. Lo que queda por decidir
 
-1. **La retención de GoatCounter.** Hoy es infinita. Hay que poner un número.
-2. **La IP en el log del proxio.** Caduca por rotación de pm2, no por una política. Lo
+1. **La IP en el log del proxio.** Caduca por rotación de pm2, no por una política. Lo
    honesto es decidir si se sigue registrando o basta con el contador.
 3. **Terminar el sellado del transporte** para que lo de la cola offline deje de importar
    (`PENDIENTES.md`).
