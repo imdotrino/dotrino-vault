@@ -1343,3 +1343,54 @@ test('un cajón sellado con la llave de la máquina se migra a la frase al abrir
   const r2 = await vault.resealAll(FRASE)
   assert.equal(r2.failed.length, 0, 'y al segundo desbloqueo sigue funcionando, sin volver a migrar')
 })
+
+/**
+ * SOLO PÚBLICAS: NI APROBACIÓN NI PRIVADAS.
+ *
+ * Pedido por el dueño (2026-09-01): «me gustaría que pudiera traer solamente públicas, eso
+ * no necesitaría aprobación». Y es correcto: la aprobación existe para soltar CLAVES
+ * PRIVADAS. Una pública está guardada en claro —eso es lo que significa marcarla— y ya la ve
+ * cualquiera que administre, así que hacer sonar el teléfono para entregarla es molestar por
+ * nada. Sirve para un arranque que solo necesita configuración y no debe despertar a nadie.
+ *
+ * Lo que se fija aquí es lo que hace peligroso el atajo: que el filtro lo haga LA BÓVEDA. Si
+ * mandara todo y el cliente eligiera, pedir «solo públicas» sería exactamente la forma de
+ * saltarse la aprobación y llevarse las privadas igual.
+ */
+test('--public: llega sin aprobación, y NO trae ninguna privada', async () => {
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  const { fetchSecrets } = await import('../lib/src/service.js')
+  const ns = 'mixto'
+  const dir = tmp('svc-mixto-')
+
+  await vault.setSecret(ns, 'PUBLIC_URL', 'https://ejemplo', true)
+  await vault.setSecret(ns, 'API_TOKEN', 'secreto', false)
+
+  // Se enrola SIN `unattended`: sin ese permiso, cualquier petición normal se queda
+  // esperando aprobación. Es lo que hace la prueba concluyente.
+  const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
+  const { enrollService } = await import('../lib/src/service.js')
+  await enrollService({ qr: encodeInvite(qr), ns, dir, onCode: ({ code }) => vault.approveDevice(code) })
+
+  // Nadie va a aprobar nada: si esto pidiera aprobación, se quedaría colgado.
+  let pidioAprobacion = false
+  const solo = await fetchSecrets({ dir, ns, publicOnly: true, onPending: () => { pidioAprobacion = true } })
+
+  assert.equal(pidioAprobacion, false, 'no se pidió aprobación: no hay privadas de por medio')
+  assert.equal(solo.PUBLIC_URL, 'https://ejemplo')
+  assert.equal('API_TOKEN' in solo, false,
+    'la PRIVADA no viaja — y la filtra la bóveda, no el cliente: si la mandara, «solo públicas» sería el atajo para saltarse la aprobación')
+
+  // Y sin el atajo, lo de siempre: se pide aprobación (aquí nadie contesta, así que se
+  // comprueba que la bóveda lo APUNTA, no que se resuelva).
+  let pendiente = null
+  // `approvalTimeoutMs` corto: aquí NADIE va a aprobar, y lo que se comprueba es que la
+  // bóveda APUNTA el pedido — no que se resuelva. Sin el plazo, esto espera los 5 minutos
+  // de verdad y el test se queda colgado.
+  const normal = fetchSecrets({ dir, ns, approvalTimeoutMs: 1500, onPending: (p) => { pendiente = p } })
+    .then(() => null, () => null)
+  const hasta = Date.now() + 8000
+  while (!pendiente && Date.now() < hasta) await new Promise((r) => setTimeout(r, 100))
+  assert.ok(pendiente, 'la petición normal SÍ pasa por la aprobación')
+  await normal
+})

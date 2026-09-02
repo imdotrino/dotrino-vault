@@ -852,7 +852,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // claves en memoria y no vuelve a pedir. El pedido se apunta, se avisa a quien aprueba y se
     // contesta «pendiente»; la respuesta de verdad sale cuando el teléfono firme
     // (`handleApproval`), sellada a la misma `ek`.
-    if (needsApproval(chk.device, record)) {
+    // SOLO PÚBLICAS: NO SE PIDE APROBACIÓN (dueño, 2026-09-01).
+    //
+    // La aprobación existe para soltar CLAVES PRIVADAS. Una variable pública está guardada
+    // en claro —eso es lo que significa marcarla— y ya la ve cualquiera que administre, así
+    // que hacer sonar el teléfono del dueño para entregarla es molestarlo por nada.
+    //
+    // Lo que NO se relaja: quien pide sigue teniendo que ser un miembro identificado, con su
+    // papel y con el `cn` de este cajón (las dos comprobaciones de arriba). Y el filtro lo
+    // hace la BÓVEDA (`bundleFor({ publicOnly })`), no el que pide: si mandáramos todo y el
+    // cliente eligiera, pedir «solo públicas» sería la manera de saltarse la aprobación.
+    const publicOnly = p.data?.publicOnly === true
+    if (!publicOnly && needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
       const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek })
@@ -866,20 +877,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return
     }
     let res
-    try { res = await resultFor(ns, chk.device, p.data.ek, record) } catch (e) {
+    try { res = await resultFor(ns, chk.device, p.data.ek, record, { publicOnly }) } catch (e) {
       return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
     }
-    audit('secrets', { device: await deviceIdOf(chk.device), ns })
+    audit('secrets', { device: await deviceIdOf(chk.device), ns, ...(publicOnly ? { publicOnly: true } : {}) })
     reply(from, { type: MSG.SECRETS_RESULT, ...res })
   }
 
-  /** El bundle de `ns` para `devicePub`, sellado a su `ek` y firmado por la maestra. */
-  async function resultFor (ns, devicePub, ek, record) {
+  /** El bundle de `ns` para `devicePub`, sellado a su `ek` y firmado por la llave de sellado. */
+  async function resultFor (ns, devicePub, ek, record, { publicOnly = false } = {}) {
     // Mientras el archivo siga en v3 el cable NO cambia: se mandan los valores como
     // siempre. Solo tras la migración viajan sobres, y entonces quien los abre es el
     // agente con su llave. Así el despliegue del daemon se deshace con un reinicio,
     // porque hasta el primer desbloqueo no ha cambiado nada de lo que ve nadie.
-    const b = secrets.bundleFor(ns, devicePub)
+    const b = secrets.bundleFor(ns, devicePub, { publicOnly })
     // EL ACTA VIAJA CON EL BUNDLE (§8.8): es lo que le permite al agente comprobar que
     // los sobres los selló esta bóveda, y con qué llave —la que el acta nombra para el
     // `seq` con el que se firmaron—. No es un dato secreto: el acta es pública dentro
@@ -897,7 +908,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // como si se hubiera servido. Desde fuera parecía que el pedido funcionaba y volvía a
     // aparecer una y otra vez. Falta la envoltura, y eso solo se arregla ABRIENDO la
     // bóveda; decirlo aquí es lo que convierte un bucle mudo en algo que se puede arreglar.
-    if (!b.legacy) {
+    if (!b.legacy && !publicOnly) {
       const faltan = [...secrets.missingFor(`ns:${ns}`, devicePub), ...secrets.missingFor(`dev:${devicePub}`, devicePub)]
       if (faltan.length) {
         const quien = await deviceIdOf(devicePub).catch(() => '????-????')

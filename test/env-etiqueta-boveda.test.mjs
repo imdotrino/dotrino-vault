@@ -33,14 +33,55 @@ const enrolar = (raiz, bov, ns, iss) => {
   return d
 }
 
-test('la ruta lleva la bóveda, y sin ella no hay ruta', () => {
+test('la ruta lleva la bóveda, y una etiqueta mal escrita no cuela', () => {
   conRaiz((raiz) => {
     assert.equal(serviceDir('cepi', 'aws'), path.join(raiz, 'cepi', 'aws'))
-    // Sin etiqueta NO se cae a un default: se para y se dice. Elegir una por su cuenta es
-    // exactamente cómo se acabaría escribiendo en el directorio de otra bóveda.
-    assert.throws(() => serviceDir(null, 'aws'), /vault label/)
-    assert.throws(() => serviceDir('CEPI', 'aws'), /vault label/, 'mismo alfabeto que el ns')
-    assert.throws(() => serviceDir('con_guion_bajo', 'aws'), /vault label/)
+    // Una etiqueta MAL ESCRITA no se «arregla» buscando: se dice que no está enrolado.
+    assert.throws(() => serviceDir('CEPI', 'aws'), /not enrolled/, 'mismo alfabeto que el ns')
+    assert.throws(() => serviceDir('con_guion_bajo', 'aws'), /not enrolled/)
+  })
+})
+
+/**
+ * SIN `--vault` SE BUSCA, Y SOLO SE EXIGE SI HAY EMPATE (dueño, 2026-09-01).
+ *
+ * La etiqueta se hizo obligatoria para que dos bóvedas pudieran tener un cajón con el mismo
+ * nombre sin pisarse — y eso lo arregla la RUTA, no la bandera. Con un solo enrolamiento de
+ * ese `ns` no hay nada que desambiguar, así que pedirla era fricción sin nada a cambio.
+ *
+ * Con dos sí hay que elegir, y elige el dueño: se para y se dice CUÁLES son. Eso no es un
+ * repliegue —no se resuelve la ambigüedad a la brava— sino lo contrario: se señala.
+ */
+test('sin etiqueta: si el ns está en UNA bóveda se encuentra; si está en dos, se pregunta', () => {
+  conRaiz((raiz) => {
+    const enrolar = (boveda, ns) => {
+      fs.mkdirSync(path.join(raiz, boveda, ns), { recursive: true })
+      fs.writeFileSync(path.join(raiz, boveda, ns, 'service-identity.json'), JSON.stringify({ ns }))
+    }
+
+    // Ninguno: se dice que no está enrolado y cómo enrolarlo.
+    assert.throws(() => serviceDir(null, 'aws'), /not enrolled/)
+
+    // Uno: se encuentra solo, sin `--vault`.
+    enrolar('cepi', 'aws')
+    assert.equal(serviceDir(null, 'aws'), path.join(raiz, 'cepi', 'aws'), 'no hay nada que elegir')
+
+    // Otro ns en otra bóveda no estorba: se sigue resolviendo por el nombre del cajón.
+    enrolar('seyacat', 'claude')
+    assert.equal(serviceDir(null, 'claude'), path.join(raiz, 'seyacat', 'claude'))
+    assert.equal(serviceDir(null, 'aws'), path.join(raiz, 'cepi', 'aws'))
+
+    // Dos con el MISMO ns: se para, y el error dice cuáles son para poder elegir.
+    enrolar('seyacat', 'aws')
+    assert.throws(() => serviceDir(null, 'aws'), (e) => {
+      assert.match(e.message, /more than one vault/)
+      assert.match(e.message, /cepi/); assert.match(e.message, /seyacat/)
+      assert.match(e.message, /--vault/, 'y dice cómo resolverlo')
+      return true
+    })
+    // Y con la etiqueta puesta, cada una va a la suya.
+    assert.equal(serviceDir('cepi', 'aws'), path.join(raiz, 'cepi', 'aws'))
+    assert.equal(serviceDir('seyacat', 'aws'), path.join(raiz, 'seyacat', 'aws'))
   })
 })
 

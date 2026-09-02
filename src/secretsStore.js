@@ -329,10 +329,25 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * Van TODAS sus generaciones, no solo la última, porque desde v5 cada variable puede
      * venir de una escritura distinta. En v3 devuelve los valores en claro, como siempre.
      */
-    bundleFor (ns, devicePub = null) {
+    /**
+     * @param {string} ns
+     * @param {string|null} devicePub
+     * @param {{publicOnly?: boolean}} [opts] `publicOnly`: SOLO las públicas, y sin
+     *   envolturas. Una pública está guardada en claro, así que no hay llave que repartir
+     *   ni sobre que abrir — y por eso pedirlas no pasa por la aprobación (ver `handleSecrets`).
+     */
+    bundleFor (ns, devicePub = null, { publicOnly = false } = {}) {
       assertNs(ns)
-      const entries = { ...entriesOf(data.ns, ns), ...(devicePub ? entriesOf(data.dev, devicePub) : {}) }
+      const todo = { ...entriesOf(data.ns, ns), ...(devicePub ? entriesOf(data.dev, devicePub) : {}) }
+      // EL FILTRO LO HACE LA BÓVEDA, no quien pide. Si mandara todo y el cliente eligiera,
+      // pedir «solo públicas» sería la forma de saltarse la aprobación y llevarse las
+      // privadas igual — o sea justo lo contrario de lo que se quiere.
+      const entries = publicOnly
+        ? Object.fromEntries(Object.entries(todo).filter(([, e]) => e.pub))
+        : todo
       if (isLegacy()) return { legacy: true, entries }
+      // Sin privadas no hay nada que envolver: el paquete va sin llavero.
+      if (publicOnly) return { entries, ns: null, dev: null, wraps: { ns: [], dev: [] } }
       const misWraps = (bag, k) => (bag[k]?.keyring || [])
         .filter((g) => g.wraps?.[devicePub])
         .map((g) => ({ gen: g.gen, wrap: g.wraps[devicePub] }))
