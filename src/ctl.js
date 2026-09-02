@@ -25,13 +25,15 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import tty from 'node:tty'
 import { pubkeyId } from '@dotrino/identity/capabilities'
-import { dataDir, readJson } from './paths.js'
+import { dataDir } from './paths.js'
+// EL CANAL LOCAL VA CIFRADO (ver `ipc.js`): por aquí salen la contraseña y los valores.
+import { ipcRead, ipcWrite } from './ipc.js'
 import { assertVar } from './secretsStore.js'
 import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
-import { readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
+import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
 import { VERSION } from './version.js'
 
 const dir = dataDir()
@@ -60,12 +62,7 @@ const withProfile = (obj) => (PROFILE ? { ...obj, profile: PROFILE } : obj)
  * escribirlo, así que escrito en el sitio se puede leer a medias — y una petición que no
  * parsea se pierde con todos sus datos.
  */
-const writeReq = (name, obj) => {
-  const dest = path.join(dir, name)
-  const tmp = dest + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(withProfile({ ...obj, at: Date.now() })), { mode: 0o600 })
-  fs.renameSync(tmp, dest)
-}
+const writeReq = (name, obj) => ipcWrite(path.join(dir, name), withProfile({ ...obj, at: Date.now() }))
 
 const R = '\x1b[31m', B = '\x1b[1m', Z = '\x1b[0m' // rojo / negrita / reset
 const D = '\x1b[2m' // apagado: para el dato que acompaña sin competir con el nombre
@@ -103,7 +100,7 @@ const RESTART_HINT = IN_DOCKER
     : 'cierra el vault y vuelve a arrancarlo'
 
 function readState () {
-  const s = readJson(stateFile, null)
+  const s = ipcRead(stateFile, null)
   if (!s) {
     console.error('El vault no parece haber arrancado todavía (no hay state.json en %s).', dir)
     console.error('Arráncalo:  %s', START_HINT)
@@ -318,7 +315,7 @@ async function cmdPair (args = []) {
   let pair = null
   for (let i = 0; i < 50; i++) {
     await sleep(100)
-    const p = readJson(pairFile, null)
+    const p = ipcRead(pairFile, null)
     assertOpen(p) // el candado se contesta por el mismo archivo, para no dejar esperando
     if (p?.expiresAt > Date.now()) { pair = p; break }
   }
@@ -357,7 +354,7 @@ async function cmdPair (args = []) {
   console.log('\nEsperando a que el dispositivo se conecte…  (Ctrl+C para salir)')
   for (let i = 0; i < 1500; i++) { // ~2.5 min
     await sleep(100)
-    const pe = readJson(pendingFile, null)
+    const pe = ipcRead(pendingFile, null)
     if (pe?.deviceId) { showChallenge(pe); return }
   }
   console.log('\nNingún dispositivo se conectó aún. Cuando lo haga:  dotrino-vault pending')
@@ -365,7 +362,7 @@ async function cmdPair (args = []) {
 
 function cmdPending () {
   requireDaemon()
-  const pe = readJson(pendingFile, null)
+  const pe = ipcRead(pendingFile, null)
   if (!pe?.deviceId) { console.log('No hay ningún dispositivo pendiente de aprobar.'); return }
   showChallenge(pe)
 }
@@ -441,7 +438,7 @@ async function cmdJoin (rest) {
   let visto = null
   for (let i = 0; i < 900; i++) {          // hasta 3 min: hay un humano tipeando al otro lado
     await sleep(200)
-    const d = readJson(res, null)
+    const d = ipcRead(res, null)
     if (!d) continue
     if (d.code && d.code !== visto) {
       visto = d.code
@@ -485,7 +482,7 @@ async function cmdMe () {
   writeReq('me-request.json', {})
   sendSignal(s.pid, 'SIGUSR2')
   let dump = null
-  for (let n = 0; n < 50; n++) { await sleep(100); const d = readJson(meFile, null); if (d?.at) { dump = d; break } }
+  for (let n = 0; n < 50; n++) { await sleep(100); const d = ipcRead(meFile, null); if (d?.at) { dump = d; break } }
   // El volcado es contenido del usuario: se lee y se BORRA, no se queda ahí suelto.
   try { fs.rmSync(meFile, { force: true }) } catch (_) {}
   if (!dump) { console.error('La bóveda no respondió. ¿Está corriendo?  dotrino-vault status'); process.exit(1) }
@@ -535,7 +532,7 @@ async function cmdMembers () {
   writeReq('dump-request.json', {})
   sendSignal(s.pid, 'SIGUSR2')
   let record = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(recordFile, null); if (a?.at) { record = a; break } }
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = ipcRead(recordFile, null); if (a?.at) { record = a; break } }
   if (!record) { console.error('El daemon no respondió.'); process.exit(1) }
   assertOpen(record)
   if (!record.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
@@ -615,7 +612,7 @@ async function findMember (id) {
   writeReq('dump-request.json', {})
   sendSignal(s.pid, 'SIGUSR2')
   let record = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const a = readJson(recordFile, null); if (a?.at) { record = a; break } }
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = ipcRead(recordFile, null); if (a?.at) { record = a; break } }
   assertOpen(record)
   const m = record?.members?.find((x) => x.id === String(id).toUpperCase())
   if (!m) { console.error('No hay ningún dispositivo con ese identificador. Míralos con: dotrino-vault members'); process.exit(1) }
@@ -695,7 +692,7 @@ async function cmdDevices () {
   writeReq('dump-request.json', {}) // de qué perfil queremos los dispositivos
   sendSignal(s.pid, 'SIGUSR2')
   let snap = null
-  for (let i = 0; i < 50; i++) { await sleep(100); const d = readJson(devFile, null); if (d?.at) { snap = d; break } }
+  for (let i = 0; i < 50; i++) { await sleep(100); const d = ipcRead(devFile, null); if (d?.at) { snap = d; break } }
   if (!snap) { console.error('El daemon no respondió.'); process.exit(1) }
   assertOpen(snap)
   const revoked = snap.revoked || []
@@ -775,6 +772,29 @@ function profileDir () {
 
 // DE DÓNDE SALE la clave que cifra el disco (`lib/src/kek.js`). Por defecto se deriva de
 // esta máquina; se puede pasar a un KMS, y entonces una copia del disco deja de servir.
+/**
+ * Archivos de un directorio que NO van cifrados y no tienen por qué estar ahí.
+ *
+ * La lista de excepciones es la misma que justifica el smoke `reposo.mjs` de
+ * `dotrino-test`: el salt y la huella son material del propio cifrado, el candado se lee
+ * antes de tener clave, `key.json` es una pública que dice de quién es la carpeta, y las
+ * preferencias no son de nadie. Todo lo demás en claro es un hallazgo.
+ */
+function enClaroEn (d) {
+  const OK = new Set(['atrest.salt', 'atrest.machine', 'atrest.kek', 'atrest.json', 'vault.lock', 'prefs.json', 'key.json'])
+  let names = []
+  try { names = fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name) } catch (_) { return [] }
+  return names.filter((n) => {
+    if (OK.has(n) || n.endsWith('.tmp')) return false
+    try {
+      const texto = fs.readFileSync(path.join(d, n), 'utf8')
+      if (!texto.trim()) return false
+      // La bitácora va cifrada línea a línea: basta con mirar la primera.
+      return !(n === 'activity.log' ? (texto.split('\n')[0] || '') : texto).startsWith('DOTRINO-ATREST-v1.')
+    } catch (_) { return false }
+  })
+}
+
 function cmdAtrest (rest) {
   // OJO: la clave es POR PERFIL. `dir` aquí dentro es el del perfil al que apunta el
   // comando (--profile, o el activo); la raíz de la bóveda es otra cosa y tiene la suya.
@@ -794,6 +814,20 @@ function cmdAtrest (rest) {
       console.log('  Una copia del disco NO basta: hace falta además poder desenvolverla.')
     }
     console.log('Archivos cifrados: ' + (archivos.length ? archivos.join(', ') : 'ninguno todavía'))
+
+    // Y LO QUE NO LO ESTÁ, que es la mitad que faltaba: listar lo cifrado no dice nada de
+    // lo que quedó fuera. Así apareció `profiles.json.pre041.bak` —un respaldo que una
+    // versión vieja dejó en claro, con el verificador de la contraseña dentro— meses
+    // después de que su migración terminara. Se mira el perfil Y la raíz, porque el canal
+    // local con la CLI vive arriba.
+    for (const [donde, d] of [['este perfil', dir], ['la raíz de la bóveda', vaultRoot]]) {
+      const sueltos = enClaroEn(d)
+      if (sueltos.length) {
+        console.log('')
+        console.log(`${R}En claro en ${donde}:${Z} ` + sueltos.join(', '))
+        console.log('  Si es un respaldo de una migración terminada, bórralo: no lo cifra nadie.')
+      }
+    }
 
     // ES POR PERFIL, y eso hay que verlo: en la misma bóveda un perfil puede ir con KMS
     // y el de al lado con la clave de la máquina. Sin esta lista, «lo puse en el KMS» es
@@ -898,6 +932,10 @@ function cmdActivity (n = 30) {
   try { lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean) } catch {
     console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
   }
+  // Cada entrada va cifrada por separado (ver `audit` en `vault.js`). `decrypt` deja pasar
+  // el texto en claro, así que una bitácora anterior a 0.89 se sigue leyendo entera.
+  const atRest = atRestFor(profileDir())
+  lines = lines.map((l) => { try { return atRest.decrypt(l) } catch { return l } })
   const ICON = { sign: '🖊 firma', renew: '♻ renovación', enroll: '➕ enrolado', revoke: '⛔ revocado', rejected: '🚫 RECHAZADO', secrets: '🔑 secretos leídos', 'secret.set': '🔑 secreto guardado', 'secret.rm': '🔑 secreto borrado' }
   for (const line of lines.slice(-n)) {
     try {
@@ -1011,7 +1049,7 @@ async function cmdSecret (rest) {
     sendSignal(s.pid, 'SIGUSR2')
     for (let i = 0; i < 50; i++) {
       await sleep(100)
-      const d = readJson(secretsListFile, null)
+      const d = ipcRead(secretsListFile, null)
       // El volcado lleva el valor de las públicas: se borra en cuanto se tiene, para que no
       // se quede esperando en el disco a que copien la carpeta (ver `daemon.js`).
       if (d?.at) { try { fs.rmSync(secretsListFile, { force: true }) } catch (_) {} ; return assertOpen(d) }
@@ -1056,8 +1094,8 @@ async function cmdSecret (rest) {
     'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
     'cambio de configuración y el servicio se reinicia a media carga.',
     '',
-    'Pública o privada dice UNA cosa: si al entregarla se te pide APROBACIÓN. Las dos se',
-    'guardan cifradas igual y ninguna enseña su valor en la consola. Se nace privada.'
+    'Pública o privada dice DOS cosas: si al entregarla se te pide APROBACIÓN, y si quien',
+    'administra puede ver su valor. Las dos se guardan cifradas igual. Se nace privada.'
   ].join('\n')
 
   /**
@@ -1335,7 +1373,7 @@ async function profileRequest (op, extra = {}) {
   sendSignal(s.pid, 'SIGUSR2')
   for (let i = 0; i < 100; i++) {
     await sleep(100)
-    const d = readJson(profilesFile, null)
+    const d = ipcRead(profilesFile, null)
     if (d?.at) return d
   }
   console.error('El daemon no respondió.'); process.exit(1)

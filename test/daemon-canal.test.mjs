@@ -19,6 +19,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+// EL CANAL LOCAL VA CIFRADO EN REPOSO (`src/ipc.js`): estas pruebas son un cliente más
+// de ese canal, así que escriben y leen con el MISMO códec que el daemon y la CLI.
+import { atRestFor } from '../src/atrest.js'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const DAEMON = path.join(ROOT, 'bin', 'dotrino-vaultd.js')
@@ -52,7 +55,7 @@ test('el daemon atiende una petición SIN que nadie le mande una señal (el caso
   assert.ok(await waitForFile(path.join(dir, 'state.json')), 'arrancó')
 
   // Esto es lo único que hace el CLI en Windows: dejar el archivo. Sin SIGUSR1.
-  fs.writeFileSync(path.join(dir, 'pair-request.json'), JSON.stringify({ at: Date.now() }))
+  fs.writeFileSync(path.join(dir, 'pair-request.json'), atRestFor(dir).encrypt(JSON.stringify({ at: Date.now() })))
 
   const served = await waitForFile(path.join(dir, 'pair.json'))
   p.kill()
@@ -106,9 +109,9 @@ test('y la respuesta a una petición NO se la pisa el repaso siguiente', async (
 
   const dev = path.join(dir, 'devices.json')
   fs.rmSync(dev, { force: true })
-  fs.writeFileSync(path.join(dir, 'dump-request.json'), JSON.stringify({ id: 'yo-1', at: Date.now() }))
+  fs.writeFileSync(path.join(dir, 'dump-request.json'), atRestFor(dir).encrypt(JSON.stringify({ id: 'yo-1', at: Date.now() })))
 
-  const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
+  const leer = () => { try { return JSON.parse(atRestFor(dir).decrypt(fs.readFileSync(dev, 'utf8'))) } catch { return null } }
   let d = null
   const until = Date.now() + 10000
   while (Date.now() < until && !(d = leer())?.at) await sleep(100)
@@ -145,14 +148,15 @@ test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', as
   try {
     // Un JSON cortado a la mitad: exactamente lo que ve el vigilante si mira mientras el
     // otro proceso escribe.
-    fs.writeFileSync(req, '{"id":"yo-2","at":')
+    const entera = atRestFor(dir).encrypt(JSON.stringify({ id: 'yo-2', at: Date.now() }))
+    fs.writeFileSync(req, entera.slice(0, Math.floor(entera.length / 2)))
     await sleep(3000)
     assert.ok(fs.existsSync(req), 'no se tira lo que no se pudo leer')
     assert.ok(!fs.existsSync(dev), 'y tampoco se contesta a medias')
 
     // Ahora entera: se atiende, y AHÍ sí se consume.
-    fs.writeFileSync(req, JSON.stringify({ id: 'yo-2', at: Date.now() }))
-    const leer = () => { try { return JSON.parse(fs.readFileSync(dev, 'utf8')) } catch { return null } }
+    fs.writeFileSync(req, atRestFor(dir).encrypt(JSON.stringify({ id: 'yo-2', at: Date.now() })))
+    const leer = () => { try { return JSON.parse(atRestFor(dir).decrypt(fs.readFileSync(dev, 'utf8'))) } catch { return null } }
     const until = Date.now() + 10000
     let d = null
     while (Date.now() < until && !(d = leer())?.at) await sleep(100)
@@ -166,7 +170,7 @@ test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', as
 
 test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const dir = tmp()
-  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ v: 2, pid: 999999 }))
+  fs.writeFileSync(path.join(dir, 'state.json'), atRestFor(dir).encrypt(JSON.stringify({ v: 2, pid: 999999 })))
   const { p } = start(dir)
   // Arrancó = `state.json` pasa a llevar SU pid (el archivo ya estaba, con el muerto).
   // Antes se esperaba a `profiles-list.json`, que el daemon volcaba solo cada dos
@@ -175,7 +179,7 @@ test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
   const until = Date.now() + 12000
   let ok = false
   while (Date.now() < until && !ok) {
-    const s = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8') || '{}')
+    const s = JSON.parse(atRestFor(dir).decrypt(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')) || '{}')
     ok = Number(s.pid) === p.pid
     if (!ok) await sleep(200)
   }

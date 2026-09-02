@@ -19,7 +19,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pubkeyId } from '@dotrino/identity/capabilities'
-import { dataDir, readJson } from './paths.js'
+import { dataDir } from './paths.js'
+// El canal local va cifrado en reposo (ver `ipc.js`).
+import { ipcRead, ipcWrite } from './ipc.js'
 import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
 
 const dir = dataDir()
@@ -49,7 +51,7 @@ const F = {
 }
 
 const p = (name) => path.join(dir, name)
-const read = (name, fb = null) => readJson(p(name), fb)
+const read = (name, fb = null) => ipcRead(p(name), fb)
 const rm = (name) => { try { fs.rmSync(p(name), { force: true }) } catch (_) {} }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -120,12 +122,10 @@ async function writeReq (name, obj, profile) {
   // nadie, se perdía: quien la había pedido esperaba seis segundos y leía «el daemon no
   // respondió», con el daemon sano. `rename` es atómico dentro del mismo sistema de
   // archivos, así que el vigilante o no ve nada, o ve la petición ENTERA.
-  const tmp = p(name) + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 })
-  fs.renameSync(tmp, p(name))
-  // `mode` de writeFileSync solo aplica al CREAR: re-chmod por si el archivo ya
-  // existía con permisos más laxos (defensa en profundidad; el dir ya es 0700).
-  try { fs.chmodSync(p(name), 0o600) } catch (_) {}
+  // `ipcWrite` hace las tres cosas: cifra en reposo, escribe en tmp y renombra, y deja
+  // el archivo en 0600 (el `mode` de `writeFileSync` solo aplica al CREAR, así que
+  // re-chmodea por si ya existía con permisos más laxos).
+  ipcWrite(p(name), body)
   return id
 }
 

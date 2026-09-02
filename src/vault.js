@@ -321,15 +321,30 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // AUDITORÍA: bitácora de actividad de seguridad (activity.log, JSONL) — qué
   // dispositivo firmó/renovó/enroló y qué se rechazó. `dotrino-vault activity`
   // la muestra. Sin contenido de payloads (privacidad): solo op, dispositivo, hora.
+  //
+  // VA CIFRADA, y una línea a la vez. Antes era el único archivo excluido del reposo, con
+  // el argumento de que «no guarda payloads»: no guarda valores, pero sí el mapa entero de
+  // la cuenta —qué aparatos hay, con qué permisos, contra qué cajones y a qué hora—, que
+  // es justo lo que quiere quien está eligiendo por dónde entrar. Y encima se creaba 0664,
+  // legible por cualquier usuario de la máquina.
+  //
+  // Cifrar por línea (y no el archivo entero) es lo que deja seguir AÑADIENDO: cada
+  // entrada se cierra sola, así que un `appendFileSync` sigue costando lo mismo y la
+  // rotación no necesita abrir nada.
   const activityFile = path.join(dir, 'activity.log')
+  const activityAtRest = atRestFor(dir)
   const audit = (op, info = {}) => {
     try {
-      fs.appendFileSync(activityFile, JSON.stringify({ ts: Date.now(), op, ...info }) + '\n')
+      const line = activityAtRest.encrypt(JSON.stringify({ ts: Date.now(), op, ...info }))
+      fs.appendFileSync(activityFile, line + '\n', { mode: 0o600 })
+      // El `mode` de `appendFileSync` solo aplica al CREAR: las bitácoras de antes de
+      // 0.89 ya existen con 0664 y hay que estrecharlas a mano.
+      try { if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600) } catch (_) {}
       // rotación simple: si pasa de ~1 MB, conservar la última mitad
       const st = fs.statSync(activityFile)
       if (st.size > 1024 * 1024) {
         const lines = fs.readFileSync(activityFile, 'utf8').split('\n')
-        fs.writeFileSync(activityFile, lines.slice(Math.floor(lines.length / 2)).join('\n'))
+        fs.writeFileSync(activityFile, lines.slice(Math.floor(lines.length / 2)).join('\n'), { mode: 0o600 })
       }
     } catch (_) {}
   }
@@ -1579,7 +1594,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function nsMembers (ns) {
     const record = (await identity.profileActa?.().catch(() => null))?.acta
-    return (record?.members || []).filter((m) => m.cn === ns)
+    if (!record) return []
+    // LLEVAR EL `cn` NO ES PODER LEER. El acta manda también aquí: un miembro entra en la
+    // lista si además puede leer los secretos de ese cajón (`memberCanReadSecrets`).
+    //
+    // Sin esa segunda mitad, el `cn` era la única puerta y `cn` es un texto libre: la LLAVE
+    // DE COMUNICACIÓN de la bóveda entra en el acta con `cn: 'vault'` y `caps: ['sign']`,
+    // así que un cajón llamado `vault` —nombre perfectamente válido— la contaba entre sus
+    // dueños. No llegaba a recibir sobre (no tiene `encPub`, y `recipientsFor` los filtra),
+    // pero la salvaguarda era un accidente: bastaba que alguien le apuntara una `encPub`
+    // para envolverle la llave a la llave que firma con la bóveda CERRADA. Se comprueba el
+    // permiso, que es lo que de verdad se quería preguntar.
+    return (record.members || []).filter((m) => m.cn === ns && Acta.memberCanReadSecrets(record, m.pub, ns))
   }
 
   /**

@@ -12,6 +12,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+// ESTA PRUEBA SE HACE PASAR POR EL DAEMON, así que escribe por el mismo canal que él — y
+// desde 0.89 ese canal va cifrado en reposo (`src/ipc.js`): por él pasan la contraseña del
+// perfil y los valores de las variables.
+import { atRestFor } from '../src/atrest.js'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-ctl-test-'))
 process.env.DOTRINO_VAULT_DIR = root
@@ -21,13 +25,15 @@ let vc
 // ------------------------------ daemon falso -------------------------------
 
 const P = (n) => path.join(root, n)
+/** El mismo códec que usan el daemon y la CLI. Se resuelve una vez: dentro cachea. */
+const canal = atRestFor(root)
 const writeAtomic = (n, obj) => {
   const f = P(n); const tmp = f + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify({ ...obj, at: Date.now() }), { mode: 0o600 })
+  fs.writeFileSync(tmp, canal.encrypt(JSON.stringify({ ...obj, at: Date.now() })), { mode: 0o600 })
   fs.renameSync(tmp, f)
 }
-const readReq = (n) => { try { const d = JSON.parse(fs.readFileSync(P(n), 'utf8')); fs.rmSync(P(n), { force: true }); return d } catch { return null } }
-const readRaw = (n) => { try { return JSON.parse(fs.readFileSync(P(n), 'utf8')) } catch { return null } }
+const readReq = (n) => { try { const d = JSON.parse(canal.decrypt(fs.readFileSync(P(n), 'utf8'))); fs.rmSync(P(n), { force: true }); return d } catch { return null } }
+const readRaw = (n) => { try { return JSON.parse(canal.decrypt(fs.readFileSync(P(n), 'utf8'))) } catch { return null } }
 const rm = (n) => { try { fs.rmSync(P(n), { force: true }) } catch {} }
 
 let model, pcount, nonce, paircount
@@ -182,7 +188,7 @@ before(async () => {
   // proceso se auto-señala como daemon falso; solo pasa en el test).
   try { if (process.report) process.report.reportOnSignal = false } catch {}
   resetModel()
-  fs.writeFileSync(P('state.json'), JSON.stringify({ v: 2, version: 'test', pid: process.pid, proxy: 'ws://test', current: model.current, profiles: model.profiles }))
+  fs.writeFileSync(P('state.json'), canal.encrypt(JSON.stringify({ v: 2, version: 'test', pid: process.pid, proxy: 'ws://test', current: model.current, profiles: model.profiles })))
   process.on('SIGUSR2', onUsr2)
   process.on('SIGUSR1', onUsr1)
   vc = await import('../src/vaultControl.js')
@@ -359,7 +365,7 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
   assert.ok(pair.expiresAt > Date.now())
 
   // simula un dispositivo conectándose (lo que escribiría el daemon real)
-  fs.writeFileSync(P('pending-enroll.json'), JSON.stringify({ v: 2, at: Date.now(), deviceId: 'AB12-CD34', label: 'móvil', profile: 'p1' }))
+  fs.writeFileSync(P('pending-enroll.json'), canal.encrypt(JSON.stringify({ v: 2, at: Date.now(), deviceId: 'AB12-CD34', label: 'móvil', profile: 'p1' })))
   const pe = vc.pendingEnroll()
   assert.equal(pe.deviceId, 'AB12-CD34')
 
@@ -375,7 +381,7 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
 })
 
 test('reject limpia el pendiente', async () => {
-  fs.writeFileSync(P('pending-enroll.json'), JSON.stringify({ v: 2, at: Date.now(), deviceId: 'EE99-FF00', profile: 'p1' }))
+  fs.writeFileSync(P('pending-enroll.json'), canal.encrypt(JSON.stringify({ v: 2, at: Date.now(), deviceId: 'EE99-FF00', profile: 'p1' })))
   assert.ok(vc.pendingEnroll())
   await vc.rejectPending('EE99-FF00', 'p1')
   assert.equal(vc.pendingEnroll(), null)
@@ -388,7 +394,7 @@ test('deviceIdOf: null → ????-????', async () => {
 test('daemon caído: señalar lanza DAEMON_DOWN', async () => {
   const saved = fs.readFileSync(P('state.json'), 'utf8')
   // pid imposible (nunca vivo)
-  fs.writeFileSync(P('state.json'), JSON.stringify({ ...JSON.parse(saved), pid: 2 ** 31 - 1 }))
+  fs.writeFileSync(P('state.json'), canal.encrypt(JSON.stringify({ ...JSON.parse(canal.decrypt(saved)), pid: 2 ** 31 - 1 })))
   assert.equal(vc.daemonAlive(), false)
   await assert.rejects(() => vc.listProfiles(), (e) => e.code === 'DAEMON_DOWN')
   fs.writeFileSync(P('state.json'), saved)

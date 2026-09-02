@@ -8,14 +8,25 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
+import { atRestFor } from './atrest.js'
 
-/** localStorage síncrono respaldado por un archivo JSON (solo lo que usan los paquetes). */
+/**
+ * localStorage síncrono respaldado por un archivo JSON (solo lo que usan los paquetes)
+ * **y cifrado en reposo**.
+ *
+ * Lo de cifrarlo no es celo: aquí `@dotrino/proxy-client` guarda su par de transporte, y
+ * ese par lleva su PRIVADA. Era el único archivo del vault con una llave privada en claro
+ * en el disco. No firma nada que el acta reconozca —quien habla por la bóveda es la llave
+ * de comunicación (`commKey.js`)—, pero sí es la identidad con la que esta bóveda se
+ * sienta en el proxio: con ella se ocupa su sitio y su cola de mensajes.
+ */
 export function fileLocalStorage (filePath) {
+  const atRest = atRestFor(path.dirname(filePath))
   let data = {}
-  try { if (fs.existsSync(filePath)) data = JSON.parse(fs.readFileSync(filePath, 'utf8')) || {} } catch (_) {}
+  try { if (fs.existsSync(filePath)) data = JSON.parse(atRest.decrypt(fs.readFileSync(filePath, 'utf8'))) || {} } catch (_) {}
   const flush = () => {
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
-    fs.writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 })
+    fs.writeFileSync(filePath, atRest.encrypt(JSON.stringify(data)), { mode: 0o600 })
   }
   return {
     getItem: (k) => (k in data ? data[k] : null),

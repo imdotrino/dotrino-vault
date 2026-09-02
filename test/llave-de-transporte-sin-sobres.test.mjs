@@ -18,7 +18,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CAPS, sealKeyAt } from '@dotrino/identity/acta'
+import { CAPS, sealKeyAt, memberCanReadSecrets } from '@dotrino/identity/acta'
 
 /** Un acta mínima con las dos zonas pobladas por llaves distintas. */
 const acta = {
@@ -78,4 +78,44 @@ test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
   }
   // Y `sealer`, que sí está, es sellar el ACTA — no la llave que firma las respuestas.
   assert.ok(CAPS.includes('sealer'))
+})
+
+/**
+ * LA LLAVE DE COMUNICACIÓN TAMPOCO. Es otro caso, y de los peligrosos: al revés que la de
+ * sellado, ESTA SÍ ES MIEMBRO del acta (entra con `cn: 'vault'` y `caps: ['sign']`, ver
+ * `src/commKey.js`), así que la garantía estructural de arriba —«no está en `members`»— no
+ * la cubre. Y firma con el perfil CERRADO: un sobre dirigido a ella sería una manera de
+ * leer secretos sin abrir la bóveda, que es exactamente lo que el candado impide.
+ *
+ * Dos cerrojos, y ninguno es un accidente:
+ *
+ *   1. **No tiene `encPub`.** Un sobre se cierra contra una pública de CIFRADO y esta es un
+ *      par de FIRMA. `recipientsFor` filtra por `encPub`, así que no hay a dónde envolver.
+ *   2. **El acta no le reconoce `secrets`.** Esta es la que faltaba: `nsMembers` miraba solo
+ *      el `cn`, y `cn` es texto libre — un cajón llamado `vault` (nombre válido) contaba a
+ *      la llave entre sus dueños. No llegaba a recibir sobre por el cerrojo 1, pero bastaba
+ *      apuntarle una `encPub` para que sí. Ahora se pregunta por el PERMISO.
+ */
+test('la llave de COMUNICACIÓN es miembro, pero el acta no la deja leer ningún cajón', () => {
+  const conVault = {
+    ...acta,
+    members: [
+      ...acta.members,
+      // Tal y como la mete `commKey.js`: sirve para hablar, no para leer.
+      { pub: 'LLAVE-DE-COMUNICACION', cn: 'vault', caps: ['sign'] }
+    ]
+  }
+  // El cajón que se llama como su `cn`: la trampa.
+  assert.equal(memberCanReadSecrets(conVault, 'LLAVE-DE-COMUNICACION', 'vault'), false,
+    'llevar el cn `vault` no puede bastar para abrir el cajón `vault`')
+  // Y ningún otro, por si acaso.
+  for (const ns of ['proxy', 'content', 'eco']) {
+    assert.equal(memberCanReadSecrets(conVault, 'LLAVE-DE-COMUNICACION', ns), false, ns)
+  }
+  // El servicio de verdad sí, que es lo que hace la comprobación significativa.
+  assert.equal(memberCanReadSecrets(conVault, 'SERVICIO-PROXY', 'proxy'), true)
+
+  // Cerrojo 1: sin llave de cifrado no hay sobre posible, tenga los permisos que tenga.
+  const comm = conVault.members.find((m) => m.pub === 'LLAVE-DE-COMUNICACION')
+  assert.equal(comm.encPub ?? null, null, 'es un par de FIRMA: no tiene pública de cifrado')
 })

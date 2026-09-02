@@ -18,12 +18,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { takeLock } from '../lib/src/lock.js'
 import { startVaultManager } from './manager.js'
-import { dataDir, writeJson, readJson } from './paths.js'
+import { dataDir } from './paths.js'
+// EL CANAL LOCAL VA CIFRADO: por aquí pasan la contraseña, los valores y las invitaciones.
+import { ipcRead, ipcWrite } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
 import { watchBinary } from './selfupdate.js'
 import { VERSION } from './version.js'
 
-const readJsonSafe = (f) => readJson(f, null)
+const readJsonSafe = (f) => ipcRead(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
 
 /**
@@ -73,7 +75,7 @@ export async function runDaemon () {
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId (y a QUÉ perfil
   // quiere entrar) para que el dueño lo compare con el del dispositivo y apruebe.
   const onEnrollChallenge = ({ deviceId, scope, profile, profileName }) => {
-    writeJson(pendingEnrollFile, { v: 2, at: Date.now(), deviceId, scope, profile, profileName })
+    ipcWrite(pendingEnrollFile, { v: 2, at: Date.now(), deviceId, scope, profile, profileName })
   }
 
   const mgr = await startVaultManager({ root: dir, proxyUrl, onEnrollChallenge })
@@ -86,7 +88,7 @@ export async function runDaemon () {
   // en `profiles`.
   const writeState = () => {
     const cur = mgr.summary().find((p) => p.current) || {}
-    writeJson(stateFile, {
+    ipcWrite(stateFile, {
       v: 2, version: daemonVersion, fingerprint: cur.fingerprint || null, iss: cur.iss || null,
       proxy: proxyUrl, pid: process.pid, startedAt: new Date().toISOString(),
       // Cuánto aguanta abierto el candado sin usarse. Va en la foto para que la consola
@@ -103,7 +105,7 @@ export async function runDaemon () {
   // contesta a lo mío». Sin esa marca, un repaso que caía en medio pasaba por respuesta:
   // el `unlock` se daba por hecho con la foto de cuando aún estaba cerrada, y un
   // «contraseña incorrecta» se perdía por el camino sin que nadie lo llegara a ver.
-  const dumpProfiles = (extra = {}) => { writeState(); writeJson(profilesFile, { v: 1, at: Date.now(), req: null, current: mgr.currentId(), profiles: mgr.summary(), ...extra }) }
+  const dumpProfiles = (extra = {}) => { writeState(); ipcWrite(profilesFile, { v: 1, at: Date.now(), req: null, current: mgr.currentId(), profiles: mgr.summary(), ...extra }) }
 
   console.log(`dotrino-vault · datos en ${dir} · proxy ${proxyUrl}`)
   for (const p of mgr.summary()) {
@@ -174,7 +176,7 @@ export async function runDaemon () {
       if (locked?.locked) {
         // Se responde por el MISMO archivo que espera quien pidió el QR: si no, se queda
         // mirando una pantalla vacía hasta que se agote el tiempo, sin saber por qué.
-        writeJson(pairFile, { v: 2, at: Date.now(), profile: locked.id, locked: true })
+        ipcWrite(pairFile, { v: 2, at: Date.now(), profile: locked.id, locked: true })
         return console.error('[vault] profile %s is locked: pairing refused', locked.id)
       }
       const vault = targetOf(pairReq)
@@ -189,7 +191,7 @@ export async function runDaemon () {
       const ALLOWED = (x) => x === 'vault:sign' || x === 'vault:read' || x === 'vault:store' || /^vault:secrets:[a-z0-9-]{1,32}$/.test(x)
       const asked = Array.isArray(pairReq?.scope) ? pairReq.scope.filter((x) => typeof x === 'string') : null
       if (asked && asked.some((x) => !ALLOWED(x))) {
-        writeJson(pairFile, { v: 2, at: Date.now(), error: 'scope not allowed: ' + asked.filter((x) => !ALLOWED(x)).join(',') })
+        ipcWrite(pairFile, { v: 2, at: Date.now(), error: 'scope not allowed: ' + asked.filter((x) => !ALLOWED(x)).join(',') })
         return console.error('[vault] pairing refused: scope not allowed (%s)', asked.join(','))
       }
       const scope = asked?.length
@@ -213,7 +215,7 @@ export async function runDaemon () {
       //               crea uno vacío), o no habría dónde meterla.
       const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
       const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
-      writeJson(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
+      ipcWrite(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
       const tok = qr.token
@@ -394,7 +396,7 @@ export async function runDaemon () {
         // esta consola: quien aprobaba desde la TUI leía «Dispositivo aprobado», el
         // pendiente desaparecía de la pantalla y el aparato seguía esperando al otro lado
         // sin que nadie pudiera reintentar.
-        const answer = (extra) => writeJson(approveFile, { v: 1, at: Date.now(), req: appr.id || null, ...extra })
+        const answer = (extra) => ipcWrite(approveFile, { v: 1, at: Date.now(), req: appr.id || null, ...extra })
         try {
           const vault = targetOf(appr)
           if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
@@ -482,7 +484,7 @@ export async function runDaemon () {
           const off = id.onVault?.((e) => {
             if (e?.phase === 'challenge' && e.code) {
               console.log('[vault] type this code in the other vault:  %s', e.code)
-              writeJson(joinResFile, { at: Date.now(), code: e.code, state: 'waiting', profile: p.id })
+              ipcWrite(joinResFile, { at: Date.now(), code: e.code, state: 'waiting', profile: p.id })
             }
           })
           // `'current'` y no `'new'`: el perfil que se acaba de crear ES el sitio, y su
@@ -498,13 +500,13 @@ export async function runDaemon () {
           // vacío no es más que un accidente del primer arranque.
           try { mgr.profiles.setCurrent(p.id) } catch (_) {}
           console.log('[vault] joined the account of the other vault (record #%s) as profile %s (now the active one)', r?.acta?.seq ?? '?', p.id)
-          writeJson(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null, profile: p.id })
+          ipcWrite(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null, profile: p.id })
         } catch (e) {
           console.error('[vault] could not join:', e.message)
           // El perfil nació para esto y está vacío: si el intento no llegó a término se va
           // con él. Si no, cada reintento dejaba una cuenta fantasma en el conmutador.
           if (nacido) { try { await mgr.remove(nacido) } catch (_) {} }
-          writeJson(joinResFile, { at: Date.now(), state: 'error', error: e.message })
+          ipcWrite(joinResFile, { at: Date.now(), state: 'error', error: e.message })
         }
       }
       // Secretos: `secret set/rm` (por SCOPE) y `secret device set/rm` (por APARATO),
@@ -641,12 +643,12 @@ export async function runDaemon () {
         // nombres de variables, ni acta. Antes el candado no tapaba ninguna de las tres.
         const closed = { v: 1, at: Date.now(), req: reqId, profile: t.id, locked: true }
         if (dumpReq) {
-          writeJson(secretsListFile, { ...closed, ns: {}, dev: [] })
-          writeJson(devFile, { ...closed, issued: [], revoked: [] })
-          writeJson(path.join(dir, 'acta.json'), { ...closed, members: [] })
+          ipcWrite(secretsListFile, { ...closed, ns: {}, dev: [] })
+          ipcWrite(devFile, { ...closed, issued: [], revoked: [] })
+          ipcWrite(path.join(dir, 'acta.json'), { ...closed, members: [] })
         }
         rm(meReqFile)
-        if (meReq) writeJson(meFile, { ...closed, req: meReq.id || null, me: null })
+        if (meReq) ipcWrite(meFile, { ...closed, req: meReq.id || null, me: null })
         return
       }
       if (dumpReq) {
@@ -658,7 +660,7 @@ export async function runDaemon () {
         // en cuanto lo tiene). Es material que su dueño marcó como mostrable, y aquí ya
         // viaja a un navegador; lo que NO puede pasar es que se quede en el disco esperando
         // a que alguien copie la carpeta, porque eso sí burlaría el cifrado en reposo.
-        writeJson(secretsListFile, {
+        ipcWrite(secretsListFile, {
           v: 2, at: Date.now(), req: reqId, profile: t.id,
           ns: t.vault.listSecrets(),
           dev: await t.vault.listDeviceSecrets(),
@@ -676,9 +678,9 @@ export async function runDaemon () {
         lastSecretError = null
         lastSecretValue = null
         lastSecretHistory = null
-        writeJson(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
+        ipcWrite(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
         // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
-        try { writeJson(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+        try { ipcWrite(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
       }
 
       // PERFIL del usuario (apodo, foto, datos) tal como lo tiene la bóveda: `dotrino-vault me`.
@@ -692,7 +694,7 @@ export async function runDaemon () {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
           const { me } = tm.vault.threads.methods.profileGet()
           const { avatar, ...rest } = me || {}
-          writeJson(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...rest, avatar: avatarInfo(avatar) } : null })
+          ipcWrite(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...rest, avatar: avatarInfo(avatar) } : null })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
     } catch (e) {
@@ -806,8 +808,8 @@ export async function runDaemon () {
     const hecho = readJsonSafe(marca)
     if (hecho?.sn === qr.sn) return // ya se usó: un reinicio no vuelve a pedir entrar
 
-    writeJson(marca, { at: Date.now(), sn: qr.sn, ...(qr.iss ? { iss: qr.iss } : {}) })
-    writeJson(path.join(dir, 'join-request.json'), {
+    ipcWrite(marca, { at: Date.now(), sn: qr.sn, ...(qr.iss ? { iss: qr.iss } : {}) })
+    ipcWrite(path.join(dir, 'join-request.json'), {
       qr,
       label: 'bóveda',
       ...(process.env.DOTRINO_JOIN_NAME ? { name: process.env.DOTRINO_JOIN_NAME } : {})
