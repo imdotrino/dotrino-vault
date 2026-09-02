@@ -79,7 +79,7 @@ export function createPasswordDesk (opts = {}) {
       // el criterio del vault es apuntar la operación, no el payload.
       audit('passwords', { op: r.op, outcome: r.outcome, device: (r.from || '').slice(0, 24) })
       if (r.outcome !== 'served') {
-        log('[vault] passwords: %s %s', r.op, r.outcome)
+        log(`[vault] passwords: ${r.op} ${r.outcome}`)
       }
     },
   })

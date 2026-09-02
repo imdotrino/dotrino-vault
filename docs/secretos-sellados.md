@@ -602,3 +602,92 @@ mismo acredita, con vida corta— en vez de a un miembro concreto. El cerrojo 3 
 se vuelve entonces *«la pública viene del aval del servicio, y el aval caduca»*, que es
 un modelo distinto y hay que pensarlo con calma: es abrirle a un servicio la puerta de
 decidir quién lee lo suyo.
+
+## 9. Nada en claro en el disco, y quién no recibe sobres (2026-09-02)
+
+> Dos preguntas del dueño mirando el directorio de datos: *«ninguna información debería
+> estar en claro»* y *«¿dónde se almacena la llave de comunicación? ¿se puede garantizar
+> que esa llave no reciba ningún sobre?»*.
+
+### 9.1. Lo que quedaba en claro, y por qué nadie lo veía
+
+La bóveda cifraba en reposo sus **almacenes** desde hacía meses (`identity.json`,
+`vault.json`, `threads.json`, `secrets.json`). Tres cosas quedaban fuera porque no se
+contaban como «datos»:
+
+| Qué | Qué llevaba dentro |
+|---|---|
+| **el canal local con la CLI** (`state.json`, `acta.json`, `secret-request.json`…) | **la contraseña del perfil**, el **valor** de cada variable que guardas, el acta con sus permisos, el volcado de certificados |
+| **`transport.json`** | la **privada** del par de transporte de `@dotrino/proxy-client` |
+| **`activity.log`** | el mapa de la cuenta: qué aparatos, con qué permisos, contra qué cajones y a qué hora — y creado **0664**, legible por cualquier usuario de la máquina |
+
+El canal es el que más duele: el daemon y `dotrino-vault` no hablan por un socket, se
+dejan archivos JSON. Que fueran efímeros no salvaba nada — se escriben en el disco igual,
+y un `rm` no borra lo que ya se copió.
+
+Desde **0.89** los tres van por el mismo cifrado en reposo (`src/ipc.js` para el canal;
+la bitácora **línea a línea**, que es lo que deja seguir añadiendo). Desde **0.90**, lo
+que ya estaba escrito **se convierte al arrancar**: cifrar solo lo nuevo deja el disco en
+claro durante meses.
+
+**Por qué en reposo y no en un sobre.** Un sobre se cierra contra la pública de quien va a
+abrirlo, y aquí el que abre es la CLI del propio usuario, que no tiene llave propia;
+inventarle una la dejaría en el mismo disco y al lado. **El sobre es para lo que VIAJA;
+para lo que se queda en la máquina, el reposo.** Y el acta que sí viaja **no se puede
+sellar**: el proxio tiene que leerla para comprobar que quien habla es miembro
+(`verifyActaMembership`), así que va firmada y legible, que es justo su trabajo.
+
+Lo único que queda en claro, y con motivo:
+
+| Archivo | Por qué |
+|---|---|
+| `atrest.salt` | es el salt DEL cifrado: no puede ir cifrado con él |
+| `atrest.machine` | un SHA-256 del material de la máquina; **avisa** de un cambio de máquina, no abre nada |
+| `atrest.json` / `atrest.kek` | qué proveedor cifra, y la DEK envuelta por él |
+| `vault.lock` | el candado entre procesos: se lee antes de tener clave |
+| `key.json` | la **pública** que dice de quién es la carpeta; hay que leerla antes de poder descifrar (`keyowner.js`) |
+| `prefs.json` | el idioma de la interfaz |
+
+`dotrino-vault atrest status` lista ahora las dos mitades: lo cifrado **y lo que quedó en
+claro**. Es como apareció `profiles.json.pre041.bak`, un respaldo que una versión vieja
+dejó en texto plano **con el verificador de la contraseña dentro**, meses después de que
+su migración terminara.
+
+Y hay un smoke que lo afirma sobre una bóveda de verdad: `dotrino-test/smoke/reposo.mjs`
+la hace trabajar, le recorre el disco entero y busca el valor, la contraseña y cualquier
+`"d":` de un JWK por todos los bytes.
+
+### 9.2. La llave de comunicación: dónde vive y por qué no recibe sobres
+
+**Dónde:** `p/<perfil>/commkey.json`, cifrada en reposo con la llave de la máquina y en
+0600. Dentro, un par ECDSA P-256 (`{ v, pub, priv, createdAt }`). **No** va bajo la
+contraseña, y es a propósito: es la que firma cuando el perfil está CERRADO — si
+necesitara la frase, una bóveda cerrada no existiría en la red (ver `src/commKey.js`).
+
+**Por qué la pregunta importa:** un sobre dirigido a ella sería una forma de leer secretos
+**sin abrir la bóveda**, que es exactamente lo que el candado impide. Y al revés que la
+llave de SELLADO —que no es miembro del acta, y por eso su garantía es que no existe
+camino—, **esta sí es miembro**, así que hace falta decir algo más fuerte que «no está en
+la lista».
+
+Son tres cerrojos, y ninguno es un accidente:
+
+1. **No hay a dónde envolver.** Un sobre se cierra contra una pública de **cifrado** y
+   esta es un par de **firma**: no tiene `encPub` en el acta, y `recipientsFor` filtra por
+   `encPub`. Sin ella, no hay envoltura posible aunque alguien la pidiera.
+2. **El acta no le reconoce `secrets`.** Entra con `cn: 'vault'` y `caps: ['sign']`. Este
+   cerrojo es el que faltaba: `nsMembers` miraba **solo el `cn`**, y `cn` es texto libre —
+   un cajón llamado `vault` (nombre perfectamente válido) la contaba entre sus dueños. No
+   llegaba a recibir sobre por el cerrojo 1, pero la salvaguarda era estructural por
+   casualidad: bastaba apuntarle una `encPub` para envolverle la llave a la llave que
+   firma con la bóveda cerrada. Desde 0.89 se pregunta por `memberCanReadSecrets`.
+3. **No puede conseguir una `encPub`.** La única puerta es `handleEncKey`, que exige una
+   cadena de certificados válida con scope `vault:secrets:<ns>` **y** `memberCanReadSecrets`.
+   La llave de comunicación **no tiene certificado** —entra por `admitMember`, no se
+   enrola— y no tiene `secrets`. Dos noes independientes.
+
+Y tampoco entra por las otras dos puertas: `adminDevices` exige `!m.cn` (ella lleva uno) y
+`cosealerMembers` exige `sealer` + `encPub` (no tiene ninguno de los dos).
+
+Comprobado, no razonado: `smoke/reposo.mjs` crea un cajón llamado **`vault`** —su propio
+`cn`— y afirma que su llave no aparece en **ninguna** envoltura de **ningún** cajón.

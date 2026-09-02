@@ -80,7 +80,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
   }
 
   const migrated = await profiles.migrate(mintKey)
-  if (migrated?.migrated) log('[vault] identidad mono-perfil migrada al perfil %s', migrated.id)
+  if (migrated?.migrated) log('[vault] single-profile identity migrated to profile %s', migrated.id)
 
   const running = new Map() // id -> instancia de startVault
 
@@ -121,7 +121,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       id = await profiles.ensureNamedByKey(p.id, mintKey)
       if (id !== p.id) log('[vault] profile %s renamed to %s (the folder is named after its key)', p.id, id)
     } catch (e) { log('[vault] could not name the folder of %s after its key: %s', p.id, e.message) }
-    try { await open(id) } catch (e) { log('[vault] no se pudo abrir el perfil %s: %s', id, e.message) }
+    try { await open(id) } catch (e) { log('[vault] could not open profile %s: %s', id, e.message) }
   }
 
   const get = (id) => {
@@ -179,7 +179,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     async add (name, { adopt = false, kek = null } = {}) {
       const p = await profiles.add(name, { adopt, kek, mintKey })
       await open(p.id)
-      log('[vault] perfil creado%s: %s (%s)', adopt ? ' (a la espera de adoptar una cuenta)' : '', p.name || '(sin nombre)', p.id)
+      log('[vault] profile created%s: %s (%s)', adopt ? ' (waiting to adopt an account)' : '', p.name || '(no name)', p.id)
       return profiles.get(p.id)
     },
 
@@ -209,7 +209,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       const res = profiles.remove(id) // valida: no es el único, no está bloqueado
       try { running.get(id)?.close() } catch (_) {}
       running.delete(id)
-      log('[vault] perfil borrado: %s (%s)', res.name || '(sin nombre)', id)
+      log('[vault] profile deleted: %s (%s)', res.name || '(no name)', id)
       return res
     },
 

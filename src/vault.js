@@ -345,7 +345,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Escribir aparte y renombrar: a medio convertir, la bitácora sería ilegible entera.
       fs.writeFileSync(activityFile + '.tmp', convertidas.join('\n'), { mode: 0o600 })
       fs.renameSync(activityFile + '.tmp', activityFile)
-      log('[vault] activity log: %d line(s) sealed at rest', convertidas.filter(Boolean).length)
+      // Sin `%d`: el `log` de la bóveda no formatea, así que el placeholder salía literal.
+      log(`[vault] activity log: ${convertidas.filter(Boolean).length} line(s) sealed at rest`)
     }
     // Y el modo, que hasta 0.89 se creaba 0664: legible por cualquier usuario.
     if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600)
@@ -1187,7 +1188,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit,
       log,
     }).start()
-    log('[vault] passwords: serving %d device(s)', passwordDevices().length)
+    log(`[vault] passwords: serving ${passwordDevices().length} device(s)`)
   }
   try {
     // El acta ANTES de mirarla: es ella la que dice si hay a quién responder, y sin
@@ -1201,7 +1202,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Ni código de enlace ni pegar nada: un gestor entra como cualquier otro aparato.
     else log('[vault] passwords: no device may ask yet · pair one with `dotrino-vault pair --scope contrasenas`')
   } catch (e) {
-    log('[vault] passwords: no se pudo levantar (%s); el resto sigue igual', e.message)
+    log(`[vault] passwords: could not start (${e.message}); everything else keeps going`)
   }
 
   log(`[vault] listo · id ${fp} · ${store.getTree().children.length} nodos`)

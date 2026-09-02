@@ -225,7 +225,7 @@ export async function runDaemon () {
       }, expiresInMs + 1000).unref?.()
       console.log('[vault] pairing started (valid for %d min)', expiresInMs / 60000)
     } catch (e) {
-      console.error('[vault] no se pudo iniciar emparejamiento:', e.message)
+      console.error('[vault] could not start pairing:', e.message)
     }
   }
 
@@ -413,7 +413,7 @@ export async function runDaemon () {
             } catch (e) { console.error('[vault] could not grant admin: %s', e.message) }
           }
           pendingAdmin = false
-          console.log('[vault] aprobado %s', r.deviceId)
+          console.log('[vault] approved %s', r.deviceId)
           answer({ ok: true, deviceId: r.deviceId || null })
         } catch (e) {
           console.error('[vault] approval failed:', e.message)
@@ -440,7 +440,7 @@ export async function runDaemon () {
         rm(path.join(dir, 'caps-request.json'))
         try {
           await targetOf(capsReq)?.setCaps(capsReq.pub, capsReq.caps)
-          console.log('[vault] permissions updated: %s', capsReq.caps.join(', ') || '(ninguno)')
+          console.log('[vault] permissions updated: %s', capsReq.caps.join(', ') || '(none)')
         } catch (e) { console.error('[vault] could not change permissions:', e.message) }
       }
       // Quitar un dispositivo: se pide por `sub` (la llave del aparato). `nonce` sigue
