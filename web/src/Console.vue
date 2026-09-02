@@ -167,6 +167,9 @@ const T = {
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda:  dotrino-vault caps <ID> +aprueba',
+    apv_profile: 'Pedidos de tu perfil',
+    apv_other: 'Estos pedidos no son de tu perfil abierto, son de otro. Ábrelo para verlos:',
+    apv_switch: 'Abrir este perfil',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
@@ -312,6 +315,9 @@ const T = {
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     apv_nocap: 'This device does not approve requests. Grant it from the vault:  dotrino-vault caps <ID> +aprueba',
+    apv_profile: 'Requests for your profile',
+    apv_other: 'These requests are not for the profile you have open, they are for another one. Open it to see them:',
+    apv_switch: 'Open this profile',
     var_t: 'Your apps\u2019 variables',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
     var_shared: 'used by every machine',
@@ -625,6 +631,15 @@ onMounted(async () => {
   // reanuncia y sale un código nuevo.
   const payload = pairOnly.value ? extractPayload(location.hash) : null
   if (payload) announce(payload)
+  // PEDIDOS: los perfiles ANTES que nada. Si el que aprueba es otro y no hay dónde
+  // elegir, se salta a él y la página se recarga — preguntar por los pedidos del perfil
+  // equivocado solo sirve para enseñar «no hay nada» y que parezca que se perdió.
+  // Va aquí, y no en su propio `onMounted`, porque aquí `id` ya está conectado: esperarlo
+  // con un temporizador desde otro sitio es una carrera, no una espera.
+  if (approvalsOnly.value) {
+    await refreshProfiles()
+    if (await jumpToApprover()) return
+  }
   offVault = id.value.onVault?.((e) => {
     if (e?.phase === 'acta' || e?.phase === 'renounced') refresh()
     // Nos echaron, y va FIRMADO por la maestra: el enlace y el acta ya se borraron solos.
@@ -1043,6 +1058,62 @@ const toggleMember = (key) => toggleIn(openMembers, key)
 const toggleGroup = (key) => toggleIn(openGroups, key)
 const approvals = ref([])
 let apvTimer = null
+
+/**
+ * EL PEDIDO ES DE UN PERFIL, Y PUEDE NO SER EL ACTIVO.
+ *
+ * En un teléfono con varios perfiles, el timbre llega a la llave de UNO de ellos. La
+ * página abría con el que estuviera activo y, si no era ese, decía «este aparato no
+ * aprueba pedidos» — que es falso: el que aprueba es otro perfil. Y no había manera de
+ * enterarse: ni de cuál era, ni de que el problema fuera ese.
+ *
+ * Ahora la lista de perfiles dice cuál está conectado a una bóveda y cuál aprueba
+ * (`listProfiles` los trae leyendo el cert de cada uno, sin tocar el activo). Con eso la
+ * pantalla puede llevarte al perfil correcto en vez de mentirte.
+ *
+ * El timbre NO dice a qué perfil llamó, y así se queda: el aviso viaja por FCM, o sea por
+ * Google, y ahí no se mete nada que identifique la cuenta. Por eso la elección se resuelve
+ * AQUÍ, con lo que ya está en el aparato.
+ */
+const profiles = ref([])
+/** Los perfiles que pueden aprobar. Es lo que decide a dónde te lleva esta pantalla. */
+const apvProfiles = computed(() => profiles.value.filter((p) => p.approve))
+const apvCurrent = computed(() => profiles.value.find((p) => p.current) || null)
+/** Se llegó por el timbre (`#ring`), no a mano: entonces sí vale saltar de perfil solo. */
+const cameFromRing = () => /(^|[#&])ring\b/.test(location.hash || '')
+
+async function refreshProfiles () {
+  try { profiles.value = await id.value.listProfiles() } catch (_) { profiles.value = [] }
+}
+
+/**
+ * SALTAR AL PERFIL QUE APRUEBA, pero solo cuando no hay nada que elegir.
+ *
+ * Si el activo no aprueba y hay EXACTAMENTE uno que sí, no hay decisión que tomar: se
+ * cambia y se recarga (cambiar de perfil no es reactivo, por diseño). Con dos o más se
+ * pregunta — elegir por ti cuál de tus cuentas usar no es una comodidad, es un error caro.
+ *
+ * `sessionStorage` corta el bucle: cambiar de perfil recarga la página, y sin la marca
+ * volvería a entrar aquí una y otra vez si el cambio no bastara.
+ */
+const JUMPED = 'dotrino.apv.jumped'
+async function jumpToApprover () {
+  if (!cameFromRing() || apvCurrent.value?.approve) return false
+  const solo = apvProfiles.value
+  if (solo.length !== 1) return false
+  try { if (sessionStorage.getItem(JUMPED) === solo[0].id) return false } catch (_) {}
+  try { sessionStorage.setItem(JUMPED, solo[0].id) } catch (_) {}
+  await id.value.switchProfile(solo[0].id)
+  location.reload()
+  return true
+}
+
+/** Cambiar de perfil a mano desde esta pantalla. Recarga: el perfil no es reactivo. */
+const apvSwitch = (p) => run('apv-sw-' + p.id, async () => {
+  await id.value.switchProfile(p.id)
+  location.reload()
+})
+
 async function refreshApprovals () {
   try {
     canApprove.value = await id.value.canApproveVault()
@@ -1065,7 +1136,16 @@ async function registerNativePush (detail) {
   const token = detail?.token || (typeof window.DotrinoNative?.pushToken === 'function' ? window.DotrinoNative.pushToken() : null)
   if (!token) return
   try {
-    const key = 'dotrino-native-push'
+    // LA MARCA VA POR PERFIL, y ese era el fallo.
+    //
+    // El token se registra en el proxio bajo la llave del APARATO, que es distinta en cada
+    // perfil. La marca de «ya está registrado», en cambio, era una sola para todo el sitio:
+    // en cuanto un perfil registraba, el segundo salía por aquí sin registrar nunca. O sea
+    // que con dos perfiles el teléfono solo timbraba para uno, y del otro no te enterabas.
+    // El proxio guarda una suscripción POR LLAVE, así que el mismo token en dos perfiles es
+    // exactamente lo que hay que hacer.
+    const me = (await id.value.currentProfile().catch(() => null))?.id || 'p'
+    const key = 'dotrino-native-push.' + me
     if (localStorage.getItem(key) === token) return
     await id.value.registerPush({ kind: detail?.kind || 'fcm', token })
     try { localStorage.setItem(key, token) } catch (_) {}
@@ -1308,6 +1388,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <!-- /approvals: SOLO pedir el sí o el no. Lo administrativo vive en /vault. -->
       <template v-if="canApprove">
         <h2>{{ t.apv_t }}</h2>
+        <!-- DE QUÉ PERFIL son estos pedidos. Con uno solo sobra decirlo. -->
+        <p v-if="profiles.length > 1" class="muted" data-testid="apv-profile">
+          {{ t.apv_profile }} <b>{{ apvCurrent?.name || '—' }}</b>
+        </p>
         <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
         <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
           <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
@@ -1316,6 +1400,21 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
         </div>
         <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+      </template>
+      <!--
+        EL PERFIL EQUIVOCADO NO ES «NO APRUEBAS».
+        Antes todo lo que no fuera «puedo aprobar» caía en el mismo cartel, que manda a
+        conceder un permiso que ya está concedido — en otro perfil. Se separan los casos:
+        aquí aprueba otro perfil (y se ofrece), o de verdad no aprueba ninguno.
+      -->
+      <template v-else-if="apvProfiles.length">
+        <h2>{{ t.apv_t }}</h2>
+        <p class="muted" data-testid="apv-other">{{ t.apv_other }}</p>
+        <div v-for="p in apvProfiles" :key="p.id" class="pending" data-testid="apv-switch-item">
+          <span><b>{{ p.name || p.id }}</b></span>
+          <button class="btn sm" data-testid="apv-switch"
+                  :disabled="busy === 'apv-sw-' + p.id" @click="apvSwitch(p)">{{ t.apv_switch }}</button>
+        </div>
       </template>
       <p v-else class="muted" data-testid="apv-nocap">{{ t.apv_nocap }}</p>
     </template>
