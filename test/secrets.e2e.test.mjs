@@ -915,8 +915,15 @@ test('un cajón con servicio dueño NO lleva envoltura de quien administra', asy
 })
 
 /**
- * LA DELEGACIÓN (§8.11): quien reparte la llave a un aparato nuevo es OTRO SERVICIO del
- * mismo cajón, no la bóveda ni quien administra.
+ * LA DELEGACIÓN (§8.11): quien ENVUELVE la llave para un aparato nuevo es otro servicio del
+ * mismo cajón — pero **se la entrega A LA BÓVEDA, que es quien la reparte**.
+ *
+ * Precisión del dueño (2026-09-01): «un servicio reparte la llave AL VAULT para que este la
+ * reparta después, pero no se la entrega directo; si lo hace sin pasar por el vault está
+ * mal». Y así está: la bóveda le PIDE el sobre al hermano (`REWRAP`), el hermano le contesta
+ * A ELLA, y ella lo guarda (`putWrap`). El recién llegado no habla con nadie, y la bóveda
+ * nunca ve la llave en claro —el sobre ya viene cerrado a la pública del destinatario—, que
+ * es lo que permite que esto funcione con el perfil cerrado.
  *
  * Es el caso normal, no un rincón: cualquier segundo servicio de un `ns` entra después
  * de que sus variables ya estén escritas, y la bóveda no puede envolvérselas —hacerlo
@@ -929,7 +936,7 @@ test('un cajón con servicio dueño NO lleva envoltura de quien administra', asy
  */
 const PHRASE_KEY = new Uint8Array(32).fill(7)
 
-test('un servicio le reparte la llave del cajón a otro que entra después', async () => {
+test('un servicio le entrega la llave A LA BÓVEDA y ella se la reparte al que entra después', async () => {
   const ns = 'delegado'
   const { enrollService, fetchSecrets, watchSecretsChanges } = await import('../lib/src/service.js')
 

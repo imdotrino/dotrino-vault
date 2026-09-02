@@ -1826,6 +1826,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * @returns {Promise<{ done: number, asked: number }>}
    */
+  /**
+   * PEDIRLE A UN HERMANO QUE ENVUELVA — Y QUE SE LO ENTREGUE A LA BÓVEDA (§8.11).
+   *
+   * Regla del dueño (2026-09-01): «un servicio reparte la llave AL VAULT para que este la
+   * reparta después, pero no se la entrega directo; si lo hace sin pasar por el vault está
+   * mal». Es lo que hace este camino, y conviene verlo en el orden de las líneas:
+   *
+   *   1. la BÓVEDA le pide el sobre al hermano (`sendByPubkey` → `REWRAP`);
+   *   2. el hermano le contesta A ELLA, nunca al recién llegado;
+   *   3. la BÓVEDA lo guarda (`putWrap`) y a partir de ahí lo sirve ella.
+   *
+   * El destinatario no habla con nadie, y la bóveda nunca ve la llave en claro: el sobre
+   * llega ya cerrado a la pública del destinatario. Por eso esto funciona con el perfil
+   * cerrado, que es justo cuando hace falta.
+   */
   async function delegateRewrap (owner, targetPub, { timeoutMs = 15000 } = {}) {
     const ns = owner.startsWith('ns:') ? owner.slice(3) : null
     if (!ns) return { done: 0, asked: 0 }
