@@ -1950,7 +1950,50 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return r
   }
 
+  /**
+   * MIGRACIÓN, CON FECHA: la copia de recuperación pudo quedar sellada con la llave de la
+   * MÁQUINA aunque el perfil tenga contraseña.
+   *
+   * Pasa por un camino perfectamente normal: escribir una variable NO pide la frase (§8.1),
+   * así que si el cajón se estrenó con el perfil cerrado, `ensureRecovery` la selló con lo
+   * único que había — la llave de la máquina. A partir de ahí, abrir el perfil y reenvolver
+   * pasa la llave de la CONTRASEÑA, que no abre ese sobre: «wrong password», el llavero no
+   * se rehace, y los servicios se quedan sin poder leer sus cajones para siempre. Es
+   * exactamente lo que le pasó a un perfil real el 2026-09-01.
+   *
+   * Aquí se abre con la de la máquina y se vuelve a cerrar con la de la contraseña, que es
+   * el `rekey` que aquel `password-set` no llegó a hacer. NO es un repliegue: no decide un
+   * permiso, no deja pasar a nadie, y **se acaba** — al primer desbloqueo el sobre queda
+   * bajo la frase y esta rama no vuelve a entrar. Y va en el sentido estricto: el material
+   * de la llave de máquina vive en este mismo disco, así que pasar a la contraseña PROTEGE
+   * más de lo que había, no menos.
+   *
+   * Se puede quitar cuando no queden perfiles de antes de 0.81.0 (2027-03-01).
+   */
+  const MIGRACION_RECUPERACION_HASTA = Date.parse('2027-03-01T00:00:00Z')
+  async function migrarRecuperacionALaFrase (adminKey) {
+    if (!adminKey || Date.now() > MIGRACION_RECUPERACION_HASTA) return false
+    try {
+      // Si la frase ya la abre, no hay nada que migrar.
+      await secrets.recoveryOpensWith(adminKey)
+      return false
+    } catch (_) {}
+    try {
+      const r = await secrets.rekeyRecovery(null, adminKey)   // `null` = la llave de la máquina
+      if (!r?.rekeyed) return false
+      log('[vault] the recovery copy was sealed with this machine\'s key: re-sealed under the profile password')
+      audit('secret.recovery-rekeyed', {})
+      return true
+    } catch (e) {
+      log(`[vault] the recovery copy does not open with the password nor with this machine's key (${e.message}): the drawers cannot be re-wrapped`)
+      return false
+    }
+  }
+
   async function resealAll (adminKey = null) {
+    // ANTES de reenvolver nada: si la copia de recuperación se quedó bajo la llave de la
+    // máquina, se pasa a la frase. Sin esto, todo lo de abajo falla con «wrong password».
+    if (adminKey) await migrarRecuperacionALaFrase(adminKey)
     const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))

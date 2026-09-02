@@ -1307,3 +1307,39 @@ test('un servicio SIN el permiso espera aprobación; con él, se sirve solo', as
   await vault.setCaps(device.publickey, ['secrets'])
   await assert.rejects(() => fetchSecrets({ dir, timeoutMs: 3000, approvalTimeoutMs: 3000 }), /approval|timeout/i)
 })
+
+/**
+ * LA COPIA DE RECUPERACIÓN SELLADA CON LA LLAVE DE LA MÁQUINA, EN UN PERFIL CON CONTRASEÑA.
+ *
+ * Cómo se llega ahí por un camino normal: escribir una variable NO pide la frase (§8.1), así
+ * que si el cajón se estrena con el perfil CERRADO, `ensureRecovery` la sella con lo único
+ * que hay a mano — la llave de la máquina. Después, abrir el perfil pasa la llave de la
+ * CONTRASEÑA, que no abre ese sobre: «wrong password» en cada cajón, el llavero no se rehace
+ * y los servicios se quedan sin poder leer nada. Para siempre, y sin que nadie lo dijera.
+ *
+ * Le pasó a un perfil real el 2026-09-01 y así se descubrió todo esto. Ahora el desbloqueo
+ * lo migra: abre con la de la máquina y vuelve a cerrar con la frase.
+ */
+test('un cajón sellado con la llave de la máquina se migra a la frase al abrir', async () => {
+  const ns = 'migrar'
+  await vault.setSecret(ns, 'TOKEN', 'valor')
+
+  // EL ESTADO SE MONTA AQUÍ, no se hereda. Un test anterior de este fichero deja la
+  // recuperación bajo `PHRASE_KEY`, así que hay que devolverla a la llave de la MÁQUINA
+  // —que es el estado que rompía— en vez de dar por hecho con qué está cerrada. Depender
+  // del orden es cómo esta misma prueba pasaba sola y fallaba acompañada.
+  try { await vault.rekeySecrets(PHRASE_KEY, null) } catch (_) { /* ya estaba con la de la máquina */ }
+
+  const FRASE = new Uint8Array(32).fill(9)
+  // Y ahora se abre con una frase que NUNCA selló nada: es el perfil al que le pusieron
+  // contraseña después, sin rekey. Antes de la migración esto fallaba con «wrong password»
+  // en cada cajón y `resealAll` no envolvía nada.
+  const r = await vault.resealAll(FRASE)
+  assert.equal(r.failed.length, 0, 'ningún cajón se queda sin reenvolver: ' + JSON.stringify(r.failed))
+  assert.ok(r.drawers > 0, 'y se recorrieron cajones de verdad')
+
+  // La migración se ACABA: a partir de ahora la copia va bajo la frase, y la llave de la
+  // máquina ya no la abre. Que es más estricto que antes, no menos.
+  const r2 = await vault.resealAll(FRASE)
+  assert.equal(r2.failed.length, 0, 'y al segundo desbloqueo sigue funcionando, sin volver a migrar')
+})

@@ -796,6 +796,19 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * `null` en cualquiera de las dos significa «la del perfil sin contraseña».
      */
     async rekeyRecovery (...a) { return enFila(() => this._rekeyRecovery(...a)) },
+    /**
+     * ¿ESTA llave abre la copia de recuperación? Lanza si no.
+     *
+     * Sirve para saber con cuál está cerrada sin tocar nada — que es lo que hace falta para
+     * decidir si hay que migrarla. Preguntarlo intentando reenvolver un cajón mezcla dos
+     * cosas y deja el fallo diciendo «wrong password» sobre el cajón, que no es donde está.
+     */
+    async recoveryOpensWith (key) {
+      needSealer('check the recovery key')
+      if (!data.recovery?.priv) throw new NeedsPassword('this store has no recovery key yet')
+      await sealer.openMaster(data.recovery.priv, keyOr(key))
+      return true
+    },
     /** @private */
     async _rekeyRecovery (oldKey, newKey) {
       if (isLegacy()) return { rekeyed: false, reason: 'v3' }
