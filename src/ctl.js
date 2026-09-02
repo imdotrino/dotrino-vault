@@ -960,7 +960,9 @@ function problemWith (key, value) {
 }
 
 async function cmdSecret (rest) {
-  // --public / --private: si el VALOR puede salir de esta máquina hacia la consola remota.
+  // --public / --private: si al entregarla se pide APROBACIÓN. NO cambia cómo se guarda —
+  // desde 2026-09-02 las dos van selladas igual (dueño: «la única diferencia es si se
+  // despachan o no, son políticas; dales el mismo tratamiento de seguridad»).
   // Se sacan de la línea antes de partirla, para que puedan ir en cualquier posición y no
   // se cuelen dentro del valor (que es lo último y puede llevar espacios).
   let isPublic
@@ -1054,8 +1056,8 @@ async function cmdSecret (rest) {
     'la bóveda la aplica entera y avisa UNA sola vez. De una en una, cada variable es un',
     'cambio de configuración y el servicio se reinicia a media carga.',
     '',
-    'Pública o privada dice UNA cosa: si el VALOR puede salir de esta máquina hacia la',
-    'consola remota (vault.dotrino.com). Se nace privada. El servicio recibe las dos igual.'
+    'Pública o privada dice UNA cosa: si al entregarla se te pide APROBACIÓN. Las dos se',
+    'guardan cifradas igual y ninguna enseña su valor en la consola. Se nace privada.'
   ].join('\n')
 
   /**
@@ -1108,11 +1110,14 @@ async function cmdSecret (rest) {
   }
 
   /**
-   * Una variable en la lista: su nombre y su valor. La PÚBLICA enseña el suyo (pública
-   * quiere decir que ese valor puede salir de esta máquina: taparlo aquí, delante de su
-   * dueño, era lo único que la marca no significaba). La privada no se muestra.
+   * Una variable en la lista: su nombre, y que TIENE valor. Ninguna lo enseña.
+   *
+   * La pública lo enseñaba, porque se guardaba en claro. Desde 2026-09-02 las dos van
+   * selladas igual y `pública` solo dice que se entrega sin pedir aprobación (dueño: «la
+   * única diferencia es si se despachan o no, son políticas»). Enseñar el hueco vacío de
+   * una pública era peor que no enseñar nada: parecía que se había perdido.
    */
-  const printVar = (k) => console.log('  · %s   %s', k.key, k.public ? `${k.value ?? ''}   (pública)` : '••••••')
+  const printVar = (k) => console.log('  · %s   ••••••%s', k.key, k.public ? '   (pública)' : '')
   /**
    * Por qué no se aplicó. El daemon deja el motivo en el volcado siguiente; sin él lo
    * único que se podía decir era «revisa los logs», que no ayuda a quien acaba de
@@ -1179,7 +1184,10 @@ async function cmdSecret (rest) {
       console.log('%s%s%s%s', B, x.id, Z, who ? '  ' + who : '')
       for (const k of x.keys) printVar(k)
     }
-    console.log('\n(pública) = su valor se puede ver desde la consola remota. Las demás no salen de aquí.\n')
+    // QUÉ SIGNIFICA HOY (dueño, 2026-09-02): todas se guardan selladas igual, y `pública`
+    // solo dice a quién se le entrega SIN APROBACIÓN. Decir «su valor se puede ver» era
+    // verdad cuando se guardaba en claro; dejarlo ahí sería prometer algo que ya no pasa.
+    console.log('\n(pública) = se entrega sin pedirte aprobación. Todas se guardan cifradas igual.\n')
     printPending(d)
     await printNoPassword()
     return
@@ -1534,9 +1542,9 @@ function help () {
                                     vuelve a una versión anterior
   secret settle                     salda lo pendiente: hereda lo ya guardado a un
                                     aparato nuevo y rota de verdad el cajón del que se fue
-  --public | --private              (al hacer un set) si el VALOR puede salir de esta
-                                    máquina hacia la consola remota. Se nace privada,
-                                    y una privada NO se vuelve pública (bórrala y créala).
+  --public | --private              (al hacer un set) si al entregarla se te pide
+                                    APROBACIÓN. Las dos se guardan cifradas igual. Se nace
+                                    privada, y una privada NO se vuelve pública.
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
   join <invitación> [--name <n>] [--kms <config.json>]

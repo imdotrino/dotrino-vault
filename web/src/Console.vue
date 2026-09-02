@@ -174,7 +174,7 @@ const T = {
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
-    var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Una variable privada no enseña su valor aquí —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual.',
+    var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Ninguna enseña su valor aquí: todas se guardan cifradas y no salen de la computadora de tu bóveda. Le puedes dar uno nuevo igual. Marcarla «privada» es pedir que te avise antes de entregarla.',
     var_shared: 'la usan todas las máquinas',
     pend_t: 'Hay variables sin entregar',
     pend_b: 'Estos aparatos aún no tienen la llave de su grupo, así que no leen esas variables. Se arregla solo cuando otro aparato del grupo está encendido y se la reparte, o al abrir la bóveda en su computadora.',
@@ -320,7 +320,7 @@ const T = {
     apv_other: 'These requests are not for the profile you have open, they are for another one. Open it to see them:',
     apv_switch: 'Open this profile',
     var_t: 'Your apps\u2019 variables',
-    var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. A private variable does not show its value here \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one.',
+    var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. None of them show their value here: they are all stored encrypted and never leave your vault\u2019s computer. You can still give any of them a new one. Marking one \u201cprivate\u201d is asking to be told before it is handed over.',
     var_shared: 'used by every machine',
     pend_t: 'Some variables are not being delivered',
     pend_b: 'These devices do not have their group key yet, so they are not reading those variables. It fixes itself when another device of the group is on and hands it out, or when the vault is opened on its computer.',
