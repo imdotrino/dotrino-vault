@@ -28,10 +28,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # ≥22.14 y npm ≥11.5.1 los pide la publicación de confianza. Node 22 trae npm 10,
-          # así que hay que subirlo a mano: sin eso el `publish` cae al camino del token y
-          # falla por no tenerlo, que es lo correcto pero desconcierta si no se sabe.
-          node-version: '22.14'
+          # La publicación de confianza pide Node ≥22.14 y npm ≥11.5.1, y Node 22 trae
+          # npm 10: por eso el paso siguiente lo sube. Pero NO se fija `22.14` exacto —
+          # se probó y npm 12 exige `^22.22.2`, así que el pin dejaba el `npm i -g` sin
+          # poder instalarse. `22` a secas coge el último 22.x, que cumple las dos.
+          node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
 
