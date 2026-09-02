@@ -263,18 +263,29 @@ test('un perfil VIEJO (verificador PBKDF2) se abre igual y asciende a scrypt', a
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * LAS VENTANAS DE ESTOS TESTS TIENEN QUE CABER EL MONTAJE.
+ *
+ * Eran de 30–120 ms y se caían en CI pasando aquí. La razón es siempre la misma: `unlock`
+ * deriva la llave con scrypt, y en una máquina lenta **eso solo ya agota la ventana**, así
+ * que el perfil se cierra antes de llegar a la primera aserción — la que da por hecho que
+ * está abierto. No fallaba el candado: fallaba que el montaje no cabía en su propio plazo.
+ *
+ * Se arreglaron de uno en uno y volvieron a caer dos veces, con otro test cada vez. La
+ * lección no era el número: era buscarlos TODOS a la vez.
+ */
 test('el candado se cierra SOLO a los 5 min sin usarse', async () => {
   // La regresión que arregla: abrir la bóveda la dejaba abierta hasta que alguien la
   // cerraba a mano o reiniciaba el servicio — y el servicio de un PC no se reinicia en
   // semanas. Teclear la contraseña el lunes dejaba la consola abierta el jueves.
   const cerradas = []
-  const p = openProfiles(tmp(), { autoLockMs: 60, onAutoLock: (id) => cerradas.push(id) })
+  const p = openProfiles(tmp(), { autoLockMs: 600, onAutoLock: (id) => cerradas.push(id) })
   const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
   assert.equal(p.isLocked(id), false)
 
-  await sleep(90)
+  await sleep(900)
   assert.equal(p.isLocked(id), true, 'vencido el plazo, vuelve a hacer falta la contraseña')
   assert.deepEqual(cerradas, [id], 'y se avisa, para poder decirlo en el log')
   assert.equal(p.get(id).until, undefined, 'ya no hay plazo que enseñar')
@@ -292,18 +303,18 @@ test('el plazo se cuenta desde el ÚLTIMO USO, no desde que se abrió', async ()
   // Quien está trabajando no se puede quedar fuera a media faena: cada cosa que hace la
   // consola (`touch`) estira el plazo. Lo que un aparato pida por el proxy NO pasa por
   // ahí, y por eso no lo alarga: el candado es de la consola.
-  const p = openProfiles(tmp(), { autoLockMs: 120 })
+  const p = openProfiles(tmp(), { autoLockMs: 600 })
   const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
 
   for (let i = 0; i < 4; i++) {
-    await sleep(50)
+    await sleep(250)
     assert.equal(p.touch(id), true, 'sigue abierta y se le estira el plazo')
   }
-  assert.equal(p.isLocked(id), false, 'tras 200 ms de USO continuo con plazo de 120 ms')
+  assert.equal(p.isLocked(id), false, 'tras 1 s de USO continuo con plazo de 600 ms')
 
-  await sleep(160)
+  await sleep(800)
   assert.equal(p.isLocked(id), true, 'y en cuanto se para, se cierra')
   assert.equal(p.touch(id), false, 'a una cerrada no hay plazo que estirarle')
 })
