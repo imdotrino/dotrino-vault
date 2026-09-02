@@ -5,7 +5,9 @@
 > [modelo de amenazas](./modelo-de-amenazas.md) porque se leen juntos.
 >
 > Esto es el documento técnico. La **política de privacidad** de cara al usuario es otra
-> cosa y va en el sitio web.
+> cosa y va en el sitio web — sigue pendiente.
+>
+> El tercero de la serie es el [cuestionario de seguridad](./cuestionario-de-seguridad.md).
 
 ## 1. El principio, y por qué la arquitectura ayuda
 

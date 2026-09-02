@@ -8,6 +8,10 @@
 > importa: un modelo de amenazas que solo enumera lo que protege no sirve para decidir nada.
 >
 > Cómo reportar un fallo: [`SECURITY.md`](https://github.com/imdotrino/.github/blob/main/SECURITY.md).
+>
+> Se lee junto al [mapa de flujos de datos](./flujos-de-datos.md) —qué se guarda, dónde y
+> cuánto— y al [cuestionario de seguridad](./cuestionario-de-seguridad.md), que responde por
+> adelantado lo que pregunta un comprador.
 
 ## 1. Qué hay en juego
 
