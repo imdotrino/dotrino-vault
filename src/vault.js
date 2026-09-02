@@ -333,6 +333,23 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // rotación no necesita abrir nada.
   const activityFile = path.join(dir, 'activity.log')
   const activityAtRest = atRestFor(dir)
+  // MIGRACIÓN de las bitácoras escritas antes de 0.89, que están en claro. Se convierten
+  // de una vez al arrancar: es un archivo acotado (rota al MB) y así «nada en claro» es
+  // cierto también para lo que ya estaba escrito, no solo para lo que se escriba desde
+  // ahora. Se agota sola — cuando no queda ninguna línea en claro, no vuelve a tocar nada.
+  try {
+    const crudo = fs.readFileSync(activityFile, 'utf8')
+    const lineas = crudo.split('\n')
+    if (lineas.some((l) => l && !l.startsWith('DOTRINO-ATREST-v1.'))) {
+      const convertidas = lineas.map((l) => (l && !l.startsWith('DOTRINO-ATREST-v1.') ? activityAtRest.encrypt(l) : l))
+      // Escribir aparte y renombrar: a medio convertir, la bitácora sería ilegible entera.
+      fs.writeFileSync(activityFile + '.tmp', convertidas.join('\n'), { mode: 0o600 })
+      fs.renameSync(activityFile + '.tmp', activityFile)
+      log('[vault] activity log: %d line(s) sealed at rest', convertidas.filter(Boolean).length)
+    }
+    // Y el modo, que hasta 0.89 se creaba 0664: legible por cualquier usuario.
+    if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600)
+  } catch (_) { /* no hay bitácora todavía */ }
   const audit = (op, info = {}) => {
     try {
       const line = activityAtRest.encrypt(JSON.stringify({ ts: Date.now(), op, ...info }))
