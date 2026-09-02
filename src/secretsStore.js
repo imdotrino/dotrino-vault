@@ -209,9 +209,12 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
   /** Los NOMBRES con su visibilidad: es lo que ve cualquier lista. Nunca valores. */
   const names = (bag, k) => Object.entries(varsOf(bag, k)).map(([key, e]) => ({ key, public: !!e.pub }))
   /** Solo las PÚBLICAS, con valor: lo único que puede salir de esta máquina en claro. */
-  const publics = (bag, k) => Object.fromEntries(
-    Object.entries(varsOf(bag, k)).filter(([, e]) => e.pub).map(([key, e]) => [key, e.v])
-  )
+  /**
+   * LOS NOMBRES de las públicas. Ya no hay valores que devolver: desde 2026-09-02 una
+   * pública se guarda en sobre igual que una privada, y `pub` solo dice si se despacha sin
+   * aprobación. Para VER un valor hay que poder abrirlo, como con cualquier otro.
+   */
+  const publics = (bag, k) => Object.keys(varsOf(bag, k)).filter((key) => varsOf(bag, k)[key].pub)
   /**
    * Las entradas TAL CUAL van al bundle: la pública con su valor, la privada con su
    * sobre y su firma. No se descifra nada aquí — de eso vive todo esto.
@@ -260,7 +263,10 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
   const gcKeyring = (bag, k, owner) => {
     if (!bag[k]) return
     const vivos = new Set()
-    for (const e of Object.values(bag[k].vars || {})) if (!e.pub && e.gen != null) vivos.add(e.gen)
+    // TAMBIÉN LAS PÚBLICAS. Se saltaban porque antes no tenían generación —se guardaban en
+    // claro—, así que su llave se recogía por «no la usa nadie» y la variable quedaba
+    // ilegible. Desde 2026-09-02 van en sobre como todas y cuentan como todas.
+    for (const e of Object.values(bag[k].vars || {})) if (e.gen != null) vivos.add(e.gen)
     for (const h of data.history) if (h.owner === owner && h.gen != null) vivos.add(h.gen)
     bag[k].keyring = (bag[k].keyring || []).filter((g) => vivos.has(g.gen))
   }
@@ -332,9 +338,10 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     /**
      * @param {string} ns
      * @param {string|null} devicePub
-     * @param {{publicOnly?: boolean}} [opts] `publicOnly`: SOLO las públicas, y sin
-     *   envolturas. Una pública está guardada en claro, así que no hay llave que repartir
-     *   ni sobre que abrir — y por eso pedirlas no pasa por la aprobación (ver `handleSecrets`).
+     * @param {{publicOnly?: boolean}} [opts] `publicOnly`: SOLO las públicas — pero CON sus
+     *   envolturas, porque desde 2026-09-02 van en sobre igual que las privadas. Lo que las
+     *   distingue es solo que se despachan sin aprobación (ver `handleSecrets`); aquí se
+     *   devolvía el paquete sin llavero, y entonces no había con qué abrirlas.
      */
     bundleFor (ns, devicePub = null, { publicOnly = false } = {}) {
       assertNs(ns)
@@ -346,8 +353,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
         ? Object.fromEntries(Object.entries(todo).filter(([, e]) => e.pub))
         : todo
       if (isLegacy()) return { legacy: true, entries }
-      // Sin privadas no hay nada que envolver: el paquete va sin llavero.
-      if (publicOnly) return { entries, ns: null, dev: null, wraps: { ns: [], dev: [] } }
+
       const misWraps = (bag, k) => (bag[k]?.keyring || [])
         .filter((g) => g.wraps?.[devicePub])
         .map((g) => ({ gen: g.gen, wrap: g.wraps[devicePub] }))
@@ -372,7 +378,9 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const bag = kind === 'ns' ? data.ns : data.dev
       const e = varsOf(bag, k)[key]
       if (!e) return null
-      if (e.pub) return e.v
+      // UNA PÚBLICA SE ABRE IGUAL QUE UNA PRIVADA (dueño, 2026-09-02). Aquí había un atajo
+      // —`if (e.pub) return e.v`— porque una pública se guardaba en claro. Ya no: la marca
+      // solo dice si se despacha sin aprobación, y para VER un valor hay que poder abrirlo.
       if (isLegacy()) return e.v
       const priv = await openRecovery(adminKey)
       const cek = await this._cekOf(bag, k, e.gen, priv)
@@ -401,7 +409,8 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const bag = kind === 'ns' ? data.ns : data.dev
       const out = []
       for (const [key, e] of Object.entries(varsOf(bag, k))) {
-        if (e.pub) continue
+        // También las públicas: desde 2026-09-02 van en sobre, así que a quien no tenga su
+        // envoltura le falta igual que con una privada.
         const g = (bag[k]?.keyring || []).find((x) => x.gen === e.gen)
         if (!g?.wraps?.[memberPub]) out.push(key)
       }
@@ -423,7 +432,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       if (isLegacy()) return []
       const [kind, k] = splitOwner(owner)
       const bag = kind === 'ns' ? data.ns : data.dev
-      const inUse = new Set(Object.values(varsOf(bag, k)).filter((e) => !e.pub).map((e) => e.gen))
+      const inUse = new Set(Object.values(varsOf(bag, k)).map((e) => e.gen))
       const out = []
       for (const g of bag[k]?.keyring || []) {
         if (!inUse.has(g.gen) || g.wraps?.[memberPub]) continue
@@ -514,10 +523,15 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       if (isLegacy()) { vars[key] = { v: value, pub }; save(); return }
       if (needsMigration()) throw new NeedsMigration()
 
-      // Una PÚBLICA se guarda en claro a propósito: eso es lo que significa marcarla.
-      if (pub) { vars[key] = { v: value, pub: true }; save(); return }
-
-      needSealer('write a private variable')
+      // PÚBLICA Y PRIVADA SE GUARDAN IGUAL (dueño, 2026-09-02: «las variables públicas
+      // igual, codificadas en sobres… la única diferencia es si se despachan o no, son
+      // políticas, dales el mismo tratamiento de seguridad»).
+      //
+      // Antes una pública se guardaba EN CLARO, y eso mezclaba dos cosas que no tienen que
+      // ver: quién puede recibirla (política) y cómo se guarda (seguridad). El precio era
+      // un valor legible en el disco y un camino aparte en cada sitio que las tocaba.
+      // Ahora `pub` es solo la marca de despacho: se lleva sin aprobación (`--public`).
+      needSealer('write a variable')
       await ensureRecovery(null)
 
       // CEK NUEVA, siempre: no se puede reutilizar la de antes sin poder abrirla.
@@ -530,11 +544,100 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const seal = signer ? await signer({ owner, key, gen, iv: e.iv, ct: e.ct }) : null
 
       pushHistory(owner, key, before, by)
-      vars[key] = { pub: false, owner, gen, e, seal, at: Date.now(), by: by || null }
+      vars[key] = { pub, owner, gen, e, seal, at: Date.now(), by: by || null }
       bag[k].keyring = [...(bag[k].keyring || []), { gen, createdAt: Date.now(), wraps }]
       gcKeyring(bag, k, owner)
       save()
       return { gen, sinLlave }
+    },
+
+    /**
+     * GUARDAR UN SOBRE YA HECHO, SIN ABRIRLO (dueño, 2026-09-01).
+     *
+     * «La bóveda cerrada no puede ver el valor; debe confiar en la firma del admin y en el
+     * contenido de esos sobres, y es la razón por la que al abrir la bóveda rehace los
+     * sobres: por si alguno tiene alguna incoherencia.»
+     *
+     * Antes, escribir hacía un rodeo absurdo: la consola sellaba el valor AL PERFIL, la
+     * bóveda lo ABRÍA para sacarlo en claro y `_putRaw` lo volvía a cerrar. Ese descifrado
+     * era el único motivo por el que la llave de cifrado del perfil tenía que estar
+     * accesible con la bóveda cerrada — o sea, la razón por la que una copia del disco
+     * abría todos los sobres dirigidos al perfil.
+     *
+     * Aquí no se abre nada: llega el valor ya cifrado con una CEK nueva y esa CEK ya
+     * envuelta para cada destinatario. Lo único que se comprueba es lo que se puede
+     * comprobar sin la llave — la FORMA, y sobre todo que venga la envoltura de
+     * recuperación: sin ella el cajón nace ilegible para siempre, y eso no se arregla
+     * después ni abriendo la bóveda.
+     *
+     * @param {string} owner `ns:<scope>` o `dev:<pub>`
+     * @param {{e:{iv:string,ct:string,gen?:number}, wraps:Object}} sobre
+     */
+    async putSealed (owner, key, sobre, { by = null, public: isPublic = false } = {}) {
+      return enFila(() => this._putSealedRaw(owner, key, sobre, by, !!isPublic))
+    },
+    /** @private */
+    async _putSealedRaw (owner, key, sobre, by, isPublic) {
+      if (isLegacy()) throw new Error('putSealed: this store is still v3 (run `migrate` first)')
+      if (needsMigration()) throw new NeedsMigration()
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      const e = sobre?.e; const wraps = sobre?.wraps
+      if (!e || typeof e.iv !== 'string' || typeof e.ct !== 'string') {
+        throw new Error('putSealed: the envelope must carry `iv` and `ct`')
+      }
+      if (!wraps || typeof wraps !== 'object' || !wraps[RECOVERY]) {
+        // SIN LA ENVOLTURA DE RECUPERACIÓN EL CAJÓN NACE MUERTO. Es la que abre la frase, y
+        // la única que puede rehacer las demás: si falta, ni el dueño con su contraseña
+        // podría reenvolverlo para nadie. Se rechaza antes de tocar el disco.
+        throw new Error('putSealed: the wraps must include the recovery one (#recovery), or the drawer could never be re-wrapped')
+      }
+      const vars = ensureBag(bag, k)
+      const before = vars[key]
+      // Una PRIVADA no se vuelve pública: cambiar eso es cambiar quién la recibe sin
+      // aprobación, y no puede colarse en una escritura normal.
+      if (before && !before.pub && isPublic) throw new PrivateStaysPrivate(key)
+
+      // LA GENERACIÓN LA PONE EL ALMACÉN, no quien escribe: es la que ordena el llavero, y
+      // dejar que la eligiera el que llega permitiría pisar una anterior.
+      const gen = (topGen(bag, k)?.gen || 0) + 1
+      // La FIRMA sigue siendo de la bóveda —dice que este sobre salió de aquí y con qué
+      // acta (§8.8)— y se hace con la llave de SELLADO, que funciona con el perfil cerrado.
+      const seal = signer ? await signer({ owner, key, gen, iv: e.iv, ct: e.ct }) : null
+
+      pushHistory(owner, key, before, by)
+      vars[key] = { pub: isPublic, owner, gen, e: { ...e, gen }, seal, at: Date.now(), by: by || null }
+      bag[k].keyring = [...(bag[k].keyring || []), { gen, createdAt: Date.now(), wraps }]
+      gcKeyring(bag, k, owner)
+      save()
+      return { gen }
+    },
+
+    /**
+     * ¿EXISTE YA ESTA VARIABLE? Sin abrirla ni decir qué vale.
+     *
+     * Hace falta para la regla de «un servicio solo rellena lo que falta, no pisa lo que
+     * hay» (dueño, 2026-09-01): quien decide eso necesita saber si había algo, y nada más.
+     */
+    has (owner, key) {
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      return key in varsOf(bag, k)
+    },
+
+    /**
+     * PARA QUIÉN hay que envolver, con su llave pública de cifrado, más la de recuperación.
+     * Es lo que necesita quien va a fabricar el sobre — y se lo dice la BÓVEDA, para que no
+     * haya dos sitios respondiendo a «quién puede abrir este cajón» (la lista la sabe el
+     * acta, y de ahí sale `recipients`).
+     */
+    async recipientsFor (owner) {
+      await ensureRecovery(null)
+      const members = (await recipients?.(owner)) || []
+      return {
+        recoveryPub: data.recovery.pub,
+        members: members.filter((m) => m.encPub).map((m) => ({ pub: m.pub, encPub: m.encPub }))
+      }
     },
 
     async delete (ns, key) {
@@ -588,13 +691,21 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       if (!e) return false
       const want = !!isPublic
       if (!!e.pub === want) return true
+      // DE PRIVADA A PÚBLICA NO EXISTE, y no es una limitación técnica: hacer despachable
+      // sin aprobación algo que se guardó como secreto no puede ser una casilla. Se crea
+      // otra variable a propósito.
       if (!e.pub) throw new PrivateStaysPrivate(key)
       if (isLegacy()) { e.pub = false; save(); return true }
       if (needsMigration()) throw new NeedsMigration()
 
-      // De pública a privada: es una escritura normal, con su generación y su firma.
-      held++
-      try { await this._putRaw(bag, k, owner, key, e.v, false, null) } finally { held-- }
+      // DE PÚBLICA A PRIVADA ES CAMBIAR LA MARCA, Y NADA MÁS (dueño, 2026-09-02).
+      //
+      // Antes había que reescribir la variable entera —generación nueva, sobre nuevo—
+      // porque una pública se guardaba EN CLARO y taparla significaba cifrarla por primera
+      // vez. Ya no: las dos se guardan igual desde el principio, así que aquí solo cambia
+      // a quién se le despacha sin aprobación. Reescribir ahora sería trabajo (y una
+      // generación) para no cambiar nada de lo guardado.
+      e.pub = false
       save()
       return true
     },
@@ -624,12 +735,12 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       return Object.keys(topGen(bag, k)?.wraps || {})
     },
 
-    /** Las PÚBLICAS de un scope, con valor. Lo que la consola remota puede ver. */
+    /** Los NOMBRES de las públicas de un scope. Ya no hay valor que devolver: van en sobre. */
     publicOf (ns) {
       assertNs(ns)
       return publics(data.ns, ns)
     },
-    /** Las PÚBLICAS de un aparato, con valor. */
+    /** Los NOMBRES de las públicas de un aparato. */
     publicOfDevice (pub) {
       assertPub(pub)
       return publics(data.dev, pub)
@@ -894,7 +1005,10 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
           for (const [key, e] of Object.entries(entradas)) {
             const value = await claro(owner, e)
             antes[`${owner}\u0000${key}`] = value
-            if (e.pub) { vars[key] = { v: value, pub: true }; continue }
+            // LA PÚBLICA TAMBIÉN SE SELLA (dueño, 2026-09-02). Aquí se dejaba en claro,
+            // así que un archivo migrado se quedaba con valores legibles en el disco —
+            // exactamente lo que la conversión venía a quitar. La marca se conserva: dice
+            // a quién se le despacha sin aprobación, no cómo se guarda.
             if (!cek) {
               cek = await sealer.newKey()
               const { wraps, sinLlave: faltan } = await sealer.wrapFor(cek, (await membersOf(owner)) || [])
@@ -904,7 +1018,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
             }
             const sobre = await sealer.encrypt(cek, value, gen)
             const seal = signer ? await signer({ owner, key, gen, iv: sobre.iv, ct: sobre.ct }) : null
-            vars[key] = { pub: false, owner, gen, e: sobre, seal, at: Date.now(), by: null }
+            vars[key] = { pub: !!e.pub, owner, gen, e: sobre, seal, at: Date.now(), by: null }
           }
           dst[k] = { vars, keyring }
         }
@@ -916,12 +1030,10 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
         for (const [k, bag] of Object.entries(dst)) {
           const owner = `${kind}:${k}`
           for (const [key, e] of Object.entries(bag.vars)) {
-            let abierto
-            if (e.pub) abierto = e.v
-            else {
-              const g = bag.keyring.find((x) => x.gen === e.gen)
-              abierto = await sealer.openValue(await sealer.openWrapWith(priv, g.wraps[RECOVERY]), e.e)
-            }
+            // Se abre TODO, también las públicas: ahora van selladas igual, así que la
+            // comprobación de que la migración no cambió ningún valor vale para las dos.
+            const g = bag.keyring.find((x) => x.gen === e.gen)
+            const abierto = await sealer.openValue(await sealer.openWrapWith(priv, g.wraps[RECOVERY]), e.e)
             if (abierto !== antes[`${owner}\u0000${key}`]) {
               throw new Error(`secrets: the migration check failed on ${owner}/${key}; nothing was touched`)
             }

@@ -111,7 +111,13 @@ test('escribir NO pide la frase, y el valor no queda en claro en el disco', asyn
   const disco = enDisco(dir)
   assert.equal(disco.schemaVersion, 5)
   assert.equal(JSON.stringify(disco).includes('secreto-de-verdad'), false, 'ni rastro del valor privado')
-  assert.equal(disco.ns.proxy.vars.PUBLIC_URL.v, 'wss://proxy', 'la pública sí, para eso se marcó')
+  // NI LA PÚBLICA (dueño, 2026-09-02: «las públicas igual, codificadas en sobres; la única
+  // diferencia es si se despachan o no, son políticas»). Antes se guardaba en claro y eso
+  // mezclaba dos cosas distintas: a quién se le entrega sin aprobación (política) y cómo se
+  // guarda (seguridad). Ahora `pub` es solo la marca de despacho.
+  assert.equal(JSON.stringify(disco).includes('wss://proxy'), false, 'la pública tampoco queda en claro')
+  assert.equal(disco.ns.proxy.vars.PUBLIC_URL.pub, true, 'pero sigue marcada como pública')
+  assert.ok(disco.ns.proxy.vars.PUBLIC_URL.e?.ct, 'y va en sobre, como cualquier otra')
   assert.equal(disco.ns.proxy.vars.TURN_KEY.pub, false)
   assert.ok(disco.ns.proxy.vars.TURN_KEY.e.ct, 'la privada es un sobre')
   assert.equal(disco.master, undefined, 'ya NO hay copia maestra: eso era lo que pedía la frase')
@@ -194,7 +200,9 @@ test('la mezcla no cambia: el cajon del APARATO pisa al del scope', async () => 
   await s.setDevice('A', 'PORT', '2', true)
 
   const b = s.bundleFor('proxy', 'A')
-  assert.equal(b.entries.PORT.v, '2', 'lo específico gana')
+  // Se compara el SOBRE, no un valor: desde 2026-09-02 una pública también va sellada, así
+  // que «cuál gana» se ve en cuál de los dos sobres quedó, no en un texto.
+  assert.equal(b.entries.PORT.owner, 'dev:A', 'lo específico gana')
 })
 
 test('el bundle lleva SOLO las envolturas de quien pregunta', async () => {
@@ -271,10 +279,16 @@ test('visibilidad: de publica a privada es escribir (nada); de privada a publica
   await s.set('proxy', 'K', 'v3')
   assert.equal(enDisco(dir).ns.proxy.vars.K.pub, false)
 
-  // El camino valido: borrarla y crearla de nuevo como publica (queda a la vista).
+  // El camino valido: borrarla y crearla de nuevo como publica.
+  //
+  // «A la vista» ya no: desde 2026-09-02 una publica va en sobre igual que una privada y la
+  // marca solo dice si se despacha sin aprobacion (dueño: «la unica diferencia es si se
+  // despachan o no, son politicas; dales el mismo tratamiento de seguridad»). Asi que
+  // `publicOf` da NOMBRES, y para ver el valor hay que poder abrirlo, como con cualquiera.
   await s.delete('proxy', 'K')
   await s.set('proxy', 'K', 'v4', true)
-  assert.equal(s.publicOf('proxy').K, 'v4')
+  assert.deepEqual(s.publicOf('proxy'), ['K'], 'sale como publica, por su nombre')
+  assert.equal(await s.reveal('ns:proxy', 'K', MAQUINA), 'v4', 'y su valor se abre, no se lee')
 })
 
 test('conversion v3 -> v5: sin frase, con respaldo, y sin cambiar ningun valor', async () => {
@@ -295,7 +309,12 @@ test('conversion v3 -> v5: sin frase, con respaldo, y sin cambiar ningun valor',
   assert.equal(disco.schemaVersion, 5)
   assert.equal(JSON.stringify(disco).includes('secreto'), false)
   assert.equal(await s.reveal('ns:proxy', 'TURN_KEY', MAQUINA), 'secreto')
-  assert.equal(s.publicOf('proxy').URL, 'wss://x')
+  // LA PÚBLICA TAMBIÉN QUEDA SELLADA (dueño, 2026-09-02). Antes la conversión la dejaba en
+  // claro, así que un archivo migrado conservaba valores legibles en el disco — justo lo
+  // que la conversión venía a quitar. La marca sigue, porque dice a quién se le despacha.
+  assert.equal(JSON.stringify(disco).includes('wss://x'), false, 'ni la pública queda en claro')
+  assert.deepEqual(s.publicOf('proxy'), ['URL'], 'sigue marcada como pública')
+  assert.equal(await s.reveal('ns:proxy', 'URL', MAQUINA), 'wss://x', 'y su valor no cambió')
   assert.ok(fs.existsSync(path.join(dir, 'secrets.json.v3.bak')), 'deshacer tiene que ser un mv')
 })
 
@@ -365,7 +384,9 @@ test('sin sellador: se sirve y se lista, pero no se escribe una privada', async 
 
   const mudo = openSecretsStore(dir, {})            // el daemon arrancando sin nada
   assert.deepEqual(mudo.list().proxy.map((x) => x.key).sort(), ['K', 'URL'])
-  assert.equal(mudo.publicOf('proxy').URL, 'wss://x')
+  // Sin sellador se listan los NOMBRES, incluidos los de las públicas — pero ningún valor:
+  // desde 2026-09-02 una pública va en sobre igual que una privada.
+  assert.deepEqual(mudo.publicOf('proxy'), ['URL'])
   assert.ok(mudo.bundleFor('proxy', 'A').entries.K, 'servir no necesita abrir nada')
   await assert.rejects(() => mudo.set('proxy', 'OTRA', 'x'), NeedsPassword)
 })
@@ -462,4 +483,51 @@ test('rehacer el llavero deja lo que dice el acta y nada más', async () => {
   assert.ok(!left.includes('intruder'), 'y al rehacer, se cae')
   assert.ok(left.includes('A'), 'el miembro de verdad se queda')
   assert.ok(left.includes(RECOVERY), 'y la recuperación, que es lo que abre la frase')
+})
+
+/**
+ * GUARDAR SIN VER EL VALOR (dueño, 2026-09-01).
+ *
+ * «La bóveda cerrada no puede ver el valor; debe confiar en la firma del admin y en el
+ * contenido de esos sobres, y es la razón por la que al abrir la bóveda rehace los sobres:
+ * por si alguno tiene alguna incoherencia.»
+ *
+ * Antes escribir hacía un rodeo: la consola sellaba el valor AL PERFIL, la bóveda lo ABRÍA
+ * para sacarlo en claro y lo volvía a cerrar. Ese descifrado era el único motivo por el que
+ * la llave de cifrado del perfil tenía que estar accesible con la bóveda cerrada — o sea, la
+ * razón por la que una copia del disco abría todo lo dirigido al perfil.
+ *
+ * Que las envolturas de este test sean objetos cualesquiera NO es un atajo: es la propiedad
+ * que se prueba. `putSealed` no las abre ni las mira por dentro, así que para él son opacas
+ * — y por eso puede guardar con la bóveda cerrada.
+ */
+test('putSealed guarda el sobre sin abrirlo, y exige la envoltura de recuperación', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A', 'B') })
+  const { recoveryPub, members } = await s.recipientsFor('ns:demo')
+  assert.ok(recoveryPub, 'la bóveda dice a quién hay que envolver, incluida la recuperación')
+  assert.deepEqual(members.map((m) => m.pub), ['A', 'B'], 'y son los que dice el acta')
+
+  // El sobre lo fabrica QUIEN ESCRIBE. Aquí es opaco a propósito.
+  const e = { iv: 'IV-DE-QUIEN-ESCRIBE', ct: 'CT-QUE-LA-BOVEDA-NO-ABRE' }
+  const wraps = { [RECOVERY]: 'w-rec', A: 'w-A', B: 'w-B' }
+
+  const r = await s.putSealed('ns:demo', 'TOKEN', { e, wraps })
+  assert.equal(r.gen, 1)
+  const guardado = s.bundleFor('demo').entries.TOKEN
+  assert.equal(guardado.pub, false)
+  assert.equal(guardado.e.ct, e.ct, 'se guardó EXACTAMENTE lo que llegó: nadie lo abrió para volver a cerrarlo')
+  assert.ok(!('v' in guardado), 'y en ningún momento hubo un valor en claro')
+  assert.deepEqual([...s.recipientsIn('ns:demo')].sort(), ['#recovery', 'A', 'B'])
+
+  // SIN la de recuperación se rechaza ANTES de tocar el disco: el cajón nacería ilegible
+  // para siempre y eso no lo arregla ni abrir la bóveda.
+  const sinRecuperacion = { A: 'w-A', B: 'w-B' }
+  await assert.rejects(
+    s.putSealed('ns:demo', 'OTRA', { e, wraps: sinRecuperacion }),
+    /recovery|re-wrapped/,
+    'un cajón sin la envoltura de recuperación nace muerto: no se acepta')
+  assert.equal('OTRA' in s.bundleFor('demo').entries, false, 'y no se escribió nada')
+
+  fs.rmSync(dir, { recursive: true, force: true })
 })

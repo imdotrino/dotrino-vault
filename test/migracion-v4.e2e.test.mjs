@@ -81,7 +81,10 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
   const r = await store.migrate((owner) => (owner.startsWith('ns:') ? miembros.filter((x) => x.cn === owner.slice(3)) : miembros), CLAVE)
   ok('migra v3 -> v4', r.migrated === true)
   ok('NADA privado queda en claro en el disco', !crudo().includes('la-clave-de-verdad'))
-  ok('la publica SI (para eso se marco)', crudo().includes('wss://proxy.dotrino.com'))
+  // LA PUBLICA TAMPOCO (dueño, 2026-09-02): «las publicas igual, codificadas en sobres; la
+  // unica diferencia es si se despachan o no». La marca dice a quien se le entrega sin
+  // aprobacion, no como se guarda — asi que la conversion tambien la sella.
+  ok('la publica TAMPOCO queda en claro', !crudo().includes('wss://proxy.dotrino.com'))
   ok('deja respaldo .v3.bak para deshacer', fs.existsSync(path.join(dir, 'secrets.json.v3.bak')))
 
   // --- 4) Con el vault ya migrado, el agente sigue leyendo — ahora abriendo sobres.

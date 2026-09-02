@@ -141,15 +141,18 @@ test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecret
   assert.deepEqual(secrets, { BUFFER_API_KEY: 'b-789' })
 })
 
-test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', async () => {
-  // «Pública» quiere decir UNA cosa: que ese valor puede salir de esta máquina. Taparlo
-  // justo aquí —en la lista que mira su dueño desde la terminal de la propia bóveda—
-  // era lo único que la marca no significaba, y obligaba a abrir `secrets.json` a mano
-  // para comprobar una URL. La privada sigue sin salir ni a esta lista.
+test('la lista da NOMBRES y visibilidad, nunca un valor: tampoco el de una pública', async () => {
+  // CAMBIÓ LA REGLA (dueño, 2026-09-02): «las públicas igual, codificadas en sobres… la
+  // única diferencia es si se despachan o no, son políticas; dales el mismo tratamiento de
+  // seguridad». Antes una pública se guardaba en claro y esta lista enseñaba su valor.
+  //
+  // Ya no: `pública` dice a quién se le entrega SIN APROBACIÓN, no cómo se guarda. Para ver
+  // un valor hay que poder abrirlo —y en un cajón con dueño, quien administra no puede, que
+  // es exactamente lo que se quiso al quitarle esa envoltura.
   await vault.setSecret('escaparate', 'PUBLIC_URL', 'https://ejemplo.com', true)
   await vault.setSecret('escaparate', 'API_KEY', 's3cr3t')
   assert.deepEqual(vault.listSecrets().escaparate, [
-    { key: 'PUBLIC_URL', public: true, value: 'https://ejemplo.com' },
+    { key: 'PUBLIC_URL', public: true },
     { key: 'API_KEY', public: false }
   ])
 
@@ -159,7 +162,7 @@ test('la lista enseña el valor de las PÚBLICAS y tapa el de las privadas', asy
   await vault.secrets.setDevice(pub, 'DB_PASSWORD', 'nope')
   const row = (await vault.listDeviceSecrets()).find((d) => d.pub === pub)
   assert.deepEqual(row.keys, [
-    { key: 'PORT', public: true, value: '8443' },
+    { key: 'PORT', public: true },
     { key: 'DB_PASSWORD', public: false }
   ])
 })
@@ -581,9 +584,13 @@ test('quitar el aparato se lleva sus variables', async () => {
   assert.ok(!(await vault.listDeviceSecrets()).some((x) => x.pub === pub), 'se fueron con él')
 })
 
-test('la consola remota ve el valor de una PÚBLICA y jamás el de una privada', async () => {
-  // Es la frontera entera de `docs/consola-remota.md` para variables: lo que cruza no es
-  // «los secretos», son los que su dueño marcó como mostrables.
+test('la consola remota ve NOMBRES y visibilidad, y ningún valor — tampoco el de una pública', async () => {
+  // CAMBIÓ LA REGLA (dueño, 2026-09-02). Antes cruzaba el valor de las marcadas como
+  // mostrables; ahora no cruza ninguno, porque «pública» dejó de significar «en claro»:
+  // dice a quién se le despacha SIN APROBACIÓN, y se guarda sellada como cualquier otra.
+  //
+  // Lo que la consola sigue viendo es lo que necesita para administrar: qué hay y de qué
+  // tipo. Ver un valor exige poder abrirlo, que es otra cosa y tiene su propio camino.
   await vault.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', true)
   await vault.setSecret('web', 'API_KEY', 'sk-esta-no-sale')
 
@@ -591,34 +598,52 @@ test('la consola remota ve el valor de una PÚBLICA y jamás el de una privada',
   const payload = JSON.parse(await vault.identity.openContent(enc))
   const web = payload.ns.web
 
-  assert.equal(web.find((x) => x.key === 'PUBLIC_URL').value, 'https://ejemplo.com')
+  const pub = web.find((x) => x.key === 'PUBLIC_URL')
+  assert.equal(pub.public, true, 'se sabe que es pública…')
+  assert.ok(!('value' in pub), '…pero su valor tampoco sale')
   const priv = web.find((x) => x.key === 'API_KEY')
-  assert.equal(priv.public, false, 'se sabe que existe y que es privada…')
-  assert.ok(!('value' in priv), '…pero su valor no sale ni dentro del sobre')
+  assert.equal(priv.public, false, 'y de la privada, igual: que existe y que es privada')
+  assert.ok(!('value' in priv))
   assert.ok(!JSON.stringify(payload).includes('sk-esta-no-sale'))
+  assert.ok(!JSON.stringify(payload).includes('https://ejemplo.com'), 'ningún valor cruza')
 })
 
 test('la consola remota CREA variables (scope nuevo o aparato) y rota las privadas a ciegas', async () => {
-  const { readServiceIdentity } = await import('../lib/src/service.js')
+  const { readServiceIdentity, } = await import('../lib/src/service.js')
+  const { buildSealedVar, authorFromDeviceKey } = await import('../lib/src/admin.js')
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
   const me = readServiceIdentity(svcDir).device.publickey
-  const sealed = (value) => vault.identity.sealContent(JSON.stringify({ value }))
+
+  // Quien administra: un aparato del acta, que es quien FIRMA cada sobre.
+  const consola = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: consola.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read'] })
+  /** El sobre ya hecho, como lo manda la consola: la bóveda no lo abre. */
+  const sobre = async (owner, key, value) => buildSealedVar({
+    recipients: await vault.vars.recipients(owner.startsWith('ns:') ? { ns: owner.slice(3) } : { pub: owner.slice(4) }),
+    owner, key, value, author: authorFromDeviceKey(consola)
+  })
+  const poner = async (dest, key, value, isPublic) => vault.vars.set({
+    ...dest, key, public: isPublic,
+    sealed: await sobre(dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`, key, value),
+    caller: consola.publickey
+  })
 
   // Un scope que no existía: crear es parte de lo que se delega.
-  await vault.vars.set({ ns: 'nuevo', key: 'API_KEY', enc: await sealed('v1'), public: false })
+  await poner({ ns: 'nuevo' }, 'API_KEY', 'v1', false)
   assert.deepEqual(vault.listSecrets().nuevo, [{ key: 'API_KEY', public: false }])
 
   // Rotar una privada SIN haberla podido leer: es justo para lo que sirve.
-  await vault.vars.set({ ns: 'web', key: 'API_KEY', enc: await sealed('sk-rotada') })
+  await poner({ ns: 'web' }, 'API_KEY', 'sk-rotada')
   assert.equal((await vault.openSecrets('web')).API_KEY, 'sk-rotada')
   assert.equal(vault.listSecrets().web.find((x) => x.key === 'API_KEY').public, false,
     'y rotarla no la vuelve visible por accidente')
 
   // Y también en el cajón de un aparato.
-  await vault.vars.set({ pub: me, key: 'PUBLIC_URL', enc: await sealed('https://uno.example'), public: true })
+  await poner({ pub: me }, 'PUBLIC_URL', 'https://uno.example', true)
   assert.equal((await fetchSecretsFrom(svcDir)).PUBLIC_URL, 'https://uno.example')
 
-  // El valor NUNCA viaja en claro: sin sobre no hay escritura.
-  await assert.rejects(vault.vars.set({ ns: 'web', key: 'API_KEY', enc: { ct: 'basura', iv: 'x', epk: 'y' } }))
+  // SIN SOBRE NO HAY ESCRITURA, y ya no hay camino viejo al que caer.
+  await assert.rejects(vault.vars.set({ ns: 'web', key: 'API_KEY' }), /already sealed|sealed/)
 })
 
 test('el scope corta el acceso a otro namespace', async () => {
@@ -764,10 +789,21 @@ test('la consola remota escribe SIN contrasena (§8.1)', async () => {
   // maestra de v4, y eso obligaba a teclear en un navegador la llave que abre TODOS los
   // cajones. Ya no viaja ninguna contraseña por este camino.
   const ns = 'consola'
-  const enc = await vault.identity.sealContent(JSON.stringify({
-    items: [{ key: 'DESDE_LA_CONSOLA', value: 'valor-remoto' }]
-  }))
-  const r = await vault.vars.setMany({ ns, enc, by: 'test' })
+  const { buildSealedVar, authorFromDeviceKey } = await import('../lib/src/admin.js')
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const quien = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: quien.publickey, label: 'consola-many', caps: ['sign', 'admin'] })
+  // CADA VARIABLE EN SU SOBRE, ya hecho (2026-09-02): la bóveda no abre ninguno.
+  const recipients = await vault.vars.recipients({ ns })
+  const r = await vault.vars.setMany({
+    ns,
+    items: [{
+      key: 'DESDE_LA_CONSOLA',
+      sealed: await buildSealedVar({ recipients, owner: `ns:${ns}`, key: 'DESDE_LA_CONSOLA', value: 'valor-remoto', author: authorFromDeviceKey(quien) })
+    }],
+    caller: quien.publickey,
+    by: 'test'
+  })
   assert.deepEqual(r.keys, ['DESDE_LA_CONSOLA'])
 
   // Y de verdad quedo guardada: sin el `await` que faltaba, la respuesta salia antes
@@ -1363,14 +1399,22 @@ test('--public: llega sin aprobación, y NO trae ninguna privada', async () => {
   const ns = 'mixto'
   const dir = tmp('svc-mixto-')
 
-  await vault.setSecret(ns, 'PUBLIC_URL', 'https://ejemplo', true)
-  await vault.setSecret(ns, 'API_TOKEN', 'secreto', false)
-
+  // SE ENROLA PRIMERO, y después se escriben las variables. Desde 2026-09-02 una pública
+  // también va en sobre, así que quien llega DESPUÉS de que se escriba necesita que se le
+  // haga su envoltura — eso es otro camino (el del servicio que llega tarde) y tiene su
+  // propio test. Aquí lo que se prueba es el despacho sin aprobación.
+  //
   // Se enrola SIN `unattended`: sin ese permiso, cualquier petición normal se queda
   // esperando aprobación. Es lo que hace la prueba concluyente.
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   const { enrollService } = await import('../lib/src/service.js')
   await enrollService({ qr: encodeInvite(qr), ns, dir, onCode: ({ code }) => vault.approveDevice(code) })
+  // Su primera petición registra su llave de cifrado: hasta entonces no hay a dónde
+  // envolver, y las variables escritas antes no serían suyas.
+  await fetchSecrets({ dir, ns, publicOnly: true }).catch(() => null)
+
+  await vault.setSecret(ns, 'PUBLIC_URL', 'https://ejemplo', true)
+  await vault.setSecret(ns, 'API_TOKEN', 'secreto', false)
 
   // Nadie va a aprobar nada: si esto pidiera aprobación, se quedaría colgado.
   let pidioAprobacion = false
@@ -1393,4 +1437,95 @@ test('--public: llega sin aprobación, y NO trae ninguna privada', async () => {
   while (!pendiente && Date.now() < hasta) await new Promise((r) => setTimeout(r, 100))
   assert.ok(pendiente, 'la petición normal SÍ pasa por la aprobación')
   await normal
+})
+
+/**
+ * ESCRIBIR SIN QUE LA BÓVEDA VEA EL VALOR, Y CON LA FIRMA DE SU AUTOR.
+ *
+ * Dos reglas del dueño (2026-09-01), que van juntas:
+ *
+ *   · «La bóveda cerrada no puede ver el valor; debe confiar en la firma del admin y en el
+ *     contenido de esos sobres, y es la razón por la que al abrir la bóveda rehace los
+ *     sobres: por si alguno tiene alguna incoherencia.»
+ *   · «Los sobres deben traer información de quién los hizo… solo puede haber sobres
+ *     firmados por miembros del acta», porque «un cn no puede poner un sobre faltante fuera
+ *     de su cn».
+ *
+ * Antes escribir hacía un rodeo: la consola sellaba el valor AL PERFIL, la bóveda lo ABRÍA
+ * para sacarlo en claro y lo volvía a cerrar. Ese descifrado era el ÚNICO motivo por el que
+ * la llave de cifrado del perfil tenía que estar accesible con la bóveda cerrada — o sea, la
+ * razón por la que una copia del disco abría todo lo dirigido al perfil.
+ */
+test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su autor', async () => {
+  const { buildSealedVar, authorFromDeviceKey } = await import('../lib/src/admin.js')
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const ns = 'sinver'
+
+  // El autor: un aparato del acta que administra.
+  const yo = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: yo.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read'] })
+  const owner = `ns:${ns}`
+
+  // 1. La BÓVEDA dice a quién hay que envolver (la lista sale del acta, la sabe ella).
+  const recipients = await vault.vars.recipients({ ns })
+  assert.ok(recipients.recoveryPub, 'y la de recuperación va incluida')
+
+  // 2. El autor fabrica el sobre y lo firma. El valor no sale de aquí en claro.
+  const sealed = await buildSealedVar({ recipients, owner, key: 'TOKEN', value: 'lo-que-no-ve', author: authorFromDeviceKey(yo) })
+  await vault.vars.set({ ns, key: 'TOKEN', sealed, caller: yo.publickey, by: 'test' })
+
+  // 3. Quedó guardado EXACTAMENTE lo que se mandó: nadie lo abrió para volver a cerrarlo.
+  //
+  //    Se comprueba sobre lo GUARDADO y no leyendo el valor, a propósito: leerlo pide la
+  //    copia de recuperación, y de qué llave depende esa copia cambia según qué test de
+  //    este fichero corrió antes — hacer depender esto del orden es lo que lo rompía. Y lo
+  //    que se prueba aquí es justo que la bóveda NO abrió nada.
+  const dentro = vault.listSecrets()[ns] || []
+  assert.ok(dentro.some((k) => k.key === 'TOKEN'), 'la variable está guardada')
+  assert.ok(vault.secretRecipients(owner).includes('#recovery'),
+    'con la envoltura de recuperación, que es la que rehace todas las demás al abrir')
+  assert.deepEqual(
+    vault.secretRecipients(owner).filter((p) => p !== '#recovery').sort(),
+    Object.keys(sealed.wraps).filter((p) => p !== '#recovery').sort(),
+    'y las envolturas guardadas son EXACTAMENTE las que mandó el autor')
+
+  // UN SOBRE SIN AUTOR NO ENTRA.
+  const sinAutor = { ...sealed }; delete sinAutor.author
+  await assert.rejects(vault.vars.set({ ns, key: 'OTRA', sealed: sinAutor, caller: yo.publickey }),
+    /WHO made it/, 'tiene que decir quién lo hizo')
+
+  // UNA FIRMA DE UNA LLAVE QUE EL ACTA NO NOMBRA, TAMPOCO.
+  const extrano = await makeDeviceKey()
+  const ajeno = await buildSealedVar({ recipients, owner, key: 'OTRA', value: 'x', author: authorFromDeviceKey(extrano) })
+  await assert.rejects(vault.vars.set({ ns, key: 'OTRA', sealed: ajeno, caller: extrano.publickey }),
+    /the record does not name/, 'un extraño no cuela un sobre aunque lo firme bien')
+
+  // UN SERVICIO NO PISA LO QUE YA HAY, solo rellena lo que falta (dueño, 2026-09-01).
+  // Misma regla que `putWrap`, y por lo mismo: reemplazar un sobre con uno basura dejaría
+  // sin leer a otro miembro — denegación de servicio disfrazada de escritura.
+  const servicio = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: servicio.publickey, label: 'svc', cn: ns, caps: ['secrets'] })
+  const rec2 = await vault.vars.recipients({ ns })
+  const suyo = await buildSealedVar({ recipients: rec2, owner, key: 'TOKEN', value: 'pisado', author: authorFromDeviceKey(servicio) })
+  await assert.rejects(vault.vars.set({ ns, key: 'TOKEN', sealed: suyo, caller: servicio.publickey }),
+    /cannot overwrite/, 'un servicio no reemplaza un sobre que ya existe')
+
+  // Pero SÍ puede rellenar uno que falta en SU cajón.
+  const nueva = await buildSealedVar({ recipients: rec2, owner, key: 'NUEVA', value: 'la-pone-el-servicio', author: authorFromDeviceKey(servicio) })
+  await vault.vars.set({ ns, key: 'NUEVA', sealed: nueva, caller: servicio.publickey })
+  assert.ok((vault.listSecrets()[ns] || []).some((k) => k.key === 'NUEVA'), 'sí puede rellenar la que falta')
+
+  // Y no en el cajón de otro.
+  const ajenoCajon = await buildSealedVar({
+    recipients: await vault.vars.recipients({ ns: 'consola' }), owner: 'ns:consola', key: 'X', value: 'z', author: authorFromDeviceKey(servicio)
+  })
+  await assert.rejects(vault.vars.set({ ns: 'consola', key: 'X', sealed: ajenoCajon, caller: servicio.publickey }),
+    /own drawer/, 'un cn no escribe fuera de su cn')
+
+  // Y UNA FIRMA QUE NO CUADRA CON ESTE SOBRE: se firmó para OTRA clave del mismo cajón.
+  const paraOtra = await buildSealedVar({ recipients, owner, key: 'DISTINTA', value: 'y', author: authorFromDeviceKey(yo) })
+  await assert.rejects(
+    vault.vars.set({ ns, key: 'TOKEN', sealed: { ...paraOtra, author: paraOtra.author }, caller: yo.publickey }),
+    /does not verify/,
+    'la firma lleva dentro el cajón y la clave: no se puede reusar en otro sitio')
 })

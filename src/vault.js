@@ -16,14 +16,14 @@ import { Identity } from '@dotrino/identity/node'
 import { verifyChain, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
-import { createAdminDesk } from '../lib/src/admin.js'
+import { createAdminDesk, authorBody } from '../lib/src/admin.js'
 import { shouldNotifyRevoked } from '../lib/src/revocation.js'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { startSealersPublisher } from './sealers.js'
 import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
-import { openSecretsStore, assertVar } from './secretsStore.js'
+import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP } from './secretsStore.js'
 // `PENDING_TTL_MS` se usa abajo, al esperar la firma del aprobador: sin importarlo, esa
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
@@ -1381,15 +1381,59 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         }))
       }
     },
-    async set ({ ns, pub, key, enc, public: isPublic, by: who = null }) {
-      const payload = JSON.parse(await identity.openContent(enc))
-      const value = payload?.value
-      if (typeof value !== 'string' || !value) throw new Error('var.set: the sealed envelope must carry a non-empty value')
-      // NO PIDE LA CONTRASEÑA (§8.1): sellar solo necesita las públicas de quien va a
-      // leer. Lo que se guarda es quién lo escribió, para que el histórico lo diga.
-      if (ns) await setSecret(ns, key, value, isPublic, { by: who })
-      else await setDeviceSecret(pub, key, value, isPublic, { by: who })
-      return { ok: true, key }
+    /**
+     * PARA QUIÉN ENVOLVER. Lo contesta la bóveda porque la lista sale del ACTA
+     * (`recipientsOf`), y tener dos sitios respondiendo a «quién puede abrir este cajón» es
+     * exactamente cómo se acaba dejando fuera a alguien sin que nadie se entere.
+     */
+    async recipients ({ ns, pub }) {
+      return secrets.recipientsFor(ns ? `ns:${ns}` : `dev:${pub}`)
+    },
+    /**
+     * GUARDAR UNA VARIABLE **SIN VERLA** (dueño, 2026-09-01).
+     *
+     * «La bóveda cerrada no puede ver el valor; debe confiar en la firma del admin y en el
+     * contenido de esos sobres, y es la razón por la que al abrir la bóveda rehace los
+     * sobres: por si alguno tiene alguna incoherencia.»
+     *
+     * Antes esto abría el sobre para sacar el valor en claro y volvía a cerrarlo. Ese
+     * rodeo era el ÚNICO motivo por el que la llave de cifrado del perfil tenía que estar
+     * accesible con la bóveda cerrada — o sea, la razón por la que una copia del disco
+     * abría todo lo dirigido al perfil.
+     *
+     * Ahora llega hecho: el valor cifrado con una CEK nueva y esa CEK envuelta para cada
+     * destinatario. Aquí se comprueba lo que se puede comprobar SIN la llave: que las
+     * envolturas cubren exactamente a quien dice el acta. Lo que no se puede comprobar
+     * —que dentro haya lo que dice— lo corrige el repaso al abrir la bóveda.
+     *
+     * Una PÚBLICA sigue viajando en claro y por el camino de siempre: marcarla pública es
+     * precisamente decir que no hay nada que ocultar.
+     */
+    async set ({ ns, pub, key, sealed, caller = null, public: isPublic, by: who = null }) {
+      const owner = ns ? `ns:${ns}` : `dev:${pub}`
+      if (sealed) {
+        // PÚBLICA Y PRIVADA VAN IGUAL (dueño, 2026-09-02: «la única diferencia es si se
+        // despachan o no, son políticas; dales el mismo tratamiento de seguridad»). La
+        // marca solo decide si se entrega sin aprobación.
+        await verificarAutor(owner, key, sealed, caller)
+        await verificarDestinatarios(owner, sealed.wraps)
+        await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
+        audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
+        await settleDebts(owner)
+        return { ok: true, key }
+      }
+      // NO HAY OTRO CAMINO (dueño, 2026-09-02: «no dejes caminos viejos ni fallbacks; no hay
+      // que hacer retrocompatibilidad y es una regla del estado actual del proyecto, por eso
+      // quedan luego backdoors»).
+      //
+      // Aquí estaba el `enc`: la consola sellaba el valor AL PERFIL y la bóveda lo ABRÍA
+      // para volver a cerrarlo. Ese descifrado era el único motivo por el que la llave de
+      // cifrado del perfil tenía que estar accesible con la bóveda cerrada — o sea, la
+      // razón por la que una copia del disco abría todo lo dirigido al perfil. Dejarlo
+      // «por si acaso» habría dejado el agujero entero abierto con otro nombre.
+      throw Object.assign(
+        new Error('var.set: the value must come already sealed (`sealed`); the old `enc` path is gone — build it with buildSealedVar()'),
+        { code: 'needs-sealed' })
     },
     /**
      * VARIAS DE UNA VEZ, y por eso existe: cada guardado suelto hace que la bóveda avise
@@ -1401,22 +1445,27 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * Los NOMBRES también viajan dentro del sobre —no solo los valores—: el proxy
      * transporta y no tiene por qué aprender cómo se llama la configuración de un servicio.
      */
-    async setMany ({ ns, pub, enc, public: isPublic, by: who = null }) {
-      const payload = JSON.parse(await identity.openContent(enc))
-      const items = payload?.items
-      if (!Array.isArray(items) || !items.length) throw new Error('var.setMany: the sealed envelope must carry the variables')
-      // Borrar no se delega (`docs/consola-remota.md` §2): un aparato robado no puede
-      // dejar sin configuración a un servicio. Así que aquí solo entran valores nuevos.
-      /** @type {Array<{op:'set', key:string, value:string, public?:boolean}>} */
-      const list = items.map((it) => ({
-        op: /** @type {'set'} */ ('set'),
-        key: it?.key,
-        value: it?.value,
-        ...(typeof it?.public === 'boolean' ? { public: it.public } : (isPublic === undefined ? {} : { public: isPublic }))
-      }))
-      // NO PIDE LA CONTRASEÑA (§8.1). Y sí, `applySecrets` va con `await` — sin él la
-      // escritura quedaba al aire y la respuesta salía antes de guardar nada.
-      const keys = ns ? await applySecrets(ns, list, { by: who }) : await applyDeviceSecrets(pub, list, { by: who })
+    async setMany ({ ns, pub, items, caller = null, by: who = null }) {
+      // CADA VARIABLE VIENE EN SU PROPIO SOBRE, ya hecho. La bóveda no abre ninguno: solo
+      // comprueba quién los firma y a quién envuelven, igual que en `set`. Aquí estaba el
+      // `enc` que las traía todas juntas selladas AL PERFIL, y abrirlo era lo que obligaba
+      // a tener la llave de cifrado accesible con la bóveda cerrada.
+      if (!Array.isArray(items) || !items.length) throw new Error('var.setMany: no variables came')
+      const owner = ns ? `ns:${ns}` : `dev:${pub}`
+      const keys = []
+      for (const it of items) {
+        if (!it?.key || !it?.sealed) throw new Error('var.setMany: each variable needs its key and its sealed envelope')
+        await verificarAutor(owner, it.key, it.sealed, caller)
+        await verificarDestinatarios(owner, it.sealed.wraps)
+      }
+      // Se comprueban TODAS antes de escribir NINGUNA: media carga aplicada es una
+      // configuración que nadie quiso, y el servicio se reinicia con ella.
+      for (const it of items) {
+        await secrets.putSealed(owner, it.key, it.sealed, { by: who, public: !!it.public })
+        keys.push(it.key)
+      }
+      audit('secret.setMany', { ns: ns || null, keys }); scheduleNotice(ns)
+      await settleDebts(owner)
       return { ok: true, keys }
     }
   }
@@ -1937,6 +1986,88 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * `if` para ese caso no sería prudencia: sería un repliegue que le pone cara de trámite
    * normal a una contradicción. Si aun así falta la llave, se dice como lo que es.
    */
+  /**
+   * ¿QUIÉN HIZO ESTE SOBRE? Tiene que decirlo, y tiene que ser un MIEMBRO DEL ACTA.
+   *
+   * Regla del dueño (2026-09-01): «los sobres deben traer información de quién los hizo,
+   * deberían tener la firma para que no se cuelen sobres firmados por cualquiera; solo
+   * puede haber sobres firmados por miembros del acta».
+   *
+   * La petición ya viene firmada y comprobada (`verifyChain` + el acta), así que un extraño
+   * no llega hasta aquí. Esto es otra cosa y hace falta igual: la bóveda guarda unos bytes
+   * que NO PUEDE LEER, y sin esta firma lo único que ataba esos bytes a un autor era el
+   * momento de la llamada. Con ella, el registro guardado se explica solo — se puede
+   * comprobar después, en frío, sin fiarse de ningún log.
+   *
+   * El autor tiene que ser QUIEN LLAMA. Aceptar un sobre firmado por otro sería admitir un
+   * relevo: alguien con `admin` colando un sobre que fabricó un tercero, sin que ninguna de
+   * las dos comprobaciones lo note.
+   */
+  async function verificarAutor (owner, key, sealed, caller) {
+    const a = sealed?.author
+    if (!a || typeof a.pub !== 'string' || typeof a.sig !== 'string' || typeof a.ts !== 'number') {
+      throw new Error('var.set: the envelope must say WHO made it (`author: { pub, sig, ts }`)')
+    }
+    if (caller && a.pub !== caller) {
+      throw new Error('var.set: the envelope was signed by someone other than the caller — a relayed envelope is not accepted')
+    }
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const m = (record?.members || []).find((x) => x.pub === a.pub)
+    if (!record || !m) {
+      throw new Error('var.set: the envelope is signed by a key the record does not name')
+    }
+    // UN SERVICIO SOLO PARA SU CAJÓN (dueño, 2026-09-01: «un cn no puede poner un sobre
+    // faltante fuera de su cn»). Es la misma regla que ya aplica el reparto delegado
+    // (`handleRewrapOk`), y tiene que valer también aquí: si no, un servicio con `admin`
+    // podría escribir en el cajón de otro. Quien administra sin `cn` sí puede: ese es su
+    // trabajo, y para eso se le concede a mano.
+    const ns = owner.startsWith('ns:') ? owner.slice(3) : null
+    if (m.cn && ns && m.cn !== ns) {
+      throw new Error(`var.set: "${m.cn}" cannot write into "${owner}" — a service only authors envelopes for its own drawer`)
+    }
+    // Y UN SERVICIO NO PISA LO QUE YA HAY (dueño, 2026-09-01: «un cn no puede sobrescribir
+    // un sobre existente; solamente el admin y el vault editan sobres, los otros pueden
+    // crear los que faltan nomás»).
+    //
+    // Es la misma regla que `putWrap` («solo añade, nunca pisa») y por el mismo motivo: un
+    // servicio que pudiera reemplazar un sobre podría dejar sin leer a otro miembro con uno
+    // basura — denegación de servicio disfrazada de escritura. Rellenar lo que falta no
+    // quita nada a nadie; reemplazar sí, y eso es de quien administra.
+    if (m.cn && secrets.has?.(owner, key)) {
+      throw new Error(`var.set: "${m.cn}" cannot overwrite "${key}" — a service only fills in what is missing; replacing is for who administers`)
+    }
+    const cuerpo = authorBody(owner, key, sealed.e, a.ts)
+    if (!(await verifyDeviceSig({ publickey: a.pub, data: cuerpo, signature: a.sig }))) {
+      throw new Error('var.set: the author signature does not verify over this envelope')
+    }
+  }
+
+  /**
+   * ¿ESTE SOBRE ENVUELVE A QUIEN TOCA? Lo único que se puede comprobar sin la llave.
+   *
+   * No se puede saber si dentro de cada envoltura está la CEK correcta —para eso habría que
+   * abrirla, que es justo lo que ya no se hace—, pero sí QUIÉN puede abrirlas. Y eso ya
+   * ataja lo que importa: que no falte nadie (un servicio que arrancaría sin configuración)
+   * y que no sobre nadie (alguien a quien el acta no nombra leyendo el cajón).
+   *
+   * Lo de dentro lo corrige el repaso al abrir la bóveda, que es para lo que está.
+   */
+  async function verificarDestinatarios (owner, wraps) {
+    if (!wraps || typeof wraps !== 'object') throw new Error('var.set: the envelope carries no wraps')
+    const { recoveryPub, members } = await secrets.recipientsFor(owner)
+    if (!recoveryPub) throw new Error('var.set: this vault has no recovery key yet')
+    const deben = new Set(members.map((m) => m.pub))
+    const traidos = new Set(Object.keys(wraps).filter((k) => k !== RECOVERY_WRAP))
+    const faltan = [...deben].filter((p) => !traidos.has(p))
+    const sobran = [...traidos].filter((p) => !deben.has(p))
+    if (faltan.length) {
+      throw new Error(`var.set: the envelope leaves ${faltan.length} member(s) of "${owner}" out — they could not read it (ask the vault for the recipients with \`var.recipients\`)`)
+    }
+    if (sobran.length) {
+      throw new Error(`var.set: the envelope wraps for ${sobran.length} key(s) the record does not name for "${owner}"`)
+    }
+  }
+
   async function refreshWraps (motivo) {
     // HAY CANDADO SOLO SI HAY LAS DOS COSAS: contraseña Y alguien que sepa abrirla.
     //
@@ -2171,12 +2302,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * era lo único que la marca no significaba. La consola remota ya las enseña.
    */
   function listSecrets () {
-    const out = {}
-    for (const [ns, keys] of Object.entries(secrets.list())) {
-      const values = secrets.publicOf(ns)
-      out[ns] = keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k))
-    }
-    return out
+    // YA NO SE ENSEÑA EL VALOR DE UNA PÚBLICA (dueño, 2026-09-02). Desde que todas van en
+    // sobre, «pública» dejó de significar «en claro»: dice a quién se le despacha sin
+    // aprobación, nada más. Para ver un valor hay que poder abrirlo, igual que cualquiera —
+    // y en un cajón con dueño, quien administra deliberadamente no puede.
+    return secrets.list()
   }
   /** Cambiar SOLO quién puede ver el valor (no toca el valor ni avisa: el servicio lee lo mismo). */
   async function setSecretVisibility (ns, key, isPublic, adminKey) {
@@ -2253,13 +2383,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const out = []
     for (const [pub, keys] of Object.entries(secrets.listDevices())) {
       const m = members.find((x) => x.pub === pub) || null
-      const values = secrets.publicOfDevice(pub)
       out.push({
         pub,
         id: m?.id || await deviceIdOf(pub).catch(() => null),
         label: m?.label || '',
         cn: m?.cn || null,
-        keys: keys.map((k) => (k.public ? { ...k, value: values[k.key] } : k)),
+        // Sin valores: desde 2026-09-02 una pública también va en sobre (ver `listSecrets`).
+        keys,
         orphan: !!members.length && !m
       })
     }

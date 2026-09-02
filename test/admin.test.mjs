@@ -182,7 +182,7 @@ test('la bitácora se lee acotada y con el actor en cada acción', async () => {
 test('sin mostrador de variables, la consola lo dice en vez de fingir que guardó', async () => {
   const { admin } = mount()
   for (const op of ['vars', 'var.set']) {
-    const r = await admin.handle({ op, ns: 'proxy', key: 'PORT', enc: { ct: 'x' }, nonce: nonce(op.padEnd(32, 'z')) })
+    const r = await admin.handle({ op, ns: 'proxy', key: 'PORT', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce(op.padEnd(32, 'z')) })
     assert.equal(r.ok, false)
     assert.match(r.error, /does not serve environment variables/)
   }
@@ -205,16 +205,19 @@ test('poner valor: UN destino, y el valor SIEMPRE dentro del sobre', async () =>
   const { admin } = mount({ vars })
 
   // Sin destino, o con los dos, no se adivina dónde acaba la variable.
-  const noTarget = await admin.handle({ op: 'var.set', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('1') })
+  const noTarget = await admin.handle({ op: 'var.set', key: 'PORT', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce('1') })
   assert.match(noTarget.error, /exactly one target/)
-  const twoTargets = await admin.handle({ op: 'var.set', ns: 'proxy', pub: 'PUB', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('2') })
+  const twoTargets = await admin.handle({ op: 'var.set', ns: 'proxy', pub: 'PUB', key: 'PORT', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce('2') })
   assert.match(twoTargets.error, /exactly one target/)
 
   // Un valor en claro no se acepta: no es algo que se pueda «arreglar» guardándolo igual.
+  // Desde 2026-09-02 solo hay UNA forma: el sobre ya hecho (`sealed`), que la bóveda no
+  // abre. El `enc` —que sellaba al perfil y obligaba a la bóveda a descifrar— se quitó
+  // entero: dejarlo «por si acaso» habría dejado abierto el agujero que cerró.
   const inClear = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PORT', value: '8443', nonce: nonce('3') })
-  assert.match(inClear.error, /sealed with the profile content key/)
+  assert.match(inClear.error, /already sealed/)
 
-  const noKey = await admin.handle({ op: 'var.set', ns: 'proxy', enc: { ct: 'x' }, nonce: nonce('4') })
+  const noKey = await admin.handle({ op: 'var.set', ns: 'proxy', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce('4') })
   assert.match(noKey.error, /needs a key/)
 
   assert.deepEqual(vars.calls, [], 'nada de eso llegó a la bóveda')
@@ -224,14 +227,14 @@ test('poner valor llega al cajón que toca, con su visibilidad, y se AVISA a tod
   const vars = fakeVars()
   const { admin, notices, audits } = mount({ vars })
 
-  const enScope = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PUBLIC_URL', enc: { ct: 'x' }, public: true, nonce: nonce('5') })
+  const enScope = await admin.handle({ op: 'var.set', ns: 'proxy', key: 'PUBLIC_URL', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, public: true, nonce: nonce('5') })
   assert.equal(enScope.ok, true)
   assert.deepEqual(
     { ns: vars.calls[0][1].ns, pub: vars.calls[0][1].pub, key: vars.calls[0][1].key, public: vars.calls[0][1].public },
     { ns: 'proxy', pub: null, key: 'PUBLIC_URL', public: true }
   )
 
-  await admin.handle({ op: 'var.set', pub: 'PUB-DEL-PROXY', key: 'PORT', enc: { ct: 'x' }, nonce: nonce('6') })
+  await admin.handle({ op: 'var.set', pub: 'PUB-DEL-PROXY', key: 'PORT', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce('6') })
   const toDevice = vars.calls[1][1]
   assert.equal(toDevice.ns, null)
   assert.equal(toDevice.pub, 'PUB-DEL-PROXY')
@@ -301,11 +304,11 @@ test('cerrada se mira Y se configura; lo que no se puede es quitar', async () =>
   assert.equal((await admin.handle({ op: 'audit', nonce: nonce('q') })).ok, true)
   assert.equal((await admin.handle({ op: 'vars', nonce: nonce('r') })).ok, true)
 
-  const g = await admin.handle({ op: 'var.set', ns: 'aws', key: 'AWS_REGION', enc: { epk: 'E', iv: 'I', ct: 'C' }, nonce: nonce('u') })
+  const g = await admin.handle({ op: 'var.set', ns: 'aws', key: 'AWS_REGION', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }, nonce: nonce('u') })
   assert.equal(g.ok, true, 'guardar una variable con el candado echado TIENE que funcionar')
   assert.equal(vars.calls.at(-1)[0], 'set', 'y llega al mostrador de verdad, no se finge')
 
-  const m = await admin.handle({ op: 'var.setMany', ns: 'aws', enc: { epk: 'E', iv: 'I', ct: 'C' }, nonce: nonce('v') })
+  const m = await admin.handle({ op: 'var.setMany', ns: 'aws', items: [{ key: 'K', sealed: { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } } }], nonce: nonce('v') })
   assert.equal(m.ok, false, 'este mostrador de mentira no sabe `setMany`…')
   assert.match(m.error, /several variables at once/, '…y lo dice por eso, no por el candado')
 })

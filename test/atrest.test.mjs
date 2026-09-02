@@ -86,13 +86,18 @@ test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', a
 
 test('el salt viaja con los datos: mover un perfil sin él los dejaría ilegibles', async () => {
   const { openSecretsStore } = await import('../src/secretsStore.js')
+  const { makeSealer } = await import('../src/sealer.js')
   const source = tmp(); const target = tmp()
-  // Pública: así no hace falta sellador ni contraseña, que aquí no es lo que se prueba.
-  await openSecretsStore(source).set('proxy', 'TURN_KEY_ID', 'TOKEN', true)
+  // CON SELLADOR, aunque la variable sea pública: desde 2026-09-02 las públicas van en
+  // sobre igual que las privadas, así que escribir cualquiera lo necesita. Lo que se prueba
+  // aquí es el SALT, no la visibilidad.
+  const abrir = (dir) => openSecretsStore(dir, { sealer: makeSealer(), defaultKey: () => new Uint8Array(32).fill(3), recipients: () => [] })
+  await abrir(source).set('proxy', 'TURN_KEY_ID', 'TOKEN', true)
 
   // Migración legacy → dir del perfil, tal como la hace profiles.js.
   for (const f of ['secrets.json', 'atrest.salt']) fs.renameSync(path.join(source, f), path.join(target, f))
-  assert.equal(openSecretsStore(target).bundleFor('proxy').entries.TURN_KEY_ID.v, 'TOKEN')
+  // Si el salt no viajara, el archivo ni se abriría; que la entrada esté (y su sobre) basta.
+  assert.ok(abrir(target).bundleFor('proxy').entries.TURN_KEY_ID?.e?.ct, 'se lee tras moverlo')
 
   fs.rmSync(source, { recursive: true, force: true }); fs.rmSync(target, { recursive: true, force: true })
 })

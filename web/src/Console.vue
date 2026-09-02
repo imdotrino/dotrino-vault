@@ -9,6 +9,7 @@
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
 import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { buildSealedVar } from '@dotrino/vault/admin'
 import { Identity } from '@dotrino/identity'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
@@ -1249,13 +1250,34 @@ const orphanVars = computed(() => (vars.value?.dev || [])
  */
 function saveVars ({ target, items }) {
   return run('var-' + target, async () => {
-    // GUARDAR NO PIDE LA CONTRASEÑA, y ese es el cambio entero: sellar solo necesita las
-    // llaves PÚBLICAS de quien va a leer, así que la bóveda puede hacerlo sin ningún
-    // secreto (`docs/secretos-sellados.md` §8.1). Antes había que teclear aquí la frase
-    // del perfil —la que abre TODOS los cajones— y eso es justo lo que no debe pasar en
-    // un navegador. Los valores siguen viajando dentro del sobre cifrado.
-    const enc = await id.value.sealContent(JSON.stringify({ items }))
-    await id.value.vaultAdmin('var.setMany', { ...targetOf(target), enc })
+    // EL SOBRE LO HACE ESTA CONSOLA, Y LA BÓVEDA NO LO ABRE (dueño, 2026-09-02).
+    //
+    // Antes se sellaba el valor AL PERFIL y la bóveda lo abría para volver a cerrarlo. Ese
+    // descifrado era el único motivo por el que la llave de cifrado del perfil tenía que
+    // estar accesible con la bóveda CERRADA — o sea, la razón por la que una copia del
+    // disco abría todo lo dirigido al perfil.
+    //
+    // Ahora: se le pregunta a la bóveda a quién hay que envolver (la lista sale del acta y
+    // la sabe ella), se envuelve con esas PÚBLICAS —por eso esto se puede hacer en un
+    // navegador— y se FIRMA. La firma la da el iframe de identidad: la privada del aparato
+    // vive dentro y no sale, así que aquí solo se pide.
+    //
+    // Y guardar sigue sin pedir la contraseña, que era el punto de §8.1: envolver necesita
+    // públicas, no secretos.
+    const dest = targetOf(target)
+    const recipients = await id.value.vaultAdmin('var.recipients', dest)
+    const owner = dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`
+    const me = await id.value.myMembership()
+    const author = { publickey: me.pub, sign: (body) => id.value.signData(body) }
+    const sealados = []
+    for (const it of items) {
+      sealados.push({
+        key: it.key,
+        ...(typeof it.public === 'boolean' ? { public: it.public } : {}),
+        sealed: await buildSealedVar({ recipients, owner, key: it.key, value: it.value, author })
+      })
+    }
+    await id.value.vaultAdmin('var.setMany', { ...dest, items: sealados })
     await loadVars()
   })
 }
