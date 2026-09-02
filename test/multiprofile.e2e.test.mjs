@@ -217,7 +217,10 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
   // se reinicia en semanas.
   const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-autolock-e2e-'))
   const { startVaultManager } = await import('../src/manager.js')
-  const m2 = await startVaultManager({ root: root2, proxyUrl, log: () => {}, autoLockMs: 300 })
+  // 300 ms era muy justo por el mismo motivo que en `profiles.test.mjs`: entre medias hay
+  // viajes por un proxio de verdad, y en CI eso se come la ventana antes de llegar a
+  // comprobar que sigue abierta. Aquí no llegó a fallar, pero era cuestión de suerte.
+  const m2 = await startVaultManager({ root: root2, proxyUrl, log: () => {}, autoLockMs: 800 })
   try {
     const [p] = m2.list()
     const vault = m2.get(p.id)
@@ -228,7 +231,7 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
     await requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Antes' } } })
     assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
-    await new Promise((r) => setTimeout(r, 450))
+    await new Promise((r) => setTimeout(r, 1200))
     assert.equal(m2.profiles.isLocked(p.id), true, 'se cerró solo, sin que nadie lo cerrara')
     await assert.rejects(
       () => requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } }),

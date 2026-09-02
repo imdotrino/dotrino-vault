@@ -367,15 +367,22 @@ test('mientras está abierto se puede envolver sin volver a pedir la frase', asy
   assert.deepEqual([...k], new Array(32).fill(0), 'la llave se borró, no se olvidó')
 })
 
+/**
+ * La ventana era de 30 ms y el test se caía en CI, no aquí: `unlock` deriva la llave con
+ * scrypt, y en un runner lento **eso solo ya se come los 30 ms**, así que el candado se
+ * cerraba antes de llegar a mirar la llave y fallaba la PRIMERA aserción — la que da por
+ * hecho que está abierta. El fallo no era del candado; era que el montaje no cabía en su
+ * propia ventana. 300/600 sigue siendo medio segundo y deja sitio para una máquina lenta.
+ */
 test('el auto-candado también se lleva la llave', async () => {
-  const p = openProfiles(tmp(), { autoLockMs: 30 })
+  const p = openProfiles(tmp(), { autoLockMs: 300 })
   const { id } = await p.migrate(llave)
   await p.setPassword(id, 'frase-de-prueba-larga')
   await p.unlock(id, 'frase-de-prueba-larga')
   const k = p.openKey(id)
   assert.ok(k?.length === 32)
 
-  await new Promise((r) => setTimeout(r, 60))
+  await new Promise((r) => setTimeout(r, 600))
   assert.equal(p.isLocked(id), true, 'se cerró solo')
   assert.equal(p.openKey(id), null)
   assert.deepEqual([...k], new Array(32).fill(0))
