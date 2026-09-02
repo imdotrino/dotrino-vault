@@ -1265,16 +1265,24 @@ function saveVars ({ target, items }) {
     // Y guardar sigue sin pedir la contraseña, que era el punto de §8.1: envolver necesita
     // públicas, no secretos.
     const dest = targetOf(target)
-    const recipients = await id.value.vaultAdmin('var.recipients', dest)
     const owner = dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`
     const me = await id.value.myMembership()
     const author = { publickey: me.pub, sign: (body) => id.value.signData(body) }
+    // LA LISTA DEPENDE DE LA VISIBILIDAD: una pública se envuelve además para quien
+    // administra, así que se pregunta por cada una. Se cachea por visibilidad porque en una
+    // tanda suelen ser todas iguales y no hay que ir dos veces por lo mismo.
+    const cache = new Map()
+    const paraQuien = async (esPublica) => {
+      if (!cache.has(esPublica)) cache.set(esPublica, await id.value.vaultAdmin('var.recipients', { ...dest, public: esPublica }))
+      return cache.get(esPublica)
+    }
     const sealados = []
     for (const it of items) {
+      const esPublica = it.public === true
       sealados.push({
         key: it.key,
         ...(typeof it.public === 'boolean' ? { public: it.public } : {}),
-        sealed: await buildSealedVar({ recipients, owner, key: it.key, value: it.value, author })
+        sealed: await buildSealedVar({ recipients: await paraQuien(esPublica), owner, key: it.key, value: it.value, author })
       })
     }
     await id.value.vaultAdmin('var.setMany', { ...dest, items: sealados })

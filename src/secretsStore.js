@@ -296,8 +296,13 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
   }
 
   /** Los destinatarios de un cajón: los que dice el acta, más la copia de recuperación. */
-  const wrapAll = async (cek, owner) => {
-    const members = (await recipients?.(owner)) || []
+  /**
+   * @param {boolean} isPublic Una PÚBLICA se envuelve además para quien administra, aunque
+   *   el cajón tenga dueño (dueño, 2026-09-02). Puede variar por variable porque cada
+   *   escritura estrena su propia CEK: el llavero guarda una generación por valor.
+   */
+  const wrapAll = async (cek, owner, isPublic = false) => {
+    const members = (await recipients?.(owner, { public: isPublic })) || []
     const { wraps, sinLlave } = await sealer.wrapFor(cek, members)
     wraps[RECOVERY] = await sealer.wrapForKey(cek, data.recovery.pub)
     return { wraps, sinLlave }
@@ -537,7 +542,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       // CEK NUEVA, siempre: no se puede reutilizar la de antes sin poder abrirla.
       const cek = await sealer.newKey()
       const gen = (topGen(bag, k)?.gen || 0) + 1
-      const { wraps, sinLlave } = await wrapAll(cek, owner)
+      const { wraps, sinLlave } = await wrapAll(cek, owner, pub)
       const e = await sealer.encrypt(cek, value, gen)
       // La FIRMA dice que este sobre salió de esta bóveda, y con qué acta (§8.8). Si no
       // hay con qué firmar, el sobre sale sin firma: guardar es más importante.
@@ -631,9 +636,9 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * haya dos sitios respondiendo a «quién puede abrir este cajón» (la lista la sabe el
      * acta, y de ahí sale `recipients`).
      */
-    async recipientsFor (owner) {
+    async recipientsFor (owner, { public: isPublic = false } = {}) {
       await ensureRecovery(null)
-      const members = (await recipients?.(owner)) || []
+      const members = (await recipients?.(owner, { public: isPublic })) || []
       return {
         recoveryPub: data.recovery.pub,
         members: members.filter((m) => m.encPub).map((m) => ({ pub: m.pub, encPub: m.encPub }))
@@ -796,6 +801,13 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       return [...Object.keys(data.ns).map((k) => `ns:${k}`), ...Object.keys(data.dev).map((k) => `dev:${k}`)]
     },
     /** @private */
+    /**
+     * @param {Array|((isPublic:boolean)=>Promise<Array>)} members A quién envolver. Puede ser
+     *   una FUNCIÓN de la visibilidad: desde 2026-09-02 una pública se envuelve además para
+     *   quien administra, y eso se decide por variable — cada escritura estrena su CEK, así
+     *   que el llavero tiene una generación por valor. Con una lista fija se aplicaría la
+     *   misma a todas y se le daría a la consola la envoltura de una privada con dueño.
+     */
     async _rewrap (owner, members, adminKey = null, { exact = false } = {}) {
       needSealer('re-wrap the key of a drawer')
       if (needsMigration()) throw new NeedsMigration()
@@ -805,11 +817,15 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       const priv = await openRecovery(adminKey)
       let wrapped = 0
       const sinLlave = new Set()
+      // De qué variable es cada generación: es lo que dice si esa CEK es de una pública.
+      const visibilidad = new Map()
+      for (const e of Object.values(varsOf(bag, k))) if (e.gen != null) visibilidad.set(e.gen, !!e.pub)
+      const paraGen = async (gen) => (typeof members === 'function' ? members(visibilidad.get(gen) === true) : members)
       for (const g of bag[k].keyring || []) {
         const w = g.wraps?.[RECOVERY]
         if (!w) continue
         const cek = await sealer.openWrapWith(priv, w)
-        const r = await sealer.wrapFor(cek, members)
+        const r = await sealer.wrapFor(cek, await paraGen(g.gen))
         // `exact`: el llavero queda con lo que dice el acta y NADA más. Es lo que hace
         // falta para rehacerlo al abrir la bóveda:
         //   · una envoltura basura que metió alguien se reemplaza por la buena;

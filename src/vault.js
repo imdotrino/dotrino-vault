@@ -197,7 +197,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // A QUIÉN se le envuelve la llave de cada cajón: los servicios de ese namespace (o el
     // propio aparato, si el cajón es suyo) MÁS los aparatos que administran. Sale del
     // acta, y por eso lo pone el vault: el store no conoce el acta.
-    recipients: (owner) => recipientsOf(owner),
+    recipients: (owner, opts) => recipientsOf(owner, opts),
     // La FIRMA del sobre: dice que salió de esta bóveda y con qué acta (§8.8).
     signer: (body) => signSeal(body),
     // CON QUÉ se cierra la copia de recuperación cuando quien llama no trajo la frase:
@@ -808,7 +808,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Y su cajón PROPIO también: un aparato con variables suyas se quedaba sin poder
       // abrirlas, que es el mismo agujero por otra puerta.
       for (const owner of [`ns:${ns}`, `dev:${chk.device}`]) {
-        await spreadKey(owner, await recipientsOf(owner))
+        await spreadKey(owner, (esPublica) => recipientsOf(owner, { public: esPublica }))
           .catch((e) => log(`[vault] ${owner}: could not hand it the key: ${e.message}`))
       }
       const body = { op: 'secrets.result', ns, enc: null, ok: true, ts: Date.now() }
@@ -1386,8 +1386,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * (`recipientsOf`), y tener dos sitios respondiendo a «quién puede abrir este cajón» es
      * exactamente cómo se acaba dejando fuera a alguien sin que nadie se entere.
      */
-    async recipients ({ ns, pub }) {
-      return secrets.recipientsFor(ns ? `ns:${ns}` : `dev:${pub}`)
+    async recipients ({ ns, pub, public: isPublic }) {
+      // LA VISIBILIDAD CAMBIA LA LISTA: una pública se envuelve además para quien
+      // administra, así que hay que decirlo al preguntar. Pedirla sin decirlo y luego
+      // guardarla como pública produciría un sobre que la consola no puede abrir — y la
+      // bóveda lo rechazaría, que es lo correcto pero desorienta.
+      return secrets.recipientsFor(ns ? `ns:${ns}` : `dev:${pub}`, { public: !!isPublic })
     },
     /**
      * GUARDAR UNA VARIABLE **SIN VERLA** (dueño, 2026-09-01).
@@ -1416,7 +1420,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // despachan o no, son políticas; dales el mismo tratamiento de seguridad»). La
         // marca solo decide si se entrega sin aprobación.
         await verificarAutor(owner, key, sealed, caller)
-        await verificarDestinatarios(owner, sealed.wraps)
+        await verificarDestinatarios(owner, sealed.wraps, !!isPublic)
         await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
         audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
         await settleDebts(owner)
@@ -1456,7 +1460,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       for (const it of items) {
         if (!it?.key || !it?.sealed) throw new Error('var.setMany: each variable needs its key and its sealed envelope')
         await verificarAutor(owner, it.key, it.sealed, caller)
-        await verificarDestinatarios(owner, it.sealed.wraps)
+        await verificarDestinatarios(owner, it.sealed.wraps, !!it.public)
       }
       // Se comprueban TODAS antes de escribir NINGUNA: media carga aplicada es una
       // configuración que nadie quiso, y el servicio se reinicia con ella.
@@ -1660,24 +1664,43 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /** Sin duplicar: un cosellador puede ser además el dueño del cajón. */
+  /** Sin repetidos por llave: un aparato puede entrar por dos vías (dueño y admin). */
+  const dedup = (miembros) => {
+    const vistos = new Set()
+    return miembros.filter((m) => m && !vistos.has(m.pub) && vistos.add(m.pub))
+  }
   const conCoselladores = (base, co) => {
     const vistos = new Set(base.map((m) => m.pub))
     return [...base, ...co.filter((m) => !vistos.has(m.pub))]
   }
 
-  async function recipientsOf (owner) {
+  async function recipientsOf (owner, { public: isPublic = false } = {}) {
     const co = await cosealerMembers()
+    // UNA PÚBLICA SE ENVUELVE TAMBIÉN PARA QUIEN ADMINISTRA (dueño, 2026-09-02: «la consola
+    // debe poder leer todas las variables… debe tener todos los sobres; la diferencia es si
+    // el vault se los envía para la lectura o no» → «cambia la regla y di que se envuelven
+    // las públicas»).
+    //
+    // Puede decidirse variable a variable porque cada escritura estrena su propia CEK: el
+    // llavero guarda una generación por valor, no una por cajón.
+    //
+    // Y la PRIVADA de un cajón con dueño sigue sin envoltura para la consola, que es la
+    // regla de agosto y su motivo no ha cambiado: el token de R2 no tiene por qué poder
+    // abrirse desde un navegador. Lo que cambia es que «pública» ya sí quiere decir algo
+    // para quien administra — puede leerla— además de que se despacha sin aprobación.
+    const admins = isPublic ? await adminDevices() : []
     if (owner.startsWith('ns:')) {
       const owned = await nsMembers(owner.slice(3))
-      // Sin dueño (un cajón personal, o uno cuyo servicio ya no está) sí entra quien
-      // administra: si no, no quedaría nadie que pudiera abrirlo sin la frase.
-      return conCoselladores(owned.length ? owned : await adminDevices(), co)
+      // Sin dueño (un cajón personal, o uno cuyo servicio ya no está) entra quien administra
+      // SIEMPRE: si no, no quedaría nadie que pudiera abrirlo sin la frase.
+      const base = owned.length ? [...owned, ...admins] : await adminDevices()
+      return conCoselladores(dedup(base), co)
     }
     const pub = owner.slice(owner.indexOf(':') + 1)
     const m = await memberOf(pub)
     // El cajón propio de un aparato de SERVICIO es tan suyo como el de su ns.
-    if (m?.cn) return conCoselladores([m], co)
-    return conCoselladores([...(m ? [m] : []), ...await adminDevices()], co)
+    if (m?.cn) return conCoselladores(dedup([m, ...admins]), co)
+    return conCoselladores(dedup([...(m ? [m] : []), ...await adminDevices()]), co)
   }
 
   /**
@@ -2052,9 +2075,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * Lo de dentro lo corrige el repaso al abrir la bóveda, que es para lo que está.
    */
-  async function verificarDestinatarios (owner, wraps) {
+  async function verificarDestinatarios (owner, wraps, isPublic = false) {
     if (!wraps || typeof wraps !== 'object') throw new Error('var.set: the envelope carries no wraps')
-    const { recoveryPub, members } = await secrets.recipientsFor(owner)
+    const { recoveryPub, members } = await secrets.recipientsFor(owner, { public: isPublic })
     if (!recoveryPub) throw new Error('var.set: this vault has no recovery key yet')
     const deben = new Set(members.map((m) => m.pub))
     const traidos = new Set(Object.keys(wraps).filter((k) => k !== RECOVERY_WRAP))
@@ -2146,7 +2169,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))
-      const members = await recipientsOf(owner)
+      // POR VISIBILIDAD, no una lista fija: una pública lleva además la envoltura de quien
+      // administra. Con una sola lista se le daría también la de una privada con dueño, que
+      // es justo lo que no puede pasar.
+      const members = (esPublica) => recipientsOf(owner, { public: esPublica })
       try {
         const r = await secrets.rewrap(owner, members, adminKey, { exact: true })
         const after = new Set(secrets.recipientsIn(owner))
@@ -2179,7 +2205,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Los destinatarios de un cajón no son solo quien lo consume: también quien lo
       // administra (`recipientsOf`). Envolver solo para los primeros dejaba a la consola
       // sin poder destapar lo que ella misma acababa de saldar.
-      const members = await recipientsOf(owner)
+      const members = (esPublica) => recipientsOf(owner, { public: esPublica })
       try { out[owner] = await spreadKey(owner, members, adminKey) } catch (e) {
         // Sin frase, el último recurso es pedírselo a quien sí puede: el propio servicio.
         let delegated = 0
@@ -2213,7 +2239,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // (dueño, 2026-09-01: «al envolver hay que envolver siempre para todos los selladores,
     // para que siempre tengan la info fresca»). Dos listas para la misma pregunta acaban
     // siempre así: una se actualiza y la otra no.
-    try { return await spreadKey(owner, await recipientsOf(owner), null) } catch (_) { return null }
+    try { return await spreadKey(owner, (esPublica) => recipientsOf(owner, { public: esPublica }), null) } catch (_) { return null }
   }
   async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
 
@@ -2448,7 +2474,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // envolver hay que envolver siempre para todos los selladores, para que siempre
         // tengan la info fresca»). Repartiendo solo a los del ns, un cajón tocado por esta
         // puerta dejaba a los selladores con la envoltura vieja.
-        await spreadKey(`ns:${m.cn}`, await recipientsOf(`ns:${m.cn}`), adminKey).catch(async (e) => {
+        await spreadKey(`ns:${m.cn}`, (esPublica) => recipientsOf(`ns:${m.cn}`, { public: esPublica }), adminKey).catch(async (e) => {
           log('[vault] could not hand the key to the new service:', e.message)
           // Sin la frase la bóveda no puede envolvérsela… pero un HERMANO suyo sí: otro
           // servicio del mismo cajón ya tiene la llave abierta (§8.11). Si contesta, el

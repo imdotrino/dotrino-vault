@@ -931,23 +931,50 @@ test('quien administra NO puede ver un valor a distancia: la operacion no existe
  * tenía que ser que la envoltura NO EXISTA, no que la bóveda se niegue a darla — un
  * envoltorio guardado se abre con el disco, sin preguntarle a nadie.
  */
-test('un cajón con servicio dueño NO lleva envoltura de quien administra', async () => {
+/**
+ * EN UN CAJÓN CON DUEÑO, LA PÚBLICA SÍ LLEVA LA ENVOLTURA DE QUIEN ADMINISTRA; LA PRIVADA NO.
+ *
+ * Cambio del dueño (2026-09-02): «la consola debe poder leer todas las variables… debe tener
+ * todos los sobres; la diferencia es si el vault se los envía para la lectura o no» →
+ * «cambia la regla y di que se envuelven las públicas» → «con eso garantizamos la seguridad
+ * impuesta».
+ *
+ * Lo que se conserva es lo que importaba de la regla de agosto: el token de R2 de un cajón
+ * con dueño sigue SIN poder abrirse desde un navegador, porque su envoltura no existe. Lo
+ * que se gana es que «pública» ya quiera decir algo para quien administra —puede leerla—
+ * además de que se entrega sin aprobación.
+ *
+ * Se puede decidir variable a variable porque cada escritura estrena su propia CEK: el
+ * llavero guarda una generación por valor, no una por cajón.
+ */
+test('cajón con dueño: la PÚBLICA lleva la envoltura de quien administra, la privada no', async () => {
   const ns = 'condueno'
   const { qr } = await vault.startPairing({ scope: [`vault:secrets:${ns}`], label: 'service:' + ns, ttlMs: 60000 })
   const dir = tmp('svc-dueno-')
-  const { enrollService } = await import('../lib/src/service.js')
-  const svc = await enrolar({
-    qr, ns, dir, label: 'service:' + ns
-  })
+  const svc = await enrolar({ qr, ns, dir, label: 'service:' + ns })
 
-  await vault.secrets.set(ns, 'TOKEN', 'el-secreto-del-servicio')
+  // Un aparato que administra, para tener a quién dejar fuera (o dentro).
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const admin = await makeDeviceKey()
+  const enc = await (await import('@dotrino/identity/capabilities')).makeDeviceEncKey()
+  await vault.identity.admitMember({ pub: admin.publickey, label: 'consola', caps: ['sign', 'admin'], encPub: enc.encPublickey })
 
-  const destinatarios = vault.secrets.recipientsIn(`ns:${ns}`)
+  await vault.secrets.set(ns, 'TOKEN', 'el-secreto-del-servicio')          // privada
+  const dePrivada = vault.secrets.recipientsIn(`ns:${ns}`)
+  assert.ok(dePrivada.includes(svc.device.publickey), 'su servicio sí, faltaría más')
+  assert.ok(dePrivada.includes('#recovery'), 'y la recuperación, que es lo que abre la frase')
+  assert.equal(dePrivada.includes(admin.publickey), false,
+    'pero NO quien administra: el token de un cajón con dueño no se abre desde un navegador')
 
-  assert.ok(destinatarios.includes(svc.device.publickey), 'su servicio sí, faltaría más')
-  assert.ok(destinatarios.includes('#recovery'), 'y la recuperación, que es lo que abre la frase')
-  assert.equal(destinatarios.length, 2,
-    'y NADIE más: ningún aparato que administre entra en un cajón que tiene dueño')
+  await vault.secrets.set(ns, 'PUBLIC_URL', 'https://ejemplo', true)       // pública
+  const dePublica = vault.secrets.recipientsIn(`ns:${ns}`)
+  assert.ok(dePublica.includes(svc.device.publickey), 'su servicio, igual')
+  assert.ok(dePublica.includes(admin.publickey),
+    'y AHORA sí quien administra: para eso está marcada como pública')
+
+  // Y la privada sigue sin la suya: la última escritura no se la dio por arrastre.
+  const genes = vault.secrets.missingFor(`ns:${ns}`, admin.publickey)
+  assert.deepEqual(genes, ['TOKEN'], 'exactamente la privada, y ninguna más')
 })
 
 /**
