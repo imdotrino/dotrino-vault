@@ -1112,12 +1112,12 @@ async function cmdSecret (rest) {
   /**
    * Una variable en la lista: su nombre, y que TIENE valor. Ninguna lo enseña.
    *
-   * La pública lo enseñaba, porque se guardaba en claro. Desde 2026-09-02 las dos van
-   * selladas igual y `pública` solo dice que se entrega sin pedir aprobación (dueño: «la
-   * única diferencia es si se despachan o no, son políticas»). Enseñar el hueco vacío de
-   * una pública era peor que no enseñar nada: parecía que se había perdido.
+   * Las dos van selladas igual desde 2026-09-02. Lo que las separa es que a quien administra
+   * se le hace la envoltura de las PÚBLICAS y la bóveda le manda su sobre, así que puede
+   * abrirlas; de una privada de un cajón con dueño no tiene envoltura ni recibe sobre.
    */
-  const printVar = (k) => console.log('  · %s   ••••••%s', k.key, k.public ? '   (pública)' : '')
+  const printVar = (k) => console.log('  · %s   %s', k.key,
+    k.public ? `${k.value ?? '••••••'}   (pública)` : '••••••')
   /**
    * Por qué no se aplicó. El daemon deja el motivo en el volcado siguiente; sin él lo
    * único que se podía decir era «revisa los logs», que no ayuda a quien acaba de
@@ -1187,7 +1187,7 @@ async function cmdSecret (rest) {
     // QUÉ SIGNIFICA HOY (dueño, 2026-09-02): todas se guardan selladas igual, y `pública`
     // solo dice a quién se le entrega SIN APROBACIÓN. Decir «su valor se puede ver» era
     // verdad cuando se guardaba en claro; dejarlo ahí sería prometer algo que ya no pasa.
-    console.log('\n(pública) = se entrega sin pedirte aprobación. Todas se guardan cifradas igual.\n')
+    console.log('\n(pública) = se entrega sin pedirte aprobación y quien administra puede leerla. Todas van cifradas.\n')
     printPending(d)
     await printNoPassword()
     return

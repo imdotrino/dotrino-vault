@@ -584,28 +584,40 @@ test('quitar el aparato se lleva sus variables', async () => {
   assert.ok(!(await vault.listDeviceSecrets()).some((x) => x.pub === pub), 'se fueron con él')
 })
 
-test('la consola remota ve NOMBRES y visibilidad, y ningún valor — tampoco el de una pública', async () => {
-  // CAMBIÓ LA REGLA (dueño, 2026-09-02). Antes cruzaba el valor de las marcadas como
-  // mostrables; ahora no cruza ninguno, porque «pública» dejó de significar «en claro»:
-  // dice a quién se le despacha SIN APROBACIÓN, y se guarda sellada como cualquier otra.
+test('la consola remota LEE las públicas (la bóveda le manda su sobre) y nunca una privada', async () => {
+  // LA REGLA (dueño, 2026-09-02): «la consola debe poder leer todas las variables… debe
+  // tener todos los sobres; la diferencia es si el vault se los envía para la lectura o no»
+  // → «se envuelven las públicas».
   //
-  // Lo que la consola sigue viendo es lo que necesita para administrar: qué hay y de qué
-  // tipo. Ver un valor exige poder abrirlo, que es otra cosa y tiene su propio camino.
+  // Así que aquí cruza el SOBRE de la pública y su envoltura para quien pregunta —que lo
+  // abre en su casa, con una llave que no sale de su aparato— y de la privada no cruza
+  // nada. Ni el valor en claro, en ningún caso: por el cable solo viajan sobres.
+  const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
+  const consola = await makeDeviceKey()
+  const enc0 = await makeDeviceEncKey()
+  await vault.identity.admitMember({ pub: consola.publickey, label: 'consola-lee', caps: ['sign', 'admin'], encPub: enc0.encPublickey })
+
   await vault.setSecret('web', 'PUBLIC_URL', 'https://ejemplo.com', true)
   await vault.setSecret('web', 'API_KEY', 'sk-esta-no-sale')
 
-  const { enc } = await vault.vars.list({ by: 'TEST' })
+  const { enc } = await vault.vars.list({ by: 'TEST', caller: consola.publickey })
   const payload = JSON.parse(await vault.identity.openContent(enc))
   const web = payload.ns.web
 
   const pub = web.find((x) => x.key === 'PUBLIC_URL')
-  assert.equal(pub.public, true, 'se sabe que es pública…')
-  assert.ok(!('value' in pub), '…pero su valor tampoco sale')
+  assert.equal(pub.public, true)
+  assert.ok(pub.e && pub.wrap, 'a la pública le llega su sobre y su envoltura')
+  // Y se abre de verdad, con la privada de cifrado de quien pregunta.
+  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
+  const { importDeviceEncKey } = await import('@dotrino/identity/capabilities')
+  const cek = await openWrap({ wrap: pub.wrap, myEncPrivateKey: await importDeviceEncKey(enc0.encPrivateJwk) })
+  assert.equal(await decryptWithCek({ cek, envelope: pub.e }), 'https://ejemplo.com')
+
   const priv = web.find((x) => x.key === 'API_KEY')
-  assert.equal(priv.public, false, 'y de la privada, igual: que existe y que es privada')
-  assert.ok(!('value' in priv))
+  assert.equal(priv.public, false, 'se sabe que existe y que es privada…')
+  assert.ok(!priv.e && !priv.wrap, '…pero de ella no cruza ni el sobre')
   assert.ok(!JSON.stringify(payload).includes('sk-esta-no-sale'))
-  assert.ok(!JSON.stringify(payload).includes('https://ejemplo.com'), 'ningún valor cruza')
+  assert.ok(!JSON.stringify(payload).includes('https://ejemplo.com'), 'y ningún valor viaja en claro')
 })
 
 test('la consola remota CREA variables (scope nuevo o aparato) y rota las privadas a ciegas', async () => {
@@ -617,14 +629,22 @@ test('la consola remota CREA variables (scope nuevo o aparato) y rota las privad
   // Quien administra: un aparato del acta, que es quien FIRMA cada sobre.
   const consola = await makeDeviceKey()
   await vault.identity.admitMember({ pub: consola.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read'] })
-  /** El sobre ya hecho, como lo manda la consola: la bóveda no lo abre. */
-  const sobre = async (owner, key, value) => buildSealedVar({
-    recipients: await vault.vars.recipients(owner.startsWith('ns:') ? { ns: owner.slice(3) } : { pub: owner.slice(4) }),
+  /**
+   * El sobre ya hecho, como lo manda la consola: la bóveda no lo abre.
+   *
+   * La VISIBILIDAD va en la pregunta: una pública se envuelve además para quien administra,
+   * así que pedir la lista sin decirlo y guardarla como pública deja a alguien fuera — y la
+   * bóveda lo rechaza, que es lo correcto.
+   */
+  const sobre = async (owner, key, value, isPublic) => buildSealedVar({
+    recipients: await vault.vars.recipients({
+      ...(owner.startsWith('ns:') ? { ns: owner.slice(3) } : { pub: owner.slice(4) }), public: !!isPublic
+    }),
     owner, key, value, author: authorFromDeviceKey(consola)
   })
   const poner = async (dest, key, value, isPublic) => vault.vars.set({
     ...dest, key, public: isPublic,
-    sealed: await sobre(dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`, key, value),
+    sealed: await sobre(dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`, key, value, isPublic),
     caller: consola.publickey
   })
 

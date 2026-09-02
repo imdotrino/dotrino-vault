@@ -72,7 +72,10 @@ watch(() => props.rows, (rows) => {
     // guardan selladas y `pública` solo dice a quién se le despacha sin aprobación. Antes
     // el valor de una pública venía en la lista y se pintaba; ahora la caja va vacía y lo
     // que se enseña es que TIENE valor —el `••••••` de abajo—, no que no lo tenga.
-    return { key: r.key, value: '', priv: !r.public, was: { value: '', priv: !r.public } }
+    // EL VALOR DE UNA PÚBLICA SÍ SE ENSEÑA (dueño, 2026-09-02): la bóveda nos manda su sobre
+    // y `loadVars` lo abre. Una privada no trae valor y su caja queda vacía con `••••••`.
+    const value = r.value ?? ''
+    return { key: r.key, value, priv: !r.public, was: { value, priv: !r.public } }
   })
   added.value = props.add ? [emptyRow()] : []
   pasteError.value = ''
@@ -170,7 +173,7 @@ const submit = () => props.save({
       <!-- El nombre se queda: renombrar no existe (sería crear otra y dejar la vieja). -->
       <input class="k" type="text" :value="d.key" disabled :data-testid="'var-key-' + tid + '-' + d.key" />
       <input v-model="d.value" :type="d.priv ? 'password' : 'text'" autocomplete="off"
-             placeholder="••••••"
+             :placeholder="d.was.priv ? '••••••' : t.var_value_ph"
              :data-testid="'var-value-' + tid + '-' + d.key" />
       <!-- Privada es para siempre: la casilla solo sirve para TAPAR una pública. -->
       <label class="chk" :title="d.was.priv ? t.var_private_final : undefined">

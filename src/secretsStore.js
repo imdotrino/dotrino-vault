@@ -619,6 +619,24 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     },
 
     /**
+     * LA ENTRADA TAL CUAL (sobre, generación, visibilidad) — sin abrir nada.
+     *
+     * Es lo que hace falta para MANDARLE a alguien una variable que sí puede leer: el sobre
+     * viaja cerrado y lo abre en su casa, con su envoltura. Aquí no se descifra.
+     */
+    entryOf (owner, key) {
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      return varsOf(bag, k)[key] || null
+    },
+    /** La envoltura de ESA generación para ESE miembro, o `null` si no la tiene. */
+    wrapOf (owner, gen, memberPub) {
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      return (bag[k]?.keyring || []).find((g) => g.gen === gen)?.wraps?.[memberPub] || null
+    },
+
+    /**
      * ¿EXISTE YA ESTA VARIABLE? Sin abrirla ni decir qué vale.
      *
      * Hace falta para la regla de «un servicio solo rellena lo que falta, no pisa lo que

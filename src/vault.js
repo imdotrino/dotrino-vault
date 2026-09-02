@@ -1358,14 +1358,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   const varsDesk = {
-    async list () {
-      // `listSecrets`/`listDeviceSecrets` ya traen el valor de las públicas y solo de esas:
-      // la frontera se decide en un sitio, y lo mismo ve el dueño en su terminal que aquí.
+    async list ({ caller = null } = {}) {
+      // EL VAULT DECIDE QUÉ ENVÍA PARA LEER (dueño, 2026-09-02: «la consola debe tener todos
+      // los sobres; la diferencia es si el vault se los envía para la lectura o no»).
+      //
+      // Tener la envoltura y recibir el sobre son dos cosas: quien administra tiene la
+      // envoltura de cada PÚBLICA, y por eso aquí se le manda el sobre de esas y solo de
+      // esas. Las privadas de un cajón con dueño no se mandan — y aunque se mandaran no
+      // podría abrirlas, porque su envoltura no existe. Dos cerrojos para lo mismo, a
+      // propósito: que uno falle no basta para leerlas.
+      //
       // Se sella la lista ENTERA, no solo los valores: el proxy tampoco tiene por qué
       // aprender cómo se llaman tus variables ni qué servicios corres.
       return {
         enc: await identity.sealContent(JSON.stringify({
-          ns: listSecrets(), dev: await listDeviceSecrets(),
+          ns: conSobres(listSecrets(), 'ns', caller), dev: conSobres(await listDeviceSecrets(), 'dev', caller),
           // Aparatos que están en el acta pero no pueden abrir lo suyo: hay que
           // enseñarlo donde se administra, no solo en el log del servicio.
           incomplete: await incompleteMembers(),
@@ -2327,6 +2334,34 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * de esta máquina»: taparlo justo aquí —en la máquina donde vive, delante de su dueño—
    * era lo único que la marca no significaba. La consola remota ya las enseña.
    */
+  /**
+   * LE PONE A CADA PÚBLICA SU SOBRE Y LA ENVOLTURA DE QUIEN PREGUNTA, para que pueda leerla.
+   *
+   * Solo a las públicas: es la política de despacho, y es lo único que cambia entre una y
+   * otra. A una privada no se le manda nada — y aunque se le mandara, quien administra no
+   * tiene su envoltura en un cajón con dueño, así que no la abriría igual.
+   *
+   * Si falta la envoltura de quien pregunta (todavía no se le ha hecho, o el cajón se
+   * escribió antes de que entrara) se manda la variable SIN sobre: se ve que existe y que es
+   * pública, y no se puede leer. Eso es cierto y se arregla abriendo la bóveda; inventarse
+   * un valor o esconder la fila sería peor.
+   */
+  const conSobres = (lista, tipo, caller) => {
+    if (!caller) return lista
+    const dar = (owner, k) => {
+      if (!k.public) return k
+      const e = secrets.entryOf?.(owner, k.key)
+      const wrap = e?.gen != null ? secrets.wrapOf?.(owner, e.gen, caller) : null
+      return e?.e && wrap ? { ...k, e: e.e, wrap } : k
+    }
+    if (tipo === 'ns') {
+      const out = {}
+      for (const [ns, keys] of Object.entries(lista)) out[ns] = keys.map((k) => dar(`ns:${ns}`, k))
+      return out
+    }
+    return lista.map((row) => ({ ...row, keys: row.keys.map((k) => dar(`dev:${row.pub}`, k)) }))
+  }
+
   function listSecrets () {
     // YA NO SE ENSEÑA EL VALOR DE UNA PÚBLICA (dueño, 2026-09-02). Desde que todas van en
     // sobre, «pública» dejó de significar «en claro»: dice a quién se le despacha sin
