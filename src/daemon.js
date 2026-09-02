@@ -332,7 +332,18 @@ export async function runDaemon () {
             r.wrapped, r.drawers, r.dropped ? `, ${r.dropped} stale one(s) dropped` : '')
           if (r?.dropped) note = ` · llavero al día (${r.dropped} envoltura(s) de más retirada(s))`
           else if (r?.wrapped) note = ' · llavero al día'
-        } catch (e) { console.error('[vault] could not rebuild the keyring on unlock:', e.message) }
+          // ABIERTA PERO SIN LLAVERO NO ES «ABIERTA». Si un cajón no se pudo reenvolver, sus
+          // aparatos no van a poder leer nada y hay que decirlo AQUÍ: contestar
+          // «desbloqueado» a secas dejaba la bóveda pareciendo sana, y el fallo aparecía
+          // días después como un servicio pidiendo sus claves en bucle.
+          if (r?.failed?.length) {
+            for (const f of r.failed) console.error('[vault] %s: could not reseal (%s)', f.owner, f.error)
+            note += ` · ⚠ ${r.failed.length} cajón(es) NO se pudieron reenvolver (${r.failed.map((f) => f.owner).join(', ')}): sus aparatos no podrán leerlos`
+          }
+        } catch (e) {
+          console.error('[vault] could not rebuild the keyring on unlock:', e.message)
+          note += ` · ⚠ el llavero NO se pudo rehacer (${e.message}): los aparatos no podrán leer sus cajones`
+        }
         finally { wipe(ak) }
         return { done: 'perfil desbloqueado' + note, autoLockMs: mgr.profiles.autoLockMs }
       }

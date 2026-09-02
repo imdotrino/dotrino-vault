@@ -798,9 +798,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       await identity.setMemberEncPub({ pub: chk.device, encPub: p.data.encPub })
       audit('enckey', { device: await deviceIdOf(chk.device).catch(() => null), ns })
       log(`[vault] ${ns}: encryption key registered for ${await deviceIdOf(chk.device).catch(() => '????-????')}`)
-      // Ya puede recibir sobres: se le envuelve la llave de su cajón en el acto, o
+      // Ya puede recibir sobres: se le envuelve la llave de sus cajones en el acto, o
       // seguiría sin poder abrir nada hasta la siguiente escritura.
-      await spreadKey(`ns:${ns}`, await nsMembers(ns)).catch((e) => log('[vault] could not hand it the key:', e.message))
+      //
+      // Va por `recipientsOf` —el único sitio que sabe quién debe tener envoltura de un
+      // cajón—, que incluye a los SELLADORES. Con `nsMembers` se envolvía solo para los del
+      // ns y los selladores se quedaban con lo viejo (dueño, 2026-09-01).
+      //
+      // Y su cajón PROPIO también: un aparato con variables suyas se quedaba sin poder
+      // abrirlas, que es el mismo agujero por otra puerta.
+      for (const owner of [`ns:${ns}`, `dev:${chk.device}`]) {
+        await spreadKey(owner, await recipientsOf(owner))
+          .catch((e) => log(`[vault] ${owner}: could not hand it the key: ${e.message}`))
+      }
       const body = { op: 'secrets.result', ns, enc: null, ok: true, ts: Date.now() }
       const { signature } = await identity.signData(body)
       reply(from, { type: MSG.SECRETS_RESULT, body, signature })
@@ -881,6 +891,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const payload = b.legacy
       ? { secrets: Object.fromEntries(Object.entries(b.entries).map(([k, e]) => [k, e.v])), acta: record || null }
       : { sealed: b, acta: record || null }
+    // LO QUE SE MANDA CON AGUJEROS, SE DICE. La bóveda sabe aquí mismo que este aparato no
+    // tiene envoltura de tal variable —`missingFor` lo contesta—, y hasta hoy se callaba:
+    // contestaba un bundle que el agente no podía abrir y el registro decía «aprobado»,
+    // como si se hubiera servido. Desde fuera parecía que el pedido funcionaba y volvía a
+    // aparecer una y otra vez. Falta la envoltura, y eso solo se arregla ABRIENDO la
+    // bóveda; decirlo aquí es lo que convierte un bucle mudo en algo que se puede arreglar.
+    if (!b.legacy) {
+      const faltan = [...secrets.missingFor(`ns:${ns}`, devicePub), ...secrets.missingFor(`dev:${devicePub}`, devicePub)]
+      if (faltan.length) {
+        const quien = await deviceIdOf(devicePub).catch(() => '????-????')
+        audit('secrets.no-wrapping', { device: quien, ns, vars: faltan })
+        log(`[vault] ${ns}: ${quien} has no wrapping for ${faltan.join(', ')} — open the vault (dotrino-vault unlock) so it hands it the key`)
+      }
+    }
     const enc = await seal({ ek, payload })
     const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
     // LA MAESTRA NO FIRMA ESTO. Su trabajo es sellar el acta y reenvolver sobres; servir
@@ -943,7 +967,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (op === 'deny') {
       audit('secrets.denied', { device: pend.deviceId, ns: pend.ns, id, by })
       log(`[vault] ${pend.ns}: request of ${pend.deviceId} DENIED by ${by}`)
-      try { client.sendByPubkey(pend.device, { type: MSG.ERROR, error: `unauthorized: denied — the "${pend.ns}" request was denied from ${by}` }) } catch (_) {}
+      try { client.sendByPubkey(pend.device, { type: MSG.ERROR, error: `unauthorized: denied — the "${pend.ns}" request was denied from ${by}` }) }
+      catch (e) { log(`[vault] ${pend.ns}: could not tell ${pend.deviceId} it was denied: ${e.message}`) }
       return answer({ op: 'deny.result', id, ok: true })
     }
     if (op !== 'approve') return reply(from, { type: MSG.ERROR, error: 'approval: unknown op' })
@@ -954,18 +979,42 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     audit('secrets.approved', { device: pend.deviceId, ns: pend.ns, id, by })
     log(`[vault] ${pend.ns}: request of ${pend.deviceId} approved by ${by}`)
     // Va por `sendByPubkey`: si el que pedía ya no está conectado, lo recoge al volver.
-    try { client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res }) } catch (_) {}
+    // EL FALLO NO SE TRAGA. Tragarlo era lo peor de este mostrador: la bóveda apuntaba
+    // «aprobado», el que pedía no recibía nada, y no quedaba una sola línea que mirar —
+    // así que el dueño aprobaba una y otra vez creyendo que el teléfono no llegaba.
+    try { client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res }) }
+    catch (e) { log(`[vault] ${pend.ns}: approved, but the reply did not reach ${pend.deviceId}: ${e.message}`) }
     return answer({ op: 'approve.result', id, ok: true })
   }
 
-  /** Aviso a los aparatos que aprueban (cola del proxio → push nativo si están apagados). */
+  /**
+   * Aviso a los aparatos que aprueban (cola del proxio → timbre nativo si están apagados).
+   *
+   * LA MAESTRA NO FIRMA ESTO, y es el fallo que dejaba el mecanismo entero inservible.
+   * Avisar es SERVIR, y servir es trabajo de la llave de sellado —la maestra solo sella el
+   * acta y reenvuelve los sobres al abrir (CLAUDE.md, «la maestra tiene DOS trabajos»)—.
+   * Con `identity.signData` esto reventaba con «vault locked» en cada pedido, o sea SIEMPRE:
+   * la bóveda vive cerrada, que es justamente para lo que sirve el candado. Y como reventaba
+   * antes de mandar nada, el proxio no tenía a quién encolar y el teléfono NO TIMBRABA
+   * NUNCA. El pedido solo se veía si al dueño se le ocurría abrir la app por su cuenta.
+   *
+   * El aviso no lleva nada que no esté ya en el pedido, y el timbre que sale de aquí sigue
+   * sin contenido: quien lo recibe pregunta por la lista, no la lee del aviso.
+   */
   async function notifyApprovers (pend, record) {
     try {
       const body = { ev: 'approval', id: pend.id, ns: pend.ns, deviceId: pend.deviceId, label: pend.label, exp: pend.exp, ts: Date.now() }
-      const { signature } = await identity.signData(body)
+      const seal = await sealOrFail(body)
       const who = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).map((m) => m.pub)
       if (!who.length) log(`[vault] ${pend.ns}: nobody can approve (grant it with: dotrino-vault caps <ID> +aprueba)`)
-      for (const pub of who) { try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature }) } catch (_) {} }
+      // EL FALLO NO SE TRAGA. Un aviso que no sale es un teléfono que no timbra, y eso
+      // desde fuera se ve igual que «nadie ha aprobado todavía»: se espera para siempre
+      // sin nada que mirar. Es el mismo cuidado que en `notifyMembers`.
+      for (const pub of who) {
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, seal }) }
+        catch (e) { log(`[vault] could not ring ${pub.slice(0, 24)}… about ${pend.ns}: ${e.message}`) }
+      }
+      log(`[vault] ${pend.ns}: rang ${who.length} approver(s) for ${pend.id}`)
     } catch (e) { log('[vault] could not notify approvers:', e.message) }
   }
 
@@ -1750,7 +1799,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function setSecret (ns, key, value, isPublic, { by = null } = {}) {
     await secrets.set(ns, key, value, isPublic, { by })
-    await settleDebts(`ns:${ns}`, () => nsMembers(ns))
+    await settleDebts(`ns:${ns}`)
     audit('secret.set', { ns, key }); scheduleNotice(ns)
   }
 
@@ -1815,8 +1864,79 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return { done, asked: pending.length }
   }
 
+  /**
+   * REHACER EL LLAVERO ENTERO. Se llama al ABRIR la bóveda, que es el único momento en que
+   * se puede: envolver exige la llave del cajón, y esa solo se abre con la frase.
+   *
+   * Lo que falle aquí SALE en `failed`, y quien llame tiene que decirlo. Callarlo fue el
+   * fallo: un cajón que no se pudo reenvolver deja a sus aparatos sin poder leer nada, y
+   * desde fuera la bóveda parecía abierta y sana — «desbloqueado» a secas—. Se descubría
+   * días después, por un servicio que pedía sus claves una y otra vez.
+   */
+  /**
+   * QUE LOS SOBRES EXISTAN PARA TODOS, SIEMPRE — TAMBIÉN AL SELLAR EL ACTA.
+   *
+   * Regla del dueño (2026-09-01): «cuando se abre el vault, y siempre, debe asegurarse de
+   * que todos los sobres para todos los dispositivos existan, antes y después de sellar un
+   * acta; es la tarea de la llave maestra, no tiene otra».
+   *
+   * Y es literalmente su otro trabajo: la maestra firma el acta y regenera los sobres. Todo
+   * cambio del acta cambia QUIÉN debe tener envoltura de qué —entra un aparato, se le da
+   * `secrets`, se le quita, aparece un sellador nuevo—, así que sellar sin repasar los
+   * sobres deja el llavero diciendo una cosa y el acta otra. Eso fue justo el agujero: un
+   * servicio en el acta, con su permiso, y sin poder abrir nada.
+   *
+   * Con la bóveda ABIERTA se rehace de verdad. Cerrada no se puede —envolver exige la llave
+   * del cajón— y entonces queda como DEUDA anotada, que es lo que salda el `unlock`. Lo que
+   * no se hace es callarlo.
+   */
+  /**
+   * QUE LOS SOBRES EXISTAN PARA TODOS, CADA VEZ QUE EL ACTA CAMBIA.
+   *
+   * Regla del dueño (2026-09-01): «cuando se abre el vault, y siempre, debe asegurarse de
+   * que todos los sobres para todos los dispositivos existan, antes y después de sellar un
+   * acta; es la tarea de la llave maestra, no tiene otra». Y es literalmente su otro
+   * trabajo: firmar el acta y regenerar los sobres.
+   *
+   * SE REHACE ENTERO, no se salda lo que falta. Saldar añade lo que no está pero no MIRA lo
+   * que sobra: la envoltura de alguien a quien ya se le quitó el permiso se quedaría ahí
+   * para siempre y nadie se enteraría. `resealAll` con `exact` deja cada cajón envuelto para
+   * exactamente quien dice el acta —crea lo que falta y RETIRA lo caduco—, que es la única
+   * forma de poder afirmar que el llavero está al día. No toca la red: es reenvolver con
+   * las públicas del acta, así que esperar aquí no cuelga de ningún aparato apagado.
+   *
+   * NO HAY CAMINO PARA «LA BÓVEDA ESTÁ CERRADA» (dueño, 2026-09-01: «es un absurdo, con
+   * bóveda cerrada no puede cambiar el acta»). Sellar el acta necesita la maestra, y cerrada
+   * la maestra no está en memoria — o sea que si se llegó hasta aquí, estaba abierta. Un
+   * `if` para ese caso no sería prudencia: sería un repliegue que le pone cara de trámite
+   * normal a una contradicción. Si aun así falta la llave, se dice como lo que es.
+   */
+  async function refreshWraps (motivo) {
+    // HAY CANDADO SOLO SI HAY LAS DOS COSAS: contraseña Y alguien que sepa abrirla.
+    //
+    // `startVault` sin gestor de perfiles trae `hasPassword = () => true` y `openKey =
+    // null`, que leído a la letra dice «tiene contraseña pero no hay con qué abrirla» — el
+    // estado imposible. Mirando solo `hasPassword` se daba por cerrada una bóveda que abre
+    // con la llave de la máquina, y el repaso del llavero se saltaba ENTERO: el servicio se
+    // quedaba sin su envoltura y contestábamos un paquete que no podía abrir. Es el mismo
+    // fallo que se está arreglando, colado por la puerta de al lado.
+    const conCandado = typeof openKey === 'function' && (() => { try { return !!hasPassword() } catch (_) { return true } })()
+    const k = conCandado ? openKey() : null
+    if (conCandado && !k) {
+      log(`[vault] ${motivo}: the record changed but the profile key is not here — the record cannot be sealed while locked, so this should not happen; the keyring was NOT rebuilt`)
+      return null
+    }
+    const r = await resealAll(k).catch((e) => { log(`[vault] ${motivo}: could not rebuild the keyring: ${e.message}`); return null })
+    if (r?.wrapped) log(`[vault] ${motivo}: keyring rebuilt (${r.wrapped} wrap(s) in ${r.drawers} drawer(s))`)
+    // LOS SOBRES CADUCOS SE DICEN. Son envolturas de quien ya no debería poder abrir ese
+    // cajón: retirarlas en silencio esconde que alguien las tuvo de más.
+    if (r?.dropped) log(`[vault] ${motivo}: ${r.dropped} stale wrap(s) dropped (they belonged to members the record no longer names)`)
+    if (r?.failed?.length) log(`[vault] ${motivo}: ${r.failed.length} drawer(s) could NOT be resealed: ${r.failed.map((f) => f.owner).join(', ')}`)
+    return r
+  }
+
   async function resealAll (adminKey = null) {
-    const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [] }
+    const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))
       const members = await recipientsOf(owner)
@@ -1829,9 +1949,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         for (const p of r?.sinLlave || []) out.sinLlave.push(p)
       } catch (e) {
         log(`[vault] ${owner}: could not reseal (${e.message})`)
+        out.failed.push({ owner, error: e.message })
       }
     }
     if (out.dropped) audit('secret.reseal', { drawers: out.drawers, dropped: out.dropped })
+    if (out.failed.length) audit('secret.reseal-failed', { drawers: out.failed.map((f) => f.owner) })
     return out
   }
 
@@ -1871,12 +1993,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * anotado, que es lo que las listas enseñan. No se propaga el error: la variable YA se
    * guardó, y el que escribe no tiene por qué enterarse de una deuda vieja.
    */
-  async function settleDebts (owner, membersFn) {
+  async function settleDebts (owner) {
     const ns = owner.startsWith('ns:') ? owner.slice(3) : null
     const owed = (ns && store.getSetting(`rotate-due:${ns}`)) ||
       (await incompleteMembers()).some((m) => m.owners[owner])
     if (!owed) return null
-    try { return await spreadKey(owner, await membersFn(), null) } catch (_) { return null }
+    // QUIÉN RECIBE ENVOLTURA LO DICE `recipientsOf`, Y SOLO ÉL.
+    //
+    // Antes cada llamador traía su propia lista (`nsMembers`, o el miembro suelto), y todas
+    // se dejaban fuera a los SELLADORES — que `recipientsOf` sí incluye. Resultado: escribir
+    // una variable envolvía para el servicio y dejaba al sellador con la generación vieja
+    // (dueño, 2026-09-01: «al envolver hay que envolver siempre para todos los selladores,
+    // para que siempre tengan la info fresca»). Dos listas para la misma pregunta acaban
+    // siempre así: una se actualiza y la otra no.
+    try { return await spreadKey(owner, await recipientsOf(owner), null) } catch (_) { return null }
   }
   async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
 
@@ -1914,7 +2044,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
     })
     if (changed.length) {
-      await settleDebts(`ns:${ns}`, () => nsMembers(ns))
+      await settleDebts(`ns:${ns}`)
       scheduleNotice(ns)
     }
     return changed
@@ -1936,7 +2066,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
     })
     if (changed.length) {
-      await settleDebts(`dev:${pub}`, async () => [m].filter(Boolean))
+      await settleDebts(`dev:${pub}`)
       const device = await deviceIdOf(pub).catch(() => null)
       for (const it of list) {
         if (!changed.includes(it.key)) continue
@@ -2015,7 +2145,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function setDeviceSecret (pub, key, value, isPublic, { by = null } = {}) {
     const m = await requireService(pub)
     await secrets.setDevice(pub, key, value, isPublic, { by })
-    await settleDebts(`dev:${pub}`, async () => [await memberOf(pub)].filter(Boolean))
+    await settleDebts(`dev:${pub}`)
     audit('secret.set', { device: await deviceIdOf(pub).catch(() => null), ns: m?.cn || null, key, scope: 'device' })
     scheduleDeviceNotice(pub)
   }
@@ -2107,7 +2237,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // el archivo vendorizado en el iframe de identidad.
       const m = r?.cert?.sub ? await memberOf(r.cert.sub) : null
       if (m?.cn) {
-        await spreadKey(`ns:${m.cn}`, await nsMembers(m.cn), adminKey).catch(async (e) => {
+        // POR `recipientsOf`, NO por `nsMembers`. Quien debe tener envoltura de un cajón lo
+        // dice UN sitio, y ahí dentro están también los SELLADORES (dueño, 2026-09-01: «al
+        // envolver hay que envolver siempre para todos los selladores, para que siempre
+        // tengan la info fresca»). Repartiendo solo a los del ns, un cajón tocado por esta
+        // puerta dejaba a los selladores con la envoltura vieja.
+        await spreadKey(`ns:${m.cn}`, await recipientsOf(`ns:${m.cn}`), adminKey).catch(async (e) => {
           log('[vault] could not hand the key to the new service:', e.message)
           // Sin la frase la bóveda no puede envolvérsela… pero un HERMANO suyo sí: otro
           // servicio del mismo cajón ya tiene la llave abierta (§8.11). Si contesta, el
@@ -2117,6 +2252,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           if (!r2.done) log(`[vault] ns:${m.cn}: nobody could hand it the key — it stays in debt until the vault is opened`)
         })
       }
+      // Y el llavero ENTERO: el recién llegado también es destinatario de su propio cajón,
+      // y si entra con `sella` lo es de TODOS. Repartir solo el suyo dejaba el resto atrás.
+      await refreshWraps('enrolled')
       await notifyMembers('enrolled', { deviceId: r?.deviceId || null, by: 'pc' })
       return r
     },
@@ -2161,6 +2299,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // rotar su llave). Lo enseñan `secret list` y la consola: si no se ve, no se salda.
     rotationsDue,
     secretDebts,
+    /**
+     * QUIÉN tiene envoltura de la generación vigente de un cajón (llaves de firma, más
+     * `#recovery`). Es diagnóstico: saber a cuántos se les envolvió no ayuda a abrir nada,
+     * y en cambio es lo único que contesta de verdad a «¿quién puede leer esto?».
+     *
+     * Se expone porque hacía falta para COMPROBARLO en una prueba en vez de argumentarlo:
+     * la condición del dueño para acotar los sobres por cajón y permisos —en vez de
+     * envolver para todos— fue estar seguro de que no falta ninguno.
+     */
+    secretRecipients: (owner) => secrets.recipientsIn(owner),
     // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
     isMaster: () => identity.isMaster(),
     setCaps: async (pub, caps) => {
@@ -2178,6 +2326,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         }
       } catch (_) { /* comprobar es un extra: si falla, no rompe el cambio */ }
       audit('caps', { device: await deviceIdOf(pub).catch(() => null), caps })
+      // El acta acaba de cambiar QUIÉN debe tener envoltura de qué: se repasa antes de
+      // avisar, para que el aviso salga con el llavero ya al día.
+      await refreshWraps('caps')
       await notifyMembers('caps', { deviceId: await deviceIdOf(pub).catch(() => null), caps })
       return r
     },
@@ -2193,6 +2344,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // QUITAR EL DISPOSITIVO. Se identifica por su llave (`sub`), no por un `nonce`: un
     // aparato puede tener varios certificados y retirar uno no lo echaba de la bóveda.
     // Se sigue aceptando `{ nonce }` para no romper una consola vieja en vuelo.
+    //
+    // Al salir alguien el acta cambia igual que al entrar, así que el llavero se repasa
+    // también aquí: lo que sobra se quita (`resealAll` lo hace) y el que se queda sigue
+    // completo. Un llavero que solo se repasa al añadir acumula envolturas de quien ya no
+    // está, que es lo contrario de lo que se quiso al expulsarlo.
     revokeDevice: async (target) => {
       const sub = typeof target === 'object' && target ? target.sub : null
       if (!sub) {
@@ -2203,6 +2359,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
       const r = await desk.revokeDevice(sub)
       audit('revoke-device', { device: await deviceIdOf(sub).catch(() => null), certs: r?.nonces?.length ?? null })
+      await refreshWraps('revoked')
       await notifyMembers('revoked', { deviceId: await deviceIdOf(sub).catch(() => null), by: 'pc' })
       return r
     },

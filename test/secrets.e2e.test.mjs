@@ -71,7 +71,11 @@ before(async () => {
   proxyUrl = `ws://127.0.0.1:${port}`
 
   const { startVault } = await import('../src/vault.js')
-  vault = await startVault({ dir: tmp('vault-e2e-'), proxyUrl, log: () => {} })
+  // `VAULT_LOG=1` enciende el registro de la bóveda. Sin esta escotilla, un fallo aquí es
+  // indiagnosticable: se ve que el servicio no puede abrir su cajón y nada más — la razón
+  // («wrong password» al abrir la copia de recuperación, por ejemplo) la dice la bóveda en
+  // un log que este arnés estaba tirando.
+  vault = await startVault({ dir: tmp('vault-e2e-'), proxyUrl, log: process.env.VAULT_LOG ? console.error : () => {} })
   svcDir = tmp('svc-e2e-')
 })
 
