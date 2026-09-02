@@ -28,10 +28,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # ≥22.14 y npm ≥11.5.1 los pide la publicación de confianza. Node 22 trae npm 10,
+          # así que hay que subirlo a mano: sin eso el `publish` cae al camino del token y
+          # falla por no tenerlo, que es lo correcto pero desconcierta si no se sabe.
+          node-version: '22.14'
           cache: npm
           registry-url: https://registry.npmjs.org
 
+      - run: npm i -g npm@latest
       - run: npm ci
 
       # LAS PRUEBAS VAN ANTES DE PUBLICAR, no después. Una versión que no pasa su suite no
@@ -59,18 +63,25 @@ jobs:
             dist/*.tar.gz
             dist/*-sbom.cdx.json
 
-      # `--provenance` hace lo mismo para npm: el tarball queda atado al commit y al
-      # workflow, y npmjs.com lo enseña. Requiere el secreto NPM_TOKEN en el repo.
+      # PUBLICACIÓN DE CONFIANZA: sin token, en ningún sitio.
+      #
+      # npm cambia un credencial efímero por la identidad OIDC de ESTA ejecución, así que no
+      # hay nada guardado que robar ni que rotar. La confianza se declara en npmjs.com, por
+      # paquete: «confío en imdotrino/dotrino-vault, workflow release.yml». **El nombre del
+      # archivo tiene que coincidir exactamente**, extensión incluida — si algún día se
+      # renombra este workflow, hay que cambiarlo también allí o la publicación se cae.
+      #
+      # Y la procedencia sale sola: npm la genera y la firma, sin `--provenance`.
+      #
+      # Cuenta PERSONAL, no organización (`imdotrino` es un User), así que no hay secretos de
+      # organización: con tokens habría que meter el mismo en los 22 repos que publican. Por
+      # eso se eligió este camino y no aquel.
       - name: Publicar @dotrino/vault (la librería)
         working-directory: lib
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Publicar @dotrino/vaultd (el daemon)
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Publicar la release con sus archivos
         uses: softprops/action-gh-release@v2
