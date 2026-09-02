@@ -573,7 +573,7 @@ async function cmdMembers () {
       m.addedAt ? `  ${D}· conectado el ${fechaCorta(m.addedAt)}${Z}` : '',
       marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
     // Un servicio SIN llave de cifrado no puede leer ninguna variable privada: van
-    // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio where_
+    // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
@@ -820,11 +820,11 @@ function cmdAtrest (rest) {
     // versión vieja dejó en claro, con el verificador de la contraseña dentro— meses
     // después de que su migración terminara. Se mira el perfil Y la raíz, porque el canal
     // local con la CLI vive arriba.
-    for (const [where_, d] of [['este perfil', dir], ['la raíz de la bóveda', vaultRoot]]) {
+    for (const [label, d] of [['este perfil', dir], ['la raíz de la bóveda', vaultRoot]]) {
       const loose = plaintextFilesIn(d)
       if (loose.length) {
         console.log('')
-        console.log(`${R}En claro en ${where_}:${Z} ` + loose.join(', '))
+        console.log(`${R}En claro en ${label}:${Z} ` + loose.join(', '))
         console.log('  Si es un respaldo de una migración terminada, bórralo: no lo cifra nadie.')
       }
     }
@@ -958,7 +958,7 @@ function cmdActivity (n = 30) {
 /**
  * `KEY=valor KEY2=valor2` — la forma de CARGAR VARIAS de una vez. Devuelve `null` si no
  * son todos pares, para que la forma clásica de tres argumentos (`set ns CLAVE valor`,
- * where_ el valor puede llevar espacios y hasta un `=`) siga funcionando igual.
+ * donde el valor puede llevar espacios y hasta un `=`) siga funcionando igual.
  */
 function asPairs (args) {
   if (!args.length) return null
@@ -1395,7 +1395,7 @@ function reportProfiles (d) {
 async function cmdProfile (rest) {
   const [sub, ...rawArgs] = rest
   // `--kms <archivo>` se saca ANTES de armar el nombre: el nombre se compone juntando
-  // los argumentos loose, así que si no se quita acabaría llamándose «midevault --kms
+  // los argumentos sueltos, así que si no se quita acabaría llamándose «midevault --kms
   // cfg.json».
   const kmsAt = rawArgs.indexOf('--kms')
   const kmsFile = kmsAt !== -1 ? rawArgs[kmsAt + 1] : null
