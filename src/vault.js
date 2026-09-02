@@ -1979,7 +1979,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return false
     } catch (_) {}
     try {
-      const r = await secrets.rekeyRecovery(null, adminKey)   // `null` = la llave de la máquina
+      // LA LLAVE DE LA MÁQUINA, EXPLÍCITA. `null` NO vale aquí: `defaultKey()` mira primero
+      // `openKey()`, y con el perfil ABIERTO eso es la llave de la contraseña — o sea que
+      // pasar `null` probaba la misma llave dos veces y la migración no migraba nada. Lo
+      // dijo el propio diagnóstico: «no abre ni con la contraseña ni con la de la máquina»,
+      // cuando la de la máquina no se había llegado a probar.
+      const maquina = new Uint8Array(kekFor(dir))
+      await secrets.recoveryOpensWith(maquina)                // si esta tampoco, no hay migración que hacer
+      const r = await secrets.rekeyRecovery(maquina, adminKey)
       if (!r?.rekeyed) return false
       log('[vault] the recovery copy was sealed with this machine\'s key: re-sealed under the profile password')
       audit('secret.recovery-rekeyed', {})
