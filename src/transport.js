@@ -82,12 +82,26 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
     // comunicación en el acta se identifica con la maestra, como siempre. Exige el perfil
     // ABIERTO —la maestra bajo llave no firma— y por eso se dice en voz alta: mientras se
     // esté aquí, cerrar el perfil deja la bóveda sin voz.
-    const publickey = await masterPubkeyOf(identity)
-    if (!publickey) return
-    const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
-    const { signature } = await identity.signData(data)
-    log('[vault] identifying with the master key: this vault is not in its own record yet (open the profile once to fix it)')
-    await client.identify({ data, signature, acta: record })
+    //
+    // QUEDARSE SIN VOZ NO ES NO ARRANCAR, y aquí eran lo mismo. Un perfil con la maestra
+    // sellada y sin llave de comunicación todavía llegaba hasta este `signData`, que tira
+    // `vault locked`; el error subía por `createTransport` hasta `startVault` y **el perfil
+    // entero se quedaba sin abrir**. Al dueño le pasó el 2026-09-02: su perfil principal no
+    // arrancaba, `unlock` lo marcaba abierto igual y cada petición contestaba «profile is
+    // not open», con la TUI vacía y sin un error a la vista.
+    //
+    // Se dice y se sigue. Sin red se puede vivir hasta que alguien teclee la frase; sin
+    // bóveda, no.
+    try {
+      const publickey = await masterPubkeyOf(identity)
+      if (!publickey) return
+      const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
+      const { signature } = await identity.signData(data)
+      log('[vault] identifying with the master key: this vault is not in its own record yet (open the profile once to fix it)')
+      await client.identify({ data, signature, acta: record })
+    } catch (e) {
+      log(`[vault] cannot identify on the proxy yet: ${e.message} — the profile still opens; unlock it once and it gets its own communication key`)
+    }
   }
   await identify()
   // Re-identificar al reconectar (el token cambia).

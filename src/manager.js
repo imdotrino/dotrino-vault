@@ -136,12 +136,37 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
    * Va aquí y no en `profiles.js` porque el registro de perfiles no sabe de bóvedas
    * corriendo: sabe de contraseñas. Quien tiene las dos cosas delante es esto.
    */
+  /**
+   * ABRIR DE VERDAD, NO SOLO QUITAR EL CANDADO.
+   *
+   * Esto decía `running.get(id)?.takeMasterKey?.()`, y con un `?.` de por medio un perfil
+   * que **no estaba corriendo** se marcaba desbloqueado sin abrir nada. Y hay un caso muy
+   * normal en el que no está corriendo: **su maestra está sellada bajo la contraseña**, así
+   * que al arrancar el servicio no hay frase con la que abrirlo y se queda fuera
+   * (`could not open profile …: vault locked`). Justo el perfil que más falta hace abrir
+   * era el único al que `unlock` no le hacía nada.
+   *
+   * Lo que se veía: `status` decía `🔓 desbloqueado` y **cada** petición contestaba
+   * `profile is not open`. La TUI se quedaba sin dispositivos, sin un error a la vista.
+   *
+   * Ahora se arranca si hace falta, y **si algo falla se vuelve a cerrar**: un candado que
+   * dice «abierto» sin estarlo es peor que uno cerrado, porque todo lo que venga detrás
+   * falla en otro sitio y por otro motivo.
+   */
   async function unlock (id, password) {
     const r = await profiles.unlock(id, password)
-    // `takeMasterKey` además la deja SELLADA la primera vez: un perfil que ya tenía
-    // contraseña guardaba la maestra bajo la llave de máquina, y se migra aquí, que es el
-    // único momento en que la llave del perfil está en la mano.
-    try { await running.get(id)?.takeMasterKey?.() } catch (e) { log('[vault] could not take the master key: %s', e.message) }
+    try {
+      // El orden importa: `profiles.unlock` ya dejó la llave del perfil disponible
+      // (`openKey`), así que ahora `startVault` sí puede abrir su maestra.
+      const v = running.get(id) || await open(id)
+      // `takeMasterKey` además la deja SELLADA la primera vez: un perfil que ya tenía
+      // contraseña guardaba la maestra bajo la llave de máquina, y se migra aquí, que es el
+      // único momento en que la llave del perfil está en la mano.
+      await v.takeMasterKey()
+    } catch (e) {
+      try { profiles.lock(id) } catch (_) {}
+      throw new Error(`unlocked the profile but could not open it, so it stays closed: ${e.message}`)
+    }
     return r
   }
 

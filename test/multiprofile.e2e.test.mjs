@@ -145,6 +145,72 @@ test('el candado es por perfil: el otro perfil se sigue editando', async () => {
   assert.equal(mgr.get(b.id).threads.methods.profileGet().me.nickname, 'Trabajo')
 })
 
+/**
+ * REINICIAR EL SERVICIO CON LA MAESTRA SELLADA: `unlock` tiene que ABRIR el perfil.
+ *
+ * Es el caso normal y era el único en el que `unlock` no hacía nada. Un perfil con
+ * contraseña guarda su maestra SELLADA, así que al arrancar el servicio no hay frase con
+ * la que abrirlo y se queda fuera de `running` («could not open profile …: vault locked»).
+ * `unlock` hacía `running.get(id)?.takeMasterKey?.()`, y ese `?.` sobre un perfil que no
+ * está corriendo es un no-op: se marcaba desbloqueado sin abrir nada.
+ *
+ * Lo que se veía —y le pasó al dueño el 2026-09-02— es lo peor de todo: `status` decía
+ * `🔓 desbloqueado` y CADA petición contestaba `profile is not open`. La TUI se quedaba
+ * sin dispositivos, sin un solo error a la vista.
+ */
+test('con la maestra sellada, reiniciar y `unlock` ABRE el perfil (no solo quita el candado)', async () => {
+  const root3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-sellada-e2e-'))
+  const { startVaultManager } = await import('../src/manager.js')
+
+  const m1 = await startVaultManager({ root: root3, proxyUrl, log: () => {} })
+  let id
+  try {
+    id = m1.list()[0].id
+    await m1.profiles.setPassword(id, 'frase-de-prueba-larga')
+    await m1.unlock(id, 'frase-de-prueba-larga')   // aquí se sella la maestra
+    await m1.lock(id)
+  } finally { try { m1.close() } catch (_) {} }
+
+  // EL REINICIO. Con la maestra sellada, este perfil NO puede abrirse solo: no hay frase.
+  const m2 = await startVaultManager({ root: root3, proxyUrl, log: () => {} })
+  try {
+    // Arranque cerrado: la maestra NO está en memoria. Que llegue a `running` o no depende
+    // de si su camino de arranque necesita firmar; lo que no puede pasar es lo de después.
+    assert.notEqual(m2.get(id)?.identity?.masterLocked, false, 'arranca sin la maestra puesta')
+
+    await m2.unlock(id, 'frase-de-prueba-larga')
+
+    // Lo que fallaba: quedaba desbloqueado y sin abrir.
+    assert.ok(m2.get(id), 'unlock lo ARRANCA, no solo le quita el candado')
+    assert.equal(m2.profiles.isLocked(id), false)
+    assert.equal(m2.get(id).identity.masterLocked, false, 'y la maestra vuelve a memoria')
+    assert.ok(m2.summary().find((p) => p.id === id).fingerprint, 'ya tiene huella: está abierto de verdad')
+  } finally { try { m2.close() } catch (_) {} }
+})
+
+test('una contraseña MALA no deja el perfil «abierto pero cerrado»', async () => {
+  const root4 = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-mala-e2e-'))
+  const { startVaultManager } = await import('../src/manager.js')
+
+  const m1 = await startVaultManager({ root: root4, proxyUrl, log: () => {} })
+  let id
+  try {
+    id = m1.list()[0].id
+    await m1.profiles.setPassword(id, 'frase-de-prueba-larga')
+    await m1.unlock(id, 'frase-de-prueba-larga')
+    await m1.lock(id)
+  } finally { try { m1.close() } catch (_) {} }
+
+  const m2 = await startVaultManager({ root: root4, proxyUrl, log: () => {} })
+  try {
+    await assert.rejects(() => m2.unlock(id, 'la-que-no-es'), /.+/, 'se rechaza')
+    // Y LO QUE IMPORTA: no se queda a medias. Un candado que dice «abierto» sin estarlo es
+    // peor que uno cerrado, porque el fallo aparece después y en otro sitio.
+    assert.equal(m2.profiles.isLocked(id), true, 'sigue cerrado')
+    assert.equal(m2.get(id)?.identity?.masterLocked ?? true, true, 'y la maestra no está en memoria')
+  } finally { try { m2.close() } catch (_) {} }
+})
+
 test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sirviéndose', async () => {
   // Un vault aparte con el plazo en milisegundos (en producción son 5 min): el candado
   // no puede quedarse abierto hasta que alguien lo cierre a mano — un servicio de PC no
