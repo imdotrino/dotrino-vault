@@ -26,6 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # EL PROXIO, AL LADO. Los E2E no simulan la red: levantan un proxio de verdad desde
+      # el repo hermano (`../dotrino-proxy/server.js`), que es lo que hace que prueben el
+      # protocolo y no una maqueta. En CI solo se clona este repo, así que hay que traerlo.
+      #
+      # Se clona SIN histórico y en la ruta exacta que espera el harness. Si algún día
+      # cambia esa ruta, esto se cae aquí y no en silencio.
+      - name: Clonar el proxio (lo necesitan los E2E)
+        run: git clone --depth 1 https://github.com/imdotrino/dotrino-proxy.git ../dotrino-proxy
+
       - uses: actions/setup-node@v4
         with:
           # La publicación de confianza pide Node ≥22.14 y npm ≥11.5.1, y Node 22 trae
@@ -38,6 +47,12 @@ jobs:
 
       - run: npm i -g npm@latest
       - run: npm ci
+
+      # El proxio tiene sus propias dependencias (`ws`, los pilares…) y sin ellas no
+      # arranca, así que los E2E se quedarían esperando a un puerto que nunca escucha.
+      - name: Dependencias del proxio
+        working-directory: ../dotrino-proxy
+        run: npm install --omit=dev
 
       # LAS PRUEBAS VAN ANTES DE PUBLICAR, no después. Una versión que no pasa su suite no
       # llega a npm: es lo único que impide publicar algo roto a mano un viernes.
