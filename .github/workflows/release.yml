@@ -76,12 +76,32 @@ jobs:
       # Cuenta PERSONAL, no organización (`imdotrino` es un User), así que no hay secretos de
       # organización: con tokens habría que meter el mismo en los 22 repos que publican. Por
       # eso se eligió este camino y no aquel.
+      # SOLO LO QUE NO ESTÉ YA PUBLICADO. El repo publica DOS paquetes y no siempre
+      # cambian los dos: si la librería no se tocó, su versión ya está en npm y
+      # `publish` corta el release entero por algo que no es un fallo — «ya estaba» no
+      # es un error, es que no había nada que hacer.
+      #
+      # No es un repliegue que tape nada: se comprueba la versión EXACTA contra el
+      # registro y se dice en voz alta cuál se saltó. Lo que sí seguiría fallando, y
+      # debe, es un publish rechazado por permisos o por una confianza mal declarada.
       - name: Publicar @dotrino/vault (la librería)
         working-directory: lib
-        run: npm publish --access public
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "@dotrino/vault@$V" version >/dev/null 2>&1; then
+            echo "@dotrino/vault@$V ya está publicada: nada que hacer"
+          else
+            npm publish --access public
+          fi
 
       - name: Publicar @dotrino/vaultd (el daemon)
-        run: npm publish --access public
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "@dotrino/vaultd@$V" version >/dev/null 2>&1; then
+            echo "@dotrino/vaultd@$V ya está publicada: nada que hacer"
+          else
+            npm publish --access public
+          fi
 
       - name: Publicar la release con sus archivos
         uses: softprops/action-gh-release@v2
