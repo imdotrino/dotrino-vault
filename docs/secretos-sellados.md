@@ -691,3 +691,43 @@ Y tampoco entra por las otras dos puertas: `adminDevices` exige `!m.cn` (ella ll
 
 Comprobado, no razonado: `smoke/reposo.mjs` crea un cajón llamado **`vault`** —su propio
 `cn`— y afirma que su llave no aparece en **ninguna** envoltura de **ningún** cajón.
+
+### 9.3. La bóveda CERRADA, medida (2026-09-02, vaultd 0.93)
+
+Auditoría con los dos perfiles bloqueados, preguntando lo único que importa: **qué consigue
+quien tiene esta máquina y el disco**. No razonada — probada, abriendo cada cosa con la
+llave de la máquina a ver si cede.
+
+| Llave | Cerrada con | Con el disco y el perfil cerrado |
+|---|---|---|
+| **la maestra** (`keypair`) | la contraseña | **no cede** — ni firma ni se recupera |
+| **`#recovery`** | la contraseña | **no cede** — el AES-GCM no autentica con la llave de máquina |
+| **`enc-keypair`** | la llave de máquina | cede |
+| **`sealkeys.json`** | la llave de máquina | cede, **a propósito** |
+| **`commkey.json`** | la llave de máquina | cede, **a propósito** |
+
+**Lo que aguanta, y es lo que sostiene el modelo.** `#recovery` es la envoltura que llevan
+TODOS los sobres, así que si cediera, los cajones se abrirían enteros con el disco y el
+sellado no valdría nada frente a un robo. No cede: está bajo la contraseña. Se comprobó
+descifrando `recovery.priv` con la llave de máquina — la autenticación GCM falla.
+
+**`enc-keypair` cede, y hay que decir exactamente qué abre.** Es la llave de cifrado del
+perfil, y su privada vive bajo la llave de máquina. **No abre los cajones de secretos**: no
+hay ni un sobre dirigido a ella (comprobado sobre los dos perfiles, con 0 y 4 destinatarios,
+y ninguno es ella), porque la bóveda no se envuelve a sí misma — envolverle la CEK sería
+devolverle la capacidad de leerlo todo. Lo que sí abre es el CONTENIDO sellado a este
+perfil. Sigue siendo la pieza que falta cerrar bajo la contraseña, y lo que lo frena es
+decidir si el almacén sirve con el perfil cerrado: hoy sirve, y por eso su llave no puede
+pedir una frase que no está puesta.
+
+**Las otras dos ceden a propósito, y es el precio de servir cerrada.** La de sellado firma
+lo que la bóveda sirve; la de comunicación la identifica en el proxio. Si pidieran la frase,
+una bóveda cerrada no existiría en la red ni podría atender a sus aparatos — que es
+justamente lo que el candado NO debe romper (el candado es de la consola). La de
+comunicación va acotada por el acta (`cn: 'vault'`, solo `sign`): con ella se habla por la
+bóveda, no se firma por la persona ni se lee nada.
+
+**Y el marco de siempre, que no cambia:** el cifrado en reposo no protege contra una copia
+del DISCO ENTERO, porque su material vive en ese mismo disco. Sube el listón de «copiar un
+archivo» a «tener tu máquina». Cerrarlo de verdad pide que la clave no esté aquí, y para eso
+está el proveedor KMS (`atrest rekey`, `docs/llaves-de-hardware.md`).

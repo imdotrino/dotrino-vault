@@ -119,7 +119,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * Lo dice el ACTA, con el permiso `unattended`: quien lo tiene se las lleva solo; quien
    * no, espera a que un aparato con `approve` lo firme.
    *
-   * Antes era al revés y vivía aquí: una lista local de «estos SÍ piden permiso», así que
+   * Antes era al revés y vivía aquí: una list_ local de «estos SÍ piden permiso», así que
    * un aparato nuevo nacía pudiendo llevarse las claves y nadie elegía eso — se elegía por
    * omisión. Ahora hay que conceder a propósito quién puede llevárselas solo, y **si falta
    * el dato se pide permiso**, que es lo que hay que hacer cuando no se sabe (dueño,
@@ -135,7 +135,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   // LA BÓVEDA DE CONTRASEÑAS: entradas y su llave, en el dir del perfil y cifradas en
   // reposo como todo lo demás. QUIÉN PUEDE PEDIR LO DICE EL ACTA (capacidad
-  // `passwords`), como cualquier otro permiso: aquí no hay una segunda lista de
+  // `passwords`), como cualquier otro permiso: aquí no hay una segunda list_ de
   // aparatos. Tenerla obligaba a acordarse de dos sitios al quitar un aparato, y era
   // además un emparejamiento paralelo al del ecosistema.
   const passwordsFile = path.join(dir, 'passwords.json')
@@ -260,25 +260,41 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * `identify` se repliega a la maestra y lo dice. Por eso una bóveda que se actualiza
    * tiene que abrirse UNA vez, y a partir de ahí ya puede vivir cerrada.
    */
-  try {
-    const info = await identity.profileActa?.()
-    const acta = info?.acta
-    // CON EL PERFIL ABIERTO, y `isLocked()` es la pregunta correcta — no `masterLocked`.
-    //
-    // Se coló así: en la PRIMERA arrancada tras actualizar, la maestra todavía está guardada
-    // en claro (se sella al abrir el perfil), o sea que `masterLocked` es `false` aunque el
-    // perfil esté cerrado. Con ese guardián, la bóveda de producción admitió su llave de
-    // comunicación y SELLÓ UN ACTA NUEVA (#76 → #77) estando cerrada — justo lo que la regla
-    // prohíbe, y encima rotando de paso la llave de sellado sin que nadie lo pidiera.
-    if (acta && !isLocked() && !identity.masterLocked) {
+  /**
+   * METER LA LLAVE DE COMUNICACIÓN EN EL ACTA, si el perfil está abierto.
+   *
+   * `isLocked()` es la pregunta correcta — no `masterLocked`. Se coló así: en la PRIMERA
+   * arrancada tras actualizar, la maestra todavía está guardada en claro (se sella al abrir
+   * el perfil), o sea que `masterLocked` es `false` aunque el perfil esté cerrado. Con ese
+   * guardián, la bóveda de producción admitió su llave de comunicación y SELLÓ UN ACTA
+   * NUEVA (#76 → #77) estando cerrada — justo lo que la regla prohíbe, y encima rotando de
+   * paso la llave de sellado sin que nadie lo pidiera.
+   *
+   * SE LLAMA TAMBIÉN AL ABRIR, y esa es la mitad que faltaba. Antes solo corría al arrancar
+   * el servicio, y **un perfil con contraseña arranca cerrado siempre**: nunca pasaba por
+   * aquí, así que jamás llegaba a tener su llave. O sea que los perfiles que MÁS la
+   * necesitan —los protegidos, los que no pueden firmar con la maestra estando cerrados—
+   * eran precisamente los únicos que se quedaban sin ella, y seguían identificándose con la
+   * maestra o quedándose mudos. Se vio el 2026-09-02: de dos perfiles, el que tenía
+   * contraseña era el que no tenía `commkey.json`.
+   */
+  async function ensureCommKeyInActa () {
+    try {
+      const info = await identity.profileActa?.()
+      const acta = info?.acta
+      if (!acta || isLocked() || identity.masterLocked) return false
       const pub = await commKey.ensure()
-      const yaEsta = (acta.members || []).some((m) => m?.pub === pub)
-      if (!yaEsta && info?.isMaster) {
-        await identity.admitMember({ pub, label: 'esta bóveda', cn: COMM_CN, caps: [...COMM_CAPS] })
-        log('[vault] this vault is now a member of its own record: it talks with its own key, not the master one')
-      }
+      if ((acta.members || []).some((m) => m?.pub === pub)) return false
+      if (!info?.isMaster) return false
+      await identity.admitMember({ pub, label: 'esta bóveda', cn: COMM_CN, caps: [...COMM_CAPS] })
+      log('[vault] this vault is now a member of its own record: it talks with its own key, not the master one')
+      return true
+    } catch (e) {
+      log('[vault] could not put the communication key in the record:', e.message)
+      return false
     }
-  } catch (e) { log('[vault] could not put the communication key in the record:', e.message) }
+  }
+  await ensureCommKeyInActa()
 
   const { client } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
 
@@ -338,15 +354,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // cierto también para lo que ya estaba escrito, no solo para lo que se escriba desde
   // ahora. Se agota sola — cuando no queda ninguna línea en claro, no vuelve a tocar nada.
   try {
-    const crudo = fs.readFileSync(activityFile, 'utf8')
-    const lineas = crudo.split('\n')
-    if (lineas.some((l) => l && !l.startsWith('DOTRINO-ATREST-v1.'))) {
-      const convertidas = lineas.map((l) => (l && !l.startsWith('DOTRINO-ATREST-v1.') ? activityAtRest.encrypt(l) : l))
+    const raw = fs.readFileSync(activityFile, 'utf8')
+    const lines = raw.split('\n')
+    if (lines.some((l) => l && !l.startsWith('DOTRINO-ATREST-v1.'))) {
+      const sealedLines = lines.map((l) => (l && !l.startsWith('DOTRINO-ATREST-v1.') ? activityAtRest.encrypt(l) : l))
       // Escribir aparte y renombrar: a medio convertir, la bitácora sería ilegible entera.
-      fs.writeFileSync(activityFile + '.tmp', convertidas.join('\n'), { mode: 0o600 })
+      fs.writeFileSync(activityFile + '.tmp', sealedLines.join('\n'), { mode: 0o600 })
       fs.renameSync(activityFile + '.tmp', activityFile)
       // Sin `%d`: el `log` de la bóveda no formatea, así que el placeholder salía literal.
-      log(`[vault] activity log: ${convertidas.filter(Boolean).length} line(s) sealed at rest`)
+      log(`[vault] activity log: ${sealedLines.filter(Boolean).length} line(s) sealed at rest`)
     }
     // Y el modo, que hasta 0.89 se creaba 0664: legible por cualquier usuario.
     if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600)
@@ -448,7 +464,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * Sustituye a `trustedIssuer: master`, que comparaba contra UNA llave fija y por eso el
    * multivault no podía existir — una segunda selladora sellaba el acta y luego sus papeles
-   * los rechazaban los diez mostradores. Ahora se compara contra la lista que dice el acta.
+   * los rechazaban los diez mostradores. Ahora se compara contra la list_ que dice el acta.
    *
    * Sin acta se devuelven nulos a propósito: `verifyDelegation` responde `no-acta` y el
    * mostrador deniega. Es lo contrario de un repliegue — no hay con qué decidir, así que no
@@ -694,7 +710,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('devices', { device: await deviceIdOf(chk.device).catch(() => null), solo: 'revocaciones' })
       return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, acta: record })
     }
-    // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
+    // El acta viaja con la list_: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
     // Si el dispositivo estuvo apagado y viene con un `seq` viejo, se le manda la CADENA
     // que falta (ventana de retención, §1.3) para que compruebe el encadenamiento en vez
@@ -712,7 +728,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
     // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
     // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
-    // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
+    // list_ tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
     })))
@@ -1043,7 +1059,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * NUNCA. El pedido solo se veía si al dueño se le ocurría abrir la app por su cuenta.
    *
    * El aviso no lleva nada que no esté ya en el pedido, y el timbre que sale de aquí sigue
-   * sin contenido: quien lo recibe pregunta por la lista, no la lee del aviso.
+   * sin contenido: quien lo recibe pregunta por la list_, no la lee del aviso.
    */
   async function notifyApprovers (pend, record) {
     try {
@@ -1154,7 +1170,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       cek: await passwordsKey(),
       // UNA sola condición, y es del ACTA: el aparato tiene la capacidad `passwords`.
       // Quitársela —o quitar el aparato— le corta esto en la siguiente pasada, sin
-      // que haya una segunda lista que acordarse de tocar.
+      // que haya una segunda list_ que acordarse de tocar.
       isAllowed: (pub) => !!actaCache && Acta.memberCan(actaCache, pub, 'passwords'),
       encPubOf: (pub) => (actaCache?.members || []).find((m) => m.pub === pub)?.encPub || null,
       // EN VIVO, no del caché: conceder o quitar `unattended` tiene que surtir efecto en
@@ -1332,11 +1348,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Esto avisaba únicamente por `issued` —las delegaciones que emitió esta bóveda—, y
       // eso deja fuera exactamente el caso del multivault: la segunda bóveda entró por
       // `join`, así que la delegación la emitió la PRIMERA. Cuando la segunda sellaba un
-      // acta nueva (admitir un aparato con su permiso `sella`), su lista de emitidas no
+      // acta nueva (admitir un aparato con su permiso `sella`), su list_ de emitidas no
       // tenía a la primera dentro y el cambio no llegaba a ninguna parte: las dos bóvedas
       // quedaban con actas distintas y la del dueño sin enterarse de nada.
       //
-      // El acta es la lista de quién es del perfil: esa es la lista correcta. `issued` se
+      // El acta es la list_ de quién es del perfil: esa es la list_ correcta. `issued` se
       // suma porque cubre a quien tiene cert y todavía no aparece ahí.
       const miembros = (await identity.profileMembers?.().catch(() => null))?.members || []
       const yo = identity.me?.publickey || null
@@ -1401,11 +1417,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // podría abrirlas, porque su envoltura no existe. Dos cerrojos para lo mismo, a
       // propósito: que uno falle no basta para leerlas.
       //
-      // Se sella la lista ENTERA, no solo los valores: el proxy tampoco tiene por qué
+      // Se sella la list_ ENTERA, no solo los valores: el proxy tampoco tiene por qué
       // aprender cómo se llaman tus variables ni qué servicios corres.
       return {
         enc: await identity.sealContent(JSON.stringify({
-          ns: conSobres(listSecrets(), 'ns', caller), dev: conSobres(await listDeviceSecrets(), 'dev', caller),
+          ns: withEnvelopes(listSecrets(), 'ns', caller), dev: withEnvelopes(await listDeviceSecrets(), 'dev', caller),
           // Aparatos que están en el acta pero no pueden abrir lo suyo: hay que
           // enseñarlo donde se administra, no solo en el log del servicio.
           incomplete: await incompleteMembers(),
@@ -1422,7 +1438,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
     },
     /**
-     * PARA QUIÉN ENVOLVER. Lo contesta la bóveda porque la lista sale del ACTA
+     * PARA QUIÉN ENVOLVER. Lo contesta la bóveda porque la list_ sale del ACTA
      * (`recipientsOf`), y tener dos sitios respondiendo a «quién puede abrir este cajón» es
      * exactamente cómo se acaba dejando fuera a alguien sin que nadie se entere.
      */
@@ -1459,8 +1475,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // PÚBLICA Y PRIVADA VAN IGUAL (dueño, 2026-09-02: «la única diferencia es si se
         // despachan o no, son políticas; dales el mismo tratamiento de seguridad»). La
         // marca solo decide si se entrega sin aprobación.
-        await verificarAutor(owner, key, sealed, caller)
-        await verificarDestinatarios(owner, sealed.wraps, !!isPublic)
+        await checkAuthor(owner, key, sealed, caller)
+        await checkRecipients(owner, sealed.wraps, !!isPublic)
         await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
         audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
         await settleDebts(owner)
@@ -1499,8 +1515,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const keys = []
       for (const it of items) {
         if (!it?.key || !it?.sealed) throw new Error('var.setMany: each variable needs its key and its sealed envelope')
-        await verificarAutor(owner, it.key, it.sealed, caller)
-        await verificarDestinatarios(owner, it.sealed.wraps, !!it.public)
+        await checkAuthor(owner, it.key, it.sealed, caller)
+        await checkRecipients(owner, it.sealed.wraps, !!it.public)
       }
       // Se comprueban TODAS antes de escribir NINGUNA: media carga aplicada es una
       // configuración que nadie quiso, y el servicio se reinicia con ella.
@@ -1606,7 +1622,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // listar y borrar no la piden (ver `secretsStore.js`).
   /**
    * Los miembros que deben poder abrir un cajón: los SERVICIOS de ese namespace
-   * (miembros del acta con ese `cn`). La bóveda NO entra en la lista — envolverle la
+   * (miembros del acta con ese `cn`). La bóveda NO entra en la list_ — envolverle la
    * CEK a ella misma sería devolverle la capacidad de leerlo todo, que es justo lo
    * que este diseño quita.
    */
@@ -1614,7 +1630,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const record = (await identity.profileActa?.().catch(() => null))?.acta
     if (!record) return []
     // LLEVAR EL `cn` NO ES PODER LEER. El acta manda también aquí: un miembro entra en la
-    // lista si además puede leer los secretos de ese cajón (`memberCanReadSecrets`).
+    // list_ si además puede leer los secretos de ese cajón (`memberCanReadSecrets`).
     //
     // Sin esa segunda mitad, el `cn` era la única puerta y `cn` es un texto libre: la LLAVE
     // DE COMUNICACIÓN de la bóveda entra en el acta con `cn: 'vault'` y `caps: ['sign']`,
@@ -1632,7 +1648,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * ningún sitio, que es todo el punto del §8.2 — la capacidad de leer se muda de una
    * frase que se escribe en cualquier parte a una llave que no sale del aparato.
    *
-   * La bóveda NO entra en la lista, ni aquí ni en `nsMembers`: envolverle la llave a
+   * La bóveda NO entra en la list_, ni aquí ni en `nsMembers`: envolverle la llave a
    * ella misma sería devolverle la capacidad de leerlo todo, que es justo lo que este
    * diseño quita. Hay un test que lo afirma.
    */
@@ -1825,7 +1841,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * hay quien la teclee.
    *
    * Que no puedan leer es CORRECTO y no se relaja. Lo que se arregla aquí es que se
-   * vea: hasta ahora un servicio recién enrolado aparecía en la lista como cualquier
+   * vea: hasta ahora un servicio recién enrolado aparecía en la list_ como cualquier
    * otro y arrancaba sin configuración, repitiendo un error en su propio log que nadie
    * mira. Con esto, la consola y la TUI pueden decir exactamente qué falta y qué hacer
    * (`dotrino-vault secret settle`, que sí pide la frase).
@@ -1844,7 +1860,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // «Ver» de la consola le fallaría sin explicar por qué.
       // Un aparato que administra NO debe tener envoltura de los cajones con dueño
       // (`recipientsOf`), así que no se le cuenta como falta: lo que ahí falta es a
-      // propósito y ponerlo en la lista sería pedir que se «arregle» lo correcto.
+      // propósito y ponerlo en la list_ sería pedir que se «arregle» lo correcto.
       const ownedNs = new Set((record?.members || []).filter((x) => x.cn).map((x) => x.cn))
       const drawers = m.cn
         ? [`ns:${m.cn}`, `dev:${m.pub}`]
@@ -1944,7 +1960,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * único que la frase guarda (§8.3).
    *
    * No lanza: devuelve qué pasó con cada cajón, porque una deuda que no se puede saldar
-   * tiene que seguir viéndose en la lista en vez de tumbar la operación entera.
+   * tiene que seguir viéndose en la list_ en vez de tumbar la operación entera.
    */
   /**
    * PIDE AL SERVICIO QUE REPARTA la llave de su cajón a un miembro nuevo (§8.11).
@@ -2077,7 +2093,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * relevo: alguien con `admin` colando un sobre que fabricó un tercero, sin que ninguna de
    * las dos comprobaciones lo note.
    */
-  async function verificarAutor (owner, key, sealed, caller) {
+  async function checkAuthor (owner, key, sealed, caller) {
     const a = sealed?.author
     if (!a || typeof a.pub !== 'string' || typeof a.sig !== 'string' || typeof a.ts !== 'number') {
       throw new Error('var.set: the envelope must say WHO made it (`author: { pub, sig, ts }`)')
@@ -2126,7 +2142,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * Lo de dentro lo corrige el repaso al abrir la bóveda, que es para lo que está.
    */
-  async function verificarDestinatarios (owner, wraps, isPublic = false) {
+  async function checkRecipients (owner, wraps, isPublic = false) {
     if (!wraps || typeof wraps !== 'object') throw new Error('var.set: the envelope carries no wraps')
     const { recoveryPub, members } = await secrets.recipientsFor(owner, { public: isPublic })
     if (!recoveryPub) throw new Error('var.set: this vault has no recovery key yet')
@@ -2220,8 +2236,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))
-      // POR VISIBILIDAD, no una lista fija: una pública lleva además la envoltura de quien
-      // administra. Con una sola lista se le daría también la de una privada con dueño, que
+      // POR VISIBILIDAD, no una list_ fija: una pública lleva además la envoltura de quien
+      // administra. Con una sola list_ se le daría también la de una privada con dueño, que
       // es justo lo que no puede pasar.
       const members = (esPublica) => recipientsOf(owner, { public: esPublica })
       try {
@@ -2284,7 +2300,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!owed) return null
     // QUIÉN RECIBE ENVOLTURA LO DICE `recipientsOf`, Y SOLO ÉL.
     //
-    // Antes cada llamador traía su propia lista (`nsMembers`, o el miembro suelto), y todas
+    // Antes cada llamador traía su propia list_ (`nsMembers`, o el miembro suelto), y todas
     // se dejaban fuera a los SELLADORES — que `recipientsOf` sí incluye. Resultado: escribir
     // una variable envolvía para el servicio y dejaba al sellador con la generación vieja
     // (dueño, 2026-09-01: «al envolver hay que envolver siempre para todos los selladores,
@@ -2390,20 +2406,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * pública, y no se puede leer. Eso es cierto y se arregla abriendo la bóveda; inventarse
    * un valor o esconder la fila sería peor.
    */
-  const conSobres = (lista, tipo, caller) => {
-    if (!caller) return lista
+  const withEnvelopes = (list_, kind, caller) => {
+    if (!caller) return list_
     const dar = (owner, k) => {
       if (!k.public) return k
       const e = secrets.entryOf?.(owner, k.key)
       const wrap = e?.gen != null ? secrets.wrapOf?.(owner, e.gen, caller) : null
       return e?.e && wrap ? { ...k, e: e.e, wrap } : k
     }
-    if (tipo === 'ns') {
+    if (kind === 'ns') {
       const out = {}
-      for (const [ns, keys] of Object.entries(lista)) out[ns] = keys.map((k) => dar(`ns:${ns}`, k))
+      for (const [ns, keys] of Object.entries(list_)) out[ns] = keys.map((k) => dar(`ns:${ns}`, k))
       return out
     }
-    return lista.map((row) => ({ ...row, keys: row.keys.map((k) => dar(`dev:${row.pub}`, k)) }))
+    return list_.map((row) => ({ ...row, keys: row.keys.map((k) => dar(`dev:${row.pub}`, k)) }))
   }
 
   function listSecrets () {
@@ -2523,16 +2539,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     async takeMasterKey () {
       const r = await identity.reloadMasterKey?.()
       if (r?.locked === false) { try { await identity.sealMasterKey?.() } catch (_) {} }
+      // ABRIR ES EL ÚNICO MOMENTO en que un perfil con contraseña está abierto, así que es
+      // aquí donde puede estrenar su llave de comunicación (ver `ensureCommKeyInActa`).
+      // Si falla, no se arrastra: abrir el perfil no puede depender de esto.
+      if (r?.locked === false) { try { await ensureCommKeyInActa() } catch (_) {} }
       return { locked: r?.locked !== false }
     },
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,
     // ¿Pide permiso este aparato para recibir claves privadas? Lo dice el ACTA
-    // (`unattended`), no una lista de esta máquina — por eso ya no hay `setApproval` ni
+    // (`unattended`), no una list_ de esta máquina — por eso ya no hay `setApproval` ni
     // `supervised`: se concede y se quita como cualquier otro permiso, con `caps`.
     needsApproval: async (pub) => needsApproval(pub, await refreshActa()),
-    // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
+    // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se list_: es donde está la
     // llave. Lo que no puede es listarla un aparato.
     passwordDevices,
     passwordsVault: () => passwords?.vault || null,
@@ -2579,7 +2599,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // desbloquear: deja `secrets.json.v3.bak` para poder volver.
     /**
      * Convierte el archivo de secretos al formato nuevo. `membersOf` es opcional y lo
-     * normal es NO pasarlo: por defecto se usa la misma lista de destinatarios que
+     * normal es NO pasarlo: por defecto se usa la misma list_ de destinatarios que
      * cualquier escritura —los servicios del cajón MÁS los aparatos que administran—.
      *
      * Pasarla a mano fue un error real: la conversión envolvía solo a los servicios, y
@@ -2624,7 +2644,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     isMaster: () => identity.isMaster(),
     setCaps: async (pub, caps) => {
       const r = await identity.setCaps(pub, caps)
-      // ¿SE QUEDÓ ALGUNO POR EL CAMINO? El acta tiene una lista CERRADA de permisos y
+      // ¿SE QUEDÓ ALGUNO POR EL CAMINO? El acta tiene una list_ CERRADA de permisos y
       // `cleanCaps` descarta los que no conoce — correcto al recibir un acta ajena, y
       // pésimo aquí: conceder `+sella` con una versión del pilar que no sabe qué es
       // devolvía «Listo», resellaba el acta y no concedía nada. Costó una tarde en un

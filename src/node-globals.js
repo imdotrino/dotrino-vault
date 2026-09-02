@@ -23,11 +23,23 @@ import { atRestFor } from './atrest.js'
 export function fileLocalStorage (filePath) {
   const atRest = atRestFor(path.dirname(filePath))
   let data = {}
-  try { if (fs.existsSync(filePath)) data = JSON.parse(atRest.decrypt(fs.readFileSync(filePath, 'utf8'))) || {} } catch (_) {}
+  let wasPlaintext = false
+  try {
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8')
+      wasPlaintext = !!raw.trim() && !raw.startsWith('DOTRINO-ATREST-v1.')
+      data = JSON.parse(atRest.decrypt(raw)) || {}
+    }
+  } catch (_) {}
   const flush = () => {
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, atRest.encrypt(JSON.stringify(data)), { mode: 0o600 })
   }
+  // CIFRAR AL ESCRIBIR NO CONVIERTE LO YA ESCRITO, y aquí eso importaba de verdad: el par
+  // de transporte se acuña UNA vez y no se vuelve a tocar, así que el archivo que dejó una
+  // versión anterior —con su privada en claro— se quedaba así para siempre. Se convierte de
+  // una vez al abrirlo. Se agota solo: la siguiente vez ya está cifrado.
+  if (wasPlaintext) { try { flush() } catch (_) {} }
   return {
     getItem: (k) => (k in data ? data[k] : null),
     setItem: (k, v) => { data[k] = String(v); flush() },

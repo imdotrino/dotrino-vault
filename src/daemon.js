@@ -20,7 +20,7 @@ import { takeLock } from '../lib/src/lock.js'
 import { startVaultManager } from './manager.js'
 import { dataDir } from './paths.js'
 // EL CANAL LOCAL VA CIFRADO: por aquí pasan la contraseña, los valores y las invitaciones.
-import { ipcRead, ipcWrite } from './ipc.js'
+import { ipcRead, ipcWrite, migrateIpcDir } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
 import { watchBinary } from './selfupdate.js'
 import { VERSION } from './version.js'
@@ -70,6 +70,9 @@ export async function runDaemon () {
   const dir = dataDir()
   const proxyUrl = process.env.PROXY_URL || 'wss://proxy.dotrino.com'
   assertSingleInstance(dir)
+  // Lo que dejó escrito una versión anterior al canal cifrado. Se agota sola.
+  const sealedLeftovers = migrateIpcDir(dir)
+  if (sealedLeftovers) console.log('[vault] control channel: %d leftover file(s) sealed at rest', sealedLeftovers)
 
   const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId (y a QUÉ perfil

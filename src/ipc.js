@@ -26,6 +26,7 @@
  * Ojo con el dir: todos estos archivos cuelgan del directorio raíz, así que la clave sale
  * de ahí (`path.dirname`). Un archivo de perfil tiene otro salt y NO se lee con esta.
  */
+import fs from 'node:fs'
 import path from 'node:path'
 import { atRestFor } from './atrest.js'
 import { readJson, writeJson } from './paths.js'
@@ -38,4 +39,33 @@ export const ipcRead = (file, fallback = null) => readJson(file, fallback, codec
 /** Escribe un archivo del canal, cifrado y 0600 (atómico: tmp + rename). */
 export const ipcWrite = (file, obj) => writeJson(file, obj, codecOf(file))
 
-export default { ipcRead, ipcWrite }
+/**
+ * CONVIERTE LO QUE DEJÓ ESCRITO UNA VERSIÓN ANTERIOR.
+ *
+ * Cifrar al escribir no limpia el disco: un archivo del canal solo se reescribe cuando
+ * alguien vuelve a pedir esa operación, y hay respuestas que se quedan meses. `approve.json`
+ * —con el id del último aparato aprobado— seguía en claro días después de la actualización,
+ * esperando a que hubiera otra aprobación.
+ *
+ * Se pasa una vez al arrancar el daemon y se agota sola. Un archivo que no se pueda leer se
+ * deja como está: no es de nadie borrar lo que no entiende.
+ */
+export function migrateIpcDir (dir) {
+  let names = []
+  try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name) } catch (_) { return 0 }
+  let n = 0
+  for (const name of names) {
+    if (!name.endsWith('.json') || name.startsWith('atrest.')) continue
+    const file = path.join(dir, name)
+    try {
+      const raw = fs.readFileSync(file, 'utf8')
+      if (!raw.trim() || raw.startsWith('DOTRINO-ATREST-v1.')) continue
+      const obj = JSON.parse(raw)
+      ipcWrite(file, obj)
+      n++
+    } catch (_) { /* no se entiende: se deja */ }
+  }
+  return n
+}
+
+export default { ipcRead, ipcWrite, migrateIpcDir }
