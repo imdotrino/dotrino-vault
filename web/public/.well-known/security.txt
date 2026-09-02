@@ -1,0 +1,8 @@
+# Política de seguridad de Dotrino · RFC 9116
+# La política completa (alcance, plazos, puerto seguro) está en Policy.
+Contact: mailto:security@dotrino.com
+Contact: https://github.com/imdotrino/dotrino-vault/security/advisories/new
+Expires: 2027-09-01T19:34:11Z
+Preferred-Languages: es, en
+Canonical: https://dotrino.com/.well-known/security.txt
+Policy: https://github.com/imdotrino/.github/blob/main/SECURITY.md

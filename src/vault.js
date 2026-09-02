@@ -11,6 +11,7 @@
  * Toda la cripto es de `@dotrino/identity`. Este módulo solo orquesta.
  */
 import fs from 'node:fs'
+import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
@@ -367,18 +368,73 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Y el modo, que hasta 0.89 se creaba 0664: legible por cualquier usuario.
     if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600)
   } catch (_) { /* no hay bitácora todavía */ }
+  /**
+   * LA BITÁCORA ES UNA CADENA, no una lista de líneas sueltas.
+   *
+   * Cifrarla (0.89) le dio confidencialidad y ninguna integridad: quien tenga la llave de
+   * la máquina puede reescribir una línea y nadie lo nota. Como evidencia no valía nada, y
+   * eso es justo lo que un auditor mira (`CUMPLIMIENTO.md` §2).
+   *
+   * Cada entrada lleva su `seq` y el **hash de la anterior**, así que tocar o quitar una
+   * rompe la cadena de ahí en adelante y se ve. Se encadena el TEXTO exacto de la línea,
+   * no un objeto re-serializado: así verificar no depende de que las claves salgan en el
+   * mismo orden.
+   *
+   * **Lo que esto NO resuelve, dicho para no venderlo de más:** quien tenga la máquina
+   * puede cortar el final de la cadena y quedarse con un prefijo válido. Eso no se cierra
+   * en local — pide anclar el último hash fuera (un TSA, otro aparato). Lo que sí cierra
+   * es reescribir el pasado sin dejar rastro, que es el caso que importaba.
+   */
+  const AUDIT_MAX_BYTES = 1024 * 1024
+  /** Cuántos archivos viejos se guardan. Es la RETENCIÓN, y va declarada. */
+  const AUDIT_KEEP = 5
+  const sha256 = (text) => nodeCrypto.createHash('sha256').update(text, 'utf8').digest('hex')
+
+  let auditSeq = 0
+  let auditPrev = null
+
+  /** Reconstruye el estado de la cadena leyendo la última entrada que haya. */
+  try {
+    const lines = fs.readFileSync(activityFile, 'utf8').split('\n').filter(Boolean)
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const text = activityAtRest.decrypt(lines[i])
+        const e = JSON.parse(text)
+        if (typeof e.seq === 'number') { auditSeq = e.seq; auditPrev = sha256(text); break }
+      } catch (_) { /* una línea vieja o ilegible: se sigue hacia atrás */ }
+    }
+  } catch (_) { /* no hay bitácora todavía */ }
+
+  /**
+   * ROTA ARCHIVANDO, NO TIRANDO. Antes se quedaba con la mitad del archivo y la otra mitad
+   * desaparecía sin que nada lo dijera: una bitácora que pierde historia en silencio es
+   * peor que no tenerla, porque parece completa. Ahora los viejos se corren a `.1`…`.N` y,
+   * cuando uno se cae del borde, **queda anotado que se cayó**.
+   */
+  const rotateAudit = () => {
+    let dropped = null
+    const older = `${activityFile}.${AUDIT_KEEP}`
+    try { if (fs.existsSync(older)) { fs.rmSync(older); dropped = `activity.log.${AUDIT_KEEP}` } } catch (_) {}
+    for (let i = AUDIT_KEEP - 1; i >= 1; i--) {
+      try { if (fs.existsSync(`${activityFile}.${i}`)) fs.renameSync(`${activityFile}.${i}`, `${activityFile}.${i + 1}`) } catch (_) {}
+    }
+    try { fs.renameSync(activityFile, `${activityFile}.1`) } catch (_) {}
+    return dropped
+  }
+
   const audit = (op, info = {}) => {
     try {
-      const line = activityAtRest.encrypt(JSON.stringify({ ts: Date.now(), op, ...info }))
-      fs.appendFileSync(activityFile, line + '\n', { mode: 0o600 })
+      const entry = { seq: ++auditSeq, prev: auditPrev, ts: Date.now(), op, ...info }
+      const text = JSON.stringify(entry)
+      fs.appendFileSync(activityFile, activityAtRest.encrypt(text) + '\n', { mode: 0o600 })
+      auditPrev = sha256(text)
       // El `mode` de `appendFileSync` solo aplica al CREAR: las bitácoras de antes de
       // 0.89 ya existen con 0664 y hay que estrecharlas a mano.
       try { if ((fs.statSync(activityFile).mode & 0o077) !== 0) fs.chmodSync(activityFile, 0o600) } catch (_) {}
-      // rotación simple: si pasa de ~1 MB, conservar la última mitad
-      const st = fs.statSync(activityFile)
-      if (st.size > 1024 * 1024) {
-        const lines = fs.readFileSync(activityFile, 'utf8').split('\n')
-        fs.writeFileSync(activityFile, lines.slice(Math.floor(lines.length / 2)).join('\n'), { mode: 0o600 })
+      if (fs.statSync(activityFile).size > AUDIT_MAX_BYTES) {
+        const dropped = rotateAudit()
+        // La primera entrada del archivo nuevo dice de dónde viene, y si se perdió algo.
+        audit('log.rotated', { keep: AUDIT_KEEP, ...(dropped ? { dropped } : {}) })
       }
     } catch (_) {}
   }

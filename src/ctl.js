@@ -24,6 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import tty from 'node:tty'
+import crypto from 'node:crypto'
 import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir } from './paths.js'
 // EL CANAL LOCAL VA CIFRADO (ver `ipc.js`): por aquí salen la contraseña y los valores.
@@ -926,16 +927,66 @@ function cmdAtrest (rest) {
 }
 
 // Bitácora de actividad de seguridad (quién firmó/renovó/enroló y qué se rechazó).
-function cmdActivity (n = 30) {
-  const f = path.join(profileDir(), 'activity.log')
-  let lines = []
-  try { lines = fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean) } catch {
+/**
+ * Toda la bitácora EN ORDEN, archivos rotados incluidos. Se leen del más viejo al más
+ * nuevo (`.5` … `.1`, y al final el vivo) porque la cadena los cruza: verificarla mirando
+ * solo el archivo actual diría «rota» en su primera línea, que es exactamente lo contrario
+ * de lo que pasa.
+ */
+function readActivity (dir) {
+  const atRest = atRestFor(dir)
+  const out = []
+  const files = []
+  for (let i = 9; i >= 1; i--) { const f = path.join(dir, `activity.log.${i}`); if (fs.existsSync(f)) files.push(f) }
+  files.push(path.join(dir, 'activity.log'))
+  for (const f of files) {
+    let raw = ''
+    try { raw = fs.readFileSync(f, 'utf8') } catch { continue }
+    for (const l of raw.trim().split('\n').filter(Boolean)) {
+      // `decrypt` deja pasar el texto en claro, así que una bitácora anterior a 0.89 se
+      // sigue leyendo entera.
+      try { out.push(atRest.decrypt(l)) } catch { out.push(l) }
+    }
+  }
+  return out
+}
+
+/**
+ * ¿ESTÁ LA CADENA ENTERA? Cada entrada lleva el hash de la anterior, así que tocar o quitar
+ * una rompe todo lo que va detrás. Esto lo recorre y dice dónde se rompió.
+ *
+ * Lo que NO comprueba, y se dice: que no le hayan cortado el FINAL. Un prefijo válido sigue
+ * siendo válido; cerrarlo pide anclar el último hash fuera de esta máquina.
+ */
+function verifyActivity (lines) {
+  const sha256 = (t) => crypto.createHash('sha256').update(t, 'utf8').digest('hex')
+  let prev = null; let seq = null; let checked = 0; let unchained = 0
+  for (const text of lines) {
+    let e; try { e = JSON.parse(text) } catch { continue }
+    if (typeof e.seq !== 'number') { unchained++; continue }   // entradas de antes de 0.94
+    if (seq !== null) {
+      if (e.seq !== seq + 1) return { ok: false, at: e.seq, why: `salta del #${seq} al #${e.seq}` }
+      if (e.prev !== prev) return { ok: false, at: e.seq, why: `el #${e.seq} no encadena con el #${seq}` }
+    }
+    seq = e.seq; prev = sha256(text); checked++
+  }
+  return { ok: true, checked, unchained, last: seq }
+}
+
+function cmdActivity (n = 30, { verify = false, exportar = false } = {}) {
+  const dir = profileDir()
+  const lines = readActivity(dir)
+  if (!lines.length) {
     console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
   }
-  // Cada entrada va cifrada por separado (ver `audit` en `vault.js`). `decrypt` deja pasar
-  // el texto en claro, así que una bitácora anterior a 0.89 se sigue leyendo entera.
-  const atRest = atRestFor(profileDir())
-  lines = lines.map((l) => { try { return atRest.decrypt(l) } catch { return l } })
+  if (exportar) { for (const l of lines) console.log(l); return }
+  if (verify) {
+    const r = verifyActivity(lines)
+    if (!r.ok) { console.error(`${R}CADENA ROTA${Z} en la entrada #${r.at}: ${r.why}`); process.exit(1) }
+    console.log(`Cadena íntegra: ${r.checked} entrada(s) encadenada(s)${r.last ? ` hasta la #${r.last}` : ''}.`)
+    if (r.unchained) console.log(`  ${r.unchained} entrada(s) anteriores a 0.94, sin encadenar: no se pueden verificar.`)
+    return
+  }
   const ICON = { sign: '🖊 firma', renew: '♻ renovación', enroll: '➕ enrolado', revoke: '⛔ revocado', rejected: '🚫 RECHAZADO', secrets: '🔑 secretos leídos', 'secret.set': '🔑 secreto guardado', 'secret.rm': '🔑 secreto borrado' }
   for (const line of lines.slice(-n)) {
     try {
@@ -1610,6 +1661,8 @@ function help () {
                       (--machine para volver a la clave de esta máquina). Editar
                       atrest.json a mano NO vale: dejaría el perfil ilegible
   activity [n]        bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
+  activity --verify   comprueba que la cadena está entera (nadie tocó el pasado)
+  activity --export   la vuelca entera en JSONL, para auditar o guardar fuera
   logs                últimos logs del servicio
   version             muestra la versión instalada
 
@@ -1664,7 +1717,9 @@ export async function runCtl (argv) {
     case 'secret': return cmdSecret(rest)
     case 'approval': return cmdApproval(rest)
     case 'atrest': return cmdAtrest(rest)
-    case 'activity': return cmdActivity(Number(rest[0]) || 30)
+    case 'activity': return cmdActivity(Number(rest.find((a) => /^\d+$/.test(a))) || 30, {
+      verify: rest.includes('--verify'), exportar: rest.includes('--export')
+    })
     case 'logs': return cmdLogs()
     case 'version':
     case '--version':

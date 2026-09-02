@@ -1,0 +1,82 @@
+# Publica una versión del vault DESDE CI, no desde el portátil de nadie.
+#
+# Hasta hoy el `.deb` se construía a mano y se subía a mano: quien lo recibía no tenía
+# forma de comprobar de qué commit salió. Aquí cada artefacto queda atado a su commit y a
+# este workflow, con una atestación firmada por sigstore que cualquiera puede verificar:
+#
+#   gh attestation verify dotrino-vault_X.Y.Z_amd64.deb --repo imdotrino/dotrino-vault
+#
+# Y de paso salen las tres cosas que el CRA da por supuestas y no teníamos: SBOM por
+# release, procedencia de los paquetes npm y artefactos firmados (ver CUMPLIMIENTO.md §2).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write      # crear la release y subirle los archivos
+  id-token: write      # OIDC: procedencia de npm y atestación de sigstore
+  attestations: write  # guardar la atestación en el repo
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # LAS PRUEBAS VAN ANTES DE PUBLICAR, no después. Una versión que no pasa su suite no
+      # llega a npm: es lo único que impide publicar algo roto a mano un viernes.
+      - run: npm test
+
+      - name: Construir el binario, el tarball y el .deb
+        run: bash packaging/build-deb.sh
+
+      # SBOM: la lista de lo que va dentro. Deja de ser opcional con el CRA y es lo primero
+      # que pide un comprador corporativo.
+      - name: SBOM (CycloneDX)
+        run: |
+          npx --yes @cyclonedx/cyclonedx-npm@latest \
+            --omit dev --output-format JSON \
+            --output-file "dist/dotrino-vault-$(node -p "require('./package.json').version")-sbom.cdx.json"
+
+      # La firma. `attest-build-provenance` deja una atestación en sigstore que ata cada
+      # archivo a este commit y a este workflow. No hace falta guardar ninguna llave.
+      - name: Atestiguar los artefactos
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*-sbom.cdx.json
+
+      # `--provenance` hace lo mismo para npm: el tarball queda atado al commit y al
+      # workflow, y npmjs.com lo enseña. Requiere el secreto NPM_TOKEN en el repo.
+      - name: Publicar @dotrino/vault (la librería)
+        working-directory: lib
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publicar @dotrino/vaultd (el daemon)
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publicar la release con sus archivos
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*-sbom.cdx.json
+          generate_release_notes: true
