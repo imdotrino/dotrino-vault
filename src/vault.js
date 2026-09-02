@@ -400,7 +400,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       try {
         const text = activityAtRest.decrypt(lines[i])
         const e = JSON.parse(text)
-        if (typeof e.seq === 'number') { auditSeq = e.seq; auditPrev = sha256(text); break }
+        if (typeof e.logSeq === 'number') { auditSeq = e.logSeq; auditPrev = sha256(text); break }
       } catch (_) { /* una línea vieja o ilegible: se sigue hacia atrás */ }
     }
   } catch (_) { /* no hay bitácora todavía */ }
@@ -424,7 +424,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const audit = (op, info = {}) => {
     try {
-      const entry = { seq: ++auditSeq, prev: auditPrev, ts: Date.now(), op, ...info }
+      // LOS CAMPOS DE LA CADENA VAN AL FINAL Y CON NOMBRE PROPIO, y las dos cosas por el
+      // mismo motivo: que quien llama no pueda pisarlos.
+      //
+      // Estaban delante y se llamaban `seq`/`prev`, así que `...info` los sobrescribía. Y
+      // no era hipotético: `renew` ya mandaba un `seq` —el del ACTA, que no tiene nada que
+      // ver— y dejaba dos entradas seguidas numeradas igual. Lo cazó el propio verificador
+      // contra la bitácora de producción a los diez minutos de desplegarlo, que es
+      // exactamente para lo que sirve.
+      const entry = { ...info, ts: Date.now(), op, logSeq: ++auditSeq, logPrev: auditPrev }
       const text = JSON.stringify(entry)
       fs.appendFileSync(activityFile, activityAtRest.encrypt(text) + '\n', { mode: 0o600 })
       auditPrev = sha256(text)

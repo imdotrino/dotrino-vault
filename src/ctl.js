@@ -963,12 +963,14 @@ function verifyActivity (lines) {
   let prev = null; let seq = null; let checked = 0; let unchained = 0
   for (const text of lines) {
     let e; try { e = JSON.parse(text) } catch { continue }
-    if (typeof e.seq !== 'number') { unchained++; continue }   // entradas de antes de 0.94
+    // Sin `logSeq` es de antes de que la cadena existiera: no se puede verificar, y se
+    // dice cuántas hay en vez de callarlo.
+    if (typeof e.logSeq !== 'number') { unchained++; continue }
     if (seq !== null) {
-      if (e.seq !== seq + 1) return { ok: false, at: e.seq, why: `salta del #${seq} al #${e.seq}` }
-      if (e.prev !== prev) return { ok: false, at: e.seq, why: `el #${e.seq} no encadena con el #${seq}` }
+      if (e.logSeq !== seq + 1) return { ok: false, at: e.logSeq, why: `salta del #${seq} al #${e.logSeq}` }
+      if (e.logPrev !== prev) return { ok: false, at: e.logSeq, why: `el #${e.logSeq} no encadena con el #${seq}` }
     }
-    seq = e.seq; prev = sha256(text); checked++
+    seq = e.logSeq; prev = sha256(text); checked++
   }
   return { ok: true, checked, unchained, last: seq }
 }

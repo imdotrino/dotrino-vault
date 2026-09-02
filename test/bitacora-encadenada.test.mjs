@@ -22,15 +22,18 @@ function verify (lines) {
   let prev = null; let seq = null; let checked = 0
   for (const text of lines) {
     let e; try { e = JSON.parse(text) } catch { continue }
-    if (typeof e.seq !== 'number') continue
+    if (typeof e.logSeq !== 'number') continue
     if (seq !== null) {
-      if (e.seq !== seq + 1) return { ok: false, at: e.seq, why: 'salto' }
-      if (e.prev !== prev) return { ok: false, at: e.seq, why: 'no encadena' }
+      if (e.logSeq !== seq + 1) return { ok: false, at: e.logSeq, why: 'salto' }
+      if (e.logPrev !== prev) return { ok: false, at: e.logSeq, why: 'no encadena' }
     }
-    seq = e.seq; prev = sha256(text); checked++
+    seq = e.logSeq; prev = sha256(text); checked++
   }
   return { ok: true, checked, last: seq }
 }
+
+/** Igual que `audit` en `vault.js`: los campos de la cadena, al final y con nombre propio. */
+const entryOf = (n, prev, info) => JSON.stringify({ ...info, ts: 1700000000000 + n, op: 'sign', logSeq: n, logPrev: prev })
 
 /** Escribe una cadena como la escribe el vault, y devuelve el directorio. */
 function writeChain (n) {
@@ -40,7 +43,7 @@ function writeChain (n) {
   let prev = null
   const plain = []
   for (let i = 1; i <= n; i++) {
-    const text = JSON.stringify({ seq: i, prev, ts: 1700000000000 + i, op: 'sign', device: `AA00-000${i}` })
+    const text = entryOf(i, prev, { device: `AA00-000${i}` })
     fs.appendFileSync(f, atRest.encrypt(text) + '\n', { mode: 0o600 })
     plain.push(text)
     prev = sha256(text)
@@ -99,4 +102,35 @@ test('cortar el FINAL no se detecta: es la limitación conocida', () => {
   const r = verify(read(dir, f))
   assert.equal(r.ok, true, 'un prefijo sigue siendo una cadena válida')
   assert.equal(r.last, 3)
+})
+
+/**
+ * QUIEN LLAMA NO PUEDE PISAR LA CADENA. No es una precaución teórica: `renew` ya mandaba un
+ * `seq` —el del ACTA, que no tiene nada que ver con el contador de la bitácora— y con los
+ * campos delante (`{ seq, prev, ...info }`) el `...info` los sobrescribía. Resultado: dos
+ * entradas seguidas numeradas igual. Lo cazó el verificador contra la bitácora de
+ * producción a los diez minutos de desplegarla.
+ *
+ * De ahí las dos decisiones que este caso fija: **nombre propio** (`logSeq`/`logPrev`, que
+ * no choca con ningún campo de dominio) y **al final** (gana la cadena, pase lo que pase).
+ */
+test('un `info` con `seq` y `prev` NO rompe la cadena', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-log-'))
+  const f = path.join(dir, 'activity.log')
+  const atRest = atRestFor(dir)
+  let prev = null
+  for (let i = 1; i <= 4; i++) {
+    // Lo que manda `renew` de verdad: su propio `seq`, el del acta. Y de paso un `prev`.
+    const text = entryOf(i, prev, { device: 'AA00-0001', seq: 89, prev: 'mentira' })
+    fs.appendFileSync(f, atRest.encrypt(text) + '\n', { mode: 0o600 })
+    prev = sha256(text)
+  }
+  const lines = read(dir, f)
+  const r = verify(lines)
+  assert.equal(r.ok, true, 'la cadena aguanta')
+  assert.equal(r.last, 4)
+  // Y el dato de dominio no se pierde por el camino: sigue ahí, con su nombre.
+  const e = JSON.parse(lines[0])
+  assert.equal(e.seq, 89, 'el `seq` del acta se conserva')
+  assert.equal(e.logSeq, 1, 'y el de la bitácora es el suyo')
 })
