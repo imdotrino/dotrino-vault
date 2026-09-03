@@ -834,11 +834,44 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       if (!bag[k]) return { wrapped: 0, sinLlave: [] }
       const priv = await openRecovery(adminKey)
       let wrapped = 0
+      let sealed = 0
       const sinLlave = new Set()
+      const vars = varsOf(bag, k)
+      const paraVisibilidad = async (esPublica) => (typeof members === 'function' ? members(esPublica) : members)
+
+      // UN VALOR QUE SE QUEDÓ EN CLARO SE SELLA AQUÍ, que es el único sitio donde se puede.
+      //
+      // Una pública escrita antes del 2026-09-02 se guardó legible y SIN sobre, así que no
+      // tiene generación ni entrada en el llavero. Y el llavero es lo único que este
+      // método reenvuelve: por muchas veces que se abra la bóveda, a esa variable no se le
+      // crea una envoltura nunca. Sus aparatos la reclaman para siempre («no key yet») y la
+      // consola invita a abrir la bóveda, que es justo lo que no lo arregla. Peor: desde
+      // 2026-09-02 el agente rechaza el cajón ENTERO por ella, así que una variable de
+      // prueba deja sin leer el token que está al lado.
+      //
+      // Con la bóveda abierta el valor está delante, así que se cifra como si se acabara
+      // de escribir. No es un repliegue ni una migración a medias: es la conversión que
+      // faltaba, y ocurre en el único momento en que hay con qué hacerla.
+      for (const [key, e] of Object.entries(vars)) {
+        if (typeof e.v !== 'string' || e.e) continue
+        const cek = await sealer.newKey()
+        const gen = (topGen(bag, k)?.gen || 0) + 1
+        const r = await sealer.wrapFor(cek, await paraVisibilidad(!!e.pub))
+        r.wraps[RECOVERY] = await sealer.wrapForKey(cek, data.recovery.pub)
+        const sobre = await sealer.encrypt(cek, e.v, gen)
+        const seal = signer ? await signer({ owner, key, gen, iv: sobre.iv, ct: sobre.ct }) : null
+        // `pub` y `at` se conservan: no es un valor nuevo, es el mismo mejor guardado.
+        vars[key] = { pub: !!e.pub, owner, gen, e: sobre, seal, at: e.at || Date.now(), by: e.by || null }
+        bag[k].keyring = [...(bag[k].keyring || []), { gen, createdAt: Date.now(), wraps: r.wraps }]
+        for (const x of r.sinLlave) sinLlave.add(x)
+        sealed++
+      }
+
       // De qué variable es cada generación: es lo que dice si esa CEK es de una pública.
+      // Se calcula DESPUÉS de sellar, para que las generaciones recién creadas entren.
       const visibilidad = new Map()
-      for (const e of Object.values(varsOf(bag, k))) if (e.gen != null) visibilidad.set(e.gen, !!e.pub)
-      const paraGen = async (gen) => (typeof members === 'function' ? members(visibilidad.get(gen) === true) : members)
+      for (const e of Object.values(vars)) if (e.gen != null) visibilidad.set(e.gen, !!e.pub)
+      const paraGen = async (gen) => paraVisibilidad(visibilidad.get(gen) === true)
       for (const g of bag[k].keyring || []) {
         const w = g.wraps?.[RECOVERY]
         if (!w) continue
@@ -859,7 +892,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
         wrapped += Object.keys(r.wraps).length
       }
       save()
-      return { wrapped, sinLlave: [...sinLlave] }
+      return { wrapped, sealed, sinLlave: [...sinLlave] }
     },
 
     /**

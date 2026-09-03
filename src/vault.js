@@ -2291,7 +2291,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // ANTES de reenvolver nada: si la copia de recuperación se quedó bajo la llave de la
     // máquina, se pasa a la frase. Sin esto, todo lo de abajo falla con «wrong password».
     if (adminKey) await migrarRecuperacionALaFrase(adminKey)
-    const out = { drawers: 0, wrapped: 0, dropped: 0, sinLlave: [], failed: [] }
+    const out = { drawers: 0, wrapped: 0, sealed: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))
       // POR VISIBILIDAD, no una lista fija: una pública lleva además la envoltura de quien
@@ -2303,6 +2303,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         const after = new Set(secrets.recipientsIn(owner))
         out.drawers++
         out.wrapped += r?.wrapped || 0
+        out.sealed += r?.sealed || 0
         out.dropped += [...before].filter((p) => !after.has(p)).length
         for (const p of r?.sinLlave || []) out.sinLlave.push(p)
       } catch (e) {
@@ -2310,7 +2311,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         out.failed.push({ owner, error: e.message })
       }
     }
-    if (out.dropped) audit('secret.reseal', { drawers: out.drawers, dropped: out.dropped })
+    if (out.dropped || out.sealed) audit('secret.reseal', { drawers: out.drawers, dropped: out.dropped, sealed: out.sealed })
     if (out.failed.length) audit('secret.reseal-failed', { drawers: out.failed.map((f) => f.owner) })
     return out
   }

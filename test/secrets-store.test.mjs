@@ -531,3 +531,66 @@ test('putSealed guarda el sobre sin abrirlo, y exige la envoltura de recuperaci�
 
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+/**
+ * UN VALOR QUE SE QUEDÓ SIN CIFRAR SE CIFRA AL ABRIR LA BÓVEDA.
+ *
+ * Hasta el 2026-09-02 una variable PÚBLICA se guardaba legible y sin sobre. Desde ese día
+ * todas van selladas, y el agente rechaza el cajón entero si alguna llega sin cifrar.
+ *
+ * Lo que quedó roto en medio: una pública escrita antes no tiene generación ni entrada en
+ * el llavero, y `rewrap` solo reenvuelve el llavero. O sea que abrir la bóveda —que es lo
+ * que la consola te dice que hagas— no le creaba una envoltura nunca. Visto de verdad en
+ * el cajón `aws-admin`: la consola listaba «no key yet: TEST» para cada aparato, abrir la
+ * bóveda no cambiaba nada, y una variable de prueba dejaba sin leer el token de AWS que
+ * estaba al lado.
+ *
+ * Con la bóveda abierta el valor está delante. Se cifra ahí, que es el único momento en
+ * que se puede.
+ */
+test('rewrap sella lo que quedó en claro, y sus aparatos ya pueden leerlo', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('aws-admin', 'AWS_SECRET_ACCESS_KEY', 'el-token')
+
+  // Una pública como las escribía la versión anterior: `v` en claro, sin `e`, sin `gen` y
+  // sin nada en el llavero. Se fabrica a mano porque `set` ya no sabe escribirlas así —
+  // que es justamente el motivo de que las que quedaron no se arreglen solas.
+  const disco = enDisco(dir)
+  disco.ns['aws-admin'].vars.TEST = { v: 'un-valor-a-la-vista', pub: true }
+  writeJson(path.join(dir, 'secrets.json'), disco, atRestFor(dir))
+
+  const s2 = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  const r = await s2.rewrap('ns:aws-admin', miembros('A'), MAQUINA, { exact: true })
+  assert.equal(r.sealed, 1, 'se selló exactamente el valor que estaba en claro')
+
+  const despues = enDisco(dir)
+  const e = despues.ns['aws-admin'].vars.TEST
+  assert.ok(e.e?.ct, 'TEST ya va en sobre')
+  assert.equal(e.v, undefined, 'y no queda el valor suelto al lado')
+  assert.equal(e.pub, true, 'sigue siendo pública: cambia cómo se guarda, no a quién se le da')
+  assert.equal(JSON.stringify(despues).includes('un-valor-a-la-vista'), false, 'ni rastro en el disco')
+
+  // Lo que motivaba todo: el aparato ya tiene con qué abrirla.
+  const anillo = despues.ns['aws-admin'].keyring.find((g) => g.gen === e.gen)
+  assert.ok(anillo, 'la generación nueva está en el llavero')
+  assert.ok(anillo.wraps.A, 'envuelta para el miembro que dice el acta')
+  assert.ok(anillo.wraps[RECOVERY], 'y para la copia de recuperación, o nacería ilegible')
+})
+
+test('lo que ya estaba sellado no se toca al reenvolver', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.set('proxy', 'TURN_KEY', 'secreto')
+  await s.set('proxy', 'PUBLIC_URL', 'wss://proxy', true)
+
+  const antes = enDisco(dir)
+  const r = await s.rewrap('ns:proxy', miembros('A'), MAQUINA, { exact: true })
+  assert.equal(r.sealed, 0, 'no había nada en claro que sellar')
+
+  const despues = enDisco(dir)
+  for (const k of ['TURN_KEY', 'PUBLIC_URL']) {
+    assert.equal(despues.ns.proxy.vars[k].gen, antes.ns.proxy.vars[k].gen, `${k} conserva su generación`)
+    assert.deepEqual(despues.ns.proxy.vars[k].e, antes.ns.proxy.vars[k].e, `${k} conserva su sobre`)
+  }
+})

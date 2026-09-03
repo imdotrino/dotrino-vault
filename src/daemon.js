@@ -333,10 +333,13 @@ export async function runDaemon () {
           // cajón envuelto para exactamente quien dice el acta — creando lo que falta,
           // reemplazando lo que alguien metiera mal y quitando lo que sobre.
           const r = await mgr.get(id)?.resealAll?.(ak)
-          if (r?.wrapped) console.log('[vault] keyring rebuilt on unlock: %d wrap(s) in %d drawer(s)%s',
-            r.wrapped, r.drawers, r.dropped ? `, ${r.dropped} stale one(s) dropped` : '')
+          if (r?.wrapped) console.log('[vault] keyring rebuilt on unlock: %d wrap(s) in %d drawer(s)%s%s',
+            r.wrapped, r.drawers, r.dropped ? `, ${r.dropped} stale one(s) dropped` : '',
+            r.sealed ? `, ${r.sealed} value(s) left in the clear now sealed` : '')
           if (r?.dropped) note = ` · llavero al día (${r.dropped} envoltura(s) de más retirada(s))`
           else if (r?.wrapped) note = ' · llavero al día'
+          // Se SUMA, no pisa: es lo que el dueño necesita ver de esta apertura en concreto.
+          if (r?.sealed) note += ` · ${r.sealed} valor(es) que estaban sin cifrar ya están sellados`
           // ABIERTA PERO SIN LLAVERO NO ES «ABIERTA». Si un cajón no se pudo reenvolver, sus
           // aparatos no van a poder leer nada y hay que decirlo AQUÍ: contestar
           // «desbloqueado» a secas dejaba la bóveda pareciendo sana, y el fallo aparecía
