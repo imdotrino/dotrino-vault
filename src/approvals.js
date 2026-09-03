@@ -21,10 +21,15 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
 
   return {
     /** Apunta un pedido. Uno por cajón y aparato: pedir otra vez reemplaza al anterior. */
-    request ({ ns, device, deviceId, label = '', ek }) {
+    /**
+     * `from` es POR DÓNDE ENTRÓ la pregunta. La respuesta llega más tarde —cuando alguien
+     * apruebe— y tiene que volver por el mismo sitio: desde que la bóveda atiende también
+     * por un socket local, mandarla siempre por el proxio la dejaba en el vacío.
+     */
+    request ({ ns, device, deviceId, label = '', ek, from = null }) {
       for (const [id, p] of pending) if (p.ns === ns && p.device === device) pending.delete(id)
       const ts = now()
-      const p = { id: rnd(), ns, device, deviceId, label, ek, ts, exp: ts + pendingTtlMs }
+      const p = { id: rnd(), ns, device, deviceId, label, ek, ts, exp: ts + pendingTtlMs, from }
       pending.set(p.id, p)
       return publicOf(p)
     },

@@ -36,7 +36,9 @@ import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { openCommKey, COMM_CN, COMM_CAPS } from './commKey.js'
 import { seal } from '../lib/src/sealed.js'
+import { localSocketPath, socketDir } from '../lib/src/localdesk.js'
 import { dataDir, ensureDir } from './paths.js'
+import net from 'node:net'
 import { atRestFor, kekFor, migrateFile, encryptText, decryptText } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
 
@@ -321,15 +323,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * Así que una respuesta que no quepa no se manda: se sustituye por un error, que sí cabe.
    * Una bóveda que dice «no cabe» se arregla; una muda no se puede ni diagnosticar.
    */
+  /**
+   * QUIÉN CONTESTA A QUIÉN. Por defecto el proxio; un remitente LOCAL (el socket de esta
+   * máquina) se apunta aquí con su propia forma de contestar.
+   *
+   * Que haya dos transportes no cambia NADA de quién puede pedir qué: la autorización sale
+   * del certificado y del acta, igual por los dos caminos. Alcanzar el socket no autoriza
+   * nada — es la misma puerta, con el camino más corto.
+   */
+  const canales = new Map()
+
   const reply = (to, obj) => {
     try {
+      const enviar = canales.get(to) || ((o) => client.send(to, o))
       const bytes = Buffer.byteLength(JSON.stringify(obj))
       if (bytes > MAX_REPLY_BYTES) {
         log(`[vault] the reply to ${obj?.type} does not fit (${bytes} bytes > ${MAX_REPLY_BYTES}): sending an error instead of killing the connection`)
         audit('reply-too-big', { type: obj?.type || null, bytes })
-        return client.send(to, { type: MSG.ERROR, error: `reply too big (${bytes} bytes): ask for less at a time` })
+        return enviar({ type: MSG.ERROR, error: `reply too big (${bytes} bytes): ask for less at a time` })
       }
-      client.send(to, obj)
+      enviar(obj)
     } catch (e) { log('[vault] could not reply:', e.message) }
   }
 
@@ -1054,7 +1067,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!publicOnly && needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
-      const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek })
+      // `from` SE GUARDA: la respuesta llega más tarde —cuando alguien apruebe— y tiene que
+      // volver POR DONDE VINO. Si la pregunta entró por el mostrador local, mandarla por el
+      // proxio la deja en el vacío: quien preguntó está escuchando en el socket, no ahí.
+      // Lo cazó el E2E de aprobación, que se quedó esperando cinco minutos.
+      const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek, from })
       audit('secrets.pending', { device: deviceId, ns, id: pend.id })
       log(`[vault] ${ns}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
       const body = { op: 'secrets.pending', ns, id: pend.id, exp: pend.exp, ts: Date.now() }
@@ -1166,8 +1183,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (op === 'deny') {
       audit('secrets.denied', { device: pend.deviceId, ns: pend.ns, id, by })
       log(`[vault] ${pend.ns}: request of ${pend.deviceId} DENIED by ${by}`)
-      try { client.sendByPubkey(pend.device, { type: MSG.ERROR, error: `unauthorized: denied — the "${pend.ns}" request was denied from ${by}` }) }
-      catch (e) { log(`[vault] ${pend.ns}: could not tell ${pend.deviceId} it was denied: ${e.message}`) }
+      try {
+        const err = { type: MSG.ERROR, error: `unauthorized: denied — the "${pend.ns}" request was denied from ${by}` }
+        const porLocal = pend.from && canales.get(pend.from)
+        if (porLocal) porLocal(err)
+        else client.sendByPubkey(pend.device, err)
+      } catch (e) { log(`[vault] ${pend.ns}: could not tell ${pend.deviceId} it was denied: ${e.message}`) }
       return answer({ op: 'deny.result', id, ok: true })
     }
     if (op !== 'approve') return reply(from, { type: MSG.ERROR, error: 'approval: unknown op' })
@@ -1181,8 +1202,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // EL FALLO NO SE TRAGA. Tragarlo era lo peor de este mostrador: la bóveda apuntaba
     // «aprobado», el que pedía no recibía nada, y no quedaba una sola línea que mirar —
     // así que el dueño aprobaba una y otra vez creyendo que el teléfono no llegaba.
-    try { client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res }) }
-    catch (e) { log(`[vault] ${pend.ns}: approved, but the reply did not reach ${pend.deviceId}: ${e.message}`) }
+    // Por el canal por el que preguntó. Si fue el proxio, `sendByPubkey`: así lo recoge al
+    // volver aunque ahora esté apagado. Si fue el socket local, por el socket.
+    try {
+      const porLocal = pend.from && canales.get(pend.from)
+      if (porLocal) porLocal({ type: MSG.SECRETS_RESULT, ...res })
+      else client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res })
+    } catch (e) { log(`[vault] ${pend.ns}: approved, but the reply did not reach ${pend.deviceId}: ${e.message}`) }
     return answer({ op: 'approve.result', id, ok: true })
   }
 
@@ -1217,7 +1243,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     } catch (e) { log('[vault] could not notify approvers:', e.message) }
   }
 
-  client.on('message', async (from, payload) => {
+  client.on('message', (from, payload) => onMessage(from, payload))
+
+  // EL MOSTRADOR LOCAL, siempre que se pueda. Si no se puede abrir (un sistema sin sockets
+  // de archivo, un directorio de solo lectura) se dice y se sigue: los servicios usan el
+  // proxio como hasta ahora. Lo que NO se hace es callarlo — un atajo que no está y nadie
+  // lo dice es media hora buscando por qué algo va lento.
+  // El socket se nombra por la LLAVE de esta bóveda: una máquina puede tener varias, y un
+  // servicio solo conoce la maestra que lleva pineada. Así los dos lados calculan la misma
+  // ruta sin mirar ningún índice.
+  if (identity.me?.publickey) {
+    abrirMostradorLocal(localSocketPath((await pubkeyId(identity.me.publickey)).slice(0, 16)))
+  }
+
+  async function onMessage (from, payload) {
     if (!payload || typeof payload !== 'object') return
     try {
       if (payload.type === MSG.HELLO) return desk.handleHello(from, payload)
@@ -1238,7 +1277,60 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
-  })
+  }
+
+  /**
+   * EL MOSTRADOR LOCAL: el mismo protocolo, sin salir de la máquina.
+   *
+   * Un servicio en ESTA máquina hablaba con la bóveda dando la vuelta por
+   * `proxy.dotrino.com`: sale a internet, vuelve, y si el proxio tiene un mal momento el
+   * arranque se retrasa cinco segundos por nada. Absurdo cuando los dos procesos comparten
+   * disco (dueño, 2026-09-03: «estando en la misma máquina debería ser inmediato»).
+   *
+   * Es EL MISMO PROTOCOLO y el mismo enrutador: llega `{type, data, signature, cert}` y se
+   * comprueba igual, contra el certificado y contra el acta. **Alcanzar el socket no
+   * autoriza nada** — es la misma puerta por un camino más corto, no una puerta de atrás.
+   * Por eso no hay un solo `if` de «viene de local» en ningún handler, y no debe haberlo.
+   *
+   * Y no es un puerto: es un socket de archivo, en modo 0600 y bajo el directorio del
+   * usuario. No se alcanza desde otra máquina ni desde otro usuario, así que la promesa
+   * del `docker-compose` —«la bóveda no escucha nada»— sigue siendo cierta donde importa.
+   */
+  function abrirMostradorLocal (socketPath) {
+    let n = 0
+    const server = net.createServer((sock) => {
+      const id = 'local:' + (++n)
+      let buf = ''
+      const enviar = (obj) => { try { sock.write(JSON.stringify(obj) + '\n') } catch (_) {} }
+      canales.set(id, enviar)
+      sock.on('data', (chunk) => {
+        buf += chunk
+        // UN TOPE, y por lo mismo que en las respuestas: sin él, quien se conecte puede
+        // hacer crecer este buffer hasta tumbar la bóveda mandando y sin saltos de línea.
+        if (buf.length > MAX_REPLY_BYTES) { buf = ''; enviar({ type: MSG.ERROR, error: 'request too big' }); return }
+        let i
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const linea = buf.slice(0, i); buf = buf.slice(i + 1)
+          if (!linea.trim()) continue
+          let p = null
+          try { p = JSON.parse(linea) } catch (_) { enviar({ type: MSG.ERROR, error: 'malformed request' }); continue }
+          onMessage(id, p).catch((e) => enviar({ type: MSG.ERROR, error: e.message }))
+        }
+      })
+      const cerrar = () => canales.delete(id)
+      sock.on('close', cerrar)
+      sock.on('error', cerrar)
+    })
+    server.on('error', (e) => log('[vault] the local desk could not open (' + e.message + '): services will use the proxy'))
+    try { fs.mkdirSync(socketDir(), { recursive: true, mode: 0o700 }) } catch (_) {}
+    try { fs.rmSync(socketPath, { force: true }) } catch (_) {}
+    server.listen(socketPath, () => {
+      try { fs.chmodSync(socketPath, 0o600) } catch (_) {}
+      log('[vault] local desk at ' + socketPath + ' (same machine, no round trip)')
+    })
+    server.unref?.()
+    return server
+  }
 
   /**
    * AVISO DE OTRA BÓVEDA de la misma cuenta (multivault). Trae el acta nueva y aquí se
