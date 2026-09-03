@@ -103,6 +103,15 @@ export function openThreadStore (dir) {
     },
     profileGet () { return { me: data.profile || null } },
 
+    // LOS DATOS DEL PERFIL EN SOBRES (`docs/datos-del-perfil.md`). Están aquí solo para
+    // que el filtro de métodos los reconozca: los atiende `handleProfile` en `vault.js`,
+    // antes de llegar a este store, porque su puerta es otra —`firma` y sin candado—.
+    // Si alguna vez alguien los llamara por este camino, contestan que no en vez de
+    // hacer algo a medias.
+    profilePut () { throw new Error('profilePut is handled before the store: see handleProfile') },
+    profileBundle () { throw new Error('profileBundle is handled before the store: see handleProfile') },
+    profilePublic () { throw new Error('profilePublic is handled before the store: see handleProfile') },
+
     // ----- DATOS SENSIBLES del usuario (F4, docs/consola-remota.md §6) -----
     //
     // Contraseñas, notas, documentos: van al contenido del perfil, cifrados con la

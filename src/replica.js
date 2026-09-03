@@ -39,6 +39,37 @@ export const replicaDir = () =>
 const LINK = 'link.json'
 const STATE = 'state.json'
 
+/**
+ * MEZCLAR DOS VERSIONES DEL MISMO PAQUETE, DATO A DATO.
+ *
+ * Antes se reemplazaba el paquete entero, y eso pierde datos en un caso concreto: una
+ * bóveda restaurada de un respaldo empuja un paquete donde un dato está más atrasado que
+ * el que ya tenemos. El `seq` del acta no lo caza —el acta puede ir por delante mientras
+ * un dato va por detrás—, así que la comparación tiene que ser POR DATO.
+ *
+ * Gana la GENERACIÓN más alta, que es la que sube en cada escritura. Un empate se rompe
+ * igual en todas partes —gana el `ct` menor— y no es justicia, es determinismo: dos
+ * replicadores que reciban lo mismo en distinto orden acaban idénticos.
+ *
+ * Las envolturas se SUMAN: son de aparatos distintos y ninguna estorba a otra.
+ */
+export function mergeBundle (viejo, nuevo) {
+  if (!viejo) return nuevo
+  if (!nuevo) return viejo
+  const entries = { ...(viejo.entries || {}) }
+  for (const [k, e] of Object.entries(nuevo.entries || {})) {
+    const a = entries[k]
+    if (!a) { entries[k] = e; continue }
+    const ga = a.gen || 0
+    const gb = e.gen || 0
+    if (gb > ga) entries[k] = e
+    else if (gb === ga && String(e.e?.ct ?? e.pubv ?? '') < String(a.e?.ct ?? a.pubv ?? '')) entries[k] = e
+  }
+  const porGen = new Map()
+  for (const w of [...(viejo.wraps || []), ...(nuevo.wraps || [])]) porGen.set(w.gen, w)
+  return { ...viejo, ...nuevo, entries, wraps: [...porGen.values()].sort((x, y) => x.gen - y.gen) }
+}
+
 /** La clave de un sobre: es POR (cajón, aparato), porque va tallado a quien lo pide. */
 export const bundleKey = (ns, devicePub) => `${ns} ${devicePub}`
 
@@ -67,7 +98,9 @@ export function openReplicaStore (dir) {
      */
     apply ({ seq, acta, bundles }) {
       if (typeof seq !== 'number' || seq < state.seq) return false
-      state = { seq, acta: acta || state.acta, bundles: { ...state.bundles, ...(bundles || {}) } }
+      const mezclados = { ...state.bundles }
+      for (const [k, nuevo] of Object.entries(bundles || {})) mezclados[k] = mergeBundle(mezclados[k], nuevo)
+      state = { seq, acta: acta || state.acta, bundles: mezclados }
       escribir(STATE, state)
       return true
     }

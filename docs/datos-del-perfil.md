@@ -143,6 +143,30 @@ certificados dejaron de caducar por reloj el 2026-08-31, y esto tampoco.
 > campo y un montón de máquina para un caso que casi no pasa — y cuando pasa, lo que la
 > gente quiere es que no queden dos verdades, no que se mezclen.
 
+## 4.bis Con la bóveda apagada: quién acepta un cambio
+
+> Lo preguntó el dueño el 2026-09-03: *«estos sobres gana el más nuevo, en el caso de el
+> vault apagado y que la replica tenga cambios por ejemplo»*.
+
+**Decisión de v1: un replicador NO acepta escrituras.** Reparte, no decide
+(`replicas.md` §8.bis). Así no puede tener cambios propios y ese conflicto no existe, en
+vez de existir y taparse con una regla de desempate.
+
+Lo que sí cambia, y es mejor que hoy: **con la bóveda apagada, editar FALLA EN VOZ ALTA.**
+Hoy falla en silencio —y eso es la mitad del problema original—; a partir de ahora el
+aparato dice que no se guardó, y lo puede preguntar (`profilePushState()`).
+
+Aceptar escrituras en el replicador es el paso natural siguiente, y lo que pediría: un
+camino de vuelta replicador → bóveda, y aceptar que un replicador pueda retener un cambio
+(no falsificarlo: va firmado). Se deja escrito, no construido.
+
+**Pero el reemplazo entero seguía estando mal por otro camino que SÍ ocurre**, y ese se
+arregló: una bóveda restaurada de un respaldo empuja un paquete donde **un dato** está más
+atrasado que el que el replicador ya tiene. El `seq` del acta no lo caza —el acta puede ir
+por delante mientras un dato va por detrás—, así que la comparación es **por dato y por
+generación** (`mergeBundle`), con el empate roto igual en todas partes. Dos replicadores
+que reciban lo mismo en distinto orden acaban idénticos.
+
 ## 5. Quién sirve el perfil público
 
 Aquí está lo bueno, y encaja con lo que ya se construyó ayer.
@@ -175,12 +199,16 @@ máquina apagada.
 
 ## 7. Fases
 
-1. **El registro y su firma** en `@dotrino/identity`: crear, firmar, verificar, ordenar.
-   Con pruebas del desempate, que es lo que nadie mira hasta que falla.
-2. **La bóveda los acepta con el perfil CERRADO** y deja de gatear por `guarda`: pasa a
-   comprobar la firma contra el acta. Aquí se cae el candado sobre editar, que es el
+1. ~~**El sobre y su almacén**~~ **HECHO** (2026-09-03). El cajón `@me`, `putSealed` para
+   lo privado, `profilePutPublic` para lo público en claro y firmado, y las lecturas.
+2. ~~**La bóveda los acepta con el perfil CERRADO**~~ **HECHO**. `handleProfile` atiende
+   antes que el store: sin candado —lo que llega no lo puede leer ni fabricar la bóveda— y
+   gateado por **`firma`**, no por `guarda`. Aquí se cae el candado sobre editar, que es el
    síntoma que abrió todo esto.
-3. **El empujón deja de tragarse el error.** Un `.catch(() => {})` en el camino de escribir
-   es exactamente lo que `CLAUDE.md` prohíbe.
-4. **Servir el público sin la bóveda**: por el replicador.
-5. **Compartido con una persona** (§2), cuando haga falta.
+3. ~~**El empujón deja de tragarse el error**~~ **HECHO**. Y se puede preguntar cómo fue:
+   `profilePushState()`.
+4. **Que el aparato use el camino nuevo.** Falta: hoy `@dotrino/identity` sigue empujando
+   el `me` plano por `profileSet`. Es lo que queda para que el síntoma desaparezca de la
+   pantalla del dueño.
+5. **Servir el público sin la bóveda**: por el replicador.
+6. **Compartido con una persona** (§2), cuando haga falta.

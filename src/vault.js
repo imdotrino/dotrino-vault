@@ -26,7 +26,7 @@ import { startSealersPublisher } from './sealers.js'
 import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
-import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP } from './secretsStore.js'
+import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
 // `PENDING_TTL_MS` se usa abajo, al esperar la firma del aprobador: sin importarlo, esa
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
@@ -610,6 +610,57 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   // Store de hilos+aperturas (Fase 3): escrituras requieren vault:store; lecturas
   // aceptan vault:store o vault:read. Cada op va firmada por D + cert (cadena D←maestra).
+  /**
+   * LOS DATOS DEL PERFIL (`docs/datos-del-perfil.md`). Tres métodos y ninguno más:
+   *
+   *   · `profilePut`      — guarda un dato. Privado = sobre ya sellado; público = en claro.
+   *   · `profileBundle`   — los sobres de ESTE aparato, para que arme su perfil.
+   *   · `profilePublic`   — lo público en claro, que puede pedir cualquiera.
+   *
+   * Lo que NO se comprueba aquí: el candado. Un sobre sellado no lo puede leer ni fabricar
+   * la bóveda, así que guardarlo no es una decisión suya y no necesita su maestra. Ese era
+   * el motivo real por el que editar el perfil exigía abrirla, y es el síntoma que abrió
+   * todo esto: se cerraba sola a los cinco minutos y editar dejaba de funcionar.
+   */
+  const PROFILE_METHODS = new Set(['profilePut', 'profileBundle', 'profilePublic'])
+
+  async function handleProfile (from, p, d) {
+    // LO PÚBLICO NO PIDE NADA. Es lo que ve quien pregunta desde fuera y no tiene ninguna
+    // llave tuya: pedir un papel para leerlo sería contradecir lo que significa «público».
+    // Va firmado, así que quien lo recibe comprueba que es tuyo sin fiarse de nadie.
+    if (d.method === 'profilePublic') {
+      return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: secrets.profilePublic() })
+    }
+
+    const revoked = await revocationSet()
+    // `vault:sign` — hablar por ti. No `vault:store`, que es guardar cosas.
+    const chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.SIGN, ...(await contextoActa()), revoked })
+    if (!chk.ok) return denyChain(from, chk, p, 'profile')
+    if (!await actaAllows(from, chk, SCOPE.SIGN, 'profile')) return
+
+    try {
+      if (d.method === 'profileBundle') {
+        const b = secrets.profileBundleFor(chk.device)
+        return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: b })
+      }
+      // profilePut
+      const { key, cls, sobre, value } = d.args || {}
+      const quien = await deviceIdOf(chk.device).catch(() => null)
+      let r
+      if (cls === 'public') {
+        r = await secrets.profilePutPublic(key, value, { by: quien })
+      } else {
+        r = await secrets.putSealed(PROFILE_OWNER, key, sobre, { by: quien })
+      }
+      audit('profile.put', { key, cls: cls || 'private', by: quien, gen: r?.gen ?? null })
+      // Y a los demás aparatos, que si no se enteran al arrancar y vuelve la divergencia.
+      await notifyMembers('profile', { key, by: quien })
+      return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: r })
+    } catch (e) {
+      return reply(from, { type: MSG.ERROR, error: 'profile: ' + e.message })
+    }
+  }
+
   async function handleStore (from, p) {
     const d = p.data
     // `Object.hasOwn` y no `threads.methods[d.method]`: con la comprobación laxa,
@@ -619,9 +670,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'store: invalid method' })
     }
     if (!isFresh(d)) return staleReply(from)
-    // CANDADO del perfil (contraseña opcional): solo frena EDITAR el perfil. Un
-    // dispositivo enrolado puede seguir firmando, leyendo y guardando contenido;
-    // lo que no puede es reescribir quién sos mientras el perfil está bloqueado.
+    // EL PERFIL VA POR OTRO CAMINO, y por eso se atiende antes que nada
+    // (`docs/datos-del-perfil.md`). Dos diferencias, y las dos son el arreglo:
+    //
+    //   · **No hace falta abrir la bóveda.** Lo que llega es un sobre ya sellado y
+    //     firmado, que ella no puede leer ni falsificar: aceptarlo no es una decisión
+    //     suya. El candado estaba ahí porque guardaba el perfil en claro; ya no.
+    //   · **Lo gatea `firma`, no `guarda`.** Escribir tu identidad es hablar por ti, no
+    //     guardar un archivo en tu bóveda (dueño, 2026-09-03). El proxio tiene `guarda`
+    //     para lo suyo y no debe poder cambiar quién eres.
+    if (PROFILE_METHODS.has(d.method)) return await handleProfile(from, p, d)
+    // CANDADO del perfil (contraseña opcional): solo frena EDITAR el perfil heredado
+    // (`profileSet`, el `me` plano). Un dispositivo enrolado puede seguir firmando,
+    // leyendo y guardando contenido.
     if (PROFILE_EDIT_METHODS.has(d.method) && isLocked()) {
       audit('rejected', { what: 'store', method: d.method, reason: 'locked' })
       return reply(from, { type: MSG.ERROR, error: 'profile locked: unlock it on the vault machine (dotrino-vault unlock) to edit it' })
