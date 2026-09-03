@@ -9,11 +9,18 @@
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
 import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
-// Del `lib/` de ESTE repo, no de npm. La consola corría `@dotrino/vault` publicado
-// (0.50) mientras el repo iba por 0.52: una versión más que mantener sincronizada a mano,
-// y de las que nadie mira porque el `package.json` no miente — dice exactamente lo viejo
-// que es. `invite.js` ya se importaba así; esto lo iguala.
-import { buildSealedVar } from '../../lib/src/admin.js'
+/**
+ * Del PAQUETE, no de `../../lib/src`. Es tentador —el `lib/` está aquí al lado, y
+ * `invite.js` sí se importa así—, pero `admin.js` importa `@dotrino/identity/content`
+ * por su nombre, y ese nombre se resuelve desde donde vive el archivo: en CI solo se
+ * instala `web/`, así que desde `lib/` no hay `node_modules` que valga y el build falla.
+ * `invite.js` se salva porque no importa nada.
+ *
+ * Lo que sí se arregla es la VERSIÓN: iba por 0.50 con el `lib/` de este mismo repo en
+ * 0.52, y nadie lo miraba porque el `package.json` no miente — dice exactamente lo viejo
+ * que es. Ahora `test/web-pin-al-dia.test.mjs` no deja que se separen.
+ */
+import { buildSealedVar } from '@dotrino/vault/admin'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope } from '@dotrino/identity/acta'
