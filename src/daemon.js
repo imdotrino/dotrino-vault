@@ -191,7 +191,19 @@ export async function runDaemon () {
       // `vault:secrets:<ns>`. Se valida aquí porque es la maestra la que firma: nada
       // que no esté en esta lista entra en un cert, y `vault:admin` / `vault:approve` nunca
       // por este camino (se conceden a mano con `caps`).
-      const ALLOWED = (x) => x === 'vault:sign' || x === 'vault:read' || x === 'vault:store' || /^vault:secrets:[a-z0-9-]{1,32}$/.test(x)
+      //
+      // LA LISTA VA EXPLÍCITA A PROPÓSITO, y es la única del ecosistema que debe estarlo:
+      // aquí no se dibuja una pantalla, se decide qué firma la maestra. Derivarla del
+      // pilar significaría que un permiso nuevo se pudiera emparejar el día que alguien lo
+      // añade, sin que nadie lo haya pensado. `vault:admin` y `vault:approve` no están, y
+      // esa ausencia ES la regla.
+      //
+      // `vault:passwords` faltaba y el CLI sí lo ofrecía: emparejar el gestor de
+      // contraseñas con su permiso se rechazaba aquí. `vault:replica` entra el 2026-09-02:
+      // un replicador reparte sobres que no puede abrir, así que se puede emparejar —al
+      // revés que sellar o administrar— y se despliega donde no hay teclado.
+      const ALLOWED = (x) => x === 'vault:sign' || x === 'vault:read' || x === 'vault:store' ||
+        x === 'vault:passwords' || x === 'vault:replica' || /^vault:secrets:[a-z0-9-]{1,32}$/.test(x)
       const asked = Array.isArray(pairReq?.scope) ? pairReq.scope.filter((x) => typeof x === 'string') : null
       if (asked && asked.some((x) => !ALLOWED(x))) {
         ipcWrite(pairFile, { v: 2, at: Date.now(), error: 'scope not allowed: ' + asked.filter((x) => !ALLOWED(x)).join(',') })

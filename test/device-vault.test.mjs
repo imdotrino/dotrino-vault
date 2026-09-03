@@ -227,6 +227,12 @@ test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
     // propios caminos —al renovar el cert y al adoptar—. El daemon necesita el gancho
     // explícito porque su identidad vive detrás de un RPC y nada más se las da.
     'ADMIN_EVENT',
+    // El acuse de un REPLICADOR, que sirve de «voy por aquí» al arrancar y hace que la
+    // bóveda le empuje lo que le falte. Es una decisión: un replicador reparte por su
+    // dueño cuando la bóveda NO está, y una pestaña de navegador no es lo que se deja
+    // encendida para eso — se apaga sola al cerrarla. El día que un dispositivo-bóveda
+    // quiera replicadores, esto se quita de aquí y se implementa; no antes.
+    'REPLICA_ACK',
   ])
 
   const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))

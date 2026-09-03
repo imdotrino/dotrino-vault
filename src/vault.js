@@ -1161,6 +1161,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
       if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
       if (payload.type === MSG.ADMIN_EVENT) return await handleAdminEvent(payload)
+      if (payload.type === MSG.REPLICA_ACK) return await handleReplicaAck(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -1443,6 +1444,38 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Y a los replicadores, que no quieren un aviso sino el CONTENIDO: sin esto se
     // quedarían con el acta de ayer y repartiendo sobres de un aparato ya revocado.
     await pushToReplicas(ev)
+  }
+
+  /**
+   * EL ARRASTRE AL ARRANCAR (`docs/replicas.md` §6). Un replicador dice por dónde va en
+   * cuanto se conecta, y si va por detrás se le empuja.
+   *
+   * Sin esto, la bóveda solo empujaba al cambiar algo: un replicador que se enciende
+   * después se quedaba vacío hasta el siguiente cambio, que puede no llegar en semanas.
+   * Y el empujón de un enrolamiento se manda a un aparato que todavía no está conectado.
+   * Lo destapó el smoke y era un hueco del diseño, no del código.
+   *
+   * El acuse va FIRMADO por el replicador y se comprueba contra el acta: sin eso, cualquiera
+   * podría pedirle a la bóveda que reparta el acta y los sobres mandando un acuse inventado.
+   */
+  async function handleReplicaAck (from, p) {
+    const body = p?.body
+    if (!body || body.op !== 'replica.ack') return
+    const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!record) return
+    // LA LLAVE VA DENTRO DEL MENSAJE FIRMADO, no se saca de `from`: `from` es el
+    // identificador de la conexión en el proxio, no la llave del miembro. Compararlo con
+    // el acta rechazaba a todo el mundo, y en el caso contrario habría sido peor.
+    const quien = body.publickey
+    if (typeof quien !== 'string' || !Acta.memberCan(record, quien, 'replica')) {
+      return log('[vault] a replica ack arrived from someone the record does not allow to serve: ignored')
+    }
+    if (!(await verifyDeviceSig({ publickey: quien, data: body, signature: p.signature }))) {
+      return log('[vault] a replica ack does not check out against its own key: ignored')
+    }
+    if (typeof body.seq === 'number' && body.seq >= record.seq) return
+    log(`[vault] a replica is at #${body.seq} and we are at #${record.seq}: catching it up`)
+    await pushToReplicas('catch-up')
   }
 
   /**

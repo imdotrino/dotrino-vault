@@ -90,6 +90,11 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   const id = (await pubkeyId(link.device.publickey)).slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2')
 
   const firmar = (data) => signWithDevice({ privateJwk: link.device.privateJwk, data })
+  // CONTESTAR es por la CONEXIÓN (`send`) y no por la llave (`sendByPubkey`): `from` es el
+  // identificador de quien escribe en el proxio, no su pubkey. Mandar por llave a un `from`
+  // no falla — se va a la nada, y quien preguntó se queda esperando el plazo entero.
+  // Por llave solo se habla con la BÓVEDA (`link.iss`), que es a quien queremos alcanzar
+  // aunque no esté conectada ahora mismo.
 
   const client = new WebSocketProxyClient({ url })
   await client.connect()
@@ -122,8 +127,8 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
       return log(`[replica] a push arrived with an older record (#${body.seq} < #${store.seq}): refused`)
     }
     log(`[replica] record #${store.seq} · ${Object.keys(body.bundles || {}).length} bundle(s) stored`)
-    const ack = { op: 'replica.ack', seq: store.seq, ts: Date.now() }
-    client.sendByPubkey(from, { type: MSG.REPLICA_ACK, body: ack, signature: (await firmar(ack)).signature })
+    const ack = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
+    client.send(from, { type: MSG.REPLICA_ACK, body: ack, signature: (await firmar(ack)).signature })
   }
 
   /**
@@ -141,10 +146,11 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
     const ek = p?.data?.ek
     const quien = p?.data?.publickey
     if (typeof ns !== 'string' || !ek || !quien) return
-    if (!store.acta) return client.sendByPubkey(from, { type: MSG.ERROR, error: 'replica: no record yet' })
+    if (!store.acta) return client.send(from, { type: MSG.ERROR, error: 'replica: no record yet' })
     const b = store.bundleFor(ns, quien)
     if (!b) {
-      return client.sendByPubkey(from, {
+      log(`[replica] asked for "${ns}" and has nothing stored for that device`)
+      return client.send(from, {
         type: MSG.ERROR,
         error: `replica: nothing stored for "${ns}" and this device — ask the vault once while it is up`
       })
@@ -154,7 +160,8 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
     // `by` y no `seq`: no tenemos la llave de sellado y no debemos tenerla. Quien recibe
     // mira el acta, ve que a esta llave le reconoce `replica`, y acepta.
     const { signature } = await firmar(body)
-    client.sendByPubkey(from, { type: MSG.SECRETS_RESULT, body, seal: { by: link.device.publickey, sig: signature } })
+    client.send(from, { type: MSG.SECRETS_RESULT, body, seal: { by: link.device.publickey, sig: signature } })
+    log(`[replica] served "${ns}" from record #${store.seq}`)
   }
 
   /** Todo lo que DECIDE algo se contesta que no, y se dice por qué. */
@@ -166,12 +173,21 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
     if (t === MSG.SECRETS) return onSecrets(from, p).catch((e) => log('[replica] secrets: ' + e.message))
     if (NO_DECIDE.has(t)) {
       log(`[replica] refused "${t}": a replica hands things out, it does not decide`)
-      return client.sendByPubkey(from, {
+      return client.send(from, {
         type: MSG.ERROR,
         error: 'replica: this is a replica — it has no master and decides nothing'
       })
     }
   })
+
+  // EL ARRASTRE AL ARRANCAR (`docs/replicas.md` §6). Se dice por dónde vamos en cuanto hay
+  // conexión: si la bóveda va por delante, contesta con un empujón. Sin esto, un
+  // replicador recién encendido se queda vacío hasta que alguien cambie algo — y el
+  // empujón del propio enrolamiento se manda cuando este proceso todavía no existe.
+  const saludo = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
+  try {
+    client.sendByPubkey(link.iss, { type: MSG.REPLICA_ACK, body: saludo, signature: (await firmar(saludo)).signature })
+  } catch (e) { log('[replica] could not say hello to the vault: ' + e.message) }
 
   log('[replica] ready · it hands out what the vault already signed, and nothing else')
   return {

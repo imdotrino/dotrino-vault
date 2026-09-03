@@ -229,8 +229,38 @@ el último papel.
 
 ## 10. Estado
 
-**Nada implementado**, y hoy la cuenta de Cepi vuelve a tener una sola bóveda: la PC del
-dueño. Si se cae, los servicios esperan en silencio y no se puede cambiar el acta.
+**EL REPLICADOR ESTÁ CONSTRUIDO Y PROBADO** (2026-09-03, vault 0.98.0 · identity 0.79.0).
+`dotrino-vault replica enroll|run|status`, con el smoke `dotrino-test/smoke/replica.mjs`:
+seis escenarios en tres máquinas, y el que importa mata la caja entera de la bóveda y
+comprueba que el servicio sigue recibiendo su clave.
+
+Lo que el smoke destapó, y que ninguna prueba de un proceso habría cazado:
+
+1. **La bóveda solo empujaba al cambiar algo**, así que un replicador encendido después se
+   quedaba vacío hasta el siguiente cambio. Faltaba el arrastre de §6, que este documento
+   ya pedía: ahora el replicador dice por dónde va al conectarse y se le pone al día.
+2. **El cliente solo le preguntaba a la bóveda.** Con ella apagada el mensaje no llegaba a
+   nadie, así que un replicador no servía para nada por bien que guardara los sobres. Ahora
+   lleva la lista y las prueba en orden (§8) — y la lista **sale del acta**, que llega
+   firmada en cada respuesta, así que no hay un `.env` que mantener.
+3. **Tres confusiones entre «conexión» y «llave»**, del tipo que no falla ruidosamente:
+   `sendByPubkey` con un identificador de conexión no da error, se va a la nada y quien
+   preguntó espera el plazo entero. Y comparar `from` con una llave del acta rechazaba a
+   todo el mundo — que es el lado bueno de equivocarse.
+
+**Dos condiciones que no se esconden**, y las dos son el precio de no tener el oráculo de
+frescura (§6.1):
+
+- **Un aparato que nunca vio la cuenta no le cree a un replicador.** Sin `maxSeq` pineado no
+  hay con qué comparar un acta atrasada. Tiene que hablar con la bóveda una vez.
+- **Un servicio aprende sus replicadores del acta.** Si añades uno, los servicios necesitan
+  un intercambio con la bóveda —mientras todavía contesta— para enterarse. Añadir un
+  replicador con la bóveda ya apagada no sirve de nada.
+
+**El multivault se probó y se desmontó el 2026-09-02**, y sigue siendo la otra pieza: una
+segunda bóveda tiene maestra y sella, un replicador no. Hoy la cuenta de Cepi tiene una
+sola bóveda, la PC del dueño; si se cae no se puede cambiar el acta (admitir, revocar,
+cambiar permisos), aunque lo ya emitido siga funcionando.
 
 **El multivault se probó de punta a punta el 2026-09-02 y se desmontó el mismo día.** Una
 bóveda en EC2 (`us-east-2`, contenedor con la clave del disco en AWS KMS) entró en la cuenta

@@ -248,3 +248,25 @@ test('contraseñas: un emparejamiento normal NO concede el permiso', async () =>
 
   assert.ok(!admitidos[0].caps.includes('passwords'), 'cualquier aparato podía pedir contraseñas')
 })
+
+/**
+ * QUÉ SCOPES SE PUEDEN EMPAREJAR, y cuáles NO.
+ *
+ * La lista vive en `src/daemon.js` (`ALLOWED`) porque es la maestra quien firma el cert.
+ * Va explícita a propósito —derivarla del pilar dejaría emparejable cualquier permiso
+ * nuevo el día que alguien lo añade—, y por eso hace falta una prueba que la mire: ya
+ * pasó que el CLI ofrecía `contrasenas` y el daemon lo rechazaba.
+ */
+test('la lista de scopes emparejables incluye lo que el CLI ofrece, y NADA de lo que se concede a mano', async () => {
+  const src = await import('node:fs').then((fs) =>
+    fs.readFileSync(new URL('../src/daemon.js', import.meta.url), 'utf8'))
+  const m = /const ALLOWED = ([^\n]*(?:\n[^\n]*)?)/.exec(src)
+  assert.ok(m, 'la lista tiene que seguir estando')
+  const texto = m[1]
+  for (const s of ['vault:sign', 'vault:read', 'vault:store', 'vault:passwords', 'vault:replica']) {
+    assert.ok(texto.includes(s), `${s} lo ofrece el CLI y el daemon tiene que aceptarlo`)
+  }
+  for (const s of ['vault:admin', 'vault:approve', 'vault:sealer']) {
+    assert.ok(!texto.includes(s), `${s} NO se empareja: se concede a mano con caps`)
+  }
+})
