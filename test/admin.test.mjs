@@ -365,3 +365,36 @@ test('el mostrador de la bóveda ofrece lo que el módulo le va a pedir', async 
       `el mostrador de variables no ofrece «${metodo}»`)
   }
 })
+
+/**
+ * QUIÉN FIRMA EL SOBRE TIENE QUE EXISTIR DE VERDAD.
+ *
+ * `myMembership()` contesta si estás en el acta y con qué permisos —`inProfile`, `caps`,
+ * `id`— y NO trae la pública. La consola leía `me.pub` de ahí para el autor, así que iba
+ * `undefined` y guardar una variable moría en «author needs { publickey, sign }». Es el
+ * mismo hueco que `var.recipients`, un escalón más abajo: la consola daba por hecha la
+ * forma de una respuesta que nadie comprobaba.
+ *
+ * No se puede montar el navegador aquí, así que se ata lo que sí es estable: de dónde saca
+ * la consola la llave, y que ese método la devuelva.
+ */
+test('el autor del sobre saca su llave de donde la hay', async () => {
+  const fs = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const raiz = fileURLToPath(new URL('..', import.meta.url))
+  const consola = fs.readFileSync(raiz + 'web/src/Console.vue', 'utf8')
+
+  const m = /const author = \{ publickey: (\w+)\.(\w+),/.exec(consola)
+  assert.ok(m, 'la consola tiene que armar un autor con su pública')
+  const [, variable, campo] = m
+
+  // De qué llamada sale esa variable.
+  const orig = new RegExp('const ' + variable + ' = await id\\.value\\.(\\w+)\\(').exec(consola)
+  assert.ok(orig, '«' + variable + '» tiene que venir del iframe de identidad')
+  const metodo = orig[1]
+
+  // Y que ese método devuelva ese campo. `getMe` entrega el perfil, que lleva `publickey`;
+  // `myMembership` entrega la pertenencia, que no.
+  assert.equal(metodo, 'getMe', 'la pública del aparato la da getMe, no la pertenencia')
+  assert.equal(campo, 'publickey', 'y el campo se llama publickey')
+})

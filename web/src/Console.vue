@@ -1323,8 +1323,11 @@ function saveVars ({ target, items }) {
     // públicas, no secretos.
     const dest = targetOf(target)
     const owner = dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`
-    const me = await id.value.myMembership()
-    const author = { publickey: me.pub, sign: (body) => id.value.signData(body) }
+    // LA LLAVE DE ESTE APARATO SALE DE `getMe`, no de `myMembership`: aquella dice si estás
+    // en el acta y con qué permisos —`inProfile`, `caps`, `id`— y NO trae la pública, así
+    // que `me.pub` era `undefined` y el sobre moría en «author needs { publickey, sign }».
+    const me = await id.value.getMe()
+    const author = { publickey: me.publickey, sign: (body) => id.value.signData(body) }
     // LA LISTA DEPENDE DE LA VISIBILIDAD: una pública se envuelve además para quien
     // administra, así que se pregunta por cada una. Se cachea por visibilidad porque en una
     // tanda suelen ser todas iguales y no hay que ir dos veces por lo mismo.
