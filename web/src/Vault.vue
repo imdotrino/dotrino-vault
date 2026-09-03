@@ -18,7 +18,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import { WebSocketProxyClient } from '@dotrino/proxy-client'
-import { LocalVault, VaultResponder, samePubkey, importAuto } from '@dotrino/passmanager'
+import { LocalVault, VaultResponder, samePubkey, importAuto, identitySealing } from '@dotrino/passmanager'
 
 const props = defineProps({
   lang: { type: String, default: 'es' },
@@ -180,24 +180,14 @@ async function listDevices () {
   return (r?.members || []).filter(m => (m.caps || []).includes('passwords'))
 }
 
-const sealing = {
-  async seal (msg, peerEncPub) {
-    if (!peerEncPub) throw Object.assign(new Error('no encryption key'), { code: 'unsealed' })
-    return {
-      app: 'passmanager',
-      // Destinatarios como OBJETOS: `encrypt` expande cada uno a todos los aparatos de
-      // esa persona, y una llave suelta se le cae sin envolver nada — el sobre salía
-      // vacío, sin error, y al otro lado era «no es para mí».
-      sealed: await identity.encrypt([{ encryptionPubkey: peerEncPub }], JSON.stringify(msg)),
-      from: await identity.getEncryptionPubkey(),
-    }
-  },
-  // `decrypt` devuelve `{ plaintext }`, no la cadena.
-  async open (env) {
-    return JSON.parse((await identity.decrypt(env.from, null, env.sealed)).plaintext)
-  },
-  isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed,
-}
+/**
+ * El sobre lo arma el PILAR, no esta pantalla: es la misma pieza que usa la extensión al
+ * otro lado (`identitySealing` de `@dotrino/passmanager`). Estaba escrito aquí y allí, y
+ * son las dos puntas del mismo sobre — dos copias es una que se queda atrás, y cuando eso
+ * pasa no hay error: la petición sale, al otro lado «no es para mí», y desde fuera se ve
+ * como que nadie respondió.
+ */
+let sealing = null
 
 async function refresh () {
   devices.value = await listDevices()
@@ -287,6 +277,7 @@ onMounted(async () => {
     vault = new LocalVault(store)
     vault.unlock(await vaultKey())
 
+    sealing = identitySealing(identity)
     const client = new WebSocketProxyClient({
       url: proxyUrl(),
       enableWebRTC: false,

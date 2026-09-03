@@ -9,8 +9,14 @@
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
 import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
-import { buildSealedVar } from '@dotrino/vault/admin'
+// Del `lib/` de ESTE repo, no de npm. La consola corría `@dotrino/vault` publicado
+// (0.50) mientras el repo iba por 0.52: una versión más que mantener sincronizada a mano,
+// y de las que nadie mira porque el `package.json` no miente — dice exactamente lo viejo
+// que es. `invite.js` ya se importaba así; esto lo iguala.
+import { buildSealedVar } from '../../lib/src/admin.js'
 import { Identity } from '@dotrino/identity'
+// El permiso → scope lo dice el acta, no una tabla copiada aquí.
+import { capScope } from '@dotrino/identity/acta'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
 import Vars from './Vars.vue'
@@ -151,6 +157,8 @@ const T = {
     self_b: 'Este aparato hace de bóveda mientras esta página esté abierta. Otros aparatos tuyos se conectan a él.',
     self_add: 'Conectar otro aparato a esta bóveda',
     self_pair: 'Generar el código',
+    self_caps: 'Qué podrá hacer',
+    self_caps_b: 'Lo mismo que elige el PC al conectar un aparato (`pair --scope`). Se puede cambiar después, aparato por aparato, en la lista de arriba.',
     self_pending: 'Un dispositivo quiere conectarse',
     pass_t: 'Contraseñas que guarda esta bóveda',
     self_code_ph: 'Los 6 dígitos que muestra',
@@ -305,6 +313,8 @@ const T = {
     self_b: 'This device acts as the vault while this page is open. Your other devices connect to it.',
     self_add: 'Connect another device to this vault',
     self_pair: 'Create the code',
+    self_caps: 'What it will be able to do',
+    self_caps_b: 'The same choice the PC makes when connecting a device (`pair --scope`). It can be changed later, device by device, in the list above.',
     self_pending: 'A device wants to connect',
     pass_t: 'Passwords kept in this vault',
     invite_url: 'Or send it this link:',
@@ -992,8 +1002,29 @@ async function refreshSelf () {
     selfPending.value = self.value.running ? await id.value.selfVaultPending() : []
   } catch (_) {}
 }
+/**
+ * QUÉ PERMISOS lleva el aparato que entre. Lo elige quien empareja, igual que en el PC
+ * (`dotrino-vault pair --scope`), y por defecto lo mismo que allí: firma, lee y guarda.
+ *
+ * Sin esto la bóveda-en-pestaña emparejaba SIEMPRE con `vault:sign` a secas, y de ahí
+ * salía el fallo que hacía que el gestor de contraseñas no funcionara contra ella: la
+ * capacidad `passwords` no se podía conceder al conectar, y la pestaña solo atiende a
+ * quien la tiene. Desde fuera se veía como «nadie respondió».
+ *
+ * `admin`, `approve` y `sealer` no están aquí a propósito: se conceden a mano después
+ * (docs/consola-remota.md §2), y emparejar no es el momento de regalar el mando.
+ */
+const PAIRABLE_CAPS = ['sign', 'read', 'store', 'passwords']
+const selfCaps = ref(['sign', 'read', 'store'])
+const toggleSelfCap = (cap) => {
+  selfCaps.value = selfCaps.value.includes(cap)
+    ? selfCaps.value.filter((c) => c !== cap)
+    : [...selfCaps.value, cap]
+}
+
 const selfPair = () => run('selfpair', async () => {
-  const r = await id.value.selfVaultPairing({})
+  // Los permisos del acta viajan como scopes del cert: `passwords` ⇒ `vault:passwords`.
+  const r = await id.value.selfVaultPairing({ scope: selfCaps.value.map((c) => capScope(c)) })
   // El QR lleva el ENLACE compacto, no el JSON: así el otro aparato lo escanea con
   // la cámara y se le abre esta misma consola, en vez de quedarse con un texto que
   // hay que pegar a mano. Y de paso cabe: el JSON daba un QR de 69 módulos.
@@ -1618,8 +1649,15 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                 :aria-label="t.info_label" @click="toggleInfo('self')">i</button>
       </h2>
       <p v-if="info === 'self'" class="muted info-panel">{{ t.self_b }}</p>
+      <p class="muted">{{ t.self_caps }}</p>
+      <div class="caps" data-testid="self-caps">
+        <button v-for="c in PAIRABLE_CAPS" :key="c" class="cap" :class="{ on: selfCaps.includes(c) }"
+                :disabled="busy === 'selfpair'" :data-cap="c"
+                @click="toggleSelfCap(c)">{{ t.caps[c] }}</button>
+      </div>
+      <p class="muted">{{ t.self_caps_b }}</p>
       <div class="row">
-        <button class="btn" data-testid="self-pair" :disabled="!self.running || busy === 'selfpair'"
+        <button class="btn" data-testid="self-pair" :disabled="!self.running || !selfCaps.length || busy === 'selfpair'"
                 @click="selfPair">{{ t.self_pair }}</button>
       </div>
       <div v-if="selfQr" class="qrbox" v-html="selfQr"></div>
