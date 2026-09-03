@@ -229,14 +229,21 @@ el último papel.
 
 ## 10. Estado
 
-**El multivault SÍ está.** Desde el 2026-09-02 la cuenta de Cepi tiene dos bóvedas: la PC
-del dueño y una en EC2 (`us-east-2`, contenedor con la clave del disco en AWS KMS), miembro
-`53F8-C1E8` **con `+sella`**. Un desastre que se lleve la PC ya no se lleva la cuenta.
+**Nada implementado**, y hoy la cuenta de Cepi vuelve a tener una sola bóveda: la PC del
+dueño. Si se cae, los servicios esperan en silencio y no se puede cambiar el acta.
 
-**El replicador NO está**: §8.bis es diseño, no código.
+**El multivault se probó de punta a punta el 2026-09-02 y se desmontó el mismo día.** Una
+bóveda en EC2 (`us-east-2`, contenedor con la clave del disco en AWS KMS) entró en la cuenta
+como `53F8-C1E8` con `+sella`, y funcionó: la invitación salió de la PC, el código se tecleó
+en la PC y al contenedor no se entró nunca. Se quitó del acta (#21) y se destruyó todo
+porque **lo que hace falta es un replicador, no un segundo sellador** (§8.bis) — decisión
+del dueño ese día. La cadena de selladores **no llegó a publicarse**: no había ningún
+testigo anunciado en `dotrino.sealers`, así que la ventana con dos selladores no salió de
+esa máquina.
 
-Y una cosa que se vio al montar la de EC2 y hay que arreglar: **su perfil no tiene
-contraseña**, así que su maestra queda cerrada con la clave de la máquina —que allí es la
-del KMS, y el rol de la instancia la desenvuelve—. O sea que hoy es un sellador
-**permanentemente abierto**: quien consiga una shell en esa máquina sella en nombre del
-dueño. Ponerle contraseña es un comando y está pendiente.
+Lo que dejó aprendido, y hay que tenerlo delante el día que se monte un replicador de
+verdad: **el perfil de aquel contenedor no tenía contraseña**, así que su maestra quedaba
+cerrada con la clave de la máquina —que allí era la del KMS, y el rol de la instancia la
+desenvolvía—. O sea que era un sellador **permanentemente abierto**: cualquiera con una
+shell ahí sellaba en nombre del dueño. Un replicador no tiene ese problema porque no tiene
+maestra, y esa es exactamente la razón por la que es la pieza correcta para poner fuera.
