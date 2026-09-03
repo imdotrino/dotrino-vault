@@ -31,7 +31,7 @@ cuál firma, cuál guarda el contenido— sin que ninguna llave privada viaje nu
 | D6 | **Si se pierde el master, se pierde la cuenta.** Decidido explícitamente por el dueño (2026-07-25), y **no hay mecanismo de recuperación**: sin relevo, sin sucesión, sin miembro de papel. Es una consecuencia asumida de D1, no una carencia a tapar. |
 | D7 | **Capacidades: `sign` · `store` · `read`.** Nada más. `admit` y `policy` no existen como capacidades porque **son el master** (cambiar el acta y admitir miembros es sellar). Se mapean 1:1 a los scopes que ya existen (`vault:sign`, `vault:read`, `vault:store`). |
 | D8 | **Capacidad efectiva = `cert ∩ acta`.** El cert es la credencial (lo que ya verifican el proxy y `verifyChain`); el acta es la política encima. Permite migración gradual. |
-| D9 | **Cadenas de un solo nivel.** Sólo el master emite certs, así que `verifyChain` sirve tal cual. Al ceder el master, el nuevo **re-emite** los certs de todos los miembros (ya se re-emiten cada 30 días por la renovación). |
+| D9 | **Cadenas de un solo nivel.** Sólo el master emite certs, así que `verifyChain` sirve tal cual. Al ceder el master, el nuevo **re-emite** los certs de todos los miembros. (Decía «ya se re-emiten cada 30 días por la renovación»: desde 2026-08-31 no hay renovación por reloj — el cert lleva `seq` y muere con el acta.) |
 | D10 | **Renunciar a una capacidad propia es un registro suelto, unilateral y offline** — no toca el acta, y por eso no contradice D4 (§2.2). Sólo puede quitar, nunca otorgar. |
 | D11 | **El acta es un snapshot firmado con `seq` monotónico + hash del anterior**, no un log que se reproduce. Tamaño O(miembros), constante en el tiempo. |
 | D12 | **La bóveda NO puede borrar una cuenta que ella manda si quedan otros miembros: primero le pasa el acta a un dispositivo conectado.** *(Decidido por el dueño el 2026-07-28.)* Es D6 leído al derecho: borrar el master **es** perder la cuenta, y con más miembros no la pierde solo quien borra —los demás se quedan con su llave y sin nadie que pueda volver a sellar, así que la cuenta muere para todos y en silencio. **En el DISPOSITIVO no hay tal restricción**: borrar allí una cuenta se lleva su llave y su copia local, pero la cuenta sigue viva donde vive el master. |
@@ -246,8 +246,10 @@ Se rechaza si el acta que presenta el firmante tiene `seq` **menor** al máximo 
 verificador ya vio para ese `profileId`.
 
 - Cada verificador guarda `maxSeq` por `profileId` conocido (un número por contacto).
-- Refuerzo temporal: el tope duro de 30 días de los certs (`MAX_DELEGATION_MS`,
-  `dotrino-identity/vault/capabilities.js:29`) hace que una política vieja caduque sola.
+- ~~Refuerzo temporal: el tope duro de 30 días de los certs (`MAX_DELEGATION_MS`).~~
+  **Ese refuerzo YA NO EXISTE** (2026-08-31): el cert lleva `seq` en vez de `exp` y
+  `MAX_DELEGATION_MS` se quitó del código. Una política vieja **no caduca sola**, así que el
+  pin de `maxSeq` pasa de ser el principal a ser el **único** freno. Ver R1 en §6.
 
 ### 2.4 Por qué no hay bifurcaciones
 
@@ -292,8 +294,9 @@ irrefutable de su propia degradación.
 > restaurar un respaldo viejo del vault, cosa poco frecuente. **No se construye todavía y
 > nada depende de él.** Cuando se retome, el motivo principal no serán los conflictos sino
 > **cerrar la ventana de rollback (R1)**: un dispositivo robado presentando el acta vieja en
-> la que aún tenía `sign`, ante alguien que no vio la nueva. Sin oráculo eso queda acotado
-> por el tope de 30 días de los certs.
+> la que aún tenía `sign`, ante alguien que no vio la nueva. Aquí decía que sin oráculo eso
+> quedaba acotado por el tope de 30 días de los certs; **ese tope desapareció el
+> 2026-08-31**, así que ante alguien que nunca vio el acta la ventana **no se cierra sola**.
 
 
 El proxy del ecosistema puede guardar, por perfil, **sólo la cabecera** del acta:
@@ -622,7 +625,10 @@ Si un escenario necesita el proxy real, va aparte y marcado como manual.
 ## 6. Residuales aceptados (documentar, no prometer que se resuelven)
 
 - **R1 — Ventana de rollback.** Quien nunca vio el acta nueva puede aceptar una vieja.
-  Acotado por el pin de `maxSeq` y el tope de 30 días de los certs.
+  Acotado por el pin de `maxSeq` **y por nada más**: el tope de 30 días de los certs, que era
+  el otro freno, desapareció el 2026-08-31 al atar el cert al `seq`. Para quien ya conoce el
+  perfil el pin basta; para quien llega nuevo no hay con qué comparar, y ahí el residual es
+  entero. Es lo que cerraría el oráculo de frescura (§2.4.2).
 - **R2 — La política la hacen cumplir los verificadores, no el dispositivo.** Un miembro al
   que le quitaste `sign` sigue teniendo su llave y físicamente puede firmar; lo que ocurre es
   que **los demás dejan de aceptarle esa firma**.

@@ -6,6 +6,13 @@ I'll write the document directly as my output (per instructions, no .md file).
 
 # Decisión de arquitectura: el vault de PC como store + identidad centralizada del usuario
 
+> **AVISO (2026-09-02).** Este documento razona sobre certificados con **tope duro de 30
+> días** (`MAX_DELEGATION_MS`). Ese tope **ya no existe**: desde `@dotrino/identity` 0.73
+> (2026-08-31) el cert lleva `seq` en vez de `exp` y muere cuando cambia el acta, no por
+> reloj. Donde abajo se lee «tope 30 días» o «exp corto» como mitigación —§1 y el punto 5 de
+> las críticas—, esa mitigación **ya no está**; lo que acota es el acta y el pin de `maxSeq`.
+> No se reescribe el resto porque describe un modelo anterior y vale como historia.
+
 ## 1. Veredicto y modelo elegido
 
 **Modelo elegido: "dispositivo delegado por origin compartido", construido sobre la cripto de capacidades que ya existe (`makeDeviceKey` / `signDelegation` / `verifyChain`, cert con tope 30 días y revocable), con el daemon de PC como autoridad maestra y el proxy del ecosistema como único transporte.** El cert delegado (D←P) y la llave privada de dispositivo `D` viven **dentro del iframe del origin compartido correspondiente a cada pilar**: el de identidad en `id.dotrino.com` (para firmar), y un cert hermano **independiente** en `store.dotrino.com` (para el store). No se centraliza la llave de dispositivo en un solo origin que sirva a los dos pilares, porque `id.` y `store.` son orígenes distintos (CNAMEs distintos) y **no comparten storage** — el "canal entre iframes hermanos" que proponían las lentes 1 y 2 es frágil y no está especificado, así que se descarta: **cada pilar enrola su propio dispositivo** contra el mismo vault maestro (dos certs, mismo `iss`, scopes distintos). Todo es **estrictamente opt-in**: sin pairing, `signData` firma con la maestra local del iframe (como hoy) y el store sirve desde IndexedDB+Drive (como hoy), byte-idéntico. Quien no empareja no ve ningún cambio, y ninguna app del ecosistema necesita re-desplegarse porque la API `postMessage` de `@dotrino/identity` y `@dotrino/store` no cambia (los métodos `vault*` son aditivos).

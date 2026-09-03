@@ -11,9 +11,17 @@ falla: espera**. `waitForSecrets` reintenta para siempre, y `secretos-sellados.m
 ya lo dejó escrito como «el error que más caro salió» — porque desde fuera no se
 distingue de que todo va bien.
 
-Y hay un reloj peor: **los certificados de aparato duran 30 días** y solo la
-maestra los renueva. Una bóveda apagada un mes no deja un servicio esperando; deja
-el ecosistema entero caducado.
+> **CORREGIDO el 2026-09-02.** Aquí decía que los certificados duran 30 días y que una
+> bóveda apagada un mes deja el ecosistema entero caducado. **Ya no es cierto**, y llevaba
+> escrito lo bastante como para hacer equivocarse a quien leyera solo este documento.
+> Desde `@dotrino/identity` 0.73 (decisión del dueño, 2026-08-31) un certificado lleva
+> `seq` en vez de `exp`: **no caduca por reloj, muere cuando cambia el acta**. Los papeles
+> del modelo viejo se aceptan hasta el **2026-10-01** y ya no se emiten
+> (`vault/capabilities.js`, `LEGACY_CERTS_UNTIL`).
+
+Lo que sí sigue en pie: si la máquina está apagada, **no se puede cambiar el acta**. Nadie
+admite un aparato, nadie revoca, nadie cambia un permiso. Lo ya emitido sigue funcionando
+—ese es el cambio—, así que lo que se pierde es **administrar**, no el acceso.
 
 ## 1.bis DECIDIDO (2026-08-30): son DOS BÓVEDAS, no una y su réplica
 
@@ -48,6 +56,13 @@ que se replica es *servir*, no *decidir*. Es la misma línea que ya existe en la
 bóveda —el candado es de la consola, un perfil bloqueado sigue sirviendo a sus
 agentes— aplicada a otra máquina.
 
+> **Cómo se lee esto desde el 2026-09-02, que parece una contradicción y no lo es.** §1.bis
+> dice que hay DOS selladores y esta sección dice que una réplica no sella jamás. Las dos
+> son ciertas porque hablan de **piezas distintas** (§8.bis): una segunda **bóveda** tiene
+> maestra y sella —es el multivault, y se conserva—; un **replicador** no tiene maestra y no
+> sella nunca. Lo que sigue en pie sin matices es D4: **un acta la sella uno**, y por eso
+> dos selladores no se abren a la vez.
+
 ## 3. Lo que hace la réplica barata: **no puede leer lo que guarda**
 
 Aquí es donde el sellado por destinatario paga por sí solo. Desde v4, cada
@@ -77,26 +92,28 @@ es pública y autoverificable por firma.
 | **Aprobar** una entrega de clave privada | **NO** | eso es del teléfono (`+aprueba`), y así debe seguir |
 | Abrir un sobre | **no puede**, aunque quisiera | no tiene la llave del destinatario |
 
-## 5. El problema de verdad: renovar certificados
+## 5. ~~El problema de verdad: renovar certificados~~ — DESAPARECIÓ
 
-Servir sobres viejos es fácil. Lo que no se puede replicar sin más es **firmar
-papeles nuevos**, y los certs caducan a los 30 días.
+**Esta sección entera está obsoleta desde el 2026-08-31, y se deja tachada en vez de
+borrada porque su razonamiento explica por qué el diseño de abajo es más barato de lo que
+parecía.**
 
-**Salida: CA raíz fuera de línea, intermedia en línea.** Es lo que hace cualquier
-PKI seria desde hace treinta años, y aquí encaja sin inventar nada porque **la
-delegación por capacidades ya existe**:
+Decía que lo que no se puede replicar es firmar papeles nuevos, porque los certs caducaban
+a los 30 días, y proponía una CA intermedia con una capacidad estrecha `renew-certs`.
 
-- La maestra emite a la réplica un cert delegado con una capacidad **estrecha**:
-  `renew-certs` y nada más. No admite aparatos, no cambia permisos, no toca el acta.
-- Ese cert **caduca antes que los que emite** (p. ej. réplica 30 días / certs que
-  emite 7 días), para que una réplica comprometida tenga una ventana corta y se
-  apague sola si la maestra no vuelve.
-- Renovar **no es admitir**: solo alarga la vida de un miembro **que ya está en el
-  acta vigente**. Una réplica no puede meter a nadie nuevo, que es la única
-  operación que de verdad importa proteger.
+**Ya no hay nada que renovar.** Un certificado lleva `seq` y muere cuando cambia el acta,
+así que la maestra puede estar apagada meses sin que se caiga nada. La CA intermedia sobra.
 
-Con eso, la maestra puede estar apagada semanas sin que caduque nada, y sigue
-siendo la única que decide *quién* pertenece.
+Y de paso resuelve mejor lo que aquella propuesta buscaba: quitarle un permiso a un aparato
+surte efecto **al instante** —el acta sube de `seq` y su papel deja de valer— en vez de
+esperar a que venza una renovación.
+
+**Lo que empeora, y hay que decirlo:** el tope de 30 días era además el freno de la ventana
+de rollback (R1 en `acta-de-perfil.md`). Sin él, una política vieja **ya no caduca sola**, y
+lo único que acota R1 es el pin de `maxSeq`. Para quien ya conoce la cuenta eso basta; para
+un aparato que llega nuevo, no hay con qué comparar. Es la razón por la que §6.1 dice que el
+oráculo de frescura es un **prerrequisito** de las réplicas, y ahora lo es más que cuando se
+escribió.
 
 ## 6. Sincronización
 
@@ -145,6 +162,61 @@ La alternativa —dirigirse al *perfil* y que el proxio entregue a cualquier mie
 con capacidad `replica` que esté conectado— es más elegante y pide enrutado
 «a cualquiera de estos», que hoy no existe. Se deja para después, si molesta.
 
+## 8.bis DECIDIDO (2026-09-02): el modo `--replica`, y NO sustituye al multivault
+
+> El dueño, sobre lo de abajo: *«esta solución es la ideal»*. Y acto seguido:
+> *«lo del multivault es otra cosa, esa característica hay que conservarla»*.
+
+**Son dos piezas distintas y las dos se quedan.** Confundirlas sería deshacer lo del
+2026-08-30:
+
+| | **Segunda bóveda** (§1.bis) | **Replicador** (esto) |
+|---|---|---|
+| Tiene maestra | **sí** | **no**, y se niega a crear una |
+| Puede sellar el acta | sí, con `+sella` | **nunca** |
+| Para qué está | que un desastre no se lleve la cuenta: sigue habiendo quien admita, revoque y cambie permisos | que la cuenta **responda** aunque tu máquina esté apagada |
+| Qué cuesta que la comprometan | todo: sella en tu nombre | disponibilidad, nada más |
+| Ejemplo | la bóveda en EC2 (`53F8-C1E8`, 2026-09-02) | cualquier sitio: un VPS alquilado, la máquina de un socio |
+
+### Qué es
+
+Un modo del mismo daemon. Arranca **sin maestra**, se niega a crear una, y rechaza toda
+operación que selle. Lleva solo tres cosas:
+
+- la **llave de comunicación**, para ser alcanzable (vive bajo la llave de máquina, así que
+  no hay nada que abrir);
+- el **acta vigente y su cadena**, que es pública y va firmada;
+- los **sobres**, que ya vienen sellados a su destinatario.
+
+Se enrola como cualquier aparato, con una capacidad estrecha, y queda en el acta como lo
+que es. No abre nada, no firma nada, no decide nada: reparte lo que otro ya firmó y selló.
+
+### Por qué es barato, y esto es lo que lo hace viable
+
+**No hay que confiar en la máquina donde corra.** Un sobre está cerrado a la llave de quien
+lo va a consumir, así que el replicador tampoco puede abrirlo (§3); y el acta la verifica
+quien la recibe, por la firma. Que se la lleven cuesta disponibilidad y nada más.
+
+De ahí sale lo demás: no hay maestra que proteger, así que no hay contraseña que gestionar
+ahí, ni un sellador siempre abierto, ni razón para blindar esa máquina. Es lo contrario de
+la de EC2, que **sí** hay que cuidar porque sella.
+
+Y lo que lo volvió razonable fue el cambio del 2026-08-31: como un cert ya no caduca por
+reloj, un replicador que solo sirve **no se pudre**. Antes habría aguantado lo que durase
+el último papel.
+
+### Las dos limitaciones, dichas antes de construirlo
+
+1. **Un acta vieja es el ataque.** Un replicador atrasado presenta un acta donde un aparato
+   revocado sigue siendo miembro. Para quien ya conoce la cuenta lo corta el pin de `maxSeq`,
+   que ya está construido; **para un aparato que llega nuevo no hay con qué comparar**. Por
+   eso el oráculo de frescura es prerrequisito (§6.1), y desde que el cert no caduca lo es
+   más, no menos.
+2. **Solo reparte los sobres que tiene.** Uno para un miembro que entró después de
+   escribirse un valor **no existe** hasta que abras tu bóveda, porque fabricarlo exige
+   abrir la llave del cajón. Un replicador está siempre tan al día como la última vez que
+   abriste. No es un fallo: es la misma deuda que ya se ve en la consola.
+
 ## 9. Fases
 
 1. **Oráculo de frescura** (§2.4.2 de `acta-de-perfil.md`). Va primero: sin él las
@@ -157,5 +229,14 @@ con capacidad `replica` que esté conectado— es más elegante y pide enrutado
 
 ## 10. Estado
 
-**Nada implementado.** Hoy hay una sola bóveda, en `74.208.234.139`, y si se cae
-los servicios esperan en silencio.
+**El multivault SÍ está.** Desde el 2026-09-02 la cuenta de Cepi tiene dos bóvedas: la PC
+del dueño y una en EC2 (`us-east-2`, contenedor con la clave del disco en AWS KMS), miembro
+`53F8-C1E8` **con `+sella`**. Un desastre que se lleve la PC ya no se lleva la cuenta.
+
+**El replicador NO está**: §8.bis es diseño, no código.
+
+Y una cosa que se vio al montar la de EC2 y hay que arreglar: **su perfil no tiene
+contraseña**, así que su maestra queda cerrada con la clave de la máquina —que allí es la
+del KMS, y el rol de la instancia la desenvuelve—. O sea que hoy es un sellador
+**permanentemente abierto**: quien consiga una shell en esa máquina sella en nombre del
+dueño. Ponerle contraseña es un comando y está pendiente.
