@@ -622,7 +622,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * el motivo real por el que editar el perfil exigía abrirla, y es el síntoma que abrió
    * todo esto: se cerraba sola a los cinco minutos y editar dejaba de funcionar.
    */
-  const PROFILE_METHODS = new Set(['profilePut', 'profileBundle', 'profilePublic'])
+  const PROFILE_METHODS = new Set(['profilePut', 'profileBundle', 'profilePublic', 'profileRecipients'])
 
   async function handleProfile (from, p, d) {
     // LO PÚBLICO NO PIDE NADA. Es lo que ve quien pregunta desde fuera y no tiene ninguna
@@ -630,6 +630,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // Va firmado, así que quien lo recibe comprueba que es tuyo sin fiarse de nadie.
     if (d.method === 'profilePublic') {
       return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: secrets.profilePublic() })
+    }
+    // A QUIÉN HAY QUE ENVOLVERLE. Lo pide el aparato ANTES de sellar, porque sellar lo hace
+    // él: envolver solo necesita públicas, así que puede hacerlo un navegador sin que
+    // ninguna privada ande suelta. Sale de aquí y no de una lista suya para que conceder
+    // `firma` a un aparato nuevo baste — sin que nadie tenga que acordarse de nada.
+    if (d.method === 'profileRecipients') {
+      const members = await recipientsOf(PROFILE_OWNER)
+      return reply(from, {
+        type: MSG.STORE_RESULT,
+        method: d.method,
+        result: { recoveryPub: secrets.recoveryPub(), members: members.map((m) => ({ pub: m.pub, encPub: m.encPub })) }
+      })
     }
 
     const revoked = await revocationSet()
@@ -1958,6 +1970,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // abrirse desde un navegador. Lo que cambia es que «pública» ya sí quiere decir algo
     // para quien administra — puede leerla— además de que se despacha sin aprobación.
     const admins = isPublic ? await adminDevices() : []
+    // EL PERFIL SE LE ENVUELVE A QUIEN PUEDE HABLAR POR TI (`docs/datos-del-perfil.md`).
+    //
+    // Va explícito y antes que nada porque si no cae en la rama de «cajón sin dueño» y
+    // acabaría envuelto solo para quien ADMINISTRA — que no es lo que se decidió: leer y
+    // escribir tu identidad es `firma`, y no todos los que firman administran. Un teléfono
+    // normal firma y no administra, y tiene que ver tu perfil.
+    if (owner === PROFILE_OWNER) {
+      const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+      const firman = (record?.members || [])
+        .filter((m) => m.encPub && Acta.memberCan(record, m.pub, 'sign'))
+        .map((m) => ({ pub: m.pub, encPub: m.encPub }))
+      return conCoselladores(dedup(firman), co)
+    }
     if (owner.startsWith('ns:')) {
       const owned = await nsMembers(owner.slice(3))
       // Sin dueño (un cajón personal, o uno cuyo servicio ya no está) entra quien administra

@@ -1420,11 +1420,17 @@ async function onKeyDevVars (term, st, key) {
  */
 function askVisibility (term, st, done) {
   const i = L(st)
+  // SE DEVUELVE LA PROMESA. `onConfirmKey` hace `await f?.()` para SERIALIZAR las
+  // operaciones contra el daemon —lo dice el comentario de `onInputKey`—, y soltarla aquí
+  // dejaba la escritura corriendo por fuera de esa serialización: se solapaba con el
+  // refresco periódico, los dos usan el mismo archivo de respuesta, el refresco lo borraba
+  // antes de que la escritura lo leyera y la pantalla se quedaba en «Guardando…» para
+  // siempre. El valor SÍ se había guardado, que es lo que lo hacía tan confuso.
   setConfirm(st, {
     text: i.newVarPrivateAsk,
     defaultYes: true,
-    onYes: () => { st.confirm = null; done(false) },   // privada
-    onNo: () => { st.confirm = null; done(true) }      // pública
+    onYes: () => { st.confirm = null; return done(false) },   // privada
+    onNo: () => { st.confirm = null; return done(true) }      // pública
   })
 }
 

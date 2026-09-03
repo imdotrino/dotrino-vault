@@ -111,6 +111,7 @@ export function openThreadStore (dir) {
     profilePut () { throw new Error('profilePut is handled before the store: see handleProfile') },
     profileBundle () { throw new Error('profileBundle is handled before the store: see handleProfile') },
     profilePublic () { throw new Error('profilePublic is handled before the store: see handleProfile') },
+    profileRecipients () { throw new Error('profileRecipients is handled before the store: see handleProfile') },
 
     // ----- DATOS SENSIBLES del usuario (F4, docs/consola-remota.md §6) -----
     //
