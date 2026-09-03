@@ -514,6 +514,30 @@ export function deleteSecret (ns, key, profile) {
 }
 
 /**
+ * Renombra una variable: el mismo sobre con otro nombre. No pide la frase — lo único que
+ * hay que rehacer es la firma, y de eso se encarga la llave de sellado.
+ *
+ * Se comprueban LAS DOS cosas: que la nueva esté y que la vieja ya no. Mirar solo una
+ * dejaría pasar una copia a medias, que es peor que un fallo.
+ */
+export function renameSecret (ns, key, to, profile) {
+  return secretOp({ op: 'rename', ns, key, to }, profile, (out) => {
+    if (!has(out.ns[ns], to) || has(out.ns[ns], key)) {
+      throw coded('the daemon did not rename the variable (check the service logs)', 'NOT_RENAMED')
+    }
+  })
+}
+
+/** Lo mismo para una variable de UN aparato. */
+export function renameDeviceSecret (pub, key, to, profile) {
+  return secretOp({ op: 'dev-rename', pub, key, to }, profile, (out) => {
+    if (!has(keysOf(out, pub), to) || has(keysOf(out, pub), key)) {
+      throw coded('the daemon did not rename the variable (check the service logs)', 'NOT_RENAMED')
+    }
+  })
+}
+
+/**
  * Cambia SOLO quién puede ver el valor: `public` deja que la consola remota lo vea,
  * `private` lo encierra en esta máquina. No toca el valor (ni hace falta conocerlo).
  */

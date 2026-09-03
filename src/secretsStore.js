@@ -991,6 +991,47 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     },
 
     /**
+     * RENOMBRAR UNA VARIABLE. Cambia el nombre y NADA MÁS: el mismo sobre, la misma
+     * generación, las mismas envolturas. El valor no se toca ni se mira.
+     *
+     * Lo único que hay que rehacer es la FIRMA, porque el nombre va dentro de lo firmado
+     * (§8.8: `{owner, key, gen, iv, ct}`). Sin eso el sobre quedaría diciendo que se llama
+     * de otra manera y el agente lo rechazaría al abrirlo — un fallo que aparecería lejos
+     * de aquí y sin pista.
+     *
+     * Y firmar de nuevo NO pide la frase: la llave de sellado existe justo para esto, no
+     * abre nada. Así que renombrar funciona con la bóveda cerrada, como escribir.
+     *
+     * El HISTÓRICO se muda con ella: es la misma variable, y dejarlo bajo el nombre viejo
+     * lo volvería inalcanzable — se vería como un hueco, no como una decisión.
+     */
+    async rename (owner, from, to) { return enFila(() => this._renameRaw(owner, from, to)) },
+    /** @private */
+    async _renameRaw (owner, from, to) {
+      if (needsMigration()) throw new NeedsMigration()
+      assertKeyValue(to, 'x')
+      const [kind, k] = splitOwner(owner)
+      const bag = kind === 'ns' ? data.ns : data.dev
+      const vars = varsOf(bag, k)
+      const e = vars[from]
+      if (!e) throw new Error(`there is no variable called "${from}" in ${owner}`)
+      if (from === to) return { renamed: false }
+      if (vars[to]) throw new Error(`"${to}" already exists in ${owner}: pick another name or remove it first`)
+
+      // La firma lleva el nombre dentro, así que se rehace. Si esta bóveda no puede firmar,
+      // se para: dejar el sobre con la firma vieja es dejarlo roto para quien lo abra.
+      if (e.e) {
+        if (!signer) throw new Error('this vault cannot sign right now: renaming would leave the envelope signed with the old name')
+        e.seal = await signer({ owner, key: to, gen: e.gen, iv: e.e.iv, ct: e.e.ct })
+      }
+      delete vars[from]
+      vars[to] = e
+      for (const h of data.history) if (h.owner === owner && h.key === from) h.key = to
+      save()
+      return { renamed: true }
+    },
+
+    /**
      * ROTA de verdad: vuelve a cifrar las variables privadas del cajón con llaves nuevas
      * y solo para los miembros dados. Es lo que corta el acceso de quien salió —
      * quitarle la envoltura no basta, porque si guardó la llave sigue abriendo lo que ya

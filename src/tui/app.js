@@ -1312,10 +1312,42 @@ async function onKeySecrets (term, st, key) {
     await revealValue(term, st, `ns:${cur.ns}`, cur.key, cur.public)
   } else if (ch === 't' && cur?.key) {
     await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st), activePwd(st)))
+  } else if (ch === 'r' && cur?.key) {
+    await promptRenameVariable(term, st, cur)
   } else if (key.name === 'f5') {
     await refreshSecrets(term, st)
   }
   return true
+}
+
+/**
+ * RENOMBRAR: el mismo sobre con otro nombre. No pide la frase, porque lo único que hay que
+ * rehacer es la firma —el nombre va DENTRO de lo firmado— y de eso se encarga la llave de
+ * sellado, que trabaja con la bóveda cerrada.
+ *
+ * Se avisa de lo que de verdad importa y no se ve: para el servicio que la lee esto es un
+ * cambio de configuración, así que se va a reiniciar. Si su código busca el nombre viejo,
+ * dejará de encontrarlo — y eso no lo puede saber la bóveda.
+ */
+function promptRenameVariable (term, st, cur) {
+  const i = L(st)
+  return new Promise((listo) => {
+    setInput(st, {
+      label: i.renameLabel(cur.key),
+      hint: i.renameHint,
+      value: cur.key,
+      onSubmit: async (nuevo) => {
+        const nv = nuevo.trim()
+        st.input = null
+        if (!nv || nv === cur.key) { listo(); return }
+        if (!KEY_RE.test(nv)) { flash(st, i.keyInvalid, 'danger'); listo(); return }
+        const r = await guard(term, st, i.renaming, () => vc.renameSecret(cur.ns, cur.key, nv, activeId(st)))
+        if (r.ok) { flash(st, i.renamed(cur.key, nv)); st.secrets = r.v }
+        listo()
+      },
+      onCancel: () => { st.input = null; listo() }
+    })
+  })
 }
 
 /**

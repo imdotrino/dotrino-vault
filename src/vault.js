@@ -2539,6 +2539,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function deleteSecret (ns, key) { const ok = await secrets.delete(ns, key); if (ok) { audit('secret.rm', { ns, key }); scheduleNotice(ns) } return ok }
 
   /**
+   * RENOMBRAR una variable. Para el servicio que la lee es un cambio de configuración como
+   * cualquier otro —la de antes desaparece y aparece otra—, así que se avisa igual: si no,
+   * seguiría arrancando con el nombre viejo hasta el siguiente reinicio.
+   */
+  async function renameSecret (ns, from, to) {
+    const r = await secrets.rename(`ns:${ns}`, from, to)
+    if (r?.renamed) { audit('secret.rename', { ns, from, to }); scheduleNotice(ns) }
+    return r
+  }
+  async function renameDeviceSecret (pub, from, to) {
+    const r = await secrets.rename(`dev:${pub}`, from, to)
+    if (r?.renamed) {
+      audit('secret.rename', { device: await deviceIdOf(pub).catch(() => null), from, to, scope: 'device' })
+      scheduleDeviceNotice(pub)
+    }
+    return r
+  }
+
+  /**
    * CARGAR CONFIGURACIÓN ES UNA TRANSACCIÓN: muchas variables, UN aviso.
    *
    * De una en una, cada `set` es un cambio de configuración para la bóveda, y el agente
@@ -2824,7 +2843,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // El mostrador que atiende a la consola remota. Se expone para poder probar la
     // frontera de verdad (que el valor de una privada no salga ni dentro del sobre).
     vars: varsDesk,
-    setSecret, deleteSecret, listSecrets, setSecretVisibility, openSecrets,
+    setSecret, deleteSecret, renameSecret, renameDeviceSecret, listSecrets, setSecretVisibility, openSecrets,
     // Sella un `secrets.json` v3 entero. Es el punto de no retorno del despliegue y
     // por eso es una operación con nombre propio, no algo que ocurra de refilón al
     // desbloquear: deja `secrets.json.v3.bak` para poder volver.

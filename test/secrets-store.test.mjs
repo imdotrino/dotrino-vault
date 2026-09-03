@@ -673,3 +673,78 @@ test('un dato público del perfil no rompe la regla de los valores en claro', as
   assert.equal(e.pubv, 'seyacat')
   assert.equal(e.cls, 'public')
 })
+
+/**
+ * RENOMBRAR: EL MISMO SOBRE CON OTRO NOMBRE, Y LA FIRMA REHECHA.
+ *
+ * El nombre va DENTRO de lo firmado (§8.8: `{owner, key, gen, iv, ct}`), así que renombrar
+ * sin volver a firmar dejaría un sobre que dice llamarse de otra manera. El agente lo
+ * rechazaría al abrirlo, lejos de aquí y sin ninguna pista de por qué.
+ *
+ * Y volver a firmar NO pide la frase: la llave de sellado existe justo para esto y no abre
+ * nada. Por eso renombrar funciona con la bóveda cerrada, igual que escribir.
+ */
+test('renombrar: cambia el nombre, rehace la firma y no toca el valor', async () => {
+  const dir = tmp()
+  const firmas = []
+  const s = abrir(dir, fakeSealer(), {
+    recipients: () => miembros('A'),
+    signer: async (body) => { firmas.push(body); return { seq: 1, sig: 'FIRMA(' + body.key + ')' } }
+  })
+  await s.set('proxy', 'TURN_KEY', 'un-secreto')
+  const antes = enDisco(dir).ns.proxy.vars.TURN_KEY
+
+  const r = await s.rename('ns:proxy', 'TURN_KEY', 'TURN_SECRET')
+  assert.equal(r.renamed, true)
+
+  const disco = enDisco(dir)
+  assert.equal(disco.ns.proxy.vars.TURN_KEY, undefined, 'el nombre viejo desaparece')
+  const e = disco.ns.proxy.vars.TURN_SECRET
+  assert.deepEqual(e.e, antes.e, 'el sobre es el MISMO: el valor no se toca ni se mira')
+  assert.equal(e.gen, antes.gen, 'y la generación tampoco cambia: no es una escritura')
+  assert.equal(e.seal.sig, 'FIRMA(TURN_SECRET)', 'la firma se rehace con el nombre nuevo')
+  assert.equal(firmas.at(-1).key, 'TURN_SECRET')
+})
+
+test('renombrar no pisa una que ya existe, y avisa si no está', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), {
+    recipients: () => miembros('A'),
+    signer: async (b) => ({ seq: 1, sig: 'F(' + b.key + ')' })
+  })
+  await s.set('proxy', 'A_KEY', 'uno')
+  await s.set('proxy', 'B_KEY', 'dos')
+
+  await assert.rejects(() => s.rename('ns:proxy', 'A_KEY', 'B_KEY'), /already exists/)
+  await assert.rejects(() => s.rename('ns:proxy', 'NO_ESTA', 'C_KEY'), /there is no variable/)
+  // Y las dos siguen intactas: un rechazo no puede dejar el cajón a medias.
+  const d = enDisco(dir)
+  assert.ok(d.ns.proxy.vars.A_KEY && d.ns.proxy.vars.B_KEY)
+})
+
+/**
+ * SIN CON QUÉ FIRMAR, NO SE RENOMBRA. Es la regla de «nada de repliegues»: dejar el sobre
+ * con la firma vieja sería guardar algo roto y descubrirlo semanas después, en otra máquina.
+ */
+test('si esta bóveda no puede firmar, renombrar se para y lo dice', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })   // sin signer
+  await s.set('proxy', 'TURN_KEY', 'x')
+  await assert.rejects(() => s.rename('ns:proxy', 'TURN_KEY', 'OTRO'), /cannot sign/)
+  assert.ok(enDisco(dir).ns.proxy.vars.TURN_KEY, 'y no se ha tocado nada')
+})
+
+test('el histórico se muda con la variable, o quedaría inalcanzable', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), {
+    recipients: () => miembros('A'),
+    signer: async (b) => ({ seq: 1, sig: 'F(' + b.key + ')' })
+  })
+  await s.set('proxy', 'TURN_KEY', 'v1')
+  await s.set('proxy', 'TURN_KEY', 'v2')   // deja una versión en el histórico
+  assert.equal(s.history('ns:proxy', 'TURN_KEY').length, 1)
+
+  await s.rename('ns:proxy', 'TURN_KEY', 'TURN_SECRET')
+  assert.equal(s.history('ns:proxy', 'TURN_KEY').length, 0, 'ya no está bajo el nombre viejo')
+  assert.equal(s.history('ns:proxy', 'TURN_SECRET').length, 1, 'sino bajo el nuevo: es la misma variable')
+})

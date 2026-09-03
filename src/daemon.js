@@ -567,6 +567,10 @@ export async function runDaemon () {
             console.log('[vault] %d secret(s) applied in one go: %s', changed.length, sec.pub ? 'device' : sec.ns)
           } else if (sec.op === 'set') { await vault.setSecret(sec.ns, sec.key, sec.value, sec.public); console.log('[vault] secret saved: %s/%s', sec.ns, sec.key) }
           else if (sec.op === 'rm') { await vault.deleteSecret(sec.ns, sec.key); console.log('[vault] secret deleted: %s/%s', sec.ns, sec.key) }
+          // Renombrar NO pide la frase: solo hay que volver a firmar el sobre —el nombre va
+          // dentro de lo firmado— y eso lo hace la llave de sellado con la bóveda cerrada.
+          else if (sec.op === 'rename') { await vault.renameSecret(sec.ns, sec.key, sec.to); console.log('[vault] secret renamed: %s/%s → %s', sec.ns, sec.key, sec.to) }
+          else if (sec.op === 'dev-rename') { await vault.renameDeviceSecret(sec.pub, sec.key, sec.to); console.log('[vault] device secret renamed: %s → %s', sec.key, sec.to) }
           else if (sec.op === 'dev-set') { await vault.setDeviceSecret(sec.pub, sec.key, sec.value, sec.public); console.log('[vault] device secret saved: %s', sec.key) }
           else if (sec.op === 'dev-rm') { await vault.deleteDeviceSecret(sec.pub, sec.key); console.log('[vault] device secret deleted: %s', sec.key) }
           // Saldar lo que quedó a deber: heredarle a un aparato nuevo lo ya guardado y

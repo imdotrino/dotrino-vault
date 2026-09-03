@@ -227,6 +227,10 @@ const es = {
   newVarPrivateAsk: '¿Es privada?',
   makePublicConfirm: '¿Hacerla pública?',
   changingVisibility: 'Cambiando…',
+  renameLabel: (k) => `Nuevo nombre para ${k}`,
+  renameHint: 'MAYUSCULAS_CON_GUION_BAJO · el valor no se toca · Esc cancela',
+  renaming: 'Renombrando…',
+  renamed: (a, b) => `${a} ahora se llama ${b} — el servicio que la lee se reinicia; si busca el nombre viejo, ya no lo encuentra`,
   nowPublic: 'Pública: se entrega sin pedirte permiso',
   nowPrivate: 'Privada: para entregarla te pide permiso',
 
@@ -299,7 +303,7 @@ const es = {
   deviceRenamed: (n) => `Ahora se llama «${n}»`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ pestaña', '↑↓', 'n nueva variable', 'i cargar varias',
-    ...(hasSecrets ? ['v ver valor', 't pública/privada', 'x quitar (variable/scope)'] : []),
+    ...(hasSecrets ? ['v ver valor', 't pública/privada', 'r renombrar', 'x quitar (variable/scope)'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   helpDevVars: ({ hasVars } = {}) => [
@@ -535,6 +539,10 @@ const en = {
   newVarPrivateAsk: 'Is it private?',
   makePublicConfirm: 'Make it public?',
   changingVisibility: 'Changing…',
+  renameLabel: (k) => `New name for ${k}`,
+  renameHint: 'UPPERCASE_WITH_UNDERSCORES · the value is not touched · Esc cancels',
+  renaming: 'Renaming…',
+  renamed: (a, b) => `${a} is now ${b} — the service that reads it restarts; if it looks for the old name, it will not find it`,
   nowPublic: 'Public: handed over without asking you',
   nowPrivate: 'Private: handing it over asks you first',
 
@@ -593,7 +601,7 @@ const en = {
   deviceRenamed: (n) => `Now called "${n}"`,
   helpSecrets: ({ hasSecrets } = {}) => [
     '←→ tab', '↑↓', 'n new variable', 'i load several',
-    ...(hasSecrets ? ['v show value', 't public/private', 'x remove (variable/scope)'] : []),
+    ...(hasSecrets ? ['v show value', 't public/private', 'r rename', 'x remove (variable/scope)'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   helpDevVars: ({ hasVars } = {}) => [
