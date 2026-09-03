@@ -324,3 +324,44 @@ test('el candado no quema el nonce', async () => {
   assert.equal(r.ok, true, 'el MISMO mensaje vale una vez abierta')
   assert.equal(desk.calls.filter(([c]) => c === 'revoke').length, 1)
 })
+
+/**
+ * LO QUE LA CONSOLA LLAMA TIENE QUE EXISTIR.
+ *
+ * `var.recipients` estaba documentada en `buildSealedVar`, la consola la llamaba en cada
+ * guardado… y no existía en ninguno de los dos lados. Resultado: crear una variable desde
+ * la consola remota contestaba «admin: invalid operation» — desde que el sellado se movió
+ * allí, o sea desde el 2026-09-02.
+ *
+ * El fallo fue que tres cosas que deben decir lo mismo se escribieron por separado: lo que
+ * la consola pide, lo que el módulo enruta, y lo que la bóveda ofrece. Esto las ata.
+ */
+test('todas las operaciones que la consola usa están permitidas y enrutadas', async () => {
+  const fs = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const raiz = fileURLToPath(new URL('..', import.meta.url))
+
+  const consola = fs.readFileSync(raiz + 'web/src/Console.vue', 'utf8')
+  const pedidas = [...consola.matchAll(/vaultAdmin\(\s*'([a-z.]+)'/g)].map((m) => m[1])
+  assert.ok(pedidas.length, 'algo tiene que pedir la consola')
+
+  const admin = fs.readFileSync(raiz + 'lib/src/admin.js', 'utf8')
+  for (const op of new Set(pedidas)) {
+    assert.ok(admin.includes(`'${op}'`), `la consola pide «${op}» y el módulo no la conoce`)
+  }
+})
+
+/**
+ * Y lo que el módulo enruta, la bóveda lo tiene que ofrecer. Es el otro extremo del mismo
+ * hueco: enrutar una operación hacia un método que no existe da un TypeError, no un «no».
+ */
+test('el mostrador de la bóveda ofrece lo que el módulo le va a pedir', async () => {
+  const fs = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const raiz = fileURLToPath(new URL('..', import.meta.url))
+  const vault = fs.readFileSync(raiz + 'src/vault.js', 'utf8')
+  for (const metodo of ['list', 'set', 'setMany', 'recipients']) {
+    assert.match(vault, new RegExp('async ' + metodo + ' \\('),
+      `el mostrador de variables no ofrece «${metodo}»`)
+  }
+})

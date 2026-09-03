@@ -49,36 +49,41 @@ const es = {
   // lo que hacen y no lo que implican»). «Sellar el acta» y «Administrar el perfil» eran
   // lo segundo: hay que saberse el modelo para traducirlos. Lo que hacen es admitir
   // aparatos y conectar o quitar dispositivos, y eso es lo que se lee ahora.
+  // EL TÍTULO ES EL NOMBRE DEL PERMISO, no una descripción (dueño, 2026-09-03: «deben
+  // decir siempre lo que SON»). Antes puse frases —«Conectar y quitar dispositivos»— y el
+  // resultado fue una lista donde no se sabía qué permiso era cuál ni cómo nombrarlo para
+  // el CLI. Lo que hace cada uno va DEBAJO, que es su sitio.
   capName: {
-    // Lleva el cajón dentro: «las claves de proxy» dice QUÉ abre; «lee sus claves» te deja
-    // preguntándote cuáles. Solo se le ofrece a un servicio (los que tienen `cn`).
-    secrets: (cn) => `Leer las claves de «${cn}»`,
-    sign: 'Entrar a las apps como tú',
-    store: 'Guardar tus datos',
-    read: 'Leer tus datos',
-    admin: 'Conectar y quitar dispositivos',
-    passwords: 'Pedir tus contraseñas',
-    approve: 'Autorizar a otros aparatos',
-    sealer: 'Admitir aparatos sin esta bóveda',
-    unattended: 'Llevarse claves sin pedirte permiso',
-    replica: 'Entregar tus claves con la bóveda apagada'
+    secrets: (cn) => `secretos «${cn}»`,
+    sign: 'firma',
+    store: 'guarda',
+    read: 'lee',
+    admin: 'administra',
+    passwords: 'contrasenas',
+    approve: 'aprueba',
+    sealer: 'sella',
+    unattended: 'desatendido',
+    replica: 'replica'
   },
+  // CADA PISTA SE SOSTIENE SOLA. Antes colgaban del título —«hacerlo desde ese aparato»
+  // continuaba a «Conectar y quitar dispositivos»—; ahora el título es la palabra que se
+  // teclea, así que la pista tiene que decir la frase entera.
   capHint: {
-    secrets: (cn) => `abrir SU cajón y ninguno más: las variables de «${cn}»`,
+    secrets: (cn) => `abrir el cajón de «${cn}» y ningún otro`,
     sign: 'usar tu identidad en las apps del ecosistema',
-    store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
+    store: 'escribir en tu bóveda: perfil, contenido, datos',
     read: 'ver lo que guardaste',
-    admin: 'hacerlo desde ese aparato, sin venir aquí. No puede cambiar permisos',
-    passwords: 'el gestor: pedir una credencial por sitio, nunca la lista entera',
+    admin: 'conectar y quitar aparatos desde ahí, sin venir aquí. No puede cambiar permisos',
+    passwords: 'pedir una contraseña por sitio, nunca la lista entera',
     approve: 'dar el visto bueno cuando otro aparato pide claves privadas',
     // Sellar solo significa algo en un aparato que HAGA de bóveda (otra máquina con el
     // daemon, o un navegador que se puso de bóveda). En un teléfono normal se concede y no
     // lo usa nadie. Se enseña igual, y se dice: verlo desactivado explica el modelo;
     // esconderlo hacía creer que no existe (dueño, 2026-08-31).
     sealer: 'admitir aparatos y cambiar permisos él solo cuando esta bóveda no está. Solo sirve en otra BÓVEDA',
-    unattended: 'llevarse claves privadas SIN preguntarte. Apagado, cada vez que arranque tienes que aprobarlo desde un aparato con «Aprobar»',
+    unattended: 'llevarse claves privadas sin preguntarte. Apagado, hay que aprobarlo desde un aparato con «aprueba» cada vez que arranque',
     // El replicador reparte y no puede nada más: no abre lo que entrega ni cambia nada.
-    replica: 'las entrega cerradas, tal como salieron de aquí: no puede abrirlas ni cambiar nada. Solo sirve en otra máquina'
+    replica: 'repartir los sobres que esta bóveda ya firmó, tal como salieron: no puede abrirlos ni cambiar nada. Solo sirve en otra máquina'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
@@ -380,28 +385,32 @@ const en = {
   capsSaved: (n) => `${n} change(s) saved in one go`,
   capsNothing: 'You have not changed anything',
   capsDiscard: 'Discard the unsaved changes?',
+  // El título es el NOMBRE del permiso, el mismo que se teclea. Ver la nota en el bloque
+  // español: describirlo dejaba una lista donde no se sabía qué permiso era cuál.
   capName: {
-    secrets: (cn) => `Read the «${cn}» keys`,
-    sign: 'Sign in to apps as you',
-    store: 'Save your data',
-    read: 'Read your data',
-    admin: 'Connect and remove devices',
-    passwords: 'Ask for your passwords',
-    approve: 'Authorise other devices',
-    sealer: 'Admit devices without this vault',
-    unattended: 'Take keys without asking you',
-    replica: 'Hand out your keys while the vault is off'
+    secrets: (cn) => `secrets «${cn}»`,
+    sign: 'sign',
+    store: 'store',
+    read: 'read',
+    admin: 'admin',
+    passwords: 'passwords',
+    approve: 'approve',
+    sealer: 'sealer',
+    unattended: 'unattended',
+    replica: 'replica'
   },
+  // Cada pista se sostiene sola: el título es la palabra, no una frase que continuar.
   capHint: {
+    secrets: (cn) => `open the «${cn}» drawer and no other`,
     sign: 'use your identity across the ecosystem apps',
-    store: 'write to your vault (profile, content, sensitive data)',
+    store: 'write to your vault: profile, content, data',
     read: 'see what you saved',
-    admin: 'do it from that device, without coming here. It cannot change permissions',
-    passwords: 'the manager: ask for one credential per site, never the whole list',
+    admin: 'connect and remove devices from there, without coming here. It cannot change permissions',
+    passwords: 'ask for one password per site, never the whole list',
     approve: 'give the go-ahead when another device asks for private keys',
     sealer: 'admit devices and change permissions on its own when this vault is away. Only useful on another VAULT',
-    unattended: 'take private keys WITHOUT asking you. Off, you must approve it from a device with «Approve» every time it starts',
-    replica: 'it hands them over sealed, exactly as they left here: it cannot open them or change anything. Only useful on another machine'
+    unattended: 'take private keys without asking you. Off, it must be approved from a device with «approve» every time it starts',
+    replica: 'hand out the envelopes this vault already signed, exactly as they left: it cannot open them or change anything. Only useful on another machine'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,

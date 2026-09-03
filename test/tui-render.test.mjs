@@ -6,6 +6,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { makeTheme, widthOf, trunc } from '../src/tui/term.js'
 import { __test as V } from '../src/tui/app.js'
 
@@ -470,27 +471,34 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   })
   const text = V.capsRows(st, t).map((r) => r.text).join('\n')
   assert.match(text, /AB12-CD34/)
-  assert.match(text, /\[x\].*Entrar a las apps como tú/, 'lo que tiene va marcado')
-  assert.match(text, /\[ \].*Conectar y quitar dispositivos/, 'lo que no tiene, sin marcar')
+  // EL TÍTULO ES EL NOMBRE DEL PERMISO, y es la palabra que se teclea en `caps <ID> +…`
+  // (dueño, 2026-09-03: «deben decir siempre lo que SON»). Describirlo en su lugar dejaba
+  // una lista donde no se sabía qué permiso era cuál ni cómo nombrarlo fuera de aquí.
+  assert.match(text, /\[x\] +firma$/m, 'lo que tiene va marcado')
+  assert.match(text, /\[ \] +administra$/m, 'lo que no tiene, sin marcar')
   assert.match(text, /sin venir aquí/, 'y debajo, el detalle')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
-  // EL NOMBRE DICE EL ACTO, NO LA CONSECUENCIA (dueño, 2026-09-02). «Sellar el acta» y
-  // «Administrar el perfil» obligaban a saberse el modelo para entender qué concedes.
-  assert.ok(!/\bacta\b|\bSellar\b/i.test(text), 'los nombres no nombran el acta: ' + text)
+  // Y la palabra tiene que servir en la CLI: si el título dejara de coincidir con lo que
+  // acepta `caps`, la pantalla explicaría un permiso que después no se puede conceder.
+  const ctl = fs.readFileSync(new URL('../src/ctl.js', import.meta.url), 'utf8')
+  for (const palabra of ['firma', 'guarda', 'lee', 'administra', 'aprueba', 'contrasenas',
+    'sella', 'desatendido', 'replica']) {
+    assert.match(text, new RegExp('^ \\[[x ]\\] +' + palabra + '$', 'm'),
+      'la pantalla nombra «' + palabra + '»')
+    assert.match(ctl, new RegExp('[{,\\s]' + palabra + ':'),
+      '`caps <ID> +' + palabra + '` tiene que existir')
+  }
   // Se puede elegir cada permiso, y están LOS NUEVE que el acta reconoce. Eran cinco:
   // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
   // pantalla que se llama «permisos»; `desatendido` era peor —una marca local de la
   // bóveda, invisible aquí y con el sentido invertido—; y `replica` entró el 2026-09-02.
   // Si el acta gana o pierde uno, esto se pone rojo a propósito.
   assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 9)
-  assert.match(text, /\[ \].*Admitir aparatos sin esta bóveda/, 'sella se ve aunque esté apagado')
-  assert.match(text, /Solo sirve en otra BÓVEDA/, 'y se dice dónde significa algo')
-  assert.match(text, /\[ \].*Entregar tus claves con la bóveda apagada/, 'y el replicador también')
+  assert.match(text, /Solo sirve en otra BÓVEDA/, 'de `sella` se dice dónde significa algo')
   // El que decide si un servidor se lleva tus claves solo. Verlo APAGADO es media
   // explicación: dice que hoy te lo pregunta.
-  assert.match(text, /\[ \].*Llevarse claves sin pedirte permiso/, 'desatendido se ve aunque esté apagado')
-  assert.match(text, /SIN preguntarte/, 'y se dice qué significa tenerlo encendido')
+  assert.match(text, /sin preguntarte/, 'y de `desatendido`, qué significa tenerlo encendido')
 })
 
 /**
@@ -783,8 +791,8 @@ test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', (
   })
   const filas = V.capsRows(servicio, t)
   const texto = filas.map((r) => r.text).join('\n')
-  assert.match(texto, /\[x\].*Leer las claves de «proxy»/, 'se ve, marcado, y dice QUÉ cajón')
-  assert.match(texto, /SU cajón y ninguno más/, 'y que no puede abrir otro')
+  assert.match(texto, /\[x\].*secretos «proxy»/, 'se ve, marcado, y dice QUÉ cajón')
+  assert.match(texto, /y ningún otro/, 'y que no puede abrir otro')
   assert.equal(filas.filter((r) => r.sel).length, 10, 'los nueve de aparato + el suyo')
   assert.equal(filas.find((r) => r.meta?.cap === 'secrets') !== undefined, true)
 

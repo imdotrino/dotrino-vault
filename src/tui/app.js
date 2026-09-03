@@ -390,6 +390,8 @@ function capsRows (st, t) {
     // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
     const cambia = has.has(cap) !== real.has(cap)
     if (cambia) tocados++
+    // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +administra`—
+    // así que no hay que repetirlo al lado. Lo que hace va debajo.
     const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })
     const hint = typeof i.capHint[cap] === 'function' ? i.capHint[cap](member.cn) : i.capHint[cap]
