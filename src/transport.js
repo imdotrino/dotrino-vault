@@ -46,14 +46,33 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   // su `identify` pisaba al anterior. Sigue siendo el cliente oficial del paquete.
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
 
-  // WebRTC off: el vault usa el proxy como transporte (RTCPeerConnection no existe
-  // en Node). Reconexión prácticamente ilimitada: un daemon de larga duración no
-  // debe rendirse tras unos intentos.
+  /**
+   * EL CANAL DIRECTO, ENCENDIDO Y CON LA PUERTA CERRADA.
+   *
+   * Encendido porque es el escalón 2 de la regla del transporte (`CLAUDE.md`) y en Node ya
+   * hay con qué (`werift`, que el pilar carga solo). Si no lo hubiera, negociar falla y se
+   * sigue por el proxio — el escalón 4 siempre está.
+   *
+   * Y con la puerta cerrada desde el primer día, que es lo que hace defendible encenderlo:
+   * **solo se le negocia a quien está en el acta.** Aceptar una señal arranca DTLS, ICE y
+   * SCTP, o sea código que parsea red no confiable, dentro del proceso que guarda la
+   * maestra. Quien decide si eso corre no puede ser el que llama a la puerta.
+   *
+   * Reconexión prácticamente ilimitada: un daemon de larga duración no debe rendirse tras
+   * unos intentos.
+   */
+  // La puerta tiene que decidir AL INSTANTE (la señal llega y o se atiende o no), y pedir
+  // el acta es asíncrono. Así que se guarda una copia y se refresca donde ya se refresca
+  // todo: en `identify`, que es lo que corre cada vez que el acta cambia o se reconecta.
+  let actaVista = null
+  const enElActa = (token) => {
+    // SIN ACTA NO SE NEGOCIA. No se sabe quién es nadie, y en la duda no se arranca a
+    // parsear red no confiable. Se sigue por el proxio, que es el escalón que siempre está.
+    if (!actaVista) return false
+    return (actaVista.members || []).some((m) => m?.pub === token)
+  }
   const client = new WebSocketProxyClient({
-  // WEBRTC SOLO DONDE EXISTE (ver `lib/src/service.js`): en Node no hay
-  // `RTCPeerConnection` y encenderlo reventaría al negociar; en un navegador es nativo y es
-  // el camino directo que hay que preferir. Se mira, en vez de apagarlo para siempre.
-    url, enableWebRTC: typeof globalThis.RTCPeerConnection === 'function', autoReconnect: true,
+    url, enableWebRTC: true, acceptDirectFrom: enElActa, autoReconnect: true,
     maxReconnectAttempts: 100000, reconnectDelay: 4000
   })
 
@@ -62,6 +81,7 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   const identify = async () => {
     if (!client.token) return
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    actaVista = record   // la copia que mira la puerta del canal directo
     const comm = commKey?.pub?.() || null
     // ¿Nos nombra el acta? Con `cn` o sin él, lo que el proxio mira es la pertenencia.
     const esMiembro = comm && (record?.members || []).some((m) => m?.pub === comm)
