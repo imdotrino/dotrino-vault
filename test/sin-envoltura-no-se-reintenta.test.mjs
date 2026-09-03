@@ -33,3 +33,17 @@ test('y lo que exige que alguien haga algo tampoco se reintenta', () => {
     assert.equal(isFinal(new Error(m)), true, m)
   }
 })
+
+/**
+ * UN VALOR EN CLARO TAMPOCO SE ARREGLA REINTENTANDO.
+ *
+ * Desde el 2026-09-02 toda variable viaja sellada, también las públicas. Una guardada
+ * antes de eso llega en claro y el agente rechaza el bundle entero — con razón. Lo que
+ * estaba mal era tratarlo como transitorio: el cajón `aws-admin` volvía a pedir cada
+ * cinco segundos y el teléfono timbraba en cada vuelta, aunque el dueño aprobara todas.
+ * Sellarla exige abrir la bóveda y volver a escribirla; ninguna espera lo hace.
+ */
+test('un valor en claro NO se reintenta: se corta', () => {
+  assert.equal(isFinal({ code: 'plaintext-var', message: 'cualquier cosa' }), true)
+  assert.equal(isFinal({ code: 'plaintext-var', message: '' }), true)
+})
