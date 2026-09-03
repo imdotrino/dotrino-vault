@@ -19,6 +19,8 @@ import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
 import { shouldNotifyRevoked } from '../lib/src/revocation.js'
+// El sobre del gestor, el mismo que usan la bóveda-en-pestaña y la extensión.
+import { identitySealing } from '@dotrino/passmanager'
 import { createTransport, masterPubkeyOf } from './transport.js'
 import { startSealersPublisher } from './sealers.js'
 import { assertKeyOwnsDir } from './keyowner.js'
@@ -1200,30 +1202,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * EL SELLADO del gestor: la misma cripto de los sobres del ecosistema
    * (`@dotrino/identity/content`), atada a la llave de cifrado de esta bóveda.
    *
-   * Va aquí y no en el cliente del transporte porque el cliente del vault es UNO y lo
-   * comparte todo: el protocolo de la CA viaja en claro a propósito (un enrolamiento es
-   * público hasta que hay cert). Lo que se sella es lo del gestor, y por eso `isSealed`
-   * mira su marca y no otra.
+   * Lo arma el PILAR (`identitySealing`), que es la MISMA pieza que usan las otras dos
+   * bóvedas —la de la pestaña y la de dentro de la extensión—. Estaba escrito a mano aquí,
+   * y son las tres puntas del mismo sobre: tres copias son dos que se pueden quedar atrás,
+   * y ese fallo no hace ruido — la petición sale, al otro lado «no es para mí», y desde
+   * fuera se ve como que nadie respondió.
+   *
+   * NO se pone `requireSealed` en el cliente, y no es un olvido: el cliente del vault es
+   * UNO y lo comparte todo, y el protocolo de la CA viaja en claro a propósito (un
+   * enrolamiento es público hasta que hay cert). Lo que corta aquí es `VaultResponder`,
+   * que tira lo que llegue sin la marca `sealed`. Por eso `isSealed` mira la marca del
+   * gestor y no otra.
    *
    * Sin esto la bóveda RECIBÍA los sobres y los tiraba —el cliente no tenía con qué
    * abrirlos— y el aparato se quedaba esperando sin que nada lo dijera.
    */
-  const passwordSealing = {
-    async seal (msg, peerEncPub) {
-      if (!peerEncPub) throw Object.assign(new Error('no encryption key'), { code: 'unsealed' })
-      return {
-        app: 'passmanager',
-        // Destinatarios como OBJETOS y no como llaves sueltas: `encrypt` expande cada
-        // uno a todos los aparatos de esa persona, y una cadena a secas se le cae por
-        // el `continue` sin envolver nada — el sobre salía vacío y sin error.
-        sealed: await identity.encrypt([{ encryptionPubkey: peerEncPub }], JSON.stringify(msg)),
-        from: await identity.getEncryptionPubkey()
-      }
-    },
-    // `decrypt` devuelve `{ plaintext }`, no la cadena.
-    async open (env) { return JSON.parse((await identity.decrypt(env.from, null, env.sealed)).plaintext) },
-    isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed
-  }
+  const passwordSealing = identitySealing(identity)
   const startPasswordDesk = async () => {
     if (passwords || !passwordDevices().length) return
     const { createPasswordDesk } = await import('./passwords.js')
