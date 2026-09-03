@@ -71,13 +71,47 @@ test('sealKeyAt devuelve llaves de sellado y JAMÁS un miembro', () => {
  */
 test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
   // La lista va a mano, no derivada: que crezca sin que nadie la mire es el fallo que
-  // esta prueba existe para impedir. \`unattended\` entró el 2026-09-01.
-  assert.deepEqual([...CAPS].sort(), ['admin', 'approve', 'passwords', 'read', 'sealer', 'secrets', 'sign', 'store', 'unattended'])
-  for (const c of ['seal', 'transport', 'serve', 'replica']) {
+  // esta prueba existe para impedir. `unattended` entró el 2026-09-01 y `replica` el
+  // 2026-09-02.
+  assert.deepEqual([...CAPS].sort(),
+    ['admin', 'approve', 'passwords', 'read', 'replica', 'sealer', 'secrets', 'sign', 'store', 'unattended'])
+  for (const c of ['seal', 'transport', 'serve']) {
     assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar el transporte no es leer`)
   }
   // Y `sealer`, que sí está, es sellar el ACTA — no la llave que firma las respuestas.
   assert.ok(CAPS.includes('sealer'))
+})
+
+/**
+ * `replica` ESTABA EN LA LISTA PROHIBIDA DE ARRIBA, y el dueño decidió lo contrario el
+ * 2026-09-02: un replicador **sí** es un miembro con su permiso. El razonamiento que lo
+ * prohibía —«firmar el transporte no es leer»— sigue siendo el correcto; lo que cambia es
+ * cómo se garantiza.
+ *
+ * Antes se garantizaba NO CREANDO el permiso. Ahora existe, así que la garantía es la
+ * misma que sostiene a la llave de comunicación: **entra sin `encPub`**, y sin pública de
+ * cifrado no hay a dónde envolverle nada. Regla del dueño, textual: *«el replicador
+ * recibirá todos los sobres que se generen, ningún sobre firmado para él»*.
+ *
+ * Y no basta con no darle `encPub`: tampoco puede llevar `secrets`, que es el permiso que
+ * abre un cajón. Las dos cosas, por la misma razón por la que la llave de comunicación
+ * necesitó dos cerrojos y no uno.
+ */
+test('un replicador reparte los sobres y no puede abrir ninguno', () => {
+  const conReplica = {
+    ...acta,
+    members: [
+      ...acta.members,
+      // Tal y como lo mete el enrolamiento de un replicador: sin `encPub` y sin `cn`.
+      { pub: 'REPLICADOR', encPub: null, cn: null, caps: ['replica'] }
+    ]
+  }
+  const m = conReplica.members.find((x) => x.pub === 'REPLICADOR')
+  assert.equal(m.encPub, null, 'sin pública de cifrado no hay a dónde envolverle un sobre')
+  assert.equal(memberCanReadSecrets(conReplica, 'REPLICADOR', 'proxy'), false,
+    'y tampoco abre un cajón: repartir no es leer')
+  // Ni el suyo propio, porque no tiene ninguno: un replicador no lleva `cn`.
+  assert.equal(memberCanReadSecrets(conReplica, 'REPLICADOR', 'vault'), false)
 })
 
 /**

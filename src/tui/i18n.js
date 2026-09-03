@@ -39,45 +39,52 @@ const es = {
   // PERMISOS de un dispositivo (§9.1: se dice el beneficio, no el scope del cert).
   titleCaps: 'Permisos del dispositivo',
   capsFor: (id, name) => `Permisos de ${id}${name ? ' · ' + name : ''}`,
-  capsNoMember: '  (este dispositivo ya no está en el acta)',
+  capsNoMember: '  (este dispositivo ya no está en el perfil)',
   capsApplyHint: 'Enter marca o desmarca · G guarda los cambios · Esc sale',
-  capsPending: (n) => `${n} cambio(s) sin guardar (*) · G para guardarlos en UNA sola acta · Esc para descartarlos`,
-  capsSaved: (n) => `${n} cambio(s) guardados en una sola acta`,
+  capsPending: (n) => `${n} cambio(s) sin guardar (*) · G para guardarlos todos de una vez · Esc para descartarlos`,
+  capsSaved: (n) => `${n} cambio(s) guardados de una vez`,
   capsNothing: 'No has cambiado nada',
   capsDiscard: '¿Descartar los cambios sin guardar?',
+  // EL NOMBRE DICE EL ACTO, NO LA CONSECUENCIA (dueño, 2026-09-02: «que digan exactamente
+  // lo que hacen y no lo que implican»). «Sellar el acta» y «Administrar el perfil» eran
+  // lo segundo: hay que saberse el modelo para traducirlos. Lo que hacen es admitir
+  // aparatos y conectar o quitar dispositivos, y eso es lo que se lee ahora.
   capName: {
     // Lleva el cajón dentro: «las claves de proxy» dice QUÉ abre; «lee sus claves» te deja
     // preguntándote cuáles. Solo se le ofrece a un servicio (los que tienen `cn`).
     secrets: (cn) => `Leer las claves de «${cn}»`,
-    sign: 'Firmar como tú',
+    sign: 'Entrar a las apps como tú',
     store: 'Guardar tus datos',
     read: 'Leer tus datos',
-    admin: 'Administrar el perfil',
+    admin: 'Conectar y quitar dispositivos',
     passwords: 'Pedir tus contraseñas',
-    approve: 'Aprobar pedidos',
-    sealer: 'Sellar el acta',
-    unattended: 'Recibir claves sin aprobación'
+    approve: 'Autorizar a otros aparatos',
+    sealer: 'Admitir aparatos sin esta bóveda',
+    unattended: 'Llevarse claves sin pedirte permiso',
+    replica: 'Entregar tus claves con la bóveda apagada'
   },
   capHint: {
     secrets: (cn) => `abrir SU cajón y ninguno más: las variables de «${cn}»`,
     sign: 'usar tu identidad en las apps del ecosistema',
     store: 'escribir en tu bóveda (perfil, contenido, datos sensibles)',
     read: 'ver lo que guardaste',
-    admin: 'conectar y quitar dispositivos desde ese aparato, sin venir aquí',
+    admin: 'hacerlo desde ese aparato, sin venir aquí. No puede cambiar permisos',
     passwords: 'el gestor: pedir una credencial por sitio, nunca la lista entera',
     approve: 'dar el visto bueno cuando otro aparato pide claves privadas',
     // Sellar solo significa algo en un aparato que HAGA de bóveda (otra máquina con el
     // daemon, o un navegador que se puso de bóveda). En un teléfono normal se concede y no
     // lo usa nadie. Se enseña igual, y se dice: verlo desactivado explica el modelo;
     // esconderlo hacía creer que no existe (dueño, 2026-08-31).
-    sealer: 'admitir aparatos y cambiar permisos él solo, si esta bóveda no está. Solo sirve en otra BÓVEDA',
-    unattended: 'llevarse claves privadas SIN preguntarte. Apagado, cada vez que arranque tienes que aprobarlo desde un aparato con «Aprobar»'
+    sealer: 'admitir aparatos y cambiar permisos él solo cuando esta bóveda no está. Solo sirve en otra BÓVEDA',
+    unattended: 'llevarse claves privadas SIN preguntarte. Apagado, cada vez que arranque tienes que aprobarlo desde un aparato con «Aprobar»',
+    // El replicador reparte y no puede nada más: no abre lo que entrega ni cambia nada.
+    replica: 'las entrega cerradas, tal como salieron de aquí: no puede abrirlas ni cambiar nada. Solo sirve en otra máquina'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
   capTaken: (n) => `Quitado: ${n}`,
   applyingCaps: 'Aplicando…',
-  loadingMembers: 'Cargando el acta…',
+  loadingMembers: 'Cargando los dispositivos…',
   helpCaps: ['↑↓', 'Enter marcar', 'G guardar', 'F5 refrescar', 'Esc dispositivos', 'l English', 'q salir'],
   // Perfil del usuario (lo que sincronizan los dispositivos). Solo lectura: se edita en
   // el aparato, no en la máquina donde vive la bóveda.
@@ -152,7 +159,7 @@ const es = {
   noDevices: '  (sin dispositivos enrolados — pulsa P para emparejar uno)',
   noLabel: '(sin etiqueta)',
   // Está en el acta y no puede entrar: o le retiraron el certificado, o se le venció.
-  deviceNoAccess: 'SIN ACCESO — está en el acta pero no puede entrar',
+  deviceNoAccess: 'SIN ACCESO — está en el perfil pero no puede entrar',
   deviceDebt: (n) => `no abre ${n}`,
   thisVault: 'esta bóveda (manda ella)',
   cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
@@ -165,7 +172,7 @@ const es = {
   noPendingToReject: 'No hay ningún dispositivo pendiente para rechazar',
   rejecting: 'Rechazando…',
   deviceRejected: 'Dispositivo rechazado',
-  revokeConfirm: (id) => `¿Quitar ${id} del perfil? Sale del acta y se le retiran los certificados ya. Lo que tenga guardado se le borra cuando se conecte: si está apagado, sigue ahí hasta entonces.`,
+  revokeConfirm: (id) => `¿Quitar ${id} del perfil? Pierde el acceso ahora mismo. Lo que tenga guardado se le borra cuando se conecte: si está apagado, sigue ahí hasta entonces.`,
   revoking: 'Revocando…',
   deviceRevoked: (id) => `Revocado ${id}`,
   approveLabel: (id) => `Código que MUESTRA el dispositivo ${id}`,
@@ -213,11 +220,15 @@ const es = {
   },
   loadNothing: 'No se cargó nada:',
   varPublic: 'pública',
-  newVarPublicAsk: '¿Que su valor se pueda VER desde la consola remota? (las demás no salen de esta máquina)',
-  makePublicConfirm: '¿Dejar que su valor se vea desde la consola remota?',
-  changingVisibility: 'Cambiando visibilidad…',
-  nowPublic: 'Ahora su valor se puede ver desde la consola remota',
-  nowPrivate: 'Ahora su valor no sale de esta máquina',
+  // LA PREGUNTA ES LA PREGUNTA, sin explicar la consecuencia (dueño, 2026-09-02:
+  // «debe decir: ¿la variable es privada? y punto»). Antes decía «¿que su valor se pueda
+  // VER desde la consola remota?», que además ya era FALSO: desde el 2026-09-02 las dos se
+  // guardan cifradas igual y `pública` solo dice que se entrega sin pedirte permiso.
+  newVarPrivateAsk: '¿Es privada?',
+  makePublicConfirm: '¿Hacerla pública?',
+  changingVisibility: 'Cambiando…',
+  nowPublic: 'Pública: se entrega sin pedirte permiso',
+  nowPrivate: 'Privada: para entregarla te pide permiso',
 
   // variables de UN aparato (Dispositivos → tecla e). Las del scope las comparten todos
   // los aparatos que sirven ese namespace; estas las lee solo él, y le ganan.
@@ -332,11 +343,11 @@ const es = {
   // El código NO es la contraseña de la bóveda: son los seis dígitos que el aparato
   // enseña en su pantalla. Si no coincide, la bóveda no firma nada y el aparato sigue
   // esperando ahí, así que se puede volver a intentar con A.
-  errWrongCode: 'El código no coincide con el que muestra el dispositivo: no se emitió ningún certificado. Míralo otra vez y pulsa A.',
+  errWrongCode: 'El código no coincide con el que muestra el dispositivo: no ha entrado nadie. Míralo otra vez y pulsa A.',
   errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
   errWrongPassword: (n) => `Contraseña incorrecta${n ? ` — van ${n} intentos fallidos` : ''}`,
   errTooManyTries: (s) => `Demasiados intentos: espera ${s || '?'} s antes de volver a probar`,
-  errMasterWithMembers: 'Esta bóveda es el Master de esta cuenta y hay otros dispositivos: pásale primero el Master a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a firmar el acta.'
+  errMasterWithMembers: 'Esta bóveda es la que manda en esta cuenta y hay otros dispositivos: pásale primero el mando a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a darles permisos.'
 }
 
 // ---------------------------------- inglés ----------------------------------
@@ -362,35 +373,37 @@ const en = {
   capsNoMember: '  (this device is no longer in the record)',
   capsApplyHint: 'Enter ticks or unticks · G saves · Esc leaves',
   capsPending: (n) => `${n} unsaved change(s) (*) · G to save them in ONE record · Esc to discard`,
-  capsSaved: (n) => `${n} change(s) saved in a single record`,
+  capsSaved: (n) => `${n} change(s) saved in one go`,
   capsNothing: 'You have not changed anything',
   capsDiscard: 'Discard the unsaved changes?',
   capName: {
     secrets: (cn) => `Read the «${cn}» keys`,
-    sign: 'Sign as you',
+    sign: 'Sign in to apps as you',
     store: 'Save your data',
     read: 'Read your data',
-    admin: 'Manage the profile',
+    admin: 'Connect and remove devices',
     passwords: 'Ask for your passwords',
-    approve: 'Approve requests',
-    sealer: 'Seal the record',
-    unattended: 'Take keys without approval'
+    approve: 'Authorise other devices',
+    sealer: 'Admit devices without this vault',
+    unattended: 'Take keys without asking you',
+    replica: 'Hand out your keys while the vault is off'
   },
   capHint: {
     sign: 'use your identity across the ecosystem apps',
     store: 'write to your vault (profile, content, sensitive data)',
     read: 'see what you saved',
-    admin: 'connect and remove devices from that device, without coming here',
+    admin: 'do it from that device, without coming here. It cannot change permissions',
     passwords: 'the manager: ask for one credential per site, never the whole list',
     approve: 'give the go-ahead when another device asks for private keys',
-    sealer: 'admit devices and change permissions on its own if this vault is gone. Only useful on another VAULT',
-    unattended: 'take private keys WITHOUT asking you. Off, you must approve it from a device with «Approve» every time it starts'
+    sealer: 'admit devices and change permissions on its own when this vault is away. Only useful on another VAULT',
+    unattended: 'take private keys WITHOUT asking you. Off, you must approve it from a device with «Approve» every time it starts',
+    replica: 'it hands them over sealed, exactly as they left here: it cannot open them or change anything. Only useful on another machine'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,
   capTaken: (n) => `Removed: ${n}`,
   applyingCaps: 'Applying…',
-  loadingMembers: 'Loading the record…',
+  loadingMembers: 'Loading the devices…',
   helpCaps: ['↑↓', 'Enter tick', 'G save', 'F5 refresh', 'Esc devices', 'l Español', 'q quit'],
   loadingProfile: 'Loading profile…',
   noProfile: '  (this vault has no profile yet)',
@@ -474,7 +487,7 @@ const en = {
   noPendingToReject: 'No device is waiting to be rejected',
   rejecting: 'Rejecting…',
   deviceRejected: 'Device rejected',
-  revokeConfirm: (id) => `Remove ${id} from the profile? It leaves the record and its certificates are withdrawn right away. What it has stored is erased when it connects: if it is switched off, it stays there until then.`,
+  revokeConfirm: (id) => `Remove ${id} from the profile? It loses access right away. What it has stored is erased when it connects: if it is switched off, it stays there until then.`,
   revoking: 'Revoking…',
   deviceRevoked: (id) => `Revoked ${id}`,
   approveLabel: (id) => `Code SHOWN by device ${id}`,
@@ -519,11 +532,11 @@ const en = {
   },
   loadNothing: 'Nothing was loaded:',
   varPublic: 'public',
-  newVarPublicAsk: 'Let its value be SEEN from the remote console? (the rest never leave this machine)',
-  makePublicConfirm: 'Let its value be seen from the remote console?',
-  changingVisibility: 'Changing visibility…',
-  nowPublic: 'Its value can now be seen from the remote console',
-  nowPrivate: 'Its value no longer leaves this machine',
+  newVarPrivateAsk: 'Is it private?',
+  makePublicConfirm: 'Make it public?',
+  changingVisibility: 'Changing…',
+  nowPublic: 'Public: handed over without asking you',
+  nowPrivate: 'Private: handing it over asks you first',
 
   // variables de UN aparato (Dispositivos → tecla e)
   titleDevVars: 'Device variables',
@@ -618,7 +631,7 @@ const en = {
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
-  errWrongCode: 'The code does not match the one shown by the device: no certificate was issued. Check it and press A again.',
+  errWrongCode: 'The code does not match the one shown by the device: nobody got in. Check it and press A again.',
   errProfileLocked: 'Vault locked: open it with its password',
   errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,
   errTooManyTries: (s) => `Too many attempts: wait ${s || '?'} s before trying again`,

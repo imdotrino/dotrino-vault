@@ -37,6 +37,7 @@ import { qrToString } from '../qr.js'
 import { dict, otherLang, loadLang, saveLang } from './i18n.js'
 import * as vc from '../vaultControl.js'
 import { VERSION } from '../version.js'
+import { DEVICE_CAPS } from '@dotrino/identity/acta'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -338,7 +339,18 @@ function pairModeRows (st, t) {
  * permiso que hay que entender para un servidor: dice si esa máquina se lleva tus claves
  * privadas sola o si te lo pregunta. Verlo apagado es la mitad del mensaje.
  */
-const CAPS_ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended']
+/**
+ * EL ORDEN LO ELIGE ESTA PANTALLA; LA LISTA LA MANDA EL ACTA.
+ *
+ * Antes esto era una lista suelta escrita a mano, y por eso cada permiso nuevo se quedó
+ * invisible aquí durante semanas —`sealer`, `unattended` y `secrets`, tres veces el mismo
+ * fallo—. Ahora el orden se cura a mano, que es una decisión de diseño, pero lo que no
+ * esté nombrado se añade al final: un permiso puede salir en mal sitio, nunca desaparecer.
+ * `test/tui-permisos.test.mjs` exige además que todos tengan nombre en los dos idiomas.
+ */
+const ORDEN = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended', 'replica']
+const CAPS_ORDER = [...ORDEN.filter((c) => DEVICE_CAPS.includes(c)),
+  ...DEVICE_CAPS.filter((c) => !ORDEN.includes(c))]
 
 /**
  * Los permisos que se le pueden dar A ESTE miembro, en orden.
@@ -1349,6 +1361,8 @@ async function toggleVisibility (term, st, wasPublic, apply) {
     if (r.ok) { flash(st, wasPublic ? i.nowPrivate : i.nowPublic); st.secrets = r.v }
   }
   if (wasPublic) return run()
+  // Solo se pregunta al ABRIRLA. Volverla privada es la dirección segura y se hace sin
+  // confirmar: pedir permiso para cerrar algo solo entrena a decir que sí.
   setConfirm(st, { text: i.makePublicConfirm, onYes: run, onNo: () => { st.confirm = null } })
 }
 
@@ -1394,17 +1408,23 @@ async function onKeyDevVars (term, st, key) {
 }
 
 /**
- * Al crear una variable se PREGUNTA si su valor puede salir de esta máquina. Se pregunta
- * al crearla, y no después, porque es cuando quien la escribe sabe qué es: un puerto se
- * puede enseñar, una llave de producción no. La respuesta por defecto —Enter, o `n`— es
- * la privada.
+ * Al crear una variable se pregunta SI ES PRIVADA. Se pregunta al crearla, y no después,
+ * porque es cuando quien la escribe sabe qué es: un puerto se puede enseñar, una llave de
+ * producción no.
+ *
+ * OJO AL SENTIDO. Antes se preguntaba lo contrario («¿que se pueda ver?») y el defecto
+ * —Enter o Esc— caía en `onNo`, que era la privada, o sea la segura. Al dar la vuelta a la
+ * pregunta, ese mismo defecto pasaría a ser la PÚBLICA sin que nadie lo notara: cada
+ * variable nueva se entregaría sin pedir permiso. Por eso el defecto se declara aquí
+ * (`defaultYes`) en vez de heredarse del manejador de teclas.
  */
 function askVisibility (term, st, done) {
   const i = L(st)
   setConfirm(st, {
-    text: i.newVarPublicAsk,
-    onYes: () => { st.confirm = null; done(true) },
-    onNo: () => { st.confirm = null; done(false) }
+    text: i.newVarPrivateAsk,
+    defaultYes: true,
+    onYes: () => { st.confirm = null; done(false) },   // privada
+    onNo: () => { st.confirm = null; done(true) }      // pública
   })
 }
 
@@ -1554,7 +1574,14 @@ async function onConfirmKey (st, key) {
   // La tecla es `y` (yes) en los dos idiomas —como el resto, mnemónico inglés—;
   // `s` (sí) se sigue aceptando por costumbre, pero no se anuncia en la ayuda.
   if (ch === 's' || ch === 'y') { const f = cf.onYes; st.confirm = null; await f?.() }
-  else if (ch === 'n' || key.name === 'escape' || key.name === 'enter' || key.name === 'ctrl-c') { const f = cf.onNo; st.confirm = null; await f?.() }
+  else if (ch === 'n') { const f = cf.onNo; st.confirm = null; await f?.() }
+  // Enter y Esc toman el CAMINO SEGURO, y cuál es lo dice quien pregunta. Sin esto el
+  // defecto era siempre «no», y una pregunta formulada al revés lo volvía el peligroso.
+  else if (key.name === 'escape' || key.name === 'enter' || key.name === 'ctrl-c') {
+    const f = cf.defaultYes ? cf.onYes : cf.onNo
+    st.confirm = null
+    await f?.()
+  }
 }
 
 // --------------------------------- render ----------------------------------

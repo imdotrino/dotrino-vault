@@ -470,22 +470,26 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   })
   const text = V.capsRows(st, t).map((r) => r.text).join('\n')
   assert.match(text, /AB12-CD34/)
-  assert.match(text, /\[x\].*Firmar/, 'lo que tiene va marcado')
-  assert.match(text, /\[ \].*Administrar/, 'lo que no tiene, sin marcar')
-  assert.match(text, /sin venir aquí/, 'y se explica qué implica administrar')
+  assert.match(text, /\[x\].*Entrar a las apps como tú/, 'lo que tiene va marcado')
+  assert.match(text, /\[ \].*Conectar y quitar dispositivos/, 'lo que no tiene, sin marcar')
+  assert.match(text, /sin venir aquí/, 'y debajo, el detalle')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
-  // Se puede elegir cada permiso, y están LOS OCHO que el acta reconoce. Eran cinco:
+  // EL NOMBRE DICE EL ACTO, NO LA CONSECUENCIA (dueño, 2026-09-02). «Sellar el acta» y
+  // «Administrar el perfil» obligaban a saberse el modelo para entender qué concedes.
+  assert.ok(!/\bacta\b|\bSellar\b/i.test(text), 'los nombres no nombran el acta: ' + text)
+  // Se puede elegir cada permiso, y están LOS NUEVE que el acta reconoce. Eran cinco:
   // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
-  // pantalla que se llama «permisos»; y `desatendido` era peor —una marca local de la
-  // bóveda, invisible aquí y con el sentido invertido—. Si el acta gana o pierde uno,
-  // esto se pone rojo a propósito.
-  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 8)
-  assert.match(text, /\[ \].*Sellar el acta/, 'sella se ve aunque esté apagado')
+  // pantalla que se llama «permisos»; `desatendido` era peor —una marca local de la
+  // bóveda, invisible aquí y con el sentido invertido—; y `replica` entró el 2026-09-02.
+  // Si el acta gana o pierde uno, esto se pone rojo a propósito.
+  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 9)
+  assert.match(text, /\[ \].*Admitir aparatos sin esta bóveda/, 'sella se ve aunque esté apagado')
   assert.match(text, /Solo sirve en otra BÓVEDA/, 'y se dice dónde significa algo')
+  assert.match(text, /\[ \].*Entregar tus claves con la bóveda apagada/, 'y el replicador también')
   // El que decide si un servidor se lleva tus claves solo. Verlo APAGADO es media
   // explicación: dice que hoy te lo pregunta.
-  assert.match(text, /\[ \].*Recibir claves sin aprobación/, 'desatendido se ve aunque esté apagado')
+  assert.match(text, /\[ \].*Llevarse claves sin pedirte permiso/, 'desatendido se ve aunque esté apagado')
   assert.match(text, /SIN preguntarte/, 'y se dice qué significa tenerlo encendido')
 })
 
@@ -781,7 +785,7 @@ test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', (
   const texto = filas.map((r) => r.text).join('\n')
   assert.match(texto, /\[x\].*Leer las claves de «proxy»/, 'se ve, marcado, y dice QUÉ cajón')
   assert.match(texto, /SU cajón y ninguno más/, 'y que no puede abrir otro')
-  assert.equal(filas.filter((r) => r.sel).length, 9, 'ocho de aparato + el suyo')
+  assert.equal(filas.filter((r) => r.sel).length, 10, 'los nueve de aparato + el suyo')
   assert.equal(filas.find((r) => r.meta?.cap === 'secrets') !== undefined, true)
 
   // Un aparato TUYO no tiene cajón: no se le ofrece.
@@ -791,7 +795,7 @@ test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', (
     members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'teléfono', caps: ['sign'] }]
   })
   const suyas = V.capsRows(aparato, t)
-  assert.equal(suyas.filter((r) => r.sel).length, 8)
+  assert.equal(suyas.filter((r) => r.sel).length, 9)
   assert.equal(suyas.find((r) => r.meta?.cap === 'secrets'), undefined, 'no hay cajón que abrir')
 })
 
