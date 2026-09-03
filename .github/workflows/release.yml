@@ -12,7 +12,11 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    # `v[0-9]*` y no `v*`: el glob de antes capturaba también `vaultd-v0.97.0` —empieza por
+    # «v»—, así que etiquetar la imagen de Docker lanzaba ADEMÁS un release entero, con su
+    # release de GitHub duplicada. Los publish de npm no se rompían porque ya se saltan lo
+    # publicado, y por eso llevaba meses pasando sin que se notara.
+    tags: ['v[0-9]*']
   workflow_dispatch:
 
 permissions:
