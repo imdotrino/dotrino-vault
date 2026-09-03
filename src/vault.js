@@ -1355,7 +1355,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * ventana. La CLAVE distingue los dos cajones (`<ns>` y `dev:<pub>`) para que tocar
    * lo de un aparato no cancele el aviso pendiente de todo su namespace.
    */
-  function scheduleNotice (ns) { schedule(ns, () => notifyNsChange(ns)) }
+  function scheduleNotice (ns) {
+    schedule(ns, async () => {
+      await notifyNsChange(ns)
+      // Y a los replicadores el sobre nuevo. Sin esto repartirían el valor de ayer: el
+      // aviso de cambio le dice al servicio que se reinicie, y al reiniciar volvería a
+      // pedir — y si la bóveda está apagada, el replicador le daría lo viejo.
+      await pushToReplicas(`secret:${ns}`)
+    })
+  }
   function scheduleDeviceNotice (pub) { schedule('dev:' + pub, () => notifyDeviceChange(pub)) }
 
   function schedule (key, fn) {
@@ -1432,6 +1440,48 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       for (const d of issued || []) avisar(d.sub)
       log(`[vault] notified ${seen.size} member(s) of "${ev}" (record #${acta?.seq ?? '?'})`)
     } catch (e) { log('[vault] could not notify members of the change:', e.message) }
+    // Y a los replicadores, que no quieren un aviso sino el CONTENIDO: sin esto se
+    // quedarían con el acta de ayer y repartiendo sobres de un aparato ya revocado.
+    await pushToReplicas(ev)
+  }
+
+  /**
+   * EMPUJAR A LOS REPLICADORES lo que tienen que poder repartir: el acta y los sobres.
+   *
+   * Se manda TODO firmado de antes —el acta la selló la maestra, cada sobre lo firmó la
+   * llave de sellado— así que un replicador no puede falsificar nada de lo que le damos.
+   * Y va cerrado a su destinatario, no a él: reparte sobres que no puede abrir. Es lo que
+   * permite ponerlo en una máquina en la que no confías (`docs/replicas.md` §8.bis).
+   *
+   * Se empuja después de cada cambio, y no se espera acuse: si un replicador está apagado
+   * se queda atrás y lo alcanza el siguiente empujón. Un replicador atrasado no es un
+   * peligro —el cliente rechaza un acta con `seq` menor del que ya vio— sino menos
+   * disponibilidad, que es exactamente lo que un replicador arriesga.
+   */
+  async function pushToReplicas (motivo = 'change') {
+    try {
+      const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+      if (!record) return
+      const replicas = (record.members || []).filter((m) => Acta.memberCan(record, m.pub, 'replica'))
+      if (!replicas.length) return
+
+      // UN SOBRE POR (CAJÓN, APARATO), porque `bundleFor` lo talla a quien lo pide: lleva
+      // solo las envolturas de ESE aparato. Mandar uno genérico no serviría de nada.
+      const bundles = {}
+      for (const m of record.members || []) {
+        if (!m.cn) continue
+        try { bundles[`${m.cn} ${m.pub}`] = secrets.bundleFor(m.cn, m.pub) } catch (_) {}
+      }
+      const body = { op: 'replica.push', seq: record.seq, acta: record, bundles, ts: Date.now() }
+      const seal = await signSeal(body)
+      if (!seal) return log('[vault] cannot push to the replicas: the record names no sealing key of ours')
+      let n = 0
+      for (const r of replicas) {
+        try { client.sendByPubkey(r.pub, { type: MSG.REPLICA_PUSH, body, seal }); n++ }
+        catch (e) { log(`[vault] could not push to a replica: ${e.message}`) }
+      }
+      log(`[vault] pushed record #${record.seq} and ${Object.keys(bundles).length} bundle(s) to ${n} replica(s) on ${motivo}`)
+    } catch (e) { log('[vault] could not push to the replicas: ' + e.message) }
   }
 
   /**
@@ -2604,6 +2654,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (r?.locked === false) { try { await ensureCommKeyInActa() } catch (_) {} }
       return { locked: r?.locked !== false }
     },
+    // Forzar un empujón: lo usa `replica push` de la CLI y el smoke, para no depender
+    // de que justo acabe de cambiar algo.
+    pushToReplicas,
     startPairing: desk.startPairing,
     stopPairing: desk.stopPairing,
     listPending: desk.listPending,

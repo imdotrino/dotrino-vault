@@ -254,6 +254,10 @@ async function cmdPair (args = []) {
       if (t === 'approve' || t === 'aprueba') { console.error('`approve` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +aprueba'); process.exit(2) }
       if (t === 'sealer' || t === 'sella') { console.error('`sella` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +sella'); process.exit(2) }
       if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
+      // Un REPLICADOR nace acotado: solo esto, ni firma ni lee ni guarda. Se empareja
+      // —al contrario que `sella`— porque se despliega en una máquina sin teclado y el
+      // permiso no concede nada que haya que pensarse dos veces: reparte sobres cerrados.
+      if (t === 'replica' || t === 'replicador') { scope.push('vault:replica'); continue }
       // El gestor de contraseñas SÍ se empareja con su permiso puesto: es lo único que
       // va a hacer ese aparato, y pedirlo en dos pasos era el paso que nadie daba.
       if (t === 'passwords') { scope.push('vault:passwords'); continue }
@@ -1606,7 +1610,7 @@ function help () {
                       El QR no lleva nada: el permiso se aplica al aprobar el código aquí
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
-  pair --scope <lista>  los PERMISOS del cert: sign,read,store,contrasenas,secrets:<ns> (sin esto: sign,read,store;
+  pair --scope <lista>  los PERMISOS del cert: sign,read,store,contrasenas,replica,secrets:<ns> (sin esto: sign,read,store;
                       se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
@@ -1646,6 +1650,10 @@ function help () {
                       KMS, y solo vale ahora: el perfil se está creando)
                       Al desplegar, esto mismo va por el entorno y sin entrar a nada:
                       DOTRINO_JOIN (o DOTRINO_JOIN_FILE) + DOTRINO_JOIN_NAME
+  replica enroll <invitación>
+                      esta máquina entra como REPLICADOR: reparte los sobres que la
+                      bóveda ya firmó cuando ella no está, y no puede abrir ninguno ni
+                      cambiar nada. No tiene maestra. Arráncalo con: replica run
   pending             muestra el dispositivo pendiente + su código a comparar
   approve <código>    aprueba el dispositivo tipeando el código que MUESTRA (el vault no lo sabe)
   reject <deviceId>   rechaza un dispositivo pendiente
@@ -1697,6 +1705,82 @@ Arrancar y parar, según dónde corra:
                     (el CLI, dentro:  docker exec -it dotrino-vault dotrino-vault status)`)
 }
 
+/**
+ * `replica` — LA OTRA PIEZA, la que reparte sin decidir (`docs/replicas.md` §8.bis).
+ *
+ *   dotrino-vault replica enroll <invitación>   entra en la cuenta, UNA vez
+ *   dotrino-vault replica run                  se queda repartiendo
+ *   dotrino-vault replica status               qué acta tiene y cuántos sobres
+ *
+ * No corre dentro del daemon del vault y no es un perfil: un replicador NO TIENE MAESTRA,
+ * y meterlo en el gestor de perfiles sería fabricarle una. Vive en su propio directorio
+ * (`DOTRINO_REPLICA_DIR`, por defecto `~/.dotrino/replica`).
+ */
+async function cmdReplica (args) {
+  const { replicaDir, openReplicaStore, runReplica, REPLICA_SCOPE } = await import('./replica.js')
+  const sub = args[0]
+  const dir = process.env.DOTRINO_REPLICA_DIR || replicaDir()
+
+  if (sub === 'enroll') {
+    const invitacion = args.slice(1).filter((a) => !a.startsWith('-')).join(' ')
+    if (!invitacion) {
+      console.error('uso: dotrino-vault replica enroll "<invitación>"')
+      console.error('     la invitación sale de la bóveda:  dotrino-vault pair --scope replica --quiet')
+      process.exit(2)
+    }
+    const { enrollWithVault } = await import('../lib/src/service.js')
+    // `withEncKey: false` NO es una optimización: es la garantía. Sin llave de cifrado en
+    // el acta no hay a dónde envolverle un sobre, así que repartir no puede convertirse en
+    // leer. Regla del dueño: «recibirá todos los sobres que se generen, ningún sobre
+    // firmado para él».
+    const r = await enrollWithVault({
+      qr: invitacion,
+      label: args.includes('--label') ? args[args.indexOf('--label') + 1] : 'replicador',
+      expectedScope: REPLICA_SCOPE,
+      withEncKey: false,
+      onCode: ({ deviceId, code }) => {
+        console.log('\n  Tipea ESTE código en la bóveda para aprobarlo:')
+        console.log(`    código:  ${code}`)
+        console.log(`    máquina: ${deviceId}`)
+        console.log(`    (en la bóveda:  dotrino-vault approve ${code})\n`)
+        console.log('  Esperando…')
+      }
+    })
+    openReplicaStore(dir).setLink({ device: r.device, cert: r.cert, iss: r.iss, proxy: r.proxy })
+    console.log('\n  Listo: este replicador ya está en la cuenta.')
+    console.log('  Arráncalo con:  dotrino-vault replica run\n')
+    return
+  }
+
+  if (sub === 'status') {
+    const st = openReplicaStore(dir)
+    if (!st.link) { console.log('Sin enrolar. Empieza por:  dotrino-vault replica enroll "<invitación>"'); return }
+    console.log('Replicador · datos en %s', dir)
+    console.log('  acta   : #%s%s', st.seq || 0, st.acta ? '' : '  (todavía ninguna: la manda la bóveda)')
+    console.log('  sobres : %d', st.bundles)
+    console.log('  bóveda : %s…', String(st.link.iss).slice(0, 32))
+    return
+  }
+
+  if (sub === 'run' || sub === undefined) {
+    try {
+      await runReplica({ dir })
+    } catch (e) {
+      if (e?.code === 'replica-not-enrolled') {
+        console.error('\n  Este replicador todavía no está en ninguna cuenta.\n')
+        console.error('  En la bóveda:      dotrino-vault pair --scope replica --quiet')
+        console.error('  Y aquí, con eso:   dotrino-vault replica enroll "<invitación>"\n')
+        process.exit(2)
+      }
+      throw e
+    }
+    await new Promise(() => {})
+    return
+  }
+  console.error('uso: dotrino-vault replica [enroll <invitación>|run|status]')
+  process.exit(2)
+}
+
 export async function runCtl (argv) {
   const [cmd, ...rest] = takeProfileFlag(argv)
   switch (cmd) {
@@ -1722,6 +1806,7 @@ export async function runCtl (argv) {
     case 'activity': return cmdActivity(Number(rest.find((a) => /^\d+$/.test(a))) || 30, {
       verify: rest.includes('--verify'), exportar: rest.includes('--export')
     })
+    case 'replica': return cmdReplica(rest)
     case 'logs': return cmdLogs()
     case 'version':
     case '--version':
