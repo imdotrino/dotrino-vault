@@ -50,7 +50,10 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   // en Node). Reconexión prácticamente ilimitada: un daemon de larga duración no
   // debe rendirse tras unos intentos.
   const client = new WebSocketProxyClient({
-    url, enableWebRTC: false, autoReconnect: true,
+  // WEBRTC SOLO DONDE EXISTE (ver `lib/src/service.js`): en Node no hay
+  // `RTCPeerConnection` y encenderlo reventaría al negociar; en un navegador es nativo y es
+  // el camino directo que hay que preferir. Se mira, en vez de apagarlo para siempre.
+    url, enableWebRTC: typeof globalThis.RTCPeerConnection === 'function', autoReconnect: true,
     maxReconnectAttempts: 100000, reconnectDelay: 4000
   })
 

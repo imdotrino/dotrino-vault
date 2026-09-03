@@ -29,7 +29,10 @@ import { MSG } from './protocol.js'
 async function freshClient ({ proxyUrl, dir = '.dotrino-vault-device' }) {
   installNodeGlobals(dir)
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
-  const client = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+  // WEBRTC SOLO DONDE EXISTE (ver `lib/src/service.js`): en Node no hay
+  // `RTCPeerConnection` y encenderlo reventaría al negociar; en un navegador es nativo y es
+  // el camino directo que hay que preferir. Se mira, en vez de apagarlo para siempre.
+  const client = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: typeof globalThis.RTCPeerConnection === 'function', autoReconnect: false })
   await client.connect()
   return client
 }
