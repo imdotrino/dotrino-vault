@@ -594,3 +594,82 @@ test('lo que ya estaba sellado no se toca al reenvolver', async () => {
     assert.deepEqual(despues.ns.proxy.vars[k].e, antes.ns.proxy.vars[k].e, `${k} conserva su sobre`)
   }
 })
+
+/**
+ * EL CAJÓN DEL PERFIL (`docs/datos-del-perfil.md`).
+ *
+ * Los datos de la identidad se guardan como cualquier variable —mismo sobre, mismo
+ * llavero— porque son lo mismo: un valor que solo pueden leer tus aparatos. Lo que cambia
+ * es que hay una TERCERA clase que no existe en las variables: lo público de verdad, en
+ * claro, porque quien pregunta desde fuera no tiene ninguna llave tuya.
+ */
+test('el perfil se escribe con la bóveda CERRADA, como cualquier sobre', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+
+  // Un dato privado es `putSealed` a secas: la bóveda no lo abre y no hace falta la frase.
+  // El `ct` es opaco a propósito: el sellador falso escribe el valor DENTRO del marcador,
+  // así que usar su formato aquí haría que el valor apareciera en el disco por culpa del
+  // doble, no del código.
+  await s.putSealed('ns:@me', 'telefono', {
+    e: { iv: 'iv1', ct: 'opaco-1' },
+    wraps: { A: 'W(A)', [RECOVERY]: 'W(rec)' }
+  }, { by: 'AB12-CD34' })
+
+  const disco = enDisco(dir)
+  assert.ok(disco.ns['@me'].vars.telefono.e.ct, 'va en sobre')
+  assert.equal(disco.ns['@me'].vars.telefono.pubv, undefined, 'y no hay ningún valor en claro al lado')
+
+  // Y el aparato se lleva SUS envolturas, no las de otro.
+  const b = s.profileBundleFor('A')
+  assert.ok(b.entries.telefono, 'la entrada está')
+  assert.equal(b.wraps.length, 1, 'con la envoltura de A')
+  assert.equal(s.profileBundleFor('B').wraps.length, 0, 'y B no se lleva ninguna')
+})
+
+/**
+ * `@me` NO ES UN NOMBRE DE CAJÓN VÁLIDO, y esa es la garantía entera: ningún servicio
+ * puede llamarse así, así que nadie puede pedir el perfil por el camino de los secretos.
+ * No es una comprobación que alguien pueda olvidar — es un nombre que el validador no deja
+ * existir.
+ */
+test('nadie puede pedir el perfil por el camino de los secretos', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await assert.rejects(() => s.set('@me', 'X', 'y'), /invalid namespace/)
+  assert.throws(() => s.bundleFor('@me', 'A'), /invalid namespace/)
+})
+
+test('lo público va EN CLARO y firmado: es lo que ve quien pregunta de fuera', async () => {
+  const dir = tmp()
+  // CON FIRMANTE: sin él no hay `seal`, que es lo correcto —una bóveda que no puede firmar
+  // no finge que firmó— pero aquí lo que se prueba es justamente la firma.
+  const s = abrir(dir, fakeSealer(), {
+    recipients: () => miembros('A'),
+    signer: async (body) => ({ seq: 1, sig: 'FIRMA(' + body.key + '#' + body.gen + ')' })
+  })
+  await s.profilePutPublic('nickname', 'seyacat', { by: 'AB12-CD34' })
+  await s.putSealed('ns:@me', 'telefono', {
+    e: { iv: 'iv1', ct: 'opaco-2' }, wraps: { A: 'W(A)', [RECOVERY]: 'W(rec)' }
+  }, { by: 'AB12-CD34' })
+
+  const pub = s.profilePublic()
+  assert.equal(pub.nickname.v, 'seyacat', 'el público se lee sin ninguna llave')
+  assert.ok(pub.nickname.seal, 'y va firmado, o cualquiera lo inventa en tu nombre')
+  assert.equal(pub.telefono, undefined, 'lo privado NO sale por aquí')
+})
+
+/**
+ * `pubv` y no `v`: un `v` suelto dentro de un paquete de VARIABLES es un error duro desde
+ * el 2026-09-02 (`plaintext-var`). Aquí un valor en claro es lo correcto, así que se
+ * escribe con otro nombre y aquella invariante se queda intacta.
+ */
+test('un dato público del perfil no rompe la regla de los valores en claro', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  await s.profilePutPublic('nickname', 'seyacat', { by: 'AB12-CD34' })
+  const e = enDisco(dir).ns['@me'].vars.nickname
+  assert.equal(e.v, undefined, 'no lleva `v`, que es lo que el agente rechaza')
+  assert.equal(e.pubv, 'seyacat')
+  assert.equal(e.cls, 'public')
+})

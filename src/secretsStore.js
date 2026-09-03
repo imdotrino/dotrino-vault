@@ -72,6 +72,32 @@ const KEY_RE = /^[A-Z0-9_]{1,64}$/
  */
 export const RECOVERY = '#recovery'
 
+/**
+ * EL CAJÓN DEL PERFIL. Los datos de tu identidad se guardan como cualquier variable —
+ * mismo sobre, mismo llavero, mismo histórico— porque son lo mismo: un valor que solo
+ * pueden leer tus aparatos. Diseño: `docs/datos-del-perfil.md`.
+ *
+ * SE LLAMA `@me` A PROPÓSITO, y es la garantía entera: un nombre de cajón válido es
+ * `[a-z0-9-]{1,32}`, así que **ningún servicio puede llamarse `@me`**. Por lo tanto
+ * `memberCanReadSecrets(acta, quien, '@me')` no puede ser cierto nunca y no hay forma de
+ * pedir el perfil por el camino de los secretos. No es una comprobación que alguien pueda
+ * olvidarse de hacer: es un nombre que el validador no deja existir.
+ */
+export const PROFILE_NS = '@me'
+export const PROFILE_OWNER = 'ns:' + PROFILE_NS
+
+/**
+ * El nombre de un dato del perfil. NO vale `assertVar`: aquélla exige MAYÚSCULAS porque
+ * describe una variable de entorno, y aquí los campos son `nickname`, `telefono`,
+ * `apellidos`. Mismo espíritu —un nombre corto y previsible, sin sorpresas al serializar—
+ * y distinto alfabeto.
+ */
+export function assertProfileKey (key) {
+  if (typeof key !== 'string' || !/^[a-z][a-z0-9_]{0,31}$/.test(key)) {
+    throw new Error('invalid profile field (use lowercase_with_underscores, e.g. "nickname")')
+  }
+}
+
 /** Cuántas versiones anteriores se conservan, en total. Ver «EL HISTÓRICO» arriba. */
 const MAX_HISTORY = 500
 
@@ -818,6 +844,75 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     owners () {
       return [...Object.keys(data.ns).map((k) => `ns:${k}`), ...Object.keys(data.dev).map((k) => `dev:${k}`)]
     },
+    // ---------------- EL PERFIL (`docs/datos-del-perfil.md`) ----------------
+    //
+    // Escribir un dato PRIVADO no necesita nada de aquí: es `putSealed(PROFILE_OWNER, …)`,
+    // que ya guarda un sobre hecho sin abrirlo y funciona con la bóveda cerrada. Lo que
+    // falta es leerlo, y el camino de lo PÚBLICO, que no se parece a ninguna variable.
+
+    /**
+     * Los sobres del perfil TALLADOS a un aparato: sus entradas y las envolturas suyas.
+     * Igual que `bundleFor`, sin `assertNs` — `@me` no es un nombre de cajón válido, y esa
+     * es justamente su garantía.
+     *
+     * El PAQUETE LO ARMA EL APARATO (dueño, 2026-09-03): aquí solo se entrega lo que hay.
+     */
+    profileBundleFor (devicePub) {
+      const bag = data.ns
+      const k = PROFILE_NS
+      if (isLegacy() || !bag[k]) return { entries: {}, wraps: [] }
+      const wraps = (bag[k].keyring || [])
+        .filter((g) => g.wraps?.[devicePub])
+        .map((g) => ({ gen: g.gen, wrap: g.wraps[devicePub] }))
+      return { entries: { ...varsOf(bag, k) }, wraps }
+    },
+
+    /**
+     * LO PÚBLICO DE VERDAD: en claro, y firmado. Es lo que recibe quien pregunta desde
+     * fuera y no tiene ninguna llave tuya — no hay a quién sellárselo (dueño, 2026-09-03).
+     *
+     * Va firmado igual que lo demás: un dato público sin firma es un dato que cualquiera
+     * puede inventar en tu nombre, que es peor que no tenerlo.
+     */
+    profilePublic () {
+      const bag = data.ns[PROFILE_NS]
+      if (!bag?.vars) return {}
+      const out = {}
+      for (const [key, e] of Object.entries(bag.vars)) {
+        if (e?.cls !== 'public' || typeof e.pubv !== 'string') continue
+        out[key] = { v: e.pubv, gen: e.gen, seal: e.seal || null, at: e.at || null, by: e.by || null }
+      }
+      return out
+    },
+
+    /**
+     * Guarda un dato PÚBLICO del perfil: en claro y con su firma. No lleva sobre ni
+     * envoltura porque no se le sella a nadie.
+     *
+     * `pubv` y no `v`: un `v` suelto dentro de un paquete de variables es un error duro
+     * desde el 2026-09-02 (`plaintext-var`), y con razón. Aquí es lo correcto, así que se
+     * escribe con otro nombre — el paquete del perfil lo arma otro código y esa invariante
+     * de los secretos se queda intacta.
+     */
+    async profilePutPublic (key, value, { by = null } = {}) {
+      return enFila(async () => {
+        if (isLegacy()) throw new Error('profile: this store is still v3 (run `migrate` first)')
+        if (needsMigration()) throw new NeedsMigration()
+        assertProfileKey(key)
+        if (typeof value !== 'string' || value.length > 200000) {
+          throw new Error('a public profile field must be a string of at most 200 kB')
+        }
+        const vars = ensureBag(data.ns, PROFILE_NS)
+        const before = vars[key]
+        const gen = (topGen(data.ns, PROFILE_NS)?.gen || 0) + 1
+        const seal = signer ? await signer({ owner: PROFILE_OWNER, key, gen, iv: '', ct: value }) : null
+        pushHistory(PROFILE_OWNER, key, before, by)
+        vars[key] = { cls: 'public', pub: true, owner: PROFILE_OWNER, gen, pubv: value, seal, at: Date.now(), by: by || null }
+        save()
+        return { gen }
+      })
+    },
+
     /** @private */
     /**
      * @param {Array|((isPublic:boolean)=>Promise<Array>)} members A quién envolver. Puede ser
