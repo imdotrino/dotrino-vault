@@ -208,6 +208,17 @@ async function cmdPair (args = []) {
   // Sin esto el nombre lo ponía el propio aparato, que por defecto usa el apodo del
   // PERFIL: acababas con varios dispositivos llamados igual que tú, y para distinguirlos
   // había que renombrarlos después —cuando ya no sabías cuál era cuál—.
+  // UNA BANDERA QUE NO EXISTE SE DICE, no se ignora. Escribir `--label` en vez de `--name`
+  // emparejaba igual y en silencio, y el aparato entraba llamándose «cli»; el error se
+  // veía media hora después mirando el acta, si es que se miraba. Una opción que tecleas
+  // y no hace nada es un fallo mudo, que es justo lo que aquí no se acepta.
+  const CONOCIDAS = new Set(['--admin', '--adopt', '--kms', '--name', '--new-account', '--quiet', '--scope', '--service', '--save', '--profile'])
+  const rara = args.find((a) => a.startsWith('--') && !CONOCIDAS.has(a))
+  if (rara) {
+    console.error('no existe la opción %s', rara)
+    console.error('las de `pair` son: %s', [...CONOCIDAS].join(' '))
+    process.exit(2)
+  }
   const nIdx = args.indexOf('--name')
   let label = null
   if (nIdx >= 0) {
@@ -552,7 +563,10 @@ async function cmdMembers () {
     // Resaltado como los otros cuatro: dice si esa máquina se lleva tus claves privadas
     // sola o si te lo pregunta. Sin traducción salía el identificador en crudo
     // (`unattended`) en una lista que lee un humano.
-    unattended: `${B}recibe claves sin aprobación${Z}`
+    unattended: `${B}recibe claves sin aprobación${Z}`,
+    // Y el que reparte cuando esta bóveda no está. Se resalta como los demás que cambian
+    // lo que ese aparato puede hacerle a la cuenta.
+    replica: `${B}entrega tus claves con la bóveda apagada${Z}`
   }
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
@@ -582,7 +596,7 @@ async function cmdMembers () {
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +desatendido')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +desatendido | +replica')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
@@ -648,6 +662,9 @@ async function cmdCaps (args = []) {
     // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
     // quien manda sigue mandando. Como `administra`, no se empareja: se concede aquí.
     sella: 'sealer', sealer: 'sealer',
+    // `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No
+    // tiene maestra y no puede abrir nada. A diferencia de `sella`, SÍ se empareja.
+    replica: 'replica', replicador: 'replica',
     // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
     // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
     contrasenas: 'passwords', 'contraseñas': 'passwords',
