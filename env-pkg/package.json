@@ -1,12 +1,22 @@
 {
   "name": "@dotrino/env",
-  "version": "0.33.2",
+  "version": "0.60.3",
   "description": "Tus credenciales del vault en vez del .env: enrola un servicio, inyecta sus variables solo en memoria, y el agente SSH sin llaves en disco. Envoltorio delgado de @dotrino/vault.",
   "type": "module",
-  "bin": { "dotrino-env": "bin/dotrino-env.js" },
-  "files": ["bin", "README.md"],
-  "dependencies": { "@dotrino/vault": "^0.35.0" },
+  "bin": {
+    "dotrino-env": "bin/dotrino-env.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "dependencies": {
+    "@dotrino/vault": "^0.60.3"
+  },
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/imdotrino/dotrino-vault.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imdotrino/dotrino-vault.git"
+  },
   "homepage": "https://vault.dotrino.com/"
 }

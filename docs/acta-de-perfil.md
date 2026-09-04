@@ -453,6 +453,10 @@ No depende de ninguna decisión pendiente. **Se puede empezar ya.**
 - [ ] Tests: `node --test` verde en identity y vault; test nuevo del `commitCode` (aprobar
       con código equivocado **no** debe emitir cert).
 - [ ] Publicar `@dotrino/identity` y `@dotrino/vault` (commit → tag → `npm publish`).
+- [ ] Publicar `@dotrino/env` **en la misma tanda**, con `npm run release:env -- --publish`.
+      No es opcional ni cosmético: el wrapper no tiene código propio, así que si se
+      queda atrás la gente instala un cliente viejo y el fallo aparece lejos de acá
+      (un enrolamiento contra un vault al día devuelve `invalid cert: no-acta`).
 
 **Hecho cuando:** aprobar con un código incorrecto no emite cert; un `MSG.ERROR` de texto no
 borra nada; un `vault.revoked` firmado sí; el emparejamiento vive en un solo módulo; los
