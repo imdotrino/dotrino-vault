@@ -644,10 +644,24 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (d.method === 'profilePublic') {
       return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: secrets.profilePublic() })
     }
+    const revoked = await revocationSet()
+    // `vault:sign` — hablar por ti. No `vault:store`, que es guardar cosas.
+    const chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.SIGN, ...(await contextoActa()), revoked })
+    if (!chk.ok) return denyChain(from, chk, p, 'profile')
+    if (!await actaAllows(from, chk, SCOPE.SIGN, 'profile')) return
+
     // A QUIÉN HAY QUE ENVOLVERLE. Lo pide el aparato ANTES de sellar, porque sellar lo hace
     // él: envolver solo necesita públicas, así que puede hacerlo un navegador sin que
     // ninguna privada ande suelta. Sale de aquí y no de una lista suya para que conceder
     // `firma` a un aparato nuevo baste — sin que nadie tenga que acordarse de nada.
+    //
+    // VA DETRÁS DEL CONTROL, y estuvo delante. Que solo haga falta material PÚBLICO para
+    // envolver no significa que la lista sea pública: lo que devuelve es el INVENTARIO
+    // —cuántas máquinas tienes, sus llaves, y la de recuperación— y eso la bóveda no se lo
+    // enseña ni a un servicio de la casa (`modelo-de-amenazas.md` §2.5). Cualquiera que
+    // supiera la llave de la cuenta, que es pública, lo sacaba entero preguntando. Y no
+    // costaba nada evitarlo: la consola YA manda su firma y su papel en esta misma llamada
+    // (`requestStore` de `@dotrino/identity`), solo que aquí no se miraban.
     if (d.method === 'profileRecipients') {
       const members = await recipientsOf(PROFILE_OWNER)
       return reply(from, {
@@ -656,12 +670,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         result: { recoveryPub: secrets.recoveryPub(), members: members.map((m) => ({ pub: m.pub, encPub: m.encPub })) }
       })
     }
-
-    const revoked = await revocationSet()
-    // `vault:sign` — hablar por ti. No `vault:store`, que es guardar cosas.
-    const chk = await verifyChain({ data: d, signature: p.signature, cert: p.cert, expectedScope: SCOPE.SIGN, ...(await contextoActa()), revoked })
-    if (!chk.ok) return denyChain(from, chk, p, 'profile')
-    if (!await actaAllows(from, chk, SCOPE.SIGN, 'profile')) return
 
     try {
       if (d.method === 'profileBundle') {
@@ -1344,6 +1352,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function handleAdminEvent (payload) {
     const acta = payload?.acta
     if (!acta || typeof acta !== 'object') return
+    // ESTE MENSAJE NO LO FIRMA NADIE, y no hace falta: el acta se autentica sola —va sellada
+    // y `canAdopt` comprueba que la selló quien la MÍA reconoce—. Pero eso solo funciona si
+    // hay una mía contra la que comparar: sin acta previa, `canAdopt` acepta cualquiera
+    // («sin-acta-previa»), y este es el único mostrador donde una llega de un desconocido.
+    // Anunciar no es cómo se entra en una cuenta —para eso está el enrolamiento—, así que
+    // sin acta propia no se adopta: se dice y se para.
+    const propia = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!propia) return log('[vault] a record was announced but this vault has none of its own to compare it with: ignored')
     try {
       const r = await identity.adoptActa?.(acta)
       if (r?.adopted) log(`[vault] adopted record #${acta.seq} announced by another vault (${r.reason})`)

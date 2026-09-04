@@ -100,6 +100,29 @@ Se indexa **la herramienta**, nunca el contenido: lo compartible viaja por `#fra
 no llega al servidor. Sin cookies, sin rastreadores, sin JS de terceros. Los paquetes se
 publican desde CI con procedencia firmada, así que se puede comprobar de qué commit salen.
 
+### 2.7. Quien le pregunta a un replicador
+
+Un replicador reparte lo que la bóveda ya firmó y selló, en una máquina que puede no ser
+del dueño (`replicas.md`). Es la boca **más expuesta** de la cuenta: está encendida cuando
+la bóveda no lo está, y esa es su razón de ser.
+
+**Lo que ve quien lo compromete:** el acta y sobres cerrados. Nada más — no tiene maestra,
+no sella, no emite papeles y no puede abrir lo que reparte (entra en el acta sin llave de
+cifrado, así que no hay camino por el que le llegue un sobre dirigido a él). Que se lo
+lleven cuesta **disponibilidad, no confidencialidad**.
+
+**Lo que se cerró el 2026-09-04:** hasta esa fecha *preguntarle* no costaba nada. No
+comprobaba firma, ni papel, ni acta: bastaba nombrar un cajón y una llave de aparato —las
+dos se aprenden mirando— para llevarse el sobre de ese cajón y, dentro de la respuesta, **el
+acta entera**, que es el inventario de máquinas del dueño. Un extraño con una llave recién
+hecha lo sacaba todo. Ahora mira lo mismo que la bóveda: frescura, papel y
+`memberCanReadSecrets`.
+
+**Lo que sigue abierto, y es deliberado:** un replicador atrasado presenta un acta vieja,
+donde un aparato ya revocado sigue dentro. Lo frena el pin de `maxSeq` del cliente (a quien
+ya conoce la cuenta) y, a quien llega nuevo, que no se le crea a un replicador sin pin. El
+cierre de verdad es el **oráculo de frescura**, diferido (§4.3 de `acta-de-perfil.md`).
+
 ## 3. Lo que se afirma con pruebas, no con adjetivos
 
 Cada invariante tiene un test. Esto es lo que se puede enseñar, no lo que se puede prometer:
@@ -115,6 +138,8 @@ Cada invariante tiene un test. Esto es lo que se puede enseñar, no lo que se pu
 | Un servicio **no ve el inventario** de aparatos | `secrets.e2e` |
 | Quien administra **no puede ver un valor a distancia**: la operación no existe | `secrets.e2e` |
 | Un sobre con la firma cambiada **no se abre** | `secrets.e2e` |
+| A un **desconocido** el replicador no le da ni el cajón ni el acta | `smoke/replica.mjs` → *a un DESCONOCIDO…* |
+| Los dos mostradores comprueban **quién pregunta antes** de entregar | `quien-pide-se-comprueba` (3 casos) |
 
 ## 4. Lo que NO se cubre
 

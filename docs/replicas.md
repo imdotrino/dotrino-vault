@@ -84,8 +84,8 @@ es pública y autoverificable por firma.
 
 | | Réplica | Por qué |
 |---|---|---|
-| Servir el acta vigente y su cadena | **sí** | es pública y va firmada; el que la recibe la verifica |
-| Entregar un sobre sellado a quien lo pide | **sí** | el sobre ya está sellado al destinatario; la réplica solo lo transporta |
+| Servir el acta vigente y su cadena **a un miembro** | **sí** | va firmada, y el que la recibe la verifica |
+| Entregar un sobre sellado **a quien el acta deja leer ese cajón** | **sí** | el sobre ya está sellado al destinatario; la réplica solo lo transporta |
 | Servir certificados **ya emitidos** | **sí** | son papeles firmados, no secretos |
 | **Sellar un acta nueva** (admitir, revocar, cambiar permisos) | **NO** | D4: un solo sellador |
 | **Emitir un certificado nuevo** | ver §5 | necesita firma de la maestra |
@@ -190,6 +190,32 @@ operación que selle. Lleva solo tres cosas:
 
 Se enrola como cualquier aparato, con una capacidad estrecha, y queda en el acta como lo
 que es. No abre nada, no firma nada, no decide nada: reparte lo que otro ya firmó y selló.
+
+### Se comprueba quién pregunta (corregido el 2026-09-04)
+
+Durante un día no se comprobaba, y conviene dejar escrito por qué, porque el razonamiento
+que lo dejó así es correcto y aun así llevaba a un agujero.
+
+El razonamiento: *un sobre va cerrado a su destinatario, así que a quien no le toque le
+llega algo que no puede abrir; un replicador que decidiera quién lee sería un replicador
+del que hay que fiarse, y la gracia es que no haga falta.* Todo eso sigue en pie.
+
+Lo que se pasaba por alto: dentro de la respuesta **también viaja el acta**, que no es un
+sobre — es el inventario de máquinas del dueño, y la bóveda no se lo enseña ni a un
+servicio de la casa. Así que bastaba nombrar un cajón y una llave de aparato, sin firmar
+nada y sin haber estado nunca en la cuenta, para sacarlo entero. Y de paso quedaba texto
+cifrado en manos de cualquiera, para siempre y sin rastro de quién se lo llevó.
+
+Se comprobó en vivo antes de arreglarlo: `dotrino-test/smoke/replica.mjs`, escenario **«a
+un DESCONOCIDO el replicador no le da ni el cajón ni el acta»** — llave recién hecha, sin
+papel, sin firma. Ahora el replicador mira lo mismo que mira la bóveda: **frescura, el
+papel (`verifyChain` contra los selladores que nombra su acta) y `memberCanReadSecrets`**.
+No costó ni un mensaje nuevo ni una llave más: la petición **ya viajaba firmada y con
+papel** desde `fetchSecrets`; aquí no se miraban.
+
+Y no lo convierte en alguien de quien haya que fiarse, que era el miedo legítimo: si
+mintiera diciendo que sí, el sobre sigue sin abrirse; si mintiera diciendo que no, es una
+caída — y una caída es exactamente lo que un replicador puede costar.
 
 ### Por qué es barato, y esto es lo que lo hace viable
 

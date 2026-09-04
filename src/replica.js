@@ -24,9 +24,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { WebSocketProxyClient } from '@dotrino/proxy-client'
-import { signWithDevice, verifyDeviceSig, pubkeyId } from '@dotrino/identity/capabilities'
-import { verifyActa, memberCan, sealKeyAt } from '@dotrino/identity/acta'
-import { MSG } from '../lib/src/protocol.js'
+import { signWithDevice, verifyDeviceSig, verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
+import { verifyActa, memberCan, memberCanReadSecrets, sealKeyAt, sealersOf } from '@dotrino/identity/acta'
+import { MSG, secretsScope, isValidSecretsNs } from '../lib/src/protocol.js'
+import { FRESH_WINDOW_MS } from '../lib/src/enroll.js'
 import { seal } from '../lib/src/sealed.js'
 import { atRestFor } from './atrest.js'
 import { readJson, writeJson } from './paths.js'
@@ -169,17 +170,59 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
    * quien pregunta y firmado con NUESTRA llave — que es lo que el cliente acepta cuando el
    * acta nos reconoce `replica` (`verifyResponder` de `@dotrino/vault`).
    *
-   * Lo que NO se decide aquí, y es a propósito: si quien pide tiene derecho a ese cajón.
-   * Lo dice el sobre, no nosotros — va cerrado a su llave, así que a quien no le toque le
-   * llega algo que no puede abrir. Un replicador que decidiera quién lee sería un
-   * replicador del que hay que fiarse, y la gracia es que no haga falta.
+   * SE COMPRUEBA QUIÉN PIDE, con lo mismo que comprueba la bóveda. Durante un día esto no
+   * miraba nada: bastaba con nombrar un cajón y una llave de aparato para llevarse el sobre
+   * y, dentro de él, EL ACTA — que es el inventario de máquinas del dueño, y que la bóveda
+   * no le enseña ni a un servicio de la casa. Un extraño con una llave recién hecha lo
+   * sacaba entero (`smoke/replica.mjs`, «a un DESCONOCIDO…»).
+   *
+   * El argumento de entonces era que el sobre va cerrado a su destinatario, así que a quien
+   * no le toque le llega algo que no puede abrir. Sigue siendo verdad y sigue siendo la
+   * segunda línea — pero no es una puerta: repartir cifrado a desconocidos regala el acta,
+   * deja el texto cifrado en manos de cualquiera para siempre, y no cuesta nada evitarlo.
+   * La petición YA viaja firmada y con papel desde `fetchSecrets`; aquí solo se miraban.
+   *
+   * Lo que sigue sin decidirse aquí, y eso sí es a propósito: NADA sobre el contenido. El
+   * replicador no abre, no filtra por clave y no sabe qué entrega. Comprobar quién llama no
+   * lo convierte en alguien de quien haya que fiarse: si mintiera diciendo que sí, el sobre
+   * sigue sin abrirse; si mintiera diciendo que no, es una caída, que es lo que un
+   * replicador puede costar.
+   *
+   * `revoked` no se le pasa a `verifyChain` porque aquí no hay registro de revocaciones —
+   * y no hace falta: quitar un aparato es sacarlo del acta (`docs/acta-de-perfil.md`), y de
+   * eso se ocupa `memberCanReadSecrets` con el acta de abajo.
    */
   async function onSecrets (from, p) {
     const ns = p?.data?.ns
     const ek = p?.data?.ek
-    const quien = p?.data?.publickey
-    if (typeof ns !== 'string' || !ek || !quien) return
+    if (!isValidSecretsNs(ns) || typeof ek !== 'string') return
     if (!store.acta) return client.send(from, { type: MSG.ERROR, error: 'replica: no record yet' })
+    const no = (error) => client.send(from, { type: MSG.ERROR, error })
+    const acta = store.acta
+
+    if (typeof p?.data?.ts !== 'number' || Math.abs(Date.now() - p.data.ts) > FRESH_WINDOW_MS) {
+      log('[replica] a secrets request arrived outside the freshness window: refused')
+      return no('replica: stale request')
+    }
+    const chk = await verifyChain({
+      data: p.data,
+      signature: p.signature,
+      cert: p.cert,
+      expectedScope: secretsScope(ns),
+      actaSeq: acta.seq,
+      sealers: sealersOf(acta)
+    })
+    if (!chk.ok) {
+      log(`[replica] a secrets request for "${ns}" does not check out (${chk.reason}): refused`)
+      return no('unauthorized: ' + chk.reason)
+    }
+    // EL ACTA MANDA, igual que en la bóveda: el papel dice qué se emitió, el acta dice qué
+    // vale hoy. Un aparato al que le quitaron el cajón trae un papel intacto.
+    if (!memberCanReadSecrets(acta, chk.device, ns)) {
+      log(`[replica] the record does not let ${(await pubkeyId(chk.device)).slice(0, 8)} read "${ns}": refused`)
+      return no(`unauthorized: cn — the record does not recognise this member as the "${ns}" service`)
+    }
+    const quien = chk.device
     const b = store.bundleFor(ns, quien)
     if (!b) {
       log(`[replica] asked for "${ns}" and has nothing stored for that device`)
