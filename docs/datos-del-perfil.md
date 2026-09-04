@@ -207,8 +207,28 @@ máquina apagada.
    síntoma que abrió todo esto.
 3. ~~**El empujón deja de tragarse el error**~~ **HECHO**. Y se puede preguntar cómo fue:
    `profilePushState()`.
-4. **Que el aparato use el camino nuevo.** Falta: hoy `@dotrino/identity` sigue empujando
-   el `me` plano por `profileSet`. Es lo que queda para que el síntoma desaparezca de la
-   pantalla del dueño.
+4. ~~**Que el aparato use el camino nuevo**~~ **HECHO** (2026-09-04, `@dotrino/identity`
+   0.80.0). El aparato arma el paquete y empuja **dato a dato**: `profileRecipients` para
+   saber a quién envolver, un sobre por dato privado, y los públicos en claro. Al leer,
+   `profileBundle` y abre lo que le toca.
 5. **Servir el público sin la bóveda**: por el replicador.
 6. **Compartido con una persona** (§2), cuando haga falta.
+
+## 8. Probado de punta a punta
+
+`dotrino-test`, `npm run smoke:navegador` — cuatro escenarios con un navegador de verdad,
+una app en OTRO origen y la bóveda **cerrada** al otro lado del proxio. No se puede probar
+en otro sitio: hace falta el iframe con sus llaves no extraíbles y el `postMessage` entre
+orígenes.
+
+| | Qué demuestra |
+|---|---|
+| se escribe con el candado puesto | el síntoma que abrió todo esto: editar el perfil ya no exige abrir la bóveda |
+| el teléfono no está en el disco | lo privado va sellado, y se busca el número en el archivo ENTERO, no solo en su entrada |
+| el apodo sí está, y firmado | lo público va en claro porque no hay a quién sellárselo, pero nadie puede inventarlo |
+| otro arranque lo reconstruye | la vuelta completa, borrando antes la copia local — si no, se leería a sí mismo |
+
+Y encontró dos fallos que no salían por ningún otro lado: la llave de recuperación nacía
+al escribir el primer secreto (así que una bóveda nueva no podía sellarle nada al perfil
+estando cerrada), y `profilePushState` nacía en `{ok: true}`, con lo que «no se ha
+empujado nada» y «salió bien» se veían igual.
