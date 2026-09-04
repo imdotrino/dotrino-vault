@@ -140,6 +140,7 @@ Cada invariante tiene un test. Esto es lo que se puede enseñar, no lo que se pu
 | Un sobre con la firma cambiada **no se abre** | `secrets.e2e` |
 | A un **desconocido** el replicador no le da ni el cajón ni el acta | `smoke/replica.mjs` → *a un DESCONOCIDO…* |
 | Los dos mostradores comprueban **quién pregunta antes** de entregar | `quien-pide-se-comprueba` (3 casos) |
+| Una **renuncia repetida** no vuelve a contar | `quien-pide-se-comprueba` → *una renuncia que no quita nada…* |
 
 ## 4. Lo que NO se cubre
 
@@ -176,6 +177,19 @@ que no se descubra el día de una auditoría.
 En el navegador la privada es una `CryptoKey` **no extraíble**: ni el propio código lee sus
 bytes. En el daemon es un JWK cifrado en reposo — atado a la máquina por cifrado, no por
 hardware. No hay TPM ni enclave. El KMS de `atrest` es el camino, y está sin usar.
+
+### 4.4.bis. Una renuncia vieja se puede volver a usar si el permiso se reconcedió
+
+El registro de renuncia va firmado por el propio miembro y lleva `ts`, pero **nadie
+compara ese `ts` con nada**. Desde el 2026-09-04 una repetición no hace nada mientras el
+permiso siga quitado —la bóveda mira lo que el acta dice hoy y para ahí—, así que ya no
+sirve para hacer churn del acta ni para escribir en la bitácora una renuncia que su aparato
+no hizo. Lo que queda abierto: si el dueño **vuelve a conceder** ese permiso, quien
+capturara el registro puede quitárselo otra vez, y las veces que quiera.
+
+Cerrarlo del todo pide que el acta recuerde la fecha de la última renuncia por miembro y
+rechace las que no sean posteriores — monotonía, como el `seq` y el `gen`. No está hecho:
+toca la forma del acta, o sea todos sus consumidores.
 
 ### 4.5. Metadatos del transporte
 

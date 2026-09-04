@@ -1923,6 +1923,29 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('rejected', { what: 'renounce', reason: 'signature' })
       return reply(from, { type: MSG.ERROR, error: 'renounce: the signature is not the member own' })
     }
+    // UNA RENUNCIA QUE NO QUITA NADA NO SE HONRA, y esto es lo que corta el replay barato.
+    //
+    // El registro va firmado y lleva `ts`, pero nadie lo miraba: cualquiera que lo viera
+    // pasar por el proxio podía volver a mandarlo cuando quisiera. Como `absorbRenounce`
+    // SELLA UN ACTA NUEVA cada vez, repetirlo hacía subir el `seq` y empujar a todos los
+    // aparatos sin que hubiera cambiado nada — y dejaba en la bitácora una renuncia con el
+    // nombre del aparato, que es lo peor: la bitácora es la prueba, y ahí decía algo que
+    // ese aparato no hizo.
+    //
+    // Mirando lo que el acta dice HOY, un registro repetido no quita nada y se para aquí.
+    // Lo que esto NO cierra, y queda anotado: si el dueño vuelve a conceder ese permiso, el
+    // mismo registro viejo lo quita otra vez. Cerrarlo del todo pide que el acta recuerde
+    // la fecha de la última renuncia por miembro y rechace las que no sean posteriores.
+    const actual = (await identity.profileActa?.().catch(() => null))?.acta || null
+    if (!actual) {
+      audit('rejected', { what: 'renounce', reason: 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'renounce: this vault has no record to apply it to' })
+    }
+    const tiene = new Set(Acta.effectiveCaps(actual, record.member) || [])
+    if (!(record.caps || []).some((c) => tiene.has(c))) {
+      audit('rejected', { what: 'renounce', reason: 'nada-que-quitar' })
+      return reply(from, { type: MSG.ERROR, error: 'renounce: that member no longer holds any of those capabilities' })
+    }
     try {
       const r = await identity.absorbRenounce(record)
       const device = await deviceIdOf(record.member).catch(() => null)

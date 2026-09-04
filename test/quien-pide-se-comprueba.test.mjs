@@ -75,3 +75,24 @@ test('un acta anunciada por un desconocido no entra en una bóveda sin acta prop
   const adopta = cuerpo.indexOf('adoptActa')
   assert.ok(mira < adopta, 'se adopta antes de comprobar que hay con qué comparar')
 })
+
+/**
+ * UNA RENUNCIA REPETIDA NO VUELVE A CONTAR.
+ *
+ * El registro va firmado por el propio miembro y solo puede QUITAR, así que honrarlo sin
+ * papel es correcto. Lo que faltaba es que su `ts` no lo miraba nadie: quien lo viera pasar
+ * por el proxio podía repetirlo cuando quisiera, y como absorberlo SELLA UN ACTA NUEVA,
+ * cada repetición subía el `seq` y empujaba a todos los aparatos sin que cambiara nada —
+ * dejando además en la bitácora una renuncia con el nombre de un aparato que no la hizo.
+ *
+ * Queda anotado lo que esto NO cierra: si el permiso se vuelve a conceder, el registro
+ * viejo lo quita otra vez.
+ */
+test('una renuncia que no quita nada no se honra', () => {
+  const cuerpo = cuerpoDe(leer('src/vault.js'), 'async function handleRenounce (')
+  const mira = cuerpo.indexOf('effectiveCaps(')
+  const absorbe = cuerpo.indexOf('absorbRenounce(')
+  assert.notEqual(mira, -1, 'hay que mirar lo que el miembro tiene HOY')
+  assert.ok(mira < absorbe, 'se absorbe antes de comprobar que hay algo que quitar')
+  assert.match(cuerpo, /sin-acta/, 'y sin acta no se aplica nada')
+})
