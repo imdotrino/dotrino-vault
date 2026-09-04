@@ -21,6 +21,8 @@ import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponen
  * que es. Ahora `test/web-pin-al-dia.test.mjs` no deja que se separen.
  */
 import { buildSealedVar } from '@dotrino/vault/admin'
+// La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.
+import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope } from '@dotrino/identity/acta'
@@ -98,6 +100,16 @@ const T = {
     // Estado de cada aparato: no es documentación, es el dato que hace falta para decidir.
     dev_until: (d) => 'conectado hasta el ' + d,
     dev_since: (d) => 'se conectó el ' + d,
+    // Abrir la bóveda desde aquí. Es una pantalla ADMINISTRATIVA: dice el estado y ofrece
+    // la acción, sin explicar qué es una bóveda (§5.1).
+    lock_t: 'La bóveda está cerrada',
+    lock_b: 'Puedes abrirla desde aquí con su contraseña de administración. No es la tuya de siempre: es otra, aparte, que solo sirve por este camino.',
+    lock_no: 'Para abrirla desde aquí hace falta ponerle una contraseña de administración en su máquina: dotrino-vault profile admin-password',
+    lock_pwd: 'Contraseña de administración',
+    lock_go: 'Abrir',
+    lock_going: 'Abriendo…',
+    unlock_no: 'la bóveda no dio con qué cifrar: puede que sea una versión anterior',
+    unlock_wait: (s) => `Demasiados intentos. Espera ${s} s.`,
     // Qué versión corre cada aparato (CONVENCIONES §14). El aviso no bloquea nada: existe
     // para que una incompatibilidad deje de parecer que ese aparato está apagado.
     dev_runs: (v) => 'corre ' + v,
@@ -265,6 +277,14 @@ const T = {
     confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
     dev_until: (d) => 'connected until ' + d,
     dev_since: (d) => 'connected on ' + d,
+    lock_t: 'The vault is closed',
+    lock_b: 'You can open it from here with its admin password. It is not your usual one: it is a separate password that only works this way.',
+    lock_no: 'To open it from here, set an admin password on its machine: dotrino-vault profile admin-password',
+    lock_pwd: 'Admin password',
+    lock_go: 'Open',
+    lock_going: 'Opening…',
+    unlock_no: 'the vault gave nothing to encrypt to: it may be an older version',
+    unlock_wait: (s) => `Too many tries. Wait ${s} s.`,
     dev_runs: (v) => 'runs ' + v,
     dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' does not match',
     vault_runs: (p, v, n) => 'This vault runs ' + p + ' ' + v + ' (protocol ' + n + ')',
@@ -1306,6 +1326,63 @@ const pendingVars = computed(() => Object.entries(vars.value?.pending || {})
     una copia del disco, y eso se dice — no se calla por incómodo. */
 const noPassword = computed(() => vars.value ? vars.value.hasPassword === false : false)
 
+/**
+ * ABRIR LA BÓVEDA DESDE AQUÍ (`docs/abrir-a-distancia.md`).
+ *
+ * Hasta ahora la consola ni siquiera SABÍA que estaba cerrada: se enteraba al chocar con un
+ * `vault-locked` intentando algo. Ahora lo dice la propia bóveda, y con ello se distinguen
+ * dos cosas que llevan a acciones distintas: que esté cerrada, y que se pueda abrir desde
+ * aquí (hace falta haberle puesto una contraseña de admin en su máquina).
+ */
+const locked = computed(() => !!vars.value?.locked)
+const canUnlock = computed(() => !!vars.value?.remoteUnlock)
+const unlockPwd = ref('')
+const unlockErr = ref('')
+const unlockWait = ref(0)
+
+/**
+ * ABRE. El molino (scrypt) se hace AQUÍ, en el navegador, y lo que viaja es el resultado:
+ * la bóveda nunca ve la contraseña. Y adivinar le cuesta el molino a quien prueba, en vez
+ * de costarle CPU a ella.
+ *
+ * Dos pasos porque la bóveda tiene que aportar una llave EFÍMERA: el sobre lo abre solo
+ * ella, y solo una vez. Su llave de cifrado fija no valdría — esa cae con el disco, y la
+ * contraseña es justo lo único que un ladrón de disco no tiene.
+ */
+async function abrirBoveda () {
+  if (!unlockPwd.value || busy.value === 'unlock') return
+  busy.value = 'unlock'
+  unlockErr.value = ''
+  unlockWait.value = 0
+  try {
+    // EL NONCE LO PONEMOS NOSOTROS y va en los DOS sitios: fuera, para que la bóveda lo
+    // queme, y DENTRO del sobre, para que uno capturado no se pueda reenviar con otro.
+    const nonce = [...crypto.getRandomValues(new Uint8Array(16))]
+      .map((b) => b.toString(16).padStart(2, '0')).join('')
+    const params = await id.value.vaultAdmin('unlock.begin', { nonce })
+    if (!params?.ek) throw new Error(t.value.unlock_no)
+
+    const { scrypt } = await import('scrypt-js')
+    const salt = Uint8Array.from(atob(params.salt), (c) => c.charCodeAt(0))
+    const clave = await scrypt(new TextEncoder().encode(unlockPwd.value), salt,
+      params.N, params.r, params.p, params.len)
+
+    const enc = await sealToEphemeral({ ek: params.ek, payload: { nonce, key: btoa(String.fromCharCode(...clave)) } })
+    clave.fill(0)
+    unlockPwd.value = ''
+
+    await id.value.vaultAdmin('unlock', { nonce, enc })
+    await refresh()
+  } catch (e) {
+    // El freno viaja con el rechazo, así que se puede decir CUÁNTO falta en vez de dejar
+    // al usuario reintentando contra una puerta que ya no responde.
+    unlockWait.value = Number(e?.waitSec) || 0
+    unlockErr.value = unlockWait.value ? t.value.unlock_wait(unlockWait.value) : (e?.message || String(e))
+  } finally {
+    busy.value = ''
+  }
+}
+
 const orphanVars = computed(() => (vars.value?.dev || [])
   .filter((d) => !members.value.some((m) => m.pub === d.pub)))
 
@@ -1592,6 +1669,25 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
            master lo puede todo; uno con «administra» puede conectar y quitar. -->
       <h2>{{ t.members }}</h2>
       <ul class="members" data-testid="members">
+        <!-- CERRADA. Va arriba del todo porque cambia lo que se puede hacer en el resto de
+             la pantalla: sin esto, quitar un aparato fallaba con un error y nadie sabía
+             por qué. -->
+        <li v-if="locked" class="member lockcard" data-testid="vault-locked">
+          <div class="who">
+            <strong>{{ t.lock_t }}</strong>
+          </div>
+          <p class="muted svc-note">{{ canUnlock ? t.lock_b : t.lock_no }}</p>
+          <form v-if="canUnlock" class="unlockform" @submit.prevent="abrirBoveda">
+            <input v-model="unlockPwd" type="password" :placeholder="t.lock_pwd"
+                   data-testid="unlock-pwd" autocomplete="off" :disabled="busy === 'unlock'">
+            <button class="btn" type="submit" data-testid="unlock-go"
+                    :disabled="!unlockPwd || busy === 'unlock'">
+              {{ busy === 'unlock' ? t.lock_going : t.lock_go }}
+            </button>
+          </form>
+          <p v-if="unlockErr" class="muted svc-note" data-testid="unlock-err">{{ unlockErr }}</p>
+        </li>
+
         <li v-for="m in devices" :key="m.pub" class="member" :class="{ open: openMembers.has(m.pub) }" :data-member="m.id">
           <div class="who acc" role="button" tabindex="0" :aria-expanded="openMembers.has(m.pub)"
                :data-testid="'acc-member-' + m.id"
@@ -1927,6 +2023,9 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 /* Qué corre: es un DATO, así que va en gris como la fecha. El que no cuadra usa `.out`,
    que ya es el color de aviso — no hace falta un tercero. */
 .tag.runs { background: transparent; color: #6b7a90; padding-left: 0; }
+.lockcard { border-color: #5a2b2f; }
+.unlockform { display: flex; gap: .5rem; padding: 0 .75rem .75rem; flex-wrap: wrap; }
+.unlockform input { flex: 1 1 12rem; min-width: 0; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }

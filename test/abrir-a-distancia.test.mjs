@@ -107,3 +107,40 @@ test('sin contraseña de admin no se puede abrir a distancia, y se dice', () => 
   const cuerpo = src.slice(i, i + 700)
   assert.match(cuerpo, /has no admin password/, 'se enciende a propósito, no viene puesto')
 })
+
+/**
+ * LA CONSOLA. No se puede montar un navegador aquí, así que se ata lo estable: que el
+ * molino se haga ARRIBA y que lo que viaje sea el resultado.
+ */
+test('la consola deriva en el navegador y manda el resultado, no la contraseña', () => {
+  const src = leer('web/src/Console.vue')
+  const i = src.indexOf('async function abrirBoveda')
+  assert.notEqual(i, -1, 'la consola tiene que poder abrir la bóveda')
+  const cuerpo = src.slice(i, i + 2200)
+
+  assert.match(cuerpo, /await import\('scrypt-js'\)/, 'el molino se hace aquí')
+  assert.match(cuerpo, /key: btoa/, 'lo que viaja es el resultado del molino')
+  assert.ok(!/password: unlockPwd|key: unlockPwd/.test(cuerpo),
+    'la contraseña no puede viajar: la bóveda no la ve nunca')
+  assert.match(cuerpo, /clave\.fill\(0\)/, 'y el resultado no se queda en memoria')
+})
+
+test('el nonce lo pone la consola y va en los DOS sitios', () => {
+  const src = leer('web/src/Console.vue')
+  const cuerpo = src.slice(src.indexOf('async function abrirBoveda'), src.indexOf('async function abrirBoveda') + 2200)
+  assert.match(cuerpo, /vaultAdmin\('unlock\.begin', \{ nonce \}\)/, 'fuera, para que la queme')
+  assert.match(cuerpo, /payload: \{ nonce,/, 'y DENTRO del sobre, para que no se reenvíe')
+})
+
+test('la consola usa la MISMA cripto que la bóveda, no una copia', () => {
+  const src = leer('web/src/Console.vue')
+  assert.match(src, /from '@dotrino\/vault\/sealed'/,
+    'copiar el sellado sería dos implementaciones que se separan sin hacer ruido')
+})
+
+test('la bóveda le dice a la consola si está cerrada y si se puede abrir', () => {
+  const vault = leer('src/vault.js')
+  assert.match(vault, /locked: \(\(\) => \{ try \{ return !!isLocked\(\)/, 'que está cerrada')
+  assert.match(vault, /remoteUnlock: \(\(\) => \{ try \{ return !!hasSecondary\(\)/,
+    'y si hay contraseña de admin puesta: son dos cosas distintas y llevan a acciones distintas')
+})

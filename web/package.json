@@ -11,7 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@dotrino/identity": "0.78.0",
+    "@dotrino/identity": "0.82.0",
     "@dotrino/install": "0.3.1",
     "@dotrino/nav": "0.3.0",
     "@dotrino/passmanager": "0.10.1",
@@ -21,6 +21,7 @@
     "@dotrino/vault": "0.61.0",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4",
+    "scrypt-js": "3.0.1",
     "vue": "3.5.13"
   },
   "devDependencies": {

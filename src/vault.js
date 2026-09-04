@@ -1966,7 +1966,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           // llave de la máquina de la bóveda, cuyo material vive en ese mismo disco.
           // El comentario de aquí decía «la consola lo dice en voz alta» y la consola
           // no decía nada — el mismo error que el comentario mentiroso de `atrest.js`.
-          hasPassword: (() => { try { return !!hasPassword() } catch (_) { return true } })()
+          hasPassword: (() => { try { return !!hasPassword() } catch (_) { return true } })(),
+          // SI ESTÁ CERRADA, Y SI SE PUEDE ABRIR DESDE AQUÍ. La consola no tenía forma de
+          // saberlo: se enteraba solo al chocar con un `vault-locked` intentando algo. Y
+          // `remoteUnlock` distingue las dos razones por las que el formulario no aparece —
+          // «no está cerrada» y «no hay contraseña de admin puesta»— que son cosas
+          // distintas y llevan a acciones distintas.
+          locked: (() => { try { return !!isLocked() } catch (_) { return true } })(),
+          remoteUnlock: (() => { try { return !!hasSecondary() } catch (_) { return false } })()
         }))
       }
     },
@@ -2176,7 +2183,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const r = await admin.handle(p.data, { signature: p.signature, cert: p.cert })
     // El `code` viaja aparte del texto: el texto está en inglés y puede cambiar, el código
     // es lo que empareja quien llama (`vault-locked` ≠ «no autorizado»).
-    if (!r.ok) return reply(from, { type: MSG.ERROR, error: r.error, ...(r.code ? { code: r.code } : {}) })
+    // EL FRENO VIAJA CON EL RECHAZO. `tries` y `waitSec` solo los trae abrir a distancia, y
+    // sin ellos el admin reintenta contra una puerta que ya no responde y no sabe por qué —
+    // el mismo silencio que se arregló en el resto del ecosistema.
+    if (!r.ok) {
+      return reply(from, {
+        type: MSG.ERROR,
+        error: r.error,
+        ...(r.code ? { code: r.code } : {}),
+        ...(r.tries != null ? { tries: r.tries } : {}),
+        ...(r.waitSec != null ? { waitSec: r.waitSec } : {})
+      })
+    }
     reply(from, { type: MSG.ADMIN_RESULT, op: p.data.op, result: r.result })
   }
 
