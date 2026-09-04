@@ -62,7 +62,34 @@ if (cambios.length) {
 
 const npm = (args, cwd) => {
   console.log(`\n$ npm ${args.join(' ')}   (${cwd})`)
-  execFileSync('npm', args, { cwd, stdio: 'inherit' })
+  // Se captura la salida ADEMÁS de enseñarla: sin capturarla no hay forma de distinguir
+  // «ya estaba» de «no tienes permiso», y los dos llegan como E403.
+  try {
+    const out = execFileSync('npm', args, { cwd, encoding: 'utf8', stdio: ['inherit', 'pipe', 'pipe'] })
+    if (out) process.stdout.write(out)
+  } catch (e) {
+    if (e?.stdout) process.stdout.write(String(e.stdout))
+    if (e?.stderr) process.stderr.write(String(e.stderr))
+    throw e
+  }
+}
+
+/**
+ * ¿ESTE FALLO ES «YA ESTABA»? Entonces no es un fallo.
+ *
+ * `npm view` va con RETRASO: acabamos de publicar y el registro todavía contesta que esa
+ * versión no existe, así que el guardián de abajo dice «publica» y npm contesta 403 «you
+ * cannot publish over the previously published versions». El paquete está donde tiene que
+ * estar y aun así la tanda se cae — y con ella la release de GitHub y sus archivos, que es
+ * lo que pasó con la 0.107.0.
+ *
+ * Preguntar es una pista; el 403 es la respuesta. Se distingue por el texto porque npm no
+ * da otra cosa: el código `E403` también sale cuando no tienes permiso, y eso sí es un
+ * fallo de verdad que tiene que seguir rompiendo.
+ */
+const esYaPublicado = (e) => {
+  const txt = String(e?.stdout || '') + String(e?.stderr || '') + String(e?.message || '')
+  return /cannot publish over the previously published versions/i.test(txt)
 }
 
 /** ¿Esa versión exacta ya está en el registry? */
@@ -83,7 +110,13 @@ const publicarSiFalta = (nombre, version, cwd) => {
     console.log(`\n${nombre}@${version} ya está en el registry — se salta`)
     return false
   }
-  npm(['publish', '--access', 'public'], cwd)
+  try {
+    npm(['publish', '--access', 'public'], cwd)
+  } catch (e) {
+    if (!esYaPublicado(e)) throw e
+    console.log(`\n${nombre}@${version} ya estaba (el registry contestaba con retraso) — se sigue`)
+    return false
+  }
   return true
 }
 
