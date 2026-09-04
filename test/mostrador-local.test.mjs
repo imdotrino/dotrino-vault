@@ -66,3 +66,31 @@ test('ningún handler decide nada por el canal de entrada', async () => {
   assert.deepEqual(sospechas, [],
     'un handler está mirando si el mensaje vino del socket local: la autorización sale del cert y del acta, no del camino')
 })
+
+/**
+ * EL DIRECTORIO ES EL CONTROL (auditoría del 2026-09-04).
+ *
+ * `mkdir` con `mode` no toca un directorio que YA existe, y sin `XDG_RUNTIME_DIR` —un
+ * servicio de sistema, un contenedor— la ruta cae en `/tmp`, donde cualquiera puede
+ * haberlo creado antes. Quien sea dueño del directorio puede borrar el socket y poner el
+ * suyo: no leería nada —la respuesta va firmada por una llave que nombra el acta— pero
+ * deja sin arrancar a los servicios de la máquina.
+ *
+ * Y el `chmod 0600` del socket llega DESPUÉS de `listen`, así que por sí solo deja una
+ * rendija. Lo que la cierra es que el directorio sea nuestro y solo nuestro; si no lo es,
+ * la bóveda no abre el mostrador y lo dice — los servicios salen por el proxio, que
+ * funciona.
+ */
+test('con el directorio abierto a otros, el mostrador local no se abre', async () => {
+  const fuente = fs.readFileSync(new URL('../src/vault.js', import.meta.url), 'utf8')
+  const i = fuente.indexOf('function abrirMostradorLocal (')
+  assert.notEqual(i, -1)
+  const cuerpo = fuente.slice(i, i + 3000)
+
+  const comprueba = cuerpo.indexOf('statSync(dir)')
+  const escucha = cuerpo.indexOf('server.listen(')
+  assert.notEqual(comprueba, -1, 'hay que mirar de quién es el directorio antes de escuchar')
+  assert.ok(comprueba < escucha, 'se escucha antes de comprobar el directorio')
+  assert.match(cuerpo, /getuid/, 'hay que comprobar que el directorio es nuestro')
+  assert.match(cuerpo, /0o077/, 'y que no esté abierto a grupo ni a otros')
+})

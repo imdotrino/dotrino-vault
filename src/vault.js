@@ -1330,7 +1330,30 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       sock.on('error', cerrar)
     })
     server.on('error', (e) => log('[vault] the local desk could not open (' + e.message + '): services will use the proxy'))
-    try { fs.mkdirSync(socketDir(), { recursive: true, mode: 0o700 }) } catch (_) {}
+    // EL DIRECTORIO ES EL CONTROL, no el modo del socket.
+    //
+    // `mkdir` con `mode` NO corrige un directorio que ya existe, y sin `XDG_RUNTIME_DIR`
+    // —un servicio de sistema, un contenedor— esto cae en `/tmp`, donde cualquiera puede
+    // haberlo creado antes con permiso de escritura para todos. Quien sea dueño del
+    // directorio puede borrar el socket y poner el suyo: los servicios de esta máquina
+    // acabarían hablando con él. No leería nada (la respuesta va firmada por una llave que
+    // nombra el acta y el cliente la comprueba), pero los deja sin arrancar.
+    //
+    // Y el `chmod 0600` de abajo llega DESPUÉS de `listen`, así que por sí solo deja una
+    // rendija. Lo que la cierra de verdad es que el directorio sea nuestro y solo nuestro.
+    const dir = socketDir()
+    try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) } catch (_) {}
+    try {
+      const st = fs.statSync(dir)
+      const ajeno = typeof process.getuid === 'function' && st.uid !== process.getuid()
+      const abierto = (st.mode & 0o077) !== 0
+      if (ajeno || abierto) {
+        return log(`[vault] the local desk stays closed: ${dir} is ${ajeno ? 'owned by another user' : 'writable by others'} ` +
+          '— services on this machine will use the proxy instead')
+      }
+    } catch (e) {
+      return log('[vault] the local desk stays closed: could not check ' + dir + ' (' + e.message + ')')
+    }
     try { fs.rmSync(socketPath, { force: true }) } catch (_) {}
     server.listen(socketPath, () => {
       try { fs.chmodSync(socketPath, 0o600) } catch (_) {}
