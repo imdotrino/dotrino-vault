@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
-import { verifyChain, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
+import { verifyChain as verifyChainRaw, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import * as Acta from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
@@ -27,6 +27,9 @@ import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
+import { VERSION } from './version.js'
+import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
+import { loadManifest, brokenOf } from '@dotrino/roadmap'
 // `PENDING_TTL_MS` se usa abajo, al esperar la firma del aprobador: sin importarlo, esa
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
@@ -40,7 +43,7 @@ import { localSocketPath, socketDir } from '../lib/src/localdesk.js'
 import { dataDir, ensureDir } from './paths.js'
 import net from 'node:net'
 import { atRestFor, kekFor, migrateFile, encryptText, decryptText } from './atrest.js'
-import { MSG, SCOPE, secretsScope, isValidSecretsNs } from './protocol.js'
+import { MSG, SCOPE, secretsScope, isValidSecretsNs, VAULT_PROTOCOL, VAULT_SPEAKS } from './protocol.js'
 
 /**
  * Tope de una respuesta de la bóveda por el transporte. El proxio (`PROXY_MAX_FRAME_BYTES`)
@@ -333,9 +336,67 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   const canales = new Map()
 
+  /**
+   * QUÉ SOMOS, Y QUÉ CORRE CADA APARATO (CONVENCIONES §14, `@dotrino/compat`).
+   *
+   * El agujero que esto tapa: una incompatibilidad de versiones se manifestaba como
+   * SILENCIO. El que llamaba no sabía si estábamos apagados, ocupados o hablando otro
+   * idioma, así que reintentaba para siempre — y aquí no se sabía que nos hablaban.
+   *
+   * **Informa, no bloquea** (dueño, 2026-09-04): el dictamen se enseña y se le pega a los
+   * errores, y no hay ni un `if` que deje de atender por él. Si algún día se decide
+   * bloquear, se decide arriba y se escribe aquí a propósito.
+   *
+   * La lista de rotas sale del registro común (`@dotrino/roadmap`), que viaja DENTRO de
+   * esta versión: la compatibilidad es política del código, no de la cuenta.
+   */
+  const MI_VERSION = compatDeclare({
+    product: 'vaultd', version: VERSION, protocol: VAULT_PROTOCOL, speaks: VAULT_SPEAKS
+  })
+  let ROTAS = []
+  try { ROTAS = brokenOf(loadManifest()) } catch (e) { log('[vault] no compatibility registry: ' + e.message) }
+
+  /**
+   * Lo que dice correr cada aparato, por llave. Se apunta de lo que viene FIRMADO
+   * (`p.data.v`, dentro del sobre) y no del envoltorio: una versión que cualquiera puede
+   * escribir no vale para enseñarla como si fuera un dato.
+   */
+  const versiones = new Map()
+  const apuntarVersion = (pub, v) => {
+    if (!pub || !v) return
+    const dictamen = compatCheck({ mine: MI_VERSION, theirs: v, broken: ROTAS })
+    versiones.set(pub, { ...v, at: Date.now(), compatible: dictamen.compatible, reason: dictamen.reason })
+    if (!dictamen.compatible) log(`[vault] ${v.product} ${v.version}: ${dictamen.reason}`)
+    return dictamen
+  }
+  /** El dictamen de un aparato, para enseñarlo o para pegárselo a un error. */
+  const versionDe = (pub) => versiones.get(pub) || null
+
+  /**
+   * LA VERSIÓN SE APUNTA DONDE YA SE COMPRUEBA LA FIRMA, y por eso esto envuelve a
+   * `verifyChain` en vez de mirar el envoltorio del mensaje: `data` va firmado, así que
+   * lo que se apunta es lo que ese aparato dijo **con su llave**, no lo que cualquiera
+   * pueda escribir por fuera. Un inventario de versiones que se puede falsificar no es un
+   * inventario, es una pantalla bonita.
+   *
+   * Va envuelto y no repetido en los ocho mostradores porque una comprobación copiada
+   * ocho veces son siete sitios donde olvidarla.
+   */
+  const verifyChain = async (args) => {
+    const chk = await verifyChainRaw(args)
+    if (chk.ok && args?.data?.v) apuntarVersion(chk.device, args.data.v)
+    return chk
+  }
+
+
   const reply = (to, obj) => {
     try {
       const enviar = canales.get(to) || ((o) => client.send(to, o))
+      // ANUNCIAMOS EN CADA RESPUESTA: el otro lado decide con esto, y decide él porque es
+      // el que puede tener la lista al día (§14). Va en el envoltorio y no dentro de un
+      // cuerpo firmado a propósito — es un dato para enseñar y para explicar un fallo, no
+      // una credencial: nada se autoriza con él.
+      obj = { ...obj, v: MI_VERSION }
       const bytes = Buffer.byteLength(JSON.stringify(obj))
       if (bytes > MAX_REPLY_BYTES) {
         log(`[vault] the reply to ${obj?.type} does not fit (${bytes} bytes > ${MAX_REPLY_BYTES}): sending an error instead of killing the connection`)
@@ -889,10 +950,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // `sub` (pubkey completa) va incluida: es la DIRECCIÓN de cada dispositivo en el
     // proxy → permite a las apps AUTODESCUBRIR tus máquinas (p. ej. la terminal
     // lista tus agentes sin pegar nada). Solo la ve quien presenta un cert tuyo válido.
+    // QUÉ CORRE CADA UNO, y si cuadra con lo que corremos aquí (CONVENCIONES §14). Va con
+    // la lista porque es donde se mira: el dueño lo pidió en el administrador Y en la
+    // lista de dispositivos de la bóveda. `null` significa «todavía no ha hablado desde
+    // que arrancamos», que es distinto de «no declara» — y se dice distinto.
     const devices = await Promise.all(issued.map(async (x) => ({
-      deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce
+      deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce,
+      running: x.sub ? versionDe(x.sub) : null
     })))
-    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain }))
+    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain, vault: MI_VERSION }))
   }
 
   /**
@@ -3038,7 +3104,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     listDevices: () => identity.listDelegations(),
     // Acta del perfil (quién es del perfil y qué puede cada uno): lo que muestran
     // `dotrino-vault members` y la consola de vault.dotrino.com.
-    profileMembers: () => identity.profileMembers(),
+    /**
+     * Los miembros del acta, y QUÉ CORRE CADA UNO (CONVENCIONES §14). La versión no está en
+     * el acta —el acta dice quién puede qué, no qué build es— así que se le pega aquí, que
+     * es por donde salen `members` y la consola. El dueño lo pidió en los dos sitios.
+     *
+     * `running: null` es «todavía no ha hablado desde que arrancamos», que no es lo mismo
+     * que «no declara»: lo segundo trae un dictamen con `code: 'undeclared'`.
+     */
+    profileMembers: async () => {
+      const r = await identity.profileMembers()
+      return {
+        ...r,
+        vault: MI_VERSION,
+        members: (r?.members || []).map((m) => ({ ...m, running: versionDe(m.pub) }))
+      }
+    },
     // Los namespaces que quedaron a deber una rotación (se fue un miembro y no se pudo
     // rotar su llave). Lo enseñan `secret list` y la consola: si no se ve, no se salda.
     rotationsDue,

@@ -595,6 +595,18 @@ async function cmdMembers () {
     // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
+    // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
+    // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
+    // fallo más caro que ha tenido el ecosistema. No bloquea nada: se enseña.
+    if (m.running) {
+      const v = `${m.running.product} ${m.running.version}`
+      if (m.running.compatible) console.log('      %scorre %s%s', D, v, Z)
+      else console.log('      %s⚠ corre %s · %s%s', R, v, m.running.reason, Z)
+    }
+  }
+  if (record.vault) {
+    console.log('\n  %sEsta bóveda corre %s %s (protocolo %d)%s',
+      D, record.vault.product, record.vault.version, record.vault.protocol, Z)
   }
   console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +desatendido | +replica')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
