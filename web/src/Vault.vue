@@ -352,7 +352,7 @@ onBeforeUnmount(() => responder?.stop())
 </script>
 
 <template>
-  <section class="vault">
+  <section class="vault" data-testid="passwords-desk">
     <p v-if="!ready && !error" class="loading">{{ t('opening') }}</p>
 
     <template v-if="error">

@@ -2552,6 +2552,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // ANTES de reenvolver nada: si la copia de recuperación se quedó bajo la llave de la
     // máquina, se pasa a la frase. Sin esto, todo lo de abajo falla con «wrong password».
     if (adminKey) await migrarRecuperacionALaFrase(adminKey)
+    // Y LA LLAVE DE RECUPERACIÓN EXISTE. Nacía al escribir el primer secreto, así que una
+    // bóveda recién creada no tenía a quién envolver — y como crearla necesita la maestra,
+    // cerrada ya no había manera. El síntoma: escribir el perfil con la bóveda cerrada
+    // fallaba con «the vault did not say who to seal the profile for», en un perfil nuevo
+    // y solo en el primero. Abrir la bóveda es el momento de saldarlo, y es idempotente.
+    // …salvo en un almacén v3, que no tiene ese concepto: ahí lo que toca es `migrate`, y
+    // escribir o leer un sobre ya se rechaza diciéndolo. Crearla antes de migrar sería
+    // dejar una llave suelta en un formato que va a reescribirse entero.
+    if (!secrets.isLegacy()) await secrets.ensureRecovery(adminKey)
     const out = { drawers: 0, wrapped: 0, sealed: 0, dropped: 0, sinLlave: [], failed: [] }
     for (const owner of secrets.owners?.() || []) {
       const before = new Set(secrets.recipientsIn(owner))

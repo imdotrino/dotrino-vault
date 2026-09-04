@@ -342,6 +342,19 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
     schemaVersion: () => data.schemaVersion,
     /** ¿La privada de recuperación está sellada solo con la llave de esta máquina? */
     recoveryPub: () => data.recovery?.pub || null,
+    /**
+     * CREA LA LLAVE DE RECUPERACIÓN SI NO EXISTE. Se llama al ABRIR la bóveda, que es el
+     * único momento en que se puede: sellar su privada necesita la maestra.
+     *
+     * Nacía perezosamente, al escribir el primer secreto. En un perfil recién hecho eso
+     * significaba que la bóveda no tenía a quién envolver, y como crearla exige estar
+     * abierta, escribir el PERFIL con la bóveda cerrada era imposible — que es justo lo
+     * que el perfil en sobres viene a permitir. Lo encontró el escenario del navegador:
+     * «the vault did not say who to seal the profile for».
+     *
+     * Idempotente: si ya está, no toca nada.
+     */
+    async ensureRecovery (adminKey = null) { return enFila(async () => (await ensureRecovery(adminKey)).pub) },
 
     /**
      * MUCHAS ESCRITURAS, UN GUARDADO. Cargar la configuración de un servicio son veinte
