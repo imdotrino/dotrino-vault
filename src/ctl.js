@@ -598,6 +598,11 @@ async function cmdMembers () {
     // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
     // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
     // fallo más caro que ha tenido el ecosistema. No bloquea nada: se enseña.
+    // RENUNCIAS SIN SELLAR. Ya no los tiene —la bóveda no se los reconoce— pero el acta
+    // que se lee arriba todavía los nombra, así que hay que decirlo aquí o la lista miente.
+    if (m.renounced?.length) {
+      console.log('      %s↓ renunció a %s (pendiente de sellar: abre la bóveda)%s', R, m.renounced.join(', '), Z)
+    }
     if (m.running) {
       const v = `${m.running.product} ${m.running.version}`
       if (m.running.compatible) console.log('      %scorre %s%s', D, v, Z)

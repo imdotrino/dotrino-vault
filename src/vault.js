@@ -15,7 +15,7 @@ import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain as verifyChainRaw, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
-import * as Acta from '@dotrino/identity/acta'
+import * as ActaPilar from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
 import { shouldNotifyRevoked } from '../lib/src/revocation.js'
@@ -27,6 +27,7 @@ import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
+import { openSubacta } from './subacta.js'
 import { VERSION } from './version.js'
 import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
 import { loadManifest, brokenOf } from '@dotrino/roadmap'
@@ -371,6 +372,55 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   /** El dictamen de un aparato, para enseñarlo o para pegárselo a un error. */
   const versionDe = (pub) => versiones.get(pub) || null
+
+  // ----- LA SUBACTA: lo decidido que todavía no selló el acta (`src/subacta.js`) -----
+  //
+  // Sellar es de la maestra, así que con el perfil CERRADO una renuncia no surtía ningún
+  // efecto: el aparato conservaba todos sus permisos hasta que alguien fuera a la máquina
+  // a teclear la contraseña. Justo el caso que la renuncia existe para cubrir.
+  //
+  // Se honra ya, sin sellar, y es seguro porque una entrada de la subacta SOLO PUEDE
+  // QUITAR: no concede nada a nadie, y va firmada por el miembro al que afecta.
+  const subacta = openSubacta(dir, atRestFor(dir))
+
+  /**
+   * EL ACTA, LEÍDA CON LA SUBACTA EN LA MANO.
+   *
+   * Envuelve al pilar en UN sitio en vez de pasar la lista en los diecisiete mostradores:
+   * una comprobación repetida diecisiete veces son dieciséis sitios donde olvidarla, y
+   * olvidarla aquí significa atender a un aparato que ya renunció.
+   *
+   * Solo se tocan las cinco que DECIDEN. El resto del pilar pasa tal cual.
+   */
+  const Acta = {
+    ...ActaPilar,
+    memberCan: (acta, pub, cap) => ActaPilar.memberCan(acta, pub, cap, subacta.forMember(pub)),
+    memberCanScope: (acta, pub, scope) => ActaPilar.memberCanScope(acta, pub, scope, subacta.forMember(pub)),
+    memberCanReadSecrets: (acta, pub, ns) => ActaPilar.memberCanReadSecrets(acta, pub, ns, subacta.forMember(pub)),
+    memberCanSign: (acta, pub, ns = null) => ActaPilar.memberCanSign(acta, pub, ns, subacta.forMember(pub)),
+    memberScopes: (acta, pub) => ActaPilar.memberScopes(acta, pub, subacta.forMember(pub)),
+    effectiveCaps: (acta, pub) => ActaPilar.effectiveCaps(acta, pub, subacta.forMember(pub))
+  }
+
+  /**
+   * ABSORBER lo pendiente en el acta. Solo con la bóveda abierta, que es la única que
+   * sella. Se vacía DESPUÉS y solo lo absorbido: mientras se sella puede entrar una nueva,
+   * y tirarla sería perder una renuncia sin aplicar.
+   */
+  async function absorberSubacta (motivo = 'unlock') {
+    const pendientes = subacta.drain()
+    if (!pendientes.length) return 0
+    const hechas = []
+    for (const e of pendientes) {
+      try { await identity.absorbRenounce(e); hechas.push(e) }
+      catch (err) { log(`[vault] ${motivo}: could not absorb a pending renounce: ${err.message}`) }
+    }
+    if (hechas.length) {
+      subacta.clear(hechas)
+      log(`[vault] ${motivo}: ${hechas.length} pending renounce(s) absorbed into the record`)
+    }
+    return hechas.length
+  }
 
   /**
    * LA VERSIÓN SE APUNTA DONDE YA SE COMPRUEBA LA FIRMA, y por eso esto envuelve a
@@ -958,7 +1008,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce,
       running: x.sub ? versionDe(x.sub) : null
     })))
-    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain, vault: MI_VERSION }))
+    // LA SUBACTA VIAJA CON EL ACTA. Es la mitad de «se comparte entre todos los
+    // dispositivos»: sin esto, una renuncia sin sellar solo la respeta esta máquina.
+    // Cada entrada va firmada por su sujeto, así que quien la recibe la verifica sola.
+    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain, vault: MI_VERSION, subacta: subacta.entries() }))
   }
 
   /**
@@ -2013,12 +2066,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return reply(from, { type: MSG.ERROR, error: 'renounce: that member no longer holds any of those capabilities' })
     }
     try {
-      const r = await identity.absorbRenounce(record)
+      // A LA SUBACTA PRIMERO, y aquí está el arreglo: desde este momento surte efecto,
+      // esté la bóveda abierta o cerrada. Antes se intentaba sellar directamente, sellar es
+      // de la maestra, y con el perfil cerrado la renuncia se perdía con un error — en el
+      // único momento en que de verdad hace falta.
+      const guardada = await subacta.add(record)
+      if (!guardada.ok && guardada.reason === 'no-aceptable') {
+        audit('rejected', { what: 'renounce', reason: 'no-aceptable' })
+        return reply(from, { type: MSG.ERROR, error: 'renounce: the entry is not one this vault accepts' })
+      }
       const device = await deviceIdOf(record.member).catch(() => null)
       audit('renounce', { device, caps: record.caps })
-      log(`[vault] ${device} renounced: ${(record.caps || []).join(', ')}`)
+      log(`[vault] ${device} renounced: ${(record.caps || []).join(', ')} — in effect now`)
+
+      // Y SE SELLA SI SE PUEDE. Con la bóveda abierta entra en el acta y lo respeta toda la
+      // cuenta; cerrada se queda pendiente y lo absorbe el `unlock`. Las dos ramas son
+      // correctas, así que el fallo al sellar NO es un error para quien renunció.
+      let seq = null
+      try {
+        const r = await identity.absorbRenounce(record)
+        subacta.clear([record])
+        seq = r?.seq ?? null
+      } catch (e) {
+        log(`[vault] the renounce stays pending until the vault is opened (${e.message})`)
+      }
       await notifyMembers('renounce', { deviceId: device, caps: record.caps })
-      reply(from, { type: MSG.RENOUNCE_RESULT, ok: true, seq: r?.seq ?? null })
+      reply(from, { type: MSG.RENOUNCE_RESULT, ok: true, seq, pending: seq === null })
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: 'renounce: ' + e.message })
     }
@@ -3019,6 +3092,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // aquí donde puede estrenar su llave de comunicación (ver `ensureCommKeyInActa`).
       // Si falla, no se arrastra: abrir el perfil no puede depender de esto.
       if (r?.locked === false) { try { await ensureCommKeyInActa() } catch (_) {} }
+      // Y ABSORBER LO PENDIENTE. La subacta ya lo estaba honrando con el perfil cerrado —de
+      // eso vive—, pero mientras siga ahí solo lo sabe esta máquina: al sellarlo, entra en
+      // el acta y lo respeta toda la cuenta. Si falla no se arrastra: abrir el perfil no
+      // puede depender de esto, y lo pendiente sigue surtiendo efecto igual.
+      if (r?.locked === false) { try { await absorberSubacta('unlock') } catch (_) {} }
       return { locked: r?.locked !== false }
     },
     // Forzar un empujón: lo usa `replica push` de la CLI y el smoke, para no depender
@@ -3117,7 +3195,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return {
         ...r,
         vault: MI_VERSION,
-        members: (r?.members || []).map((m) => ({ ...m, running: versionDe(m.pub) }))
+        // Y LO QUE RENUNCIÓ Y NO SE HA SELLADO. Ya surte efecto —de eso vive la subacta—
+        // pero si no se ve, el dueño mira la lista, lee los permisos del acta y cree que
+        // ese aparato los tiene. Un freno que no se explica es otro silencio.
+        members: (r?.members || []).map((m) => ({
+          ...m,
+          running: versionDe(m.pub),
+          renounced: subacta.forMember(m.pub).flatMap((e) => e.caps || [])
+        }))
       }
     },
     // Los namespaces que quedaron a deber una rotación (se fue un miembro y no se pudo

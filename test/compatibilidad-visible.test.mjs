@@ -54,8 +54,12 @@ test('la bóveda anuncia lo suyo en cada respuesta', () => {
 test('se ve en la lista de dispositivos: en el mensaje y en la CLI', () => {
   const vault = leer('src/vault.js')
   assert.match(vault, /running: x\.sub \? versionDe\(x\.sub\) : null/, 'DEVICES_RESULT lleva lo que corre cada uno')
-  assert.match(vault, /members: \(r\?\.members \|\| \[\]\)\.map\(\(m\) => \(\{ \.\.\.m, running: versionDe\(m\.pub\) \}\)\)/,
-    'y el volcado del que sale `members`')
+  // Sin fijar la línea entera: lo que importa es que el volcado del que sale `members`
+  // lleve lo que corre cada uno. Atar el texto exacto convierte cualquier añadido en un
+  // fallo, y ya pasó al sumarle las renuncias pendientes.
+  const i = vault.indexOf('profileMembers: async ()')
+  assert.notEqual(i, -1, 'el volcado del que sale `members` tiene que existir')
+  assert.match(vault.slice(i, i + 900), /running: versionDe\(m\.pub\)/, 'y llevar lo que corre cada uno')
   assert.match(leer('src/ctl.js'), /⚠ corre %s · %s/, 'y la CLI lo enseña')
 })
 
