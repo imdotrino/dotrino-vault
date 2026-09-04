@@ -133,9 +133,17 @@ jobs:
       # Publicarlo a mano «en la misma tanda» ya estaba escrito en el checklist y aun así
       # pasó, así que el número deja de estar en manos de nadie: el script lo deriva de
       # `lib` y publica, saltándose lo que ya esté.
-      - name: Publicar @dotrino/env (el envoltorio)
-        run: node packaging/release-env.mjs --publish
-
+      # LA RELEASE VA ANTES QUE EL ENVOLTORIO, y el orden importa.
+      #
+      # Estaba al revés y se pagó dos veces seguidas: el paso del envoltorio se cayó
+      # —primero por el retraso del registro, después porque `@dotrino/env` no tiene
+      # declarada la publicación de confianza— y se llevó por delante la release entera. El
+      # `.deb`, el tarball y el SBOM se habían construido y atestiguado, y no llegaron a
+      # ninguna parte por un paquete de cinco líneas que solo reexporta un `bin`.
+      #
+      # Lo que se publica y lo que se distribuye son cosas distintas: un fallo en lo segundo
+      # no puede borrar lo primero. El paso sigue rompiendo la ejecución si falla —se ve en
+      # rojo, que es lo que tiene que pasar— pero ya no se lleva nada con él.
       - name: Publicar la release con sus archivos
         uses: softprops/action-gh-release@v2
         with:
@@ -144,3 +152,11 @@ jobs:
             dist/*.tar.gz
             dist/*-sbom.cdx.json
           generate_release_notes: true
+
+      # ⚠️ Este paso necesita que `@dotrino/env` tenga declarada la PUBLICACIÓN DE CONFIANZA
+      # en npmjs.com (repo `imdotrino/dotrino-vault`, workflow `release.yml`), igual que
+      # `@dotrino/vault` y `@dotrino/vaultd`. Sin eso npm contesta 404 al publicar —oculta
+      # el «no autorizado» como «no encontrado»— y este paso sale en rojo hasta que se
+      # declare. Es una casilla en la web, no algo que se arregle desde aquí.
+      - name: Publicar @dotrino/env (el envoltorio)
+        run: node packaging/release-env.mjs --publish
