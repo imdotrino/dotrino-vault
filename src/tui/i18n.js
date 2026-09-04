@@ -166,6 +166,11 @@ const es = {
   // Está en el acta y no puede entrar: o le retiraron el certificado, o se le venció.
   deviceNoAccess: 'SIN ACCESO — está en el perfil pero no puede entrar',
   deviceDebt: (n) => `no abre ${n}`,
+  // QUÉ CORRE CADA APARATO (CONVENCIONES §14). `runs` va en gris —es un dato— y el aviso
+  // en color, porque una versión que no cuadra es lo que hace que ese aparato parezca
+  // apagado cuando en realidad no os entendéis.
+  runs: 'corre',
+  mismatch: (producto, version) => `⚠ ${producto} ${version} no cuadra`,
   thisVault: 'esta bóveda (manda ella)',
   cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
   revokedCount: (n) => `  Revocados: ${n}`,
@@ -489,6 +494,8 @@ const en = {
   noLabel: '(no label)',
   deviceNoAccess: 'NO ACCESS — it is on the record but cannot get in',
   deviceDebt: (n) => `cannot open ${n}`,
+  runs: 'runs',
+  mismatch: (product, version) => `⚠ ${product} ${version} does not match`,
   thisVault: 'this vault (it is the Master)',
   cantRemoveMaster: 'This vault is the Master: it does not remove itself.',
   revokedCount: (n) => `  Revoked: ${n}`,

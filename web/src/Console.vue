@@ -98,6 +98,11 @@ const T = {
     // Estado de cada aparato: no es documentación, es el dato que hace falta para decidir.
     dev_until: (d) => 'conectado hasta el ' + d,
     dev_since: (d) => 'se conectó el ' + d,
+    // Qué versión corre cada aparato (CONVENCIONES §14). El aviso no bloquea nada: existe
+    // para que una incompatibilidad deje de parecer que ese aparato está apagado.
+    dev_runs: (v) => 'corre ' + v,
+    dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' no cuadra',
+    vault_runs: (p, v, n) => 'Esta bóveda corre ' + p + ' ' + v + ' (protocolo ' + n + ')',
     dev_nocert: 'sin acceso',
     dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
     // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
@@ -260,6 +265,9 @@ const T = {
     confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
     dev_until: (d) => 'connected until ' + d,
     dev_since: (d) => 'connected on ' + d,
+    dev_runs: (v) => 'runs ' + v,
+    dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' does not match',
+    vault_runs: (p, v, n) => 'This vault runs ' + p + ' ' + v + ' (protocol ' + n + ')',
     dev_nocert: 'no access',
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
     gone_t: 'This device is no longer in the profile',
@@ -512,6 +520,10 @@ async function refresh () {
   try {
     const r = await id.value.listVaultDevices()
     certBySub.value = groupCerts(r?.devices)
+    // QUÉ CORRE CADA UNO (CONVENCIONES §14). Viene con la lista, no del acta: el acta dice
+    // quién puede qué, no qué build es. Y la de la bóveda, para el pie.
+    runningBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.running).map((d) => [d.sub, d.running]))
+    vaultRunning.value = r?.vault || null
     syncError.value = ''
     notLinked.value = false
     checkedAt.value = Date.now()
@@ -562,6 +574,9 @@ async function refresh () {
  * seguía apareciendo arriba para siempre. Eso es el «dispositivo fantasma»: la fila de
  * abajo desaparecía, la de arriba no.
  */
+const runningBySub = ref(new Map())
+const vaultRunning = ref(null)
+
 const devices = computed(() => members.value.map((m) => {
   const cert = certBySub.value.get(m.pub) || null
   return {
@@ -569,7 +584,8 @@ const devices = computed(() => members.value.map((m) => {
     exp: cert?.exp || null,
     // Un servicio y el master no tienen (ni necesitan) certificado emitido por la bóveda:
     // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
-    noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size
+    noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size,
+    running: runningBySub.value.get(m.pub) || null
   }
 }))
 
@@ -1592,7 +1608,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <!-- CUÁNDO ENTRÓ. El nombre lo pone el propio aparato y muchas veces no
                  distingue nada; la fecha es lo que deja saber cuál es cuál, y ver si hay
                  uno que no recuerdas haber conectado. -->
-            <span class="tag since" v-if="m.addedAt" :data-testid="'since-' + m.id">{{ t.dev_since(shortDate(m.addedAt)) }}</span>
+            <!-- QUÉ VERSIÓN CORRE. Sin esto una incompatibilidad se ve como que ese
+                 aparato «no responde», que es el fallo más caro que ha tenido el
+                 ecosistema. En gris si cuadra —es un dato— y en aviso si no. -->
+            <span v-if="m.running" class="tag" :class="m.running.compatible ? 'runs' : 'out'"
+                  :data-testid="'runs-' + m.id" :title="m.running.reason || ''">
+              {{ m.running.compatible ? t.dev_runs(m.running.version) : t.dev_mismatch(m.running.product, m.running.version) }}
+            </span>
             <code class="mid">{{ m.id }}</code>
           </div>
           <template v-if="openMembers.has(m.pub)">
@@ -1648,6 +1670,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           </template>
         </li>
       </ul>
+
+      <!-- QUÉ CORRE LA PROPIA BÓVEDA. Va al pie de la lista y no arriba porque es el
+           punto de comparación de todo lo de encima: sin él, «no cuadra» no dice con qué. -->
+      <p v-if="vaultRunning" class="muted vault-runs" data-testid="vault-runs">
+        {{ t.vault_runs(vaultRunning.product, vaultRunning.version, vaultRunning.protocol) }}
+      </p>
 
       <!-- LA BÓVEDA ES ESTE APARATO: lo único que se administra aquí es a quién se deja
            entrar. Encenderla ya no es un paso — lo hizo la página al ver que no hay
@@ -1896,6 +1924,9 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .tag.out { background: #2a1113; color: #ff9aa2; }
 /* La fecha acompaña; no compite con el nombre ni con las marcas que importan. */
 .tag.since { background: transparent; color: #6b7a90; padding-left: 0; }
+/* Qué corre: es un DATO, así que va en gris como la fecha. El que no cuadra usa `.out`,
+   que ya es el color de aviso — no hace falta un tercero. */
+.tag.runs { background: transparent; color: #6b7a90; padding-left: 0; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }

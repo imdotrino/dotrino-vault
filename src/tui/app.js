@@ -134,7 +134,10 @@ function mergeMembersAndCerts (members, issued) {
       addedAt: m.addedAt || null,
       // El master es la propia bóveda: no tiene (ni necesita) certificado. Un servicio
       // tampoco lleva uno de dispositivo. Marcarlos «sin acceso» sería una alarma falsa.
-      noAccess: !cert && !m.isMaster && !m.cn
+      noAccess: !cert && !m.isMaster && !m.cn,
+      // QUÉ CORRE ESE APARATO (CONVENCIONES §14). Lo apunta la bóveda cuando le habla, así
+      // que aquí solo hay que dejarlo pasar — que es justo lo que le faltaba a `addedAt`.
+      running: m.running || null
     }
   })
 }
@@ -266,8 +269,23 @@ function deviceRows (st, t) {
     const vars = devVarsOf(st, d.sub).length
     const debt = debtOf(st, d.sub)
     const desde = d.addedAt ? t.muted(`  ${i.deviceSince}:${fmtExp(d.addedAt)}`) : ''
+    // QUÉ VERSIÓN CORRE, y en color de aviso si no cuadra con la nuestra.
+    //
+    // Sin esto una incompatibilidad de versiones se ve como que ese aparato «no responde»,
+    // que es el fallo más caro que ha tenido el ecosistema: el apagón del 1-2 de septiembre
+    // fueron tres servicios reintentando cada 60 s contra una bóveda que ya no les
+    // entendía, un día entero y sin una sola línea que lo dijera.
+    //
+    // Un aparato que todavía no ha hablado desde que arrancamos no sale: `null` es «no lo
+    // sé», y escribir «desconocido» en cada fila sería ruido, no información.
+    const corre = d.running
+      ? (d.running.compatible
+          ? t.muted(`  ${i.runs}:${d.running.version}`)
+          : t.warn(`  ${i.mismatch(d.running.product, d.running.version)}`))
+      : ''
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
       (vars ? t.muted(`  vars:${vars}`) : '') +
+      corre +
       // EN DEUDA: en el acta y sin poder abrir lo suyo. Va en color de aviso al lado de
       // sus variables, que es donde se mira cuando algo no arranca.
       (debt ? t.warn(`  ${i.deviceDebt(debt)}`) : '')
