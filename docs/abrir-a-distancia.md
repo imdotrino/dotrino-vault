@@ -83,6 +83,67 @@ vault → admin   { ok, locked, tries?, waitMs? }            + firma de sellado
 - Con `ok:false` va **el mismo freno que en local**: cuántos intentos van y cuánto hay que
   esperar. Callarlo dejaría al admin reintentando contra una puerta que ya no responde.
 
+## La contraseña del admin es OTRA, y vale menos
+
+> Decidido por el dueño el 2026-09-04, después de descartar él mismo la cadena de sobres
+> («esto es sobreingeniería»): **otra contraseña, distinta, para el admin.**
+
+Y es mejor que teclear la principal, por una razón que no es de criptografía: hoy tu
+contraseña **es la cuenta** —destapa la maestra, y la maestra manda—, así que teclearla en
+un navegador es poner la cuenta entera ahí. Una segunda, acotada, cambia lo que se filtra
+el día que el admin esté comprometido: pasa de «se llevaron mi cuenta» a «pueden abrirme la
+bóveda».
+
+### Cómo se guarda
+
+La llave que destapa la maestra se envuelve **dos veces**: una bajo la contraseña principal
+y otra bajo la del admin. Es el mismo patrón que ya usan los cajones —varios sobres, uno
+por destinatario— así que no hay mecanismo nuevo que inventar.
+
+- **Revocarla es borrar ese sobre.** Al instante, sin tocar la principal ni re-envolver nada.
+- **Rotarla es reemplazarlo.** Igual.
+- Si no existe ese sobre, abrir a distancia sencillamente no está disponible, y eso es el
+  defecto: se enciende a propósito.
+
+### Lo que la hace valer menos, y sin esto no vale menos
+
+**Una vez abierta, la bóveda está abierta.** Si abrir con la secundaria dejara hacerlo todo,
+sería la principal con pasos de más — la misma crítica que se le hizo a la cadena de sobres.
+
+Así que **el vault recuerda con cuál se abrió** y se niega a lo que no toca:
+
+| | Principal | Secundaria (admin) |
+|---|---|---|
+| Sellar el acta: admitir, revocar, cambiar permisos | sí | **NO** |
+| Emitir certificados | sí | **NO** |
+| Cambiar la contraseña principal, recuperar | sí | **NO** |
+| Regenerar los sobres al abrir (que los servicios arranquen) | sí | sí |
+| Servir claves, saldar deudas, variables | sí | sí |
+
+No es una frontera nueva: es **la que ya tiene la consola** —«un admin puede admitir y
+expulsar, pero no reescribir quién manda»— aplicada al candado. La secundaria abre en
+**modo admin**, no en modo dueño.
+
+Un detalle que no se puede saltar: la maestra tiene dos trabajos, y abrir en modo admin
+**conserva el segundo** (regenerar los sobres). Si no lo hiciera, abrir a distancia dejaría
+a los servicios sin sus llaves, que es justo lo que se viene a arreglar.
+
+### Lo que se filtra si comprometen el admin
+
+Pueden **abrirte la bóveda** y leer lo que la consola ya podía leer. No pueden meter un
+aparato suyo, ni quitarte los tuyos, ni traspasarse el mando, ni cambiar tu contraseña. Y
+lo cortas borrando un sobre.
+
+## Descartado: la cadena de sobres
+
+Se propuso que la contraseña del admin abriera **un sobre guardado en el admin** que
+contuviera la contraseña del vault. Se descarta, y queda escrito para que no vuelva:
+
+**la página que ve la primera contraseña abre ese sobre ella misma y se lleva la segunda.**
+Mismo resultado, un paso más, una contraseña más que recordar, y una copia guardada que
+antes no existía. Lo que valía de la idea era la contraseña secundaria; lo que no valía era
+la cadena.
+
 ## Lo que se apunta en la bitácora
 
 Abrir a distancia **se registra siempre**: qué aparato lo pidió y cuándo, y también los
