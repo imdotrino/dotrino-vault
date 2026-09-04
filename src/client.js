@@ -194,16 +194,29 @@ export async function requestStore ({ masterPubkey, proxyUrl, device, cert, meth
  * El `nonce` de un solo uso NO es decorativo: `approve` y `revoke` cambian estado, así
  * que la ventana de frescura de ±5 min no basta para descartar un replay.
  */
-export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, op, dir, ...rest } = {}) {
+export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, op, dir, nonce: dado, ...rest } = {}) {
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
+    // EL NONCE SE PUEDE DAR. Abrir la bóveda a distancia lo mete TAMBIÉN dentro del sobre
+    // sellado —es lo que impide reenviar uno capturado con un nonce nuevo— y quien sella
+    // tiene que conocerlo antes de llamar.
+    const nonce = typeof dado === 'string' && dado.length >= 16
+      ? dado
+      : [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
     const data = { op, ...rest, publickey: device.publickey, ts: Date.now(), nonce }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.ADMIN_RESULT || p.type === MSG.ERROR)
     client.sendByPubkey(masterPubkey, { type: MSG.ADMIN, data, signature, cert })
     const res = await pending
-    if (res.type === MSG.ERROR) throw new Error(res.error)
+    if (res.type === MSG.ERROR) {
+      // CON LO QUE TRAE: el `code` y —al abrir— el freno. Emparejar por el TEXTO es lo que
+      // rompe en silencio en cuanto alguien lo traduce.
+      const e = new Error(res.error)
+      if (res.code) e.code = res.code
+      if (res.tries != null) e.tries = res.tries
+      if (res.waitSec != null) e.waitSec = res.waitSec
+      throw e
+    }
     return res.result
   } finally { client.close() }
 }

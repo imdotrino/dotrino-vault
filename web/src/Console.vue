@@ -1355,11 +1355,14 @@ async function abrirBoveda () {
   unlockErr.value = ''
   unlockWait.value = 0
   try {
-    // EL NONCE LO PONEMOS NOSOTROS y va en los DOS sitios: fuera, para que la bóveda lo
-    // queme, y DENTRO del sobre, para que uno capturado no se pueda reenviar con otro.
-    const nonce = [...crypto.getRandomValues(new Uint8Array(16))]
+    // DOS NONCES, uno por mensaje: el protocolo los quema al usarlos, así que repetirlo en
+    // el segundo se rechaza con «nonce already used». Lo cazó el E2E, no la lectura.
+    //
+    // El del SEGUNDO es el que va también DENTRO del sobre: es el que impide que uno
+    // capturado se reenvíe con un nonce nuevo. El del primero solo pide turno.
+    const nuevoNonce = () => [...crypto.getRandomValues(new Uint8Array(16))]
       .map((b) => b.toString(16).padStart(2, '0')).join('')
-    const params = await id.value.vaultAdmin('unlock.begin', { nonce })
+    const params = await id.value.vaultAdmin('unlock.begin', { nonce: nuevoNonce() })
     if (!params?.ek) throw new Error(t.value.unlock_no)
 
     const { scrypt } = await import('scrypt-js')
@@ -1367,6 +1370,7 @@ async function abrirBoveda () {
     const clave = await scrypt(new TextEncoder().encode(unlockPwd.value), salt,
       params.N, params.r, params.p, params.len)
 
+    const nonce = nuevoNonce()
     const enc = await sealToEphemeral({ ek: params.ek, payload: { nonce, key: btoa(String.fromCharCode(...clave)) } })
     clave.fill(0)
     unlockPwd.value = ''

@@ -128,7 +128,7 @@ test('la consola deriva en el navegador y manda el resultado, no la contraseña'
 test('el nonce lo pone la consola y va en los DOS sitios', () => {
   const src = leer('web/src/Console.vue')
   const cuerpo = src.slice(src.indexOf('async function abrirBoveda'), src.indexOf('async function abrirBoveda') + 2200)
-  assert.match(cuerpo, /vaultAdmin\('unlock\.begin', \{ nonce \}\)/, 'fuera, para que la queme')
+  assert.match(cuerpo, /vaultAdmin\('unlock', \{ nonce, enc \}\)/, 'fuera, para que la bóveda lo queme')
   assert.match(cuerpo, /payload: \{ nonce,/, 'y DENTRO del sobre, para que no se reenvíe')
 })
 
@@ -143,4 +143,20 @@ test('la bóveda le dice a la consola si está cerrada y si se puede abrir', () 
   assert.match(vault, /locked: \(\(\) => \{ try \{ return !!isLocked\(\)/, 'que está cerrada')
   assert.match(vault, /remoteUnlock: \(\(\) => \{ try \{ return !!hasSecondary\(\)/,
     'y si hay contraseña de admin puesta: son dos cosas distintas y llevan a acciones distintas')
+})
+
+/**
+ * UN NONCE POR MENSAJE. El protocolo los quema al usarlos, así que reutilizar el del
+ * `unlock.begin` en el `unlock` se rechaza con «nonce already used» — y la bóveda no abre
+ * nunca. Lo cazó el E2E (`dotrino-test/smoke/abrir-a-distancia.mjs`), no la lectura: los
+ * tests de fuente veían el nonce dentro del sobre y daban por bueno el resto.
+ */
+test('la consola pide un nonce por mensaje, no uno para los dos', () => {
+  const src = leer('web/src/Console.vue')
+  const cuerpo = src.slice(src.indexOf('async function abrirBoveda'), src.indexOf('async function abrirBoveda') + 2600)
+  assert.match(cuerpo, /unlock\.begin', \{ nonce: nuevoNonce\(\) \}/, 'el primero pide turno')
+  assert.match(cuerpo, /const nonce = nuevoNonce\(\)/, 'y el segundo es otro')
+  const begin = cuerpo.indexOf("unlock.begin")
+  const segundo = cuerpo.indexOf('const nonce = nuevoNonce()')
+  assert.ok(begin < segundo, 'el del sobre se acuña después de pedir turno')
 })
