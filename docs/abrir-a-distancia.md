@@ -105,6 +105,22 @@ por destinatario— así que no hay mecanismo nuevo que inventar.
 - Si no existe ese sobre, abrir a distancia sencillamente no está disponible, y eso es el
   defecto: se enciende a propósito.
 
+### Solo sirve por el admin, nunca en la máquina
+
+> Acotado por el dueño: *«una contraseña que sirva solo en el admin, no en el vault
+> directo»*.
+
+`dotrino-vault unlock`, tecleado delante de la máquina, **solo acepta la principal**. La
+secundaria se rechaza ahí, y no es prolijidad — es lo que la convierte en **dos factores**:
+
+Usarla exige llegar por el camino del admin, y ese camino pide una petición **firmada por
+un aparato que el acta reconozca con `admin`**, con su certificado. Así que la contraseña
+secundaria filtrada, **sola, no abre nada**: hace falta además un aparato admitido. La
+principal, en cambio, es un factor más el acceso físico.
+
+Y deja la bitácora sin huecos: **toda vez que se usa hay un aparato detrás**. Si también
+valiera en local, habría aperturas con esa contraseña que no se le pueden atribuir a nadie.
+
 ### Lo que la hace valer menos, y sin esto no vale menos
 
 **Una vez abierta, la bóveda está abierta.** Si abrir con la secundaria dejara hacerlo todo,
