@@ -24,6 +24,7 @@ import { ipcRead, ipcWrite, migrateIpcDir } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
 import { watchBinary } from './selfupdate.js'
 import { VERSION } from './version.js'
+import crypto from 'node:crypto'
 
 const readJsonSafe = (f) => ipcRead(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
@@ -399,6 +400,35 @@ export async function runDaemon () {
         try { await rekey(id, vieja, null) } finally { wipe(vieja) }
         mgr.profiles.removePassword(id)
         return { done: 'contraseña quitada · los secretos ahora se abren con la llave de esta máquina' }
+      }
+      // ----- LA CONTRASEÑA DEL ADMIN (`docs/abrir-a-distancia.md`) -----
+      //
+      // Otra contraseña, distinta, que **solo sirve por el camino del admin**. Lo que se
+      // guarda es una copia de la llave del perfil cifrada con lo que sale de ella; por eso
+      // ponerla exige el perfil abierto: esa llave solo está en memoria con el candado
+      // descorrido.
+      //
+      // El molino se hace AQUÍ porque quien la pone está delante de la máquina y ya tecleó
+      // la principal. Cuando se USA a distancia lo hace el navegador, y por eso la bóveda
+      // publica los parámetros (`secondaryParams`).
+      case 'admin-password-set': {
+        const id = ref()
+        if (!req.password) throw new Error('an admin password is required')
+        // El salt se acuña ANTES de derivar (`mint`), para derivar una sola vez con el
+        // definitivo. El molino se hace aquí porque quien la pone está delante de la
+        // máquina y acaba de teclear la principal; cuando se USA a distancia lo hace el
+        // navegador, y por eso la bóveda publica estos mismos parámetros.
+        const params = mgr.profiles.secondaryParams(id, { mint: true })
+        const derivada = new Uint8Array(crypto.scryptSync(
+          String(req.password), Buffer.from(params.salt, 'base64'),
+          params.len, { N: params.N, r: params.r, p: params.p }))
+        try { mgr.profiles.setSecondary(id, derivada) } finally { wipe(derivada) }
+        return { done: 'contraseña del admin guardada · solo sirve desde el admin, no aquí' }
+      }
+      case 'admin-password-rm': {
+        const id = ref()
+        const r = mgr.profiles.clearSecondary(id)
+        return { done: r.had ? 'contraseña del admin quitada' : 'no había ninguna' }
       }
       default: throw new Error('unknown profile operation: ' + req.op)
     }

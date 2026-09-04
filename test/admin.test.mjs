@@ -119,11 +119,52 @@ test('agregar un aparato NO se puede desde la consola: la operación no existe',
 test('no existen las operaciones que no se delegan', async () => {
   const { admin } = mount()
   // No es que estén prohibidas: es que no hay mensaje que las nombre.
-  for (const op of ['caps', 'handover', 'secrets', 'unlock', 'remove-profile']) {
+  //
+  // `unlock` SALIÓ de esta lista el 2026-09-04: abrir a distancia sí existe ahora
+  // (`docs/abrir-a-distancia.md`). Lo que no cambió es el resto — cambiar permisos,
+  // traspasar el mando, leer secretos y borrar un perfil siguen sin tener mensaje.
+  for (const op of ['caps', 'handover', 'secrets', 'remove-profile']) {
     const r = await admin.handle({ op, nonce: nonce(op.padEnd(32, 'x')) })
     assert.equal(r.ok, false)
     assert.match(r.error, /invalid operation/)
   }
+})
+
+/**
+ * ABRIR A DISTANCIA EXISTE, PERO NO EN CUALQUIER BÓVEDA. El módulo es puro —sin cripto ni
+ * disco— así que el trabajo va inyectado. Sin él, la operación contesta que no en vez de
+ * romper con un TypeError, que es la diferencia entre «esta bóveda es vieja» y «se cayó».
+ */
+test('sin mostrador de apertura, abrir a distancia se contesta, no revienta', async () => {
+  const { admin } = mount()
+  for (const op of ['unlock.begin', 'unlock']) {
+    const r = await admin.handle({ op, nonce: nonce(op.padEnd(32, 'y')) })
+    assert.equal(r.ok, false)
+    assert.match(r.error, /cannot be opened remotely/)
+  }
+})
+
+/** Y las dos se atienden con el candado echado: son las únicas que solo sirven para eso. */
+test('abrir a distancia se atiende con la bóveda CERRADA', async () => {
+  const abierto = []
+  const { admin } = mount({
+    isLocked: () => true,
+    unlockDesk: {
+      begin: async () => ({ salt: 'x', N: 16384, r: 8, p: 1, len: 32, ek: 'EK' }),
+      open: async ({ nonce }) => { abierto.push(nonce); return { ok: true, result: { ok: true, locked: false } } }
+    }
+  })
+  const r1 = await admin.handle({ op: 'unlock.begin', nonce: nonce('a'.repeat(32)) })
+  assert.equal(r1.ok, true)
+  assert.equal(r1.result.ek, 'EK', 'la efímera sale de la bóveda, no del que pregunta')
+
+  const r2 = await admin.handle({ op: 'unlock', enc: {}, nonce: nonce('b'.repeat(32)) })
+  assert.equal(r2.ok, true)
+  assert.equal(abierto.length, 1)
+
+  // Y lo que NO se atiende cerrada sigue sin atenderse.
+  const r3 = await admin.handle({ op: 'revoke', certNonce: 'n-1', nonce: nonce('c'.repeat(32)) })
+  assert.equal(r3.code, 'vault-locked')
 })
 
 test('expulsar avisa a todos los miembros', async () => {

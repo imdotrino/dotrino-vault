@@ -98,6 +98,22 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       // Para la consola remota: la contraseña llega dentro del sobre firmado y hay que
       // convertirla en la llave que abre la copia maestra de los secretos.
       deriveAdminKey: (password) => profiles.adminKey(id, password),
+      // ABRIR A DISTANCIA (`docs/abrir-a-distancia.md`). La bóveda no toca el registro de
+      // perfiles: se le pasan las tres cosas que necesita y nada más — con qué números
+      // deriva el admin, cómo se abre con la derivada, y si hay contraseña de admin puesta.
+      secondaryParams: () => profiles.secondaryParams(id),
+      openWithSecondary: async (derivada) => {
+        const r = await profiles.openWithSecondary(id, derivada)
+        // Igual que `unlock`: abrir el perfil no basta, hay que traer la maestra a memoria.
+        // Sin esto el candado diría «abierto» y todo lo que la necesita fallaría en otro
+        // sitio y por otro motivo, que es el fallo que ya se pagó una vez.
+        try { await running.get(id)?.takeMasterKey?.() } catch (e) {
+          try { profiles.lock(id) } catch (_) {}
+          throw new Error(`opened the profile but could not open it: ${e.message}`)
+        }
+        return r
+      },
+      hasSecondary: () => profiles.hasSecondary(id),
       // La llave del perfil MIENTRAS esté abierto, o null. Con ella, enrolar un servicio
       // con la bóveda abierta le envuelve su cajón en el acto en vez de dejarlo entrar
       // sin poder leer nada (ver `profiles.js`, `llaves`).

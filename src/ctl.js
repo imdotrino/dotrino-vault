@@ -1582,8 +1582,28 @@ async function cmdProfile (rest) {
       reportProfiles(await profileRequest('password-set', { password: pwd, current: actual || undefined }))
       return
     }
+    // LA CONTRASEÑA DEL ADMIN. Otra, distinta, que solo sirve desde el admin remoto — aquí
+    // no abre nada. Pantalla administrativa: dice qué hace y qué no, y ya (§5.1).
+    case 'admin-password': {
+      const action = args[0]
+      if (action === 'rm') {
+        reportProfiles(await profileRequest('admin-password-rm', {}))
+        return
+      }
+      if (action && action !== 'set') { console.error('uso: dotrino-vault profile admin-password [set|rm]'); process.exit(2) }
+      console.log('Una contraseña APARTE, para abrir la bóveda desde el admin remoto.')
+      console.log('Aquí no abre nada: tecleada en esta máquina no vale. Y para usarla hace')
+      console.log('falta además un aparato tuyo que administre — la contraseña sola no basta.')
+      console.log('\nEl perfil tiene que estar abierto ahora mismo para poder ponerla.')
+      const pwd = await askPassword('\nContraseña del admin: ')
+      if (!pwd) { console.error('Cancelado.'); process.exit(1) }
+      const again = await askPassword('Repítela: ')
+      if (pwd !== again) { console.error('Las contraseñas no coinciden.'); process.exit(1) }
+      reportProfiles(await profileRequest('admin-password-set', { password: pwd }))
+      return
+    }
     default:
-      console.error('uso: dotrino-vault profile {ls|add|rename|use|rm|password}'); process.exit(2)
+      console.error('uso: dotrino-vault profile {ls|add|rename|use|rm|password|admin-password}'); process.exit(2)
   }
 }
 

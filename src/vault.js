@@ -28,6 +28,7 @@ import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
 import { openSubacta } from './subacta.js'
+import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
 import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
 import { loadManifest, brokenOf } from '@dotrino/roadmap'
@@ -63,7 +64,7 @@ const MAX_REPLY_BYTES = 768 * 1024
  *   Solo bloquea EDITAR el perfil (`profileSet`): firmar/leer y el resto del store
  *   siguen sirviendo a los dispositivos enrolados aunque esté bloqueado.
  */
-export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, deriveAdminKey = null, openKey = null, forAdoption = false, onAdopted } = {}) {
+export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log, onEnrollChallenge, isLocked = () => false, hasPassword = () => true, deriveAdminKey = null, openKey = null, secondaryParams = null, openWithSecondary = null, hasSecondary = () => false, forAdoption = false, onAdopted } = {}) {
   ensureDir(dir)
   // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
   // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando
@@ -746,6 +747,74 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * el motivo real por el que editar el perfil exigía abrirla, y es el síntoma que abrió
    * todo esto: se cerraba sola a los cinco minutos y editar dejaba de funcionar.
    */
+  /**
+   * ABRIR LA BÓVEDA DESDE EL ADMIN (`docs/abrir-a-distancia.md`).
+   *
+   * Dos pasos, y el segundo no se puede reproducir por DOS candados distintos:
+   *
+   *   · el **nonce** hace que se NIEGUE a atenderlo dos veces (memoria, 10 min);
+   *   · la **efímera** hace que no se PUEDA abrir dos veces — se tira al usarla, así que
+   *     ese sobre queda inabrible hasta para nosotros, incluso con el disco en la mano.
+   *
+   * Por qué una efímera y no la llave de cifrado fija de la bóveda: esa cede a la llave de
+   * la máquina (modelo de amenazas §4.2), o sea que cae con el disco. La contraseña es
+   * justo lo único que un ladrón de disco NO tiene — cifrarla con algo que el disco
+   * entrega sería regalársela a quien grabe el tráfico hoy y robe el disco mañana.
+   *
+   * Y el molino lo hace el ADMIN: aquí llega la derivada, nunca la contraseña.
+   */
+  const EPHEMERAL_TTL_MS = 60 * 1000
+  const aperturas = new Map()   // nonce -> { privateKey, exp }
+
+  const unlockDesk = (typeof openWithSecondary === 'function' && typeof secondaryParams === 'function')
+    ? {
+        async begin ({ by }) {
+          const params = secondaryParams()
+          if (!params) {
+            throw new Error('this profile has no admin password: set one with `dotrino-vault profile admin-password`')
+          }
+          // Se barre lo vencido aquí y no con un temporizador: es barato, y un temporizador
+          // más es una cosa más que puede quedarse corriendo cuando el perfil ya no existe.
+          const t = Date.now()
+          for (const [n, v] of aperturas) if (v.exp <= t) aperturas.delete(n)
+          const eph = await makeEphemeralKey()
+          aperturas.set('pendiente', { privateKey: eph.privateKey, exp: t + EPHEMERAL_TTL_MS })
+          audit('unlock.begin', { by })
+          return { ...params, ek: eph.ek }
+        },
+
+        async open ({ nonce, enc, by }) {
+          const guardada = aperturas.get('pendiente')
+          aperturas.delete('pendiente')
+          if (!guardada || guardada.exp <= Date.now()) {
+            return { ok: false, error: 'unlock: ask for a key first, and use it within a minute' }
+          }
+          let payload = null
+          try { payload = await openSealed({ privateKey: guardada.privateKey, enc }) } catch (_) { payload = null }
+          // EL NONCE VA DENTRO DEL SOBRE. Si fuera solo por fuera, un sobre capturado se
+          // reenvía con un nonce nuevo y el candado del nonce no sirve de nada.
+          if (!payload || payload.nonce !== nonce || typeof payload.key !== 'string') {
+            audit('rejected', { what: 'unlock', by, reason: 'sobre' })
+            return { ok: false, error: 'unlock: the envelope does not check out' }
+          }
+          const derivada = new Uint8Array(Buffer.from(payload.key, 'base64'))
+          try {
+            const r = await openWithSecondary(derivada)
+            audit('unlock', { by })
+            log(`[vault] opened from the admin by ${by || '????-????'}`)
+            return { ok: true, result: { ok: true, locked: false } }
+          } catch (e) {
+            audit('rejected', { what: 'unlock', by, reason: e.code || 'error' })
+            // El freno viaja con el rechazo: sin él, el admin reintenta contra una puerta
+            // que ya no responde y no sabe por qué.
+            return { ok: false, code: e.code || null, error: e.message, tries: e.tries ?? null, waitSec: e.waitSec ?? null }
+          } finally {
+            derivada.fill(0)
+          }
+        }
+      }
+    : null
+
   const PROFILE_METHODS = new Set(['profilePut', 'profileBundle', 'profilePublic', 'profileRecipients'])
 
   async function handleProfile (from, p, d) {
@@ -1998,6 +2067,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     desk,
     deviceIdOf,
     audit,
+    // Abrir a distancia. Va inyectado porque `admin.js` es puro y esto necesita cripto y
+    // disco; `null` si este perfil no lo soporta, y entonces la operación contesta que no.
+    unlockDesk,
     // El MISMO candado que frena firmar y editar el perfil: revocar reescribe el acta y
     // configurar toca los secretos, y ninguna de las dos se hace con la bóveda cerrada.
     isLocked,

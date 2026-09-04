@@ -24,12 +24,22 @@ import fs from 'node:fs'
 import crypto2 from 'node:crypto'
 import path from 'node:path'
 import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
-import { atRestFor, migrateFile, kekFor } from './atrest.js'
+import { atRestFor, migrateFile, kekFor, encryptText, decryptText } from './atrest.js'
 import { probe as probeKek, writeConfig as writeKekConfig, configFromEnv } from './atrest.js'
 import { keyDirName, keyOwnerOf } from './keyowner.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
+
+/**
+ * EL MOLINO, en un solo sitio. Estaba escrito a mano en cada llamada, y con la contraseña
+ * del admin eso deja de ser cosmética: **el navegador tiene que derivar con exactamente
+ * estos números**. Si aquí se cambia uno y allá no, la contraseña «deja de funcionar» sin
+ * que nada diga por qué, que es la clase de fallo que este proyecto viene evitando.
+ *
+ * Por eso también se le mandan al admin (`secondaryParams`) en vez de que los copie.
+ */
+export const SCRYPT = Object.freeze({ N: 16384, r: 8, p: 1, len: 32 })
 const MAX_NAME = 40
 /**
  * Lo MÍNIMO que se acepta al poner una contraseña.
@@ -98,7 +108,7 @@ const b64 = (buf) => Buffer.from(new Uint8Array(buf)).toString('base64')
  */
 function deriveScryptPwd (password, saltB64) {
   const salt = Buffer.from(saltB64, 'base64')
-  return b64(crypto2.scryptSync(String(password || ''), salt, 32, { N: 16384, r: 8, p: 1 }))
+  return b64(crypto2.scryptSync(String(password || ''), salt, SCRYPT.len, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p }))
 }
 
 /** PBKDF2-SHA256 → verificador base64 (v1, heredado). */
@@ -226,6 +236,35 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     const p = find(id)
     if (!p) throw new Error('profile does not exist: ' + id)
     return p
+  }
+
+  /**
+   * EL FRENO DE FUERZA BRUTA, en un solo sitio porque ahora hay DOS puertas.
+   *
+   * Tras 5 fallos, espera exponencial (2^n s, tope 5 min) persistida en el registro. Los
+   * fallos VIEJOS se olvidan (`TRIES_FORGET_MS`): sigue frenando una ráfaga, pero no
+   * convierte un despiste de ayer en un vault que ya no se abre.
+   *
+   * **Las dos contraseñas cuentan en el MISMO contador**, y no es un detalle: si cada una
+   * llevara el suyo, probar por un camino no frenaría el otro y el freno valdría la mitad.
+   *
+   * Lanza con CÓDIGO: la TUI es bilingüe y lo traduce, y la CLI lo dice con sus palabras.
+   * Sin código, el rechazo llegaba como un texto suelto del daemon, indistinguible de
+   * «se volvió a pedir la contraseña porque sí».
+   */
+  function frenar (p) {
+    let tries = p.tries || { n: 0, at: 0 }
+    if (tries.at && Date.now() - tries.at > TRIES_FORGET_MS) {
+      tries = { n: 0, at: 0 }
+      if (p.tries) { delete p.tries; save() }
+    }
+    const waitMs = tries.n >= 5 ? Math.min(2 ** (tries.n - 4) * 1000, 5 * 60 * 1000) : 0
+    const left = tries.at + waitMs - Date.now()
+    if (left > 0) {
+      throw Object.assign(new Error(`too many tries: wait ${Math.ceil(left / 1000)} s`),
+        { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
+    }
+    return tries
   }
 
   const api = {
@@ -497,32 +536,13 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
         save()
       }
       const salt = Buffer.from(p.kdf.salt, 'base64')
-      return new Uint8Array(crypto2.scryptSync(String(password || ''), salt, 32, { N: 16384, r: 8, p: 1 }))
+      return new Uint8Array(crypto2.scryptSync(String(password || ''), salt, SCRYPT.len, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p }))
     },
 
     async unlock (id, password) {
       const p = assertExists(id)
       if (!p.pwd) { open(id); return { ok: true, locked: false } }
-      // Freno de fuerza bruta (una contraseña corta se adivina probando): tras 5
-      // fallos, espera exponencial (2^n s, tope 5 min) persistida en el registro.
-      // Los fallos VIEJOS se olvidan (ver TRIES_FORGET_MS): si desde el último ha pasado
-      // el rato, se empieza de cero. Así el freno sigue frenando una ráfaga —los intentos
-      // seguidos se cuentan igual— pero no convierte un despiste de ayer en un vault que
-      // ya no se abre.
-      let tries = p.tries || { n: 0, at: 0 }
-      if (tries.at && Date.now() - tries.at > TRIES_FORGET_MS) {
-        tries = { n: 0, at: 0 }
-        if (p.tries) { delete p.tries; save() }
-      }
-      const waitMs = tries.n >= 5 ? Math.min(2 ** (tries.n - 4) * 1000, 5 * 60 * 1000) : 0
-      const left = tries.at + waitMs - Date.now()
-      // Con CÓDIGO: la TUI es bilingüe y lo traduce, y la CLI puede decirlo con sus
-      // palabras. Sin código, el rechazo llegaba como un texto suelto del daemon y era
-      // indistinguible de «se volvió a pedir la contraseña porque sí».
-      if (left > 0) {
-        throw Object.assign(new Error(`too many tries: wait ${Math.ceil(left / 1000)} s`),
-          { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
-      }
+      const tries = frenar(p)
       const proof = p.pwd.v === 2
         ? deriveScryptPwd(password, p.pwd.salt)
         : await derivePwd(password, p.pwd.salt, p.pwd.iter)
@@ -544,6 +564,99 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       // La llave se queda mientras el candado esté abierto: es lo que permite envolverle
       // su cajón a un servicio que se enrola AHORA, sin volver a pedir la frase.
       llaves.set(id, await api.adminKey(id, password))
+      return { ok: true, locked: false }
+    },
+
+    // ----- LA SEGUNDA CONTRASEÑA: la del admin (`docs/abrir-a-distancia.md`) -----
+    //
+    // DOS PUERTAS AL MISMO SITIO. La llave del perfil sale de `scrypt(principal, p.kdf.salt)`
+    // y es lo que destapa la maestra. Una segunda contraseña NO puede derivar una llave
+    // distinta —tiene que llegar a la misma—, así que lo que se guarda es **una copia de esa
+    // llave, cifrada con lo que sale de la secundaria**. Es el mismo patrón que los cajones:
+    // varios sobres, un destinatario cada uno.
+    //
+    // EL MOLINO LO HACE QUIEN LLAMA, no esto. Aquí entra `derivada` ya calculada, y hay dos
+    // motivos: la bóveda nunca llega a ver la contraseña del admin, y adivinar le cuesta el
+    // scrypt AL QUE PRUEBA en vez de costarle CPU a la bóveda (que además sería una forma de
+    // ahogarla). El freno sigue contando los fallos igual — ver `frenar`.
+    //
+    // Y por eso `derivada` VALE TANTO COMO LA CONTRASEÑA: quien la capture abre igual. Viaja
+    // cifrada a una llave efímera de la bóveda y la petición va firmada por un aparato del
+    // acta; esas dos cosas son las que la protegen, no el hecho de estar derivada.
+
+    /**
+     * Los parámetros para que el admin derive EXACTAMENTE igual. Son públicos: un salt no es
+     * un secreto y ya vive en el disco junto a los datos. `null` si este perfil no tiene
+     * segunda contraseña — entonces abrir a distancia sencillamente no está disponible.
+     */
+    secondaryParams (id, { mint = false } = {}) {
+      const p = find(id)
+      if (!p) return null
+      // `mint`: acuña el salt si todavía no hay ninguno. Lo pide QUIEN LA PONE, para poder
+      // derivar una sola vez con el salt definitivo — si no, habría que derivar, guardar, y
+      // volver a derivar con el salt que salió, que es como lo escribí primero y era torpe.
+      if (!p.kdf2) {
+        if (!mint) return null
+        p.kdf2 = { v: 1, salt: b64(crypto.getRandomValues(new Uint8Array(32))), wrapped: null }
+        save()
+      }
+      return { salt: p.kdf2.salt, ...SCRYPT }
+    },
+
+    /** ¿Tiene puesta la del admin? Es estado, y se enseña donde se administra. */
+    hasSecondary: (id) => !!find(id)?.kdf2?.wrapped,
+
+    /**
+     * Pone o cambia la contraseña del admin. **Exige el perfil ABIERTO**, porque lo que se
+     * guarda es la llave del perfil y esa solo está en memoria con el candado descorrido.
+     * Es lo correcto además de lo posible: ponerla es una decisión del dueño, y el dueño
+     * acaba de teclear la principal.
+     */
+    setSecondary (id, derivada) {
+      const p = assertExists(id)
+      if (!p.pwd) throw Object.assign(new Error('this profile has no password: there is nothing to open remotely'), { code: 'NO_PASSWORD' })
+      const llave = api.openKey(id)
+      if (!llave) throw Object.assign(new Error('open the profile first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
+      if (!(derivada instanceof Uint8Array) || derivada.length !== 32) throw new Error('the admin key must be 32 bytes')
+      const salt = p.kdf2?.salt || b64(crypto.getRandomValues(new Uint8Array(32)))
+      p.kdf2 = { v: 1, salt, wrapped: encryptText(b64(llave), Buffer.from(derivada)) }
+      save()
+      return { ok: true }
+    },
+
+    /** La quita. Revocar es borrar el sobre: al instante y sin tocar la principal. */
+    clearSecondary (id) {
+      const p = assertExists(id)
+      if (!p.kdf2?.wrapped) { if (p.kdf2) { delete p.kdf2; save() } ; return { ok: true, had: false } }
+      delete p.kdf2
+      save()
+      return { ok: true, had: true }
+    },
+
+    /**
+     * ABRE CON LA DEL ADMIN. Recibe la derivada, descifra el sobre y saca la llave del
+     * perfil: de ahí para abajo el estado es idéntico a `unlock`, porque es la misma llave.
+     *
+     * No hay verificador aparte y no hace falta: AES-GCM autentica, así que una derivada
+     * equivocada **no descifra**, y eso ES la comprobación.
+     *
+     * Comparte el contador de `unlock` (`frenar`): probar por aquí frena allá y al revés.
+     */
+    async openWithSecondary (id, derivada) {
+      const p = assertExists(id)
+      if (!p.kdf2?.wrapped) throw Object.assign(new Error('this profile has no admin password'), { code: 'NO_SECONDARY' })
+      const tries = frenar(p)
+      let llave = null
+      try { llave = Buffer.from(decryptText(p.kdf2.wrapped, Buffer.from(derivada)), 'base64') } catch (_) { llave = null }
+      if (!llave || llave.length !== 32) {
+        p.tries = { n: tries.n + 1, at: Date.now() }
+        save()
+        throw Object.assign(new Error('wrong admin password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
+      }
+      delete p.tries
+      save()
+      open(id)
+      llaves.set(id, new Uint8Array(llave))
       return { ok: true, locked: false }
     },
 
