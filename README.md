@@ -846,6 +846,7 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
   - [`acta-de-perfil.md`](./docs/acta-de-perfil.md) — el modelo vigente: un perfil es un conjunto de llaves con un acta firmada por un solo sellador.
   - [`pairing-protocol.md`](./docs/pairing-protocol.md) — el emparejamiento endurecido: por qué el token dejó de ser autoridad suficiente.
   - [`vinculacion-de-cuentas.md`](./docs/vinculacion-de-cuentas.md) — los dos caminos al conectar un aparato, y por qué no existe fusionar cuentas.
+  - [`inicio-de-sesion.md`](./docs/inicio-de-sesion.md) — **entrar sin enrolar**: las sesiones (papel con vencimiento, respaldado por un aparato tuyo) y el orden hacia el inicio de sesión federado.
   - [`store-identity-architecture.md`](./docs/store-identity-architecture.md) — por qué la bóveda del PC hace de store además de identidad.
 
 Sin anuncios, sin cuentas, sin rastreo. MIT · parte de Dotrino.
