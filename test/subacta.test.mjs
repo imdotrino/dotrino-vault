@@ -123,8 +123,13 @@ test('la bóveda envuelve al acta en UN sitio, no en los diecisiete mostradores'
 test('el unlock absorbe, y renunciar no falla con la bóveda cerrada', () => {
   const src = fs.readFileSync(fileURLToPath(new URL('../src/vault.js', import.meta.url)), 'utf8')
 
+  // LA FUNCIÓN ENTERA, no los primeros N caracteres: la ventana fija se pasaba de
+  // frágil — un comentario nuevo dentro de `takeMasterKey` empujaba la línea buscada
+  // fuera del recorte y el test cantaba una regresión que no existía (2026-09-05).
   const i = src.indexOf('async takeMasterKey ()')
-  assert.match(src.slice(i, i + 1200), /absorberSubacta\('unlock'\)/, 'abrir el perfil sella lo pendiente')
+  const fin = src.indexOf('\n    },', i)
+  assert.ok(i !== -1 && fin > i, 'se encuentra el cuerpo de takeMasterKey')
+  assert.match(src.slice(i, fin), /absorberSubacta\('unlock'\)/, 'abrir el perfil sella lo pendiente')
 
   const j = src.indexOf('async function handleRenounce')
   const cuerpo = src.slice(j, j + 5000)

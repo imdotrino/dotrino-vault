@@ -306,7 +306,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   await ensureCommKeyInActa()
 
-  const { client } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
+  const { client, identify: reidentificar } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
 
   // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
   // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver
@@ -3181,7 +3181,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // ABRIR ES EL ÚNICO MOMENTO en que un perfil con contraseña está abierto, así que es
       // aquí donde puede estrenar su llave de comunicación (ver `ensureCommKeyInActa`).
       // Si falla, no se arrastra: abrir el perfil no puede depender de esto.
-      if (r?.locked === false) { try { await ensureCommKeyInActa() } catch (_) {} }
+      //
+      // Y SE VUELVE A IDENTIFICAR EN EL ACTO: `identify` solo corre al conectar y al cambiar
+      // el token, así que estrenar la llave no servía de nada hasta el siguiente arranque —
+      // la bóveda seguía muda en el proxio con su llave ya admitida en el acta. Al dueño le
+      // pasó el 2026-09-05: hizo lo que el log pedía y la consola siguió sin contestar.
+      if (r?.locked === false) {
+        try { if (await ensureCommKeyInActa()) await reidentificar?.() } catch (_) {}
+      }
       // Y ABSORBER LO PENDIENTE. La subacta ya lo estaba honrando con el perfil cerrado —de
       // eso vive—, pero mientras siga ahí solo lo sabe esta máquina: al sellarlo, entra en
       // el acta y lo respeta toda la cuenta. Si falla no se arrastra: abrir el perfil no

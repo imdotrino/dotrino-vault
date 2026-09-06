@@ -87,10 +87,9 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
     const esMiembro = comm && (record?.members || []).some((m) => m?.pub === comm)
 
     if (comm && esMiembro) {
-      const data = { op: 'identify', publickey: comm, token: client.token, ts: Date.now() }
-      const signature = await commKey.sign(data)
-      if (signature) {
-        await client.identify({ data, signature, acta: record })
+      // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
+      try {
+        await client.identifyAs({ publickey: comm, sign: (d) => commKey.sign(d), acta: record })
         // SE DICE QUE SE IDENTIFICÓ, y con qué llave. Este camino era MUDO: al pasar de la
         // maestra a la llave de comunicación, el único rastro de «estoy alcanzable» que
         // quedaba en el log era el del repliegue. Así que cuando la consola decía «no
@@ -98,6 +97,11 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
         // o no. Una línea por reconexión es barata; no tenerla cuesta una hora de sondeos.
         log(`[vault] identified on the proxy with the communication key · record #${record?.seq ?? '?'}`)
         return
+      } catch (e) {
+        // SOLO «esta llave no firma» cae al camino de abajo, y se distingue por el `code`.
+        // Un fallo de red no es eso: tragárselo aquí mandaría a la maestra a firmar por un
+        // problema pasajero, que es justo lo que la llave de comunicación vino a evitar.
+        if (e?.code !== 'no-signature') throw e
       }
     }
 
@@ -118,10 +122,8 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
     try {
       const publickey = await masterPubkeyOf(identity)
       if (!publickey) return
-      const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
-      const { signature } = await identity.signData(data)
       log('[vault] identifying with the master key: this vault is not in its own record yet (open the profile once to fix it)')
-      await client.identify({ data, signature, acta: record })
+      await client.identifyAs({ publickey, sign: (d) => identity.signData(d), acta: record })
     } catch (e) {
       log(`[vault] cannot identify on the proxy yet: ${e.message} — the profile still opens; unlock it once and it gets its own communication key`)
     }

@@ -256,3 +256,52 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
     try { m2.close() } catch (_) {}
   }
 })
+
+/**
+ * ABRIR EL PERFIL TIENE QUE DEJAR LA BÓVEDA ALCANZABLE **YA**, no al siguiente arranque.
+ *
+ * Un perfil con contraseña arranca cerrado siempre, así que es el único que puede llegar
+ * sin llave de comunicación: sin ella solo le queda identificarse con la maestra, que está
+ * sellada, y se queda mudo en el proxio. El log le dice al dueño exactamente qué hacer
+ * —«unlock it once and it gets its own communication key»— y hasta ahora eso solo era
+ * media verdad: la llave se estrenaba y entraba en el acta, pero nadie volvía a
+ * identificarse con ella, porque `identify` solo corre al conectar y al cambiar el token.
+ *
+ * Resultado desde fuera: haces lo que el log pide, el acta se sella… y la consola sigue
+ * diciendo «no contesta». Le pasó al dueño el 2026-09-05, y es de la peor clase: queda
+ * LATENTE hasta un reinicio que nadie relaciona con esto.
+ */
+test('estrenar la llave de comunicación al abrir deja la bóveda alcanzable EN EL ACTO', async () => {
+  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-comm-e2e-'))
+  const { startVaultManager } = await import('../src/manager.js')
+
+  // Un perfil con contraseña y un aparato enrolado, que es como se llega aquí.
+  const m1 = await startVaultManager({ root: raiz, proxyUrl, log: () => {} })
+  let id, dev
+  try {
+    id = m1.list()[0].id
+    dev = await pair(m1.get(id))
+    await m1.profiles.setPassword(id, 'frase-de-prueba-larga')
+    // EL `unlock` DE EN MEDIO ES LO QUE SELLA LA MAESTRA, y sin él este test no prueba
+    // nada: poner la contraseña no la sella todavía, así que al reiniciar la bóveda la
+    // abriría sola con la llave de la máquina, se identificaría con ella y sería alcanzable
+    // por el camino viejo. El caso real es el de una maestra ya sellada.
+    await m1.unlock(id, 'frase-de-prueba-larga')
+    await m1.lock(id)
+  } finally { try { m1.close() } catch (_) {} }
+
+  // Y SIN LLAVE DE COMUNICACIÓN. Aquí la estrenó el arranque de `m1` —el perfil todavía no
+  // tenía contraseña—, pero un perfil que ya venía protegido nunca pasa por ahí. Borrarla
+  // reproduce ese estado, que es el del caso real.
+  const llave = path.join(raiz, 'p', id, 'commkey.json')
+  assert.ok(fs.existsSync(llave), 'la llave vive donde este test cree que vive')
+  fs.rmSync(llave)
+
+  const m2 = await startVaultManager({ root: raiz, proxyUrl, log: () => {} })
+  try {
+    await m2.unlock(id, 'frase-de-prueba-larga')
+    // Sin reiniciar nada: el aparato le habla por el proxio y la bóveda contesta. Si esto
+    // vuelve a romperse, aquí se ve como un plantón de 15 s (el timeout de `vaultRpc`).
+    assert.ok(await store(dev, 'getStats'), 'contesta ya, sin reiniciar el servicio')
+  } finally { try { m2.close() } catch (_) {} }
+})

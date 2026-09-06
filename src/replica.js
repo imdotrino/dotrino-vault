@@ -132,8 +132,8 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
 
   const client = new WebSocketProxyClient({ url })
   await client.connect()
-  const data = { op: 'identify', publickey: link.device.publickey, token: client.token, ts: Date.now() }
-  await client.identify({ data, signature: (await firmar(data)).signature })
+  // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
+  await client.identifyAs({ publickey: link.device.publickey, sign: (d) => firmar(d) })
   log(`[replica] ${id} · connected to ${url}`)
   log(`[replica] record #${store.seq}${store.acta ? '' : ' · no record yet: waiting for the vault'}`)
 

@@ -40,9 +40,8 @@ async function freshClient ({ proxyUrl, dir = '.dotrino-vault-device' }) {
 /** Identifica la conexión bajo la pubkey de dispositivo D (para ser direccionable). */
 async function identifyAsDevice (client, device) {
   if (!client.token) return
-  const data = { op: 'identify', publickey: device.publickey, token: client.token, ts: Date.now() }
-  const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
-  await client.identify({ data, signature })
+  // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
+  await client.identifyAs({ publickey: device.publickey, sign: (d) => signWithDevice({ privateJwk: device.privateJwk, data: d }) })
 }
 
 function waitFor (client, predicate, timeoutMs = 30000) {
