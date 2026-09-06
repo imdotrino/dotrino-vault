@@ -163,7 +163,7 @@ Queda como decisión revisable (§9).
 
 | Fase | Qué | Repo |
 |---|---|---|
-| **F0** ✅ | `requestAssertion` / `verifyAssertion` con `aud`, `nonce`, `iat`, `exp`. Sin modo permisivo. **Hecha el 2026-09-05** en `@dotrino/identity` 0.84.0 (`vault/assertion.js`), con `verifySignedFor` para lo que se publica. **Cableada en geo** (cliente 0.9.0 + servicio): un pin sin destinatario, o firmado para otro índice, se rechaza. **Falta cablear reputación y el proxio**; hasta entonces el cruce sigue abierto ahí. | `dotrino-identity` (+ `dotrino-vault`) |
+| **F0** ✅ | `requestAssertion` / `verifyAssertion` con `aud`, `nonce`, `iat`, `exp`. Sin modo permisivo. **Hecha el 2026-09-05** en `@dotrino/identity` 0.84.0 (`vault/assertion.js`), con `verifySignedFor` para lo que se publica. **Cableada en geo** (cliente 0.9.0) **y en reputación** (cliente 0.11.0): un pin o una atestación sin destinatario, o firmados para otro servicio, se rechazan. **Falta el proxio** —que es el caso interactivo, con reto— y el `/events` co-firmado del registro, que se cierra al tocar `@dotrino/lobby`. | `dotrino-identity` (+ `dotrino-vault`) |
 | **F1** | **Sesiones**: papel, protocolo (`MSG.SESSION_*`), QR inverso, lista y cierre. Aplicación de referencia. | `dotrino-vault`, `@dotrino/identity`, una app |
 | **F2** | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. | `dotrino-vault` |
 | **F3** | Puente OpenID Connect + `@dotrino/sso-client`. | `dotrino-sso` |
