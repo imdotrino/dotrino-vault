@@ -165,7 +165,7 @@ Queda como decisión revisable (§9).
 |---|---|---|
 | **F0** ✅ | `requestAssertion` / `verifyAssertion` con `aud`, `nonce`, `iat`, `exp`. Sin modo permisivo. **Hecha el 2026-09-05** en `@dotrino/identity` 0.84.0 (`vault/assertion.js`), con `verifySignedFor` para lo que se publica. **Cableada en geo** (cliente 0.9.0) **y en reputación** (cliente 0.11.0): un pin o una atestación sin destinatario, o firmados para otro servicio, se rechazan. **Falta solo el proxio**, que es el caso interactivo, con reto. | `dotrino-identity` (+ `dotrino-vault`) |
 | **F1** ✅ | **Sesiones**: papel, flujo de las dos puntas, QR inverso, lista y cierre. **Hecha el 2026-09-05** en `@dotrino/identity` 0.85.0 (`vault/session.js` + `vault/sessionFlow.js`, 19 pruebas) y cableada en **`profile.dotrino.com/sessions`**, comprobada de punta a punta contra el proxio de producción. | `@dotrino/identity`, `dotrino-profile-app` |
-| **F2** | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. | `dotrino-vault` |
+| **F2** ✅ | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. **Hecha el 2026-09-06** en `@dotrino/identity` 0.86.1: saber quién eres no cuesta permiso, cualquier dato tuyo sí; el panel lo pinta la BÓVEDA (otro origen: la app no puede pulsarlo ni leerlo) y lo concedido se ve y se retira en `profile.dotrino.com/sessions`. | `@dotrino/identity`, `dotrino-profile-app` |
 | **F3** | Puente OpenID Connect + `@dotrino/sso-client`. | `dotrino-sso` |
 | **F4** | «Dónde se usó mi identidad»: sesiones abiertas **y** aplicaciones ajenas en **una sola lista**. | `dotrino-profile-app` |
 | **F5** | Federación entrante: Active Directory respalda al usuario. | `dotrino-ad-integration` |
