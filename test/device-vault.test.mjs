@@ -78,6 +78,14 @@ function fakeClient () {
     send (to, obj) { sent.push({ to, ...obj }) },
     sendByPubkey (pub, obj) { sent.push({ pub, ...obj }) },
     async identify () { return { ok: true } },
+    // El doble tiene que ofrecer lo mismo que el cliente de verdad: desde
+    // `@dotrino/proxy-client` 0.18 quien se identifica llama a `identifyAs`, que arma el
+    // sobre y le pone el destinatario. Sin esto el montaje reventaba con un TypeError y
+    // dejaba recursos abiertos: el proceso de test no terminaba nunca.
+    async identifyAs ({ publickey, sign } = {}) {
+      await sign?.({ op: 'identify', aud: 'wss://falso', publickey, token: 'T', ts: Date.now() })
+      return { ok: true }
+    },
     async requestPairingCode () { return { code: 'ABC123' } },
     close () {}
   }

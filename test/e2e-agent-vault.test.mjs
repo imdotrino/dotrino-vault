@@ -99,6 +99,13 @@ function makeBus () {
         return () => { const i = c._h.indexOf(fn); if (i >= 0) c._h.splice(i, 1) }
       },
       async identify ({ data } = {}) { if (data?.publickey) byPubkey.set(data.publickey, c); return { ok: true } },
+      // Lo mismo que el cliente de verdad: `identifyAs` arma el sobre y le pone el
+      // destinatario. Un doble que no lo ofrece prueba otra cosa.
+      async identifyAs ({ publickey, sign } = {}) {
+        await sign?.({ op: 'identify', aud: 'wss://falso', publickey, token: c.token, ts: Date.now() })
+        if (publickey) byPubkey.set(publickey, c)
+        return { ok: true }
+      },
       send (to, obj) { const t = byToken.get(to); if (t) deliver(t, token, obj) },
       sendByPubkey (pub, obj) { const t = byPubkey.get(pub); if (t) deliver(t, token, obj) },
       async requestPairingCode () { return { code: 'ABC123' } },
