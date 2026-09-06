@@ -164,7 +164,7 @@ Queda como decisión revisable (§9).
 | Fase | Qué | Repo |
 |---|---|---|
 | **F0** ✅ | `requestAssertion` / `verifyAssertion` con `aud`, `nonce`, `iat`, `exp`. Sin modo permisivo. **Hecha el 2026-09-05** en `@dotrino/identity` 0.84.0 (`vault/assertion.js`), con `verifySignedFor` para lo que se publica. **Cableada en geo** (cliente 0.9.0) **y en reputación** (cliente 0.11.0): un pin o una atestación sin destinatario, o firmados para otro servicio, se rechazan. **Falta solo el proxio**, que es el caso interactivo, con reto. | `dotrino-identity` (+ `dotrino-vault`) |
-| **F1** | **Sesiones**: papel, protocolo (`MSG.SESSION_*`), QR inverso, lista y cierre. Aplicación de referencia. | `dotrino-vault`, `@dotrino/identity`, una app |
+| **F1** ✅ | **Sesiones**: papel, flujo de las dos puntas, QR inverso, lista y cierre. **Hecha el 2026-09-05** en `@dotrino/identity` 0.85.0 (`vault/session.js` + `vault/sessionFlow.js`, 19 pruebas) y cableada en **`profile.dotrino.com/sessions`**, comprobada de punta a punta contra el proxio de producción. | `@dotrino/identity`, `dotrino-profile-app` |
 | **F2** | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. | `dotrino-vault` |
 | **F3** | Puente OpenID Connect + `@dotrino/sso-client`. | `dotrino-sso` |
 | **F4** | «Dónde se usó mi identidad»: sesiones abiertas **y** aplicaciones ajenas en **una sola lista**. | `dotrino-profile-app` |
@@ -179,6 +179,18 @@ como silencio.
 
 F4 lleva las dos cosas a la misma pantalla a propósito. Dos listas —«mis sesiones» y
 «mis aplicaciones»— se desincronizan y obligan al usuario a saber la diferencia.
+
+### Lo que F1 dejó fuera, y hay que decirlo
+
+- **El papel no se renueva**: cuando vence, se vuelve a entrar. Renovarlo mientras el que
+  respalda siga vivo es cómodo, pero alarga la vida de una llave que está en un aparato que
+  no es tuyo, así que se decide aparte.
+- **Las sesiones dadas se guardan en `localStorage`**, no en el store. En el aparato que
+  entra no hay otra cosa —todavía no tiene identidad, que es justo lo que viene a
+  conseguir—, pero en el que respalda sí la hay y ahí corresponde el store.
+- **Ninguna app consume todavía el papel**: `verifySessionSigned` existe y está probado,
+  pero quien lo va a pedir es F2 (permiso por origen) y los servicios. Hasta entonces, una
+  sesión sirve para entrar y verse, no para usar el ecosistema entero.
 
 ## 8. Lo que NO se hace
 
@@ -202,8 +214,8 @@ F4 lleva las dos cosas a la misma pantalla a propósito. Dos listas —«mis ses
 
 | Tema | Pregunta |
 |---|---|
-| **Alcance de la sesión** | ¿Firma sola lo de bajo riesgo (§6) o todo va a demanda? Lo primero es lo único viable para el transporte; lo segundo es más estricto. |
-| **Duración** | ¿Cuánto dura por defecto, y se renueva sola mientras el que respalda esté vivo, o se vuelve a pedir? |
+| ~~**Alcance de la sesión**~~ | **Decidido (2026-09-05): firma sola lo de bajo riesgo.** Todo a demanda obliga a molestar al aparato que respalda en cada mensaje del transporte. La lista quedó en `id:whoami` y `vault:store`; firmar por la persona no está, y eso es lo que se pide al aparato. |
+| **Duración** | Por ahora 8 h por defecto y tope de 24, sin renovación: cuando vence se vuelve a entrar. Falta decidir si se renueva sola mientras el que respalda esté vivo. |
 | **Identificador por pares** | Heredada del SSO: ¿el mismo `sub` en todas las aplicaciones, o derivado por aplicación para que nadie pueda cruzarlas? |
 | **Correo respaldado** | ¿`profile:email` se bloquea hasta que `@dotrino/verifier` esté cableado, o se entrega marcado como *declarado*? |
 | **Sesión sin teléfono a mano** | Si el único miembro con `approve` está apagado, ¿se puede entrar de otro modo, o se acepta que no? |
