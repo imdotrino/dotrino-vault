@@ -1333,7 +1333,9 @@ async function onKeySecrets (term, st, key) {
   } else if (ch === 't' && cur?.key) {
     await toggleVisibility(term, st, cur.public, () => vc.setSecretVisibility(cur.ns, cur.key, !cur.public, activeId(st), activePwd(st)))
   } else if (ch === 'r' && cur?.key) {
-    await promptRenameVariable(term, st, cur)
+    // SIN `await`: el prompt solo ABRE el cuadro de entrada y vuelve. Esperarlo aquí
+    // congelaba la TUI entera — ver `promptRenameVariable`.
+    promptRenameVariable(term, st, cur)
   } else if (key.name === 'f5') {
     await refreshSecrets(term, st)
   }
@@ -1349,24 +1351,33 @@ async function onKeySecrets (term, st, key) {
  * cambio de configuración, así que se va a reiniciar. Si su código busca el nombre viejo,
  * dejará de encontrarlo — y eso no lo puede saber la bóveda.
  */
+/**
+ * ABRE EL CUADRO Y VUELVE. No devuelve una promesa que espere a que el usuario escriba, y
+ * eso no es estilo: era un INTERBLOQUEO que congelaba la TUI entera.
+ *
+ * Quien escribe es `onInputKey`, y a `onInputKey` solo se llega desde el bucle de teclas.
+ * Devolver aquí una promesa que solo resuelve en `onSubmit` dejaba al bucle esperándola —
+ * o sea, esperando a una tecla que no iba a leer nunca, porque el que lee es él. A partir
+ * de ahí no respondía a nada: ni Enter, ni Esc, ni Ctrl-C, que también se atienden ahí. La
+ * única salida era cerrar la terminal, y es lo que le tocó hacer al dueño el 2026-09-05.
+ *
+ * Los otros veinte prompts de esta TUI ya eran así; este era el único que no.
+ */
 function promptRenameVariable (term, st, cur) {
   const i = L(st)
-  return new Promise((listo) => {
-    setInput(st, {
-      label: i.renameLabel(cur.key),
-      hint: i.renameHint,
-      value: cur.key,
-      onSubmit: async (nuevo) => {
-        const nv = nuevo.trim()
-        st.input = null
-        if (!nv || nv === cur.key) { listo(); return }
-        if (!KEY_RE.test(nv)) { flash(st, i.keyInvalid, 'danger'); listo(); return }
-        const r = await guard(term, st, i.renaming, () => vc.renameSecret(cur.ns, cur.key, nv, activeId(st)))
-        if (r.ok) { flash(st, i.renamed(cur.key, nv)); st.secrets = r.v }
-        listo()
-      },
-      onCancel: () => { st.input = null; listo() }
-    })
+  setInput(st, {
+    label: i.renameLabel(cur.key),
+    hint: i.renameHint,
+    value: cur.key,
+    onSubmit: async (nuevo) => {
+      const nv = nuevo.trim()
+      st.input = null
+      if (!nv || nv === cur.key) return
+      if (!KEY_RE.test(nv)) { flash(st, i.keyInvalid, 'danger'); return }
+      const r = await guard(term, st, i.renaming, () => vc.renameSecret(cur.ns, cur.key, nv, activeId(st)))
+      if (r.ok) { flash(st, i.renamed(cur.key, nv)); st.secrets = r.v }
+    },
+    onCancel: () => { st.input = null }
   })
 }
 
@@ -1971,4 +1982,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, onKeySecrets, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

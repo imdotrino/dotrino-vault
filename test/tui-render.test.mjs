@@ -829,3 +829,36 @@ test('Permisos: F5 con cambios sin guardar PREGUNTA, igual que Esc', async () =>
   assert.match(st.confirm.text, /Descartar/i)
   assert.deepEqual([...st.capsDraft.caps], antes, 'y el borrador sigue ahí hasta que contestes')
 })
+
+/**
+ * PULSAR «r» ABRE EL CUADRO Y DEVUELVE EL CONTROL. Si no vuelve, la TUI está muerta.
+ *
+ * `onKeySecrets` se AWAITA desde el bucle de teclas, y ese bucle es el único que llama a
+ * `onInputKey` — o sea, el único que puede llegar a ejecutar el `onSubmit` del cuadro.
+ * Cuando el prompt devolvía una promesa que solo resolvía dentro de `onSubmit`, el bucle
+ * se quedaba esperando a una tecla que él mismo tenía que leer: interbloqueo. Desde fuera
+ * la TUI no respondía a NADA —tampoco a Esc ni a Ctrl-C, que se atienden en ese mismo
+ * bucle— y la única salida era cerrar la terminal. Le pasó al dueño el 2026-09-05.
+ *
+ * El test es la carrera contra un reloj a propósito: lo que se comprueba no es qué pinta,
+ * es que la llamada TERMINE.
+ */
+test('renombrar una variable no bloquea el bucle de teclas', async () => {
+  const term = fakeTerm()
+  const st = baseState({
+    screen: 'secrets',
+    secrets: { ns: { proxy: [{ key: 'TURN_KEY_ID', public: false }] }, dev: [] },
+    // 0 es la fila del SCOPE (`key: null`, no se renombra); 1 es la variable.
+    sel: { profiles: 0, devices: 0, secrets: 1, caps: 0, devvars: 0 }
+  })
+  const tarde = new Promise((_, no) => setTimeout(() => no(new Error('onKeySecrets no volvió: la TUI se queda congelada')), 2000))
+  await Promise.race([V.onKeySecrets(term, st, { name: 'char', ch: 'r' }), tarde])
+
+  // Y dejó el cuadro abierto, que es lo que la tecla tenía que hacer.
+  assert.ok(st.input, 'se abrió el cuadro de entrada')
+  assert.equal(st.input.value, 'TURN_KEY_ID', 'viene relleno con el nombre actual, para editarlo')
+
+  // Y el cuadro se cierra solo con Esc, sin dejar nada colgado.
+  await st.input.onCancel()
+  assert.equal(st.input, null)
+})

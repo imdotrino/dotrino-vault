@@ -1263,6 +1263,27 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!publicOnly && needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
+      // NADIE PUEDE APROBAR = SE DICE AHORA, no se deja esperando cinco minutos.
+      //
+      // La bóveda ya lo sabía —lo escribía en su propio log, «rang 0 approver(s)»— y aun
+      // así contestaba «pendiente» y dejaba al otro aguardando a algo que no podía pasar.
+      // Eso es un fallo ruidoso convertido en uno mudo, que es exactamente lo que la norma
+      // prohíbe (CLAUDE.md, «nada de repliegues»), y encima el que sabe es el ÚNICO que
+      // puede enterar al otro (CONVENCIONES §14): el que pide no tiene el acta, así que no
+      // hay forma de que lo averigüe por su cuenta.
+      //
+      // Lo pidió el dueño el 2026-09-05, después de mirar un `dotrino-env check` que parecía
+      // colgado y era esto.
+      const quienAprueba = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve'))
+      if (!quienAprueba.length) {
+        audit('rejected', { what: 'secrets', ns, reason: 'sin-aprobador' })
+        log(`[vault] ${ns}: refused ${deviceId || '????-????'} — nobody in the record can approve`)
+        return reply(from, {
+          type: MSG.ERROR,
+          code: 'no-approver',
+          error: `approval: nobody in the record can approve — grant it with \`dotrino-vault caps <ID> +aprueba\`, or let this service run unattended with \`dotrino-vault caps ${deviceId || '<ID>'} +desatendido\``
+        })
+      }
       // `from` SE GUARDA: la respuesta llega más tarde —cuando alguien apruebe— y tiene que
       // volver POR DONDE VINO. Si la pregunta entró por el mostrador local, mandarla por el
       // proxio la deja en el vacío: quien preguntó está escuchando en el socket, no ahí.

@@ -1576,3 +1576,43 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
     /does not verify/,
     'la firma lleva dentro el cajón y la clave: no se puede reusar en otro sitio')
 })
+
+/**
+ * SI NADIE PUEDE APROBAR, SE DICE — no se deja esperando cinco minutos.
+ *
+ * Un servicio recién enrolado nace pidiendo aprobación (2026-09-01), y la bóveda busca en
+ * el acta a quién timbrar. Cuando no encuentra a nadie lo apuntaba en su log —«rang 0
+ * approver(s)»— y aun así contestaba «pendiente», así que el que preguntaba se quedaba
+ * aguardando a algo que no podía pasar hasta agotar el plazo del pedido. Desde fuera eso es
+ * un cuelgue, y de los caros: el mensaje que explica el problema existía, pero solo lo veía
+ * quien supiera mirar el journal de la bóveda.
+ *
+ * La bóveda es la ÚNICA que puede enterar al otro (CONVENCIONES §14): el que pide no tiene
+ * el acta, así que jamás puede averiguar por su cuenta que no hay aprobadores.
+ */
+test('nadie puede aprobar: la bóveda lo dice EN EL ACTO, no deja esperando', { timeout: 60000 }, async () => {
+  // BÓVEDA PROPIA, y hace falta: lo que se prueba es un acta en la que NADIE puede aprobar,
+  // y la que comparte el resto del fichero tiene un teléfono con `approve` desde el test de
+  // la aprobación por uso. Con ella, el caso no llegaba a darse nunca y este test se
+  // agotaba esperando — aprobado a solas y colgado en la suite, que es lo peor de los dos.
+  const { startVault } = await import('../src/vault.js')
+  const sola = await startVault({ dir: tmp('vault-huerfano-'), proxyUrl, log: process.env.VAULT_LOG ? console.error : () => {} })
+  try {
+    await sola.setSecret('huerfano', 'API_KEY', 'k-000')
+    const { qr } = await sola.startPairing({ scope: ['vault:secrets:huerfano'], label: 'service:huerfano', ttlMs: 60000 })
+
+    const { enrollService, fetchSecrets } = await import('../lib/src/service.js')
+    const dir = tmp('svc-huerfano-')
+    // Se aprueba el EMPAREJAMIENTO y nada más: sin `unattended`, y sin que ningún miembro
+    // del acta tenga `approve`. Es el estado en que queda cualquier servicio recién enrolado
+    // en una bóveda sin teléfono dado de alta.
+    await enrollService({ qr, ns: 'huerfano', dir, onCode: ({ code }) => { sola.approveDevice(code).catch(() => {}) } })
+
+    const t0 = Date.now()
+    await assert.rejects(() => fetchSecrets({ dir }), /nobody in the record can approve/,
+      'contesta por qué, en vez de callar')
+    // Y RÁPIDO. Es la mitad que importa: el mensaje correcto después de cinco minutos sigue
+    // siendo un cuelgue. Sin el arreglo esto tardaba `APPROVAL_TIMEOUT_MS` (5 min y 10 s).
+    assert.ok(Date.now() - t0 < 30000, `tardó ${Date.now() - t0} ms: se está esperando al plazo de la aprobación`)
+  } finally { try { sola.close() } catch (_) {} }
+})
