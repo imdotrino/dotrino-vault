@@ -166,10 +166,10 @@ Queda como decisión revisable (§9).
 | **F0** ✅ | `requestAssertion` / `verifyAssertion` con `aud`, `nonce`, `iat`, `exp`. Sin modo permisivo. **Hecha el 2026-09-05** en `@dotrino/identity` 0.84.0 (`vault/assertion.js`), con `verifySignedFor` para lo que se publica. **Cableada en geo** (cliente 0.9.0) **y en reputación** (cliente 0.11.0): un pin o una atestación sin destinatario, o firmados para otro servicio, se rechazan. **Falta solo el proxio**, que es el caso interactivo, con reto. | `dotrino-identity` (+ `dotrino-vault`) |
 | **F1** ✅ | **Sesiones**: papel, flujo de las dos puntas, QR inverso, lista y cierre. **Hecha el 2026-09-05** en `@dotrino/identity` 0.85.0 (`vault/session.js` + `vault/sessionFlow.js`, 19 pruebas) y cableada en **`profile.dotrino.com/sessions`**, comprobada de punta a punta contra el proxio de producción. | `@dotrino/identity`, `dotrino-profile-app` |
 | **F2** ✅ | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. **Hecha el 2026-09-06** en `@dotrino/identity` 0.86.1: saber quién eres no cuesta permiso, cualquier dato tuyo sí; el panel lo pinta la BÓVEDA (otro origen: la app no puede pulsarlo ni leerlo) y lo concedido se ve y se retira en `profile.dotrino.com/sessions`. | `@dotrino/identity`, `dotrino-profile-app` |
-| **F3** | Puente OpenID Connect + `@dotrino/sso-client`. | `dotrino-sso` |
-| **F4** | «Dónde se usó mi identidad»: sesiones abiertas **y** aplicaciones ajenas en **una sola lista**. | `dotrino-profile-app` |
-| **F5** | Federación entrante: Active Directory respalda al usuario. | `dotrino-ad-integration` |
-| **F6** | Landing pública y catálogo. En la copy, «SSO» es argot: *un solo inicio de sesión para todo*. | `dotrino-sso/web`, `dotrino-home` |
+| **F3** ✅ | Puente OpenID Connect + `@dotrino/sso-client`. **Hecho el 2026-09-06** y en vivo en `sso.dotrino.com`: Authorization Code con PKCE S256, `id_token` ES256, sin base de datos de usuarios. Comprobado de punta a punta en producción. | `dotrino-sso` |
+| **F4** ✅ | «Dónde se usó mi identidad»: sesiones abiertas **y** aplicaciones ajenas en **una sola lista**, con su último uso y quién pedía de verdad (`onBehalfOf`, subordinado al origen). **Hecha el 2026-09-06.** | `@dotrino/identity` 0.87, `dotrino-profile-app` |
+| **F5** | Federación entrante: Active Directory respalda al usuario. **Lo único que queda del plan.** | `dotrino-ad-integration` |
+| **F6** ✅ | Landing pública y catálogo. En la copy, «SSO» es argot: *un solo inicio de sesión para todo*. **Hecha el 2026-09-06**: la sirve el propio puente (un `git pull` despliega todo) y el aviso de lo que ese servicio ve está en la propia página, con sus dos salidas al lado. | `dotrino-sso/web`, `dotrino-home` |
 
 F0 va primero porque sin destinatario no hay nada de lo demás, y porque cierra hoy
 el cruce entre proxio, geo y reputación. **Toca el pilar que usan todas las apps:**
