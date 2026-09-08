@@ -1,9 +1,10 @@
 # Entrar — sesiones, y el inicio de sesión federado
 
-> **Estado:** plan de diseño, **sin implementar**. Decidido con el dueño el
-> 2026-09-05: se hacen las tres direcciones **en este orden** — primero entrar en un
-> aparato nuevo, después "Entrar con Dotrino" en aplicaciones ajenas, y al final
-> entrar a Dotrino con un proveedor externo (Microsoft/AD).
+> **Estado: hecho, F0 a F6.** Terminado el 2026-09-07. Decidido con el dueño el
+> 2026-09-05: se hacían las tres direcciones **en este orden** — primero entrar en un
+> aparato nuevo, después "Entrar con Dotrino" en aplicaciones ajenas, y al final entrar
+> a Dotrino con el directorio de una empresa. Las tres funcionan y están comprobadas de
+> punta a punta; el estado de cada fase, con su fecha y lo que dejó fuera, está en §7.
 >
 > Fija el *qué* y el *cómo*, y deja marcado lo que falta decidir (§9). El código va
 > en inglés (`CONVENCIONES-APPS.md` §8.1); los identificadores de aquí ya lo están.
@@ -168,8 +169,13 @@ Queda como decisión revisable (§9).
 | **F2** ✅ | Permiso por origen y alcances, **diseñado para el caso ajeno desde el principio**. **Hecha el 2026-09-06** en `@dotrino/identity` 0.86.1: saber quién eres no cuesta permiso, cualquier dato tuyo sí; el panel lo pinta la BÓVEDA (otro origen: la app no puede pulsarlo ni leerlo) y lo concedido se ve y se retira en `profile.dotrino.com/sessions`. | `@dotrino/identity`, `dotrino-profile-app` |
 | **F3** ✅ | Puente OpenID Connect + `@dotrino/sso-client`. **Hecho el 2026-09-06** y en vivo en `sso.dotrino.com`: Authorization Code con PKCE S256, `id_token` ES256, sin base de datos de usuarios. Comprobado de punta a punta en producción. | `dotrino-sso` |
 | **F4** ✅ | «Dónde se usó mi identidad»: sesiones abiertas **y** aplicaciones ajenas en **una sola lista**, con su último uso y quién pedía de verdad (`onBehalfOf`, subordinado al origen). **Hecha el 2026-09-06.** | `@dotrino/identity` 0.87, `dotrino-profile-app` |
-| **F5** | Federación entrante: Active Directory respalda al usuario. **Lo único que queda del plan.** | `dotrino-ad-integration` |
+| **F5** ✅ | Federación entrante: el directorio de una empresa respalda una llave. **Hecha el 2026-09-07**: el servicio hace OpenID Connect contra el directorio y firma una atestación `op:'verify'` de `@dotrino/verifier` 0.2.0 (servicio `directory`, con `aud` y con los `claims` que la aplicación necesita). Las dos pruebas se atan **criptográficamente** —el reto que va al directorio es el hash de la llave que firmó la prueba—, no por la sesión. Probada de punta a punta contra un Keycloak de verdad, formulario de contraseña incluido. **Queda un paso de operación**: `@dotrino/verifier` es un paquete nuevo y su publicación de confianza está sin declarar en npm. | `dotrino-ad-integration`, `dotrino-verifier` |
 | **F6** ✅ | Landing pública y catálogo. En la copy, «SSO» es argot: *un solo inicio de sesión para todo*. **Hecha el 2026-09-06**: la sirve el propio puente (un `git pull` despliega todo) y el aviso de lo que ese servicio ve está en la propia página, con sus dos salidas al lado. | `dotrino-sso/web`, `dotrino-home` |
+
+**El plan está completo.** Lo que sigue no es login: son los tres pasos que convierten el
+respaldo de la empresa en un producto —salas con política en el chat, la puerta en el
+proxio, y la llave de sala condicionada a la atestación—, y viven en `dotrino-chat` y
+`dotrino-proxy` (`dotrino-ad-integration/docs/DISENO.md` §10, fases 3 a 5).
 
 F0 va primero porque sin destinatario no hay nada de lo demás, y porque cierra hoy
 el cruce entre proxio, geo y reputación. **Toca el pilar que usan todas las apps:**
