@@ -24,6 +24,8 @@ import { buildSealedVar } from '@dotrino/vault/admin'
 // La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.
 import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
+import { avatarDataUri } from '@dotrino/identity/avatar' // identicon de cada perfil (subpath barato)
+import { walkStep } from './approvals-walk.js'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope } from '@dotrino/identity/acta'
 import jsQR from 'jsqr'
@@ -199,8 +201,10 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
-    apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda:  dotrino-vault caps <ID> +aprueba',
-    apv_profile: 'Pedidos de tu perfil',
+    apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda, en tu computadora:',
+    apv_profile: 'Perfil:',
+    apv_none_any: 'Nadie está pidiendo nada, en ninguno de tus perfiles.',
+    apv_looking: 'Buscando el pedido en tus perfiles…',
     apv_other: 'Estos pedidos no son de tu perfil abierto, son de otro. Ábrelo para verlos:',
     apv_switch: 'Abrir este perfil',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -360,8 +364,10 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
-    apv_nocap: 'This device does not approve requests. Grant it from the vault:  dotrino-vault caps <ID> +aprueba',
-    apv_profile: 'Requests for your profile',
+    apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
+    apv_profile: 'Profile:',
+    apv_none_any: 'Nobody is asking for anything, in any of your profiles.',
+    apv_looking: 'Looking for the request in your profiles…',
     apv_other: 'These requests are not for the profile you have open, they are for another one. Open it to see them:',
     apv_switch: 'Open this profile',
     var_t: 'Your apps\u2019 variables',
@@ -454,6 +460,24 @@ async function computeProfileIdShort () {
     const h = (await pubkeyId(pub)).slice(0, 8).toUpperCase()
     profileIdShort.value = h.slice(0, 4) + '-' + h.slice(4)
   } catch (_) { profileIdShort.value = shortId(pub) }
+}
+
+/**
+ * EL ID DE **ESTE** APARATO, tal como lo escribe la bóveda (AB12-CD34).
+ *
+ * Hacía falta porque el cartel de «este aparato no aprueba» mandaba a ejecutar
+ * `dotrino-vault caps <ID> +aprueba` con el `<ID>` LITERAL: quien lo lee tiene que ir a
+ * buscar cuál es el suyo en otra pantalla, y de los tres aparatos de la lista no es obvio.
+ * Un comando que no se puede copiar tal cual no es una ayuda, es un acertijo.
+ */
+const myDeviceIdShort = ref('')
+async function computeMyDeviceId () {
+  try {
+    const me = await id.value.getMe()
+    const { pubkeyId } = await import('@dotrino/identity/capabilities')
+    const h = (await pubkeyId(me?.publickey)).slice(0, 8).toUpperCase()
+    myDeviceIdShort.value = h.slice(0, 4) + '-' + h.slice(4)
+  } catch (_) { myDeviceIdShort.value = '' }
 }
 
 /** Falla al hablar con la bóveda: se ENSEÑA, no se traga (ver `syncError`). */
@@ -692,7 +716,13 @@ onMounted(async () => {
   // con un temporizador desde otro sitio es una carrera, no una espera.
   if (approvalsOnly.value) {
     await refreshProfiles()
-    if (await jumpToApprover()) return
+    computeMyDeviceId()
+    // Preguntar PRIMERO por los de este perfil: si el pedido está aquí, no hay paseo que
+    // dar. Y si no está, `walkToPending` prueba los demás y para en el que lo tenga.
+    await refreshApprovals()
+    try { if (sessionStorage.getItem(WALK_DONE) === '1') { sessionStorage.removeItem(WALK_DONE); nadaEnNinguno.value = true } } catch (_) {}
+    if (leerPaseo()) buscandoPedido.value = true
+    if (await walkToPending()) return
   }
   offVault = id.value.onVault?.((e) => {
     if (e?.phase === 'acta' || e?.phase === 'renounced') refresh()
@@ -1161,32 +1191,102 @@ async function refreshProfiles () {
   try { profiles.value = await id.value.listProfiles() } catch (_) { profiles.value = [] }
 }
 
+/** El avatar de un perfil: el que subió, o su identicon (determinista, siempre hay uno). */
+const apvAvatar = (p) => p?.avatar || avatarDataUri(p?.pubkey || p?.id || '', { size: 44 })
+
 /**
- * SALTAR AL PERFIL QUE APRUEBA, pero solo cuando no hay nada que elegir.
+ * BUSCAR EL PERFIL QUE TIENE EL PEDIDO, en vez de dejarte en el último que usaste.
  *
- * Si el activo no aprueba y hay EXACTAMENTE uno que sí, no hay decisión que tomar: se
- * cambia y se recarga (cambiar de perfil no es reactivo, por diseño). Con dos o más se
- * pregunta — elegir por ti cuál de tus cuentas usar no es una comodidad, es un error caro.
+ * El timbre NO dice a qué perfil llamó, y así se queda: viaja por FCM —o sea por Google—
+ * y ahí no se mete nada que identifique la cuenta. Así que con varios perfiles que
+ * aprueban, la única forma de saber dónde está el pedido es MIRAR en cada uno.
  *
- * `sessionStorage` corta el bucle: cambiar de perfil recarga la página, y sin la marca
- * volvería a entrar aquí una y otra vez si el cambio no bastara.
+ * Antes esto se rendía en cuanto había más de uno («elegir por ti no es una comodidad»),
+ * y el resultado era peor que elegir mal: te dejaba en el perfil que estuviera abierto —el
+ * último que usaste— diciendo «nadie está pidiendo nada», que es falso, y sin una pista de
+ * dónde estaba el pedido. Preguntar tampoco servía: la pregunta solo salía cuando el
+ * abierto NO podía aprobar; si podía y el pedido era del otro, no salía nada.
+ *
+ * Ahora se prueban de uno en uno, cada uno UNA vez, y el paseo se PARA en el primero que
+ * tenga un pedido. Si ninguno tiene, se vuelve a donde estabas y se dice en voz alta.
+ *
+ * Dos cosas que lo hacen seguro: la marca vive en `sessionStorage` (cambiar de perfil
+ * recarga la página, así que la memoria del paseo no puede estar en una variable) y cada
+ * perfil se prueba una sola vez, así que no hay forma de dar vueltas.
+ *
+ * Y solo pasa con el timbre. Entrar a mano en /approvals no te mueve de perfil: para eso
+ * está el selector de arriba, que ahora se ve SIEMPRE que hay más de uno.
  */
-const JUMPED = 'dotrino.apv.jumped'
-async function jumpToApprover () {
-  if (!cameFromRing() || apvCurrent.value?.approve) return false
-  const solo = apvProfiles.value
-  if (solo.length !== 1) return false
-  try { if (sessionStorage.getItem(JUMPED) === solo[0].id) return false } catch (_) {}
-  try { sessionStorage.setItem(JUMPED, solo[0].id) } catch (_) {}
-  await id.value.switchProfile(solo[0].id)
-  location.reload()
-  return true
+const WALK = 'dotrino.apv.walk'
+const WALK_DONE = 'dotrino.apv.walk-done'
+const leerPaseo = () => { try { return JSON.parse(sessionStorage.getItem(WALK) || 'null') } catch (_) { return null } }
+const guardarPaseo = (v) => { try { sessionStorage.setItem(WALK, JSON.stringify(v)) } catch (_) {} }
+const borrarPaseo = () => { try { sessionStorage.removeItem(WALK) } catch (_) {} }
+/** Se recorrieron todos y ninguno tenía nada: hay que decirlo tras la última recarga. */
+const nadaEnNinguno = ref(false)
+/**
+ * EL PASEO SE DICE MIENTRAS PASA.
+ *
+ * Cada perfil que se mira es una recarga de la página (cambiar de cuenta no es reactivo),
+ * así que sin esto pulsar «Pedidos» y no tener nada pendiente parpadea dos o tres veces sin
+ * explicación, y parece que la app se cuelga. Se avisa de que está BUSCANDO.
+ */
+const buscandoPedido = ref(false)
+
+async function walkToPending () {
+  if (!cameFromRing()) { borrarPaseo(); return false }
+  const aqui = apvCurrent.value?.id || null
+  const paseo = leerPaseo() || { from: aqui, tried: [] }
+  // La DECISIÓN vive en `approvals-walk.js`, pura y probada aparte; aquí solo se ejecuta.
+  const paso = walkStep({
+    aqui,
+    from: paseo.from,
+    tried: paseo.tried,
+    approvers: apvProfiles.value.map((p) => p.id),
+    hasPending: approvals.value.length > 0
+  })
+  if (paso.go) {
+    guardarPaseo({ from: paseo.from || aqui, tried: paso.tried })
+    await id.value.switchProfile(paso.go)
+    location.reload()
+    return true
+  }
+  borrarPaseo()
+  if (paso.back && profiles.value.some((p) => p.id === paso.back)) {
+    // La recarga borra la memoria de la página, así que lo que hay que DECIR al llegar
+    // viaja en sessionStorage: si no, se vuelve al perfil de siempre sin explicar nada.
+    try { sessionStorage.setItem(WALK_DONE, '1') } catch (_) {}
+    await id.value.switchProfile(paso.back)
+    location.reload()
+    return true
+  }
+  if (paso.nothingAnywhere) nadaEnNinguno.value = true
+  return false
 }
 
 /** Cambiar de perfil a mano desde esta pantalla. Recarga: el perfil no es reactivo. */
 const apvSwitch = (p) => run('apv-sw-' + p.id, async () => {
+  borrarPaseo()
   await id.value.switchProfile(p.id)
   location.reload()
+})
+
+// EL SELECTOR DE PERFIL, siempre a la vista cuando hay más de uno (no solo cuando el
+// abierto no aprueba). Es un desplegable: enseña en qué perfil estás —con su avatar, que
+// es como se reconocen— y lleva a cualquier otro de un toque.
+const apvPicker = ref(false)
+// Pulsar fuera (o Escape) lo cierra. Un desplegable que solo se cierra con el mismo botón
+// se queda abierto tapando el pedido, que es justo lo que se venía a ver.
+const toggleApvPicker = (e) => { e?.stopPropagation?.(); apvPicker.value = !apvPicker.value }
+const cerrarApvPicker = () => { apvPicker.value = false }
+const onApvKey = (e) => { if (e.key === 'Escape') cerrarApvPicker() }
+onMounted(() => {
+  document.addEventListener('click', cerrarApvPicker)
+  document.addEventListener('keydown', onApvKey)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', cerrarApvPicker)
+  document.removeEventListener('keydown', onApvKey)
 })
 
 async function refreshApprovals () {
@@ -1575,11 +1675,37 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <!-- /approvals: SOLO pedir el sí o el no. Lo administrativo vive en /vault. -->
       <template v-if="canApprove">
         <h2>{{ t.apv_t }}</h2>
-        <!-- DE QUÉ PERFIL son estos pedidos. Con uno solo sobra decirlo. -->
-        <p v-if="profiles.length > 1" class="muted" data-testid="apv-profile">
-          {{ t.apv_profile }} <b>{{ apvCurrent?.name || '—' }}</b>
-        </p>
-        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
+        <!--
+          EN QUÉ PERFIL ESTÁS, Y CÓMO IR A OTRO. Con un solo perfil sobra decirlo; con
+          varios era el dato que faltaba: la pantalla enseñaba «nadie está pidiendo nada»
+          sin decir de quién hablaba ni que hubiera otra cuenta donde mirar.
+        -->
+        <div v-if="profiles.length > 1" class="apvsel" data-testid="apv-profile">
+          <span class="muted">{{ t.apv_profile }}</span>
+          <div class="apvwrap">
+            <button class="apvbtn" type="button" data-testid="apv-picker"
+                    :aria-expanded="apvPicker ? 'true' : 'false'" @click="toggleApvPicker">
+              <img :src="apvAvatar(apvCurrent)" alt="" width="22" height="22" />
+              <b>{{ apvCurrent?.name || '—' }}</b>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div v-if="apvPicker" class="apvmenu" data-testid="apv-menu">
+              <button v-for="p in apvProfiles" :key="p.id" class="apvitem" type="button"
+                      :data-profile="p.id" data-testid="apv-pick"
+                      :aria-current="p.current ? 'true' : 'false'"
+                      :disabled="p.current || busy === 'apv-sw-' + p.id" @click="apvSwitch(p)">
+                <img :src="apvAvatar(p)" alt="" width="22" height="22" />
+                <span>{{ p.name || p.id }}</span>
+                <span v-if="p.current" aria-hidden="true">✓</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- Se miraron TODOS los perfiles y ninguno tenía nada: se dice, para que no
+             parezca que el pedido se perdió en la cuenta que no estabas mirando. -->
+        <p v-if="buscandoPedido && !approvals.length" class="muted" data-testid="apv-looking">{{ t.apv_looking }}</p>
+        <p v-else-if="nadaEnNinguno && !approvals.length" class="muted" data-testid="apv-none-any">{{ t.apv_none_any }}</p>
+        <p v-else-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
         <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
           <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
@@ -1603,7 +1729,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                   :disabled="busy === 'apv-sw-' + p.id" @click="apvSwitch(p)">{{ t.apv_switch }}</button>
         </div>
       </template>
-      <p v-else class="muted" data-testid="apv-nocap">{{ t.apv_nocap }}</p>
+      <p v-else class="muted" data-testid="apv-nocap">
+        {{ t.apv_nocap }}
+        <code class="mid">dotrino-vault caps {{ myDeviceIdShort || 'ID' }} +aprueba</code>
+      </p>
     </template>
 
     <template v-else>
@@ -2072,4 +2201,32 @@ textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #
 .pending { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #10203a; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
 .pending input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; width: 140px; font-family: ui-monospace, monospace; }
 details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
+
+/* EL SELECTOR DE PERFIL de la pantalla de pedidos: en qué cuenta estás y cómo ir a otra.
+   Mismo gesto que el del topbar (avatar + nombre + desplegable), aquí porque el pedido es
+   de UNA cuenta y con varias hay que poder verlo y cambiar sin salir de la pantalla. */
+.apvsel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
+.apvwrap { position: relative; }
+.apvbtn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #10203a; color: #dbe7f7; border: 1px solid #223047; border-radius: 999px;
+  padding: 5px 12px 5px 6px; cursor: pointer; font: inherit; font-size: 14px;
+}
+.apvbtn:hover { border-color: #2f4a6d; }
+.apvbtn img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+.apvmenu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  min-width: 200px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  background: #0f1725; border: 1px solid #223047; border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.apvitem {
+  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  padding: 7px 8px; border: 0; border-radius: 9px; cursor: pointer;
+  background: transparent; color: #dbe7f7; font: inherit; font-size: 13px; text-align: left;
+}
+.apvitem:hover:not(:disabled) { background: #17263c; }
+.apvitem:disabled { cursor: default; color: #9cc4ff; font-weight: 600; }
+.apvitem img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
+.apvitem span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
