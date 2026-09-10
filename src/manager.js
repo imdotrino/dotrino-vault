@@ -195,7 +195,10 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
   /** Resumen para state.json / `profile ls`: identidad + candado de cada perfil. */
   const summary = () => profiles.list().map((p) => {
     const v = running.get(p.id)
-    return { ...p, fingerprint: v?.fingerprint || null, iss: v?.master || null }
+    // `online` es ALCANZABLE, no «corriendo»: la bóveda puede estar abierta y con el socket
+    // en pie y aun así fuera de la red, si el proxio le rechazó el `identify` (un reloj
+    // atrasado al arrancar, p. ej.). Sin esto, eso solo se veía en una línea del log.
+    return { ...p, fingerprint: v?.fingerprint || null, iss: v?.master || null, online: v ? !!v.isIdentified?.() : false }
   })
 
   return {

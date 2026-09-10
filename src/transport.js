@@ -36,7 +36,7 @@ export async function masterPubkeyOf (identity) {
  * @param {string} [opts.url] URL del proxy (default wss://proxy.dotrino.com).
  * @returns {Promise<{ client, token:string, identify():Promise<void> }>}
  */
-export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {} }) {
+export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
   // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
@@ -44,7 +44,11 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   // conexión POR PERFIL (cada maestra se identifica con su propia pubkey ante el
   // proxy). Con el singleton, el segundo perfil reusaba el cliente del primero y
   // su `identify` pisaba al anterior. Sigue siendo el cliente oficial del paquete.
-  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  // `makeClient` es la costura de las PRUEBAS, y existe por una razón concreta: comprobar
+  // que un `identify` rechazado no tumba el perfil y se reintenta solo. Sin ella habría que
+  // levantar un proxio de verdad para probar el caso que ya costó una tarde. En producción
+  // no se pasa nunca y esto es el cliente oficial de siempre.
+  const { WebSocketProxyClient } = makeClient ? {} : await import('@dotrino/proxy-client')
 
   /**
    * EL CANAL DIRECTO, ENCENDIDO Y CON LA PUERTA CERRADA.
@@ -65,13 +69,17 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   // el acta es asíncrono. Así que se guarda una copia y se refresca donde ya se refresca
   // todo: en `identify`, que es lo que corre cada vez que el acta cambia o se reconecta.
   let actaVista = null
+  // ¿Está esta bóveda ATADA al proxio ahora mismo? Conectado no es identificado: el socket
+  // puede estar perfectamente abierto y el sobre rechazado, y entonces nadie la alcanza por
+  // su pubkey. Se expone para que `status` lo enseñe en vez de dejarlo a un log del arranque.
+  let identificado = false
   const enElActa = (token) => {
     // SIN ACTA NO SE NEGOCIA. No se sabe quién es nadie, y en la duda no se arranca a
     // parsear red no confiable. Se sigue por el proxio, que es el escalón que siempre está.
     if (!actaVista) return false
     return (actaVista.members || []).some((m) => m?.pub === token)
   }
-  const client = new WebSocketProxyClient({
+  const client = makeClient ? makeClient({ url, acceptDirectFrom: enElActa }) : new WebSocketProxyClient({
     url, enableWebRTC: true, acceptDirectFrom: enElActa, autoReconnect: true,
     maxReconnectAttempts: 100000, reconnectDelay: 4000
   })
@@ -79,6 +87,7 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   await client.connect()
 
   const identify = async () => {
+    identificado = false
     if (!client.token) return
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
     actaVista = record   // la copia que mira la puerta del canal directo
@@ -90,6 +99,7 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
       // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
       try {
         await client.identifyAs({ publickey: comm, sign: (d) => commKey.sign(d), acta: record })
+        identificado = true
         // SE DICE QUE SE IDENTIFICÓ, y con qué llave. Este camino era MUDO: al pasar de la
         // maestra a la llave de comunicación, el único rastro de «estoy alcanzable» que
         // quedaba en el log era el del repliegue. Así que cuando la consola decía «no
@@ -124,13 +134,51 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
       if (!publickey) return
       log('[vault] identifying with the master key: this vault is not in its own record yet (open the profile once to fix it)')
       await client.identifyAs({ publickey, sign: (d) => identity.signData(d), acta: record })
+      identificado = true
     } catch (e) {
       log(`[vault] cannot identify on the proxy yet: ${e.message} — the profile still opens; unlock it once and it gets its own communication key`)
     }
   }
-  await identify()
+  /**
+   * IDENTIFICARSE PUEDE FALLAR, Y ESO NO PUEDE TUMBAR EL PERFIL — NI QUEDARSE ASÍ.
+   *
+   * Esto era `await identify()` a secas, así que cualquier «no» del proxio subía por
+   * `createTransport` hasta `startVault` y el perfil **no se abría en absoluto**: no es que
+   * se quedara sin voz, es que cada petición contestaba `profile is not open` y en el
+   * `status` el perfil salía sin huella. Y no se reintentaba nunca: `identify` solo vuelve a
+   * correr con el evento `token`, o sea al RECONECTAR, y aquí el socket estaba perfectamente
+   * conectado — lo que el proxio rechazó fue el sobre.
+   *
+   * El caso real (2026-09-10): esta máquina arranca con el reloj 35 minutos atrasado (el
+   * `systemd-timesyncd` no contactó el servidor de hora hasta media hora después del
+   * arranque), el proxio rechaza el `identify` con «ts fuera de la ventana ±5min» y la
+   * bóveda se quedaba fuera de la red DESDE EL ARRANQUE HASTA QUE ALGUIEN LA REINICIABA.
+   * Con ella fuera no hay a quién timbrar: el teléfono nunca recibía un pedido de
+   * aprobación, y desde fuera eso se ve igual que «no hay pedidos».
+   *
+   * Reintentar con espera creciente lo arregla solo en cuanto el reloj se corrige, y cada
+   * intento se dice en voz alta: una bóveda inalcanzable en silencio es el fallo que ya
+   * costó un día entero (`CLAUDE.md`, el apagón del 1-2 de septiembre).
+   */
+  let reintento = null
+  let fallos = 0
+  const identifyWithRetry = async () => {
+    if (reintento) { clearTimeout(reintento); reintento = null }
+    try {
+      await identify()
+      if (fallos) log(`[vault] identified on the proxy after ${fallos + 1} attempt(s)`)
+      fallos = 0
+    } catch (e) {
+      fallos++
+      const espera = Math.min(60000, 5000 * fallos)
+      log(`[vault] could not identify on the proxy (${e.message}) — retrying in ${Math.round(espera / 1000)}s; until then this vault is unreachable and cannot ring anyone`)
+      reintento = setTimeout(() => { reintento = null; identifyWithRetry() }, espera)
+      reintento.unref?.()
+    }
+  }
+  await identifyWithRetry()
   // Re-identificar al reconectar (el token cambia).
-  client.on('token', () => { identify().catch(() => {}) })
+  client.on('token', () => { fallos = 0; identifyWithRetry() })
 
-  return { client, token: client.token, identify }
+  return { client, token: client.token, identify: identifyWithRetry, isIdentified: () => identificado }
 }

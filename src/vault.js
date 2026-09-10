@@ -306,7 +306,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   await ensureCommKeyInActa()
 
-  const { client, identify: reidentificar } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
+  const { client, identify: reidentificar, isIdentified } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
 
   // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
   // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver
@@ -3179,6 +3179,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   return {
     identity, client, store, threads, secrets, master, fingerprint: fp, dir,
+    // Alcanzable ≠ corriendo: si el proxio rechazó el `identify` esta bóveda está viva y
+    // nadie puede hablarle. Lo mira `status` (ver `manager.js`, `summary`).
+    isIdentified,
     // Se expone para poder PROBAR que una respuesta que no cabe no mata la conexión: es el
     // único punto por el que sale todo, y el fallo que cierra vive justo ahí.
     reply,

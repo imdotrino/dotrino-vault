@@ -155,7 +155,13 @@ function cmdStatus () {
 /** Una línea por perfil: nombre, id, huella y estado del candado. */
 function describeProfile (p) {
   const lock = !p.protected ? 'sin contraseña' : (p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado')
-  return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}`
+  // ALCANZABLE, Y SE DICE AQUÍ. Una bóveda puede estar corriendo y fuera de la red —si el
+  // proxio le rechazó el `identify`, nadie la alcanza por su pubkey— y desde fuera eso se ve
+  // igual que «no hay nada que aprobar»: el teléfono no timbra y no hay nada que mirar.
+  // `online` no viaja en las fotos de un daemon anterior, así que solo se enseña cuando el
+  // dato está y dice que no.
+  const red = p.online === false ? `  ${B}⚠ sin proxio (nadie puede alcanzarla)${Z}` : ''
+  return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}${red}`
 }
 
 function showChallenge (pe) {
