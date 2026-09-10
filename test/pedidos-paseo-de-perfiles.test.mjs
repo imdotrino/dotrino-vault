@@ -68,3 +68,56 @@ test('el perfil abierto NO aprueba: se va al que sí, y no se cuenta como mirado
   assert.equal(r3.go, null)
   assert.equal(r3.back, 'px')
 })
+
+/**
+ * EL BUCLE QUE SE ESCAPÓ, y por qué esta prueba no existía antes.
+ *
+ * La primera versión probaba una vuelta del paseo, no lo que pasa DESPUÉS de terminarla: al
+ * volver a la cuenta desde la que se entró —que es una recarga más— el paseo veía su marca
+ * borrada, se creía nuevo y volvía a salir al otro perfil, que a su vez acababa
+ * devolviéndote aquí. La pantalla rotaba entre cuentas para siempre. El dueño lo vio en su
+ * teléfono a los diez minutos de desplegarlo.
+ *
+ * Se prueba el ciclo COMPLETO, incluida la vuelta a casa, y con el freno del arranque.
+ */
+test('tras volver a casa NO se empieza otro paseo (el ping-pong infinito)', () => {
+  const APRUEBAN2 = ['p1', 'p2']
+  // Vuelta 1: en p1 no hay nada → sale a p2.
+  const r1 = walkStep({ aqui: 'p1', from: 'p1', tried: [], approvers: APRUEBAN2, hasPending: false })
+  assert.equal(r1.go, 'p2')
+  // Vuelta 2: en p2 tampoco → no queda ninguno, vuelve a p1 (y hay que decirlo).
+  const r2 = walkStep({ aqui: 'p2', from: 'p1', tried: r1.tried, approvers: APRUEBAN2, hasPending: false })
+  assert.equal(r2.go, null)
+  assert.equal(r2.back, 'p1')
+  assert.equal(r2.nothingAnywhere, true)
+  // Vuelta 3 — LA QUE FALTABA. Ya en casa y sin memoria del paseo (se borró al volver), lo
+  // único que queda es la marca de «vengo de terminar uno». Con ella no se mueve; sin ella,
+  // volvería a salir a p2 y ahí está el ping-pong.
+  const r3 = walkStep({ aqui: 'p1', from: 'p1', tried: [], approvers: APRUEBAN2, hasPending: false, justFinished: true })
+  assert.equal(r3.go, null, 'este es el bucle: no puede volver a salir')
+  assert.equal(r3.back, null)
+  assert.equal(r3.done, true)
+  assert.equal(r3.nothingAnywhere, true, 'y al llegar hay que decir que no había nada en ninguno')
+
+  // Sin la marca sí volvería a salir: es exactamente lo que pasaba, y queda escrito para que
+  // nadie la quite creyendo que sobra.
+  const sinFreno = walkStep({ aqui: 'p1', from: 'p1', tried: [], approvers: APRUEBAN2, hasPending: false })
+  assert.equal(sinFreno.go, 'p2')
+})
+
+test('la marca de «recién terminado» manda sobre todo lo demás', () => {
+  // Incluso con perfiles por mirar y un pedido delante: si venimos de cerrar un paseo, no se
+  // anda. Mirar lo que hay aquí es de la pantalla; moverse, no.
+  const r = walkStep({ aqui: 'p1', from: 'p2', tried: [], approvers: ['p1', 'p2', 'p3'], hasPending: false, justFinished: true })
+  assert.equal(r.go, null)
+  assert.equal(r.back, null)
+})
+
+test('sin perfil abierto que reconocer, el paseo no se mueve', () => {
+  // `aqui` null y la lista de mirados que no puede crecer: sin este freno saldría al primer
+  // perfil que aprueba en cada recarga, para siempre.
+  const r = walkStep({ aqui: null, from: null, tried: [], approvers: ['p1', 'p2'], hasPending: false })
+  assert.equal(r.go, null)
+  assert.equal(r.back, null)
+  assert.equal(r.done, true)
+})

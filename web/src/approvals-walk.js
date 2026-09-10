@@ -17,11 +17,24 @@
  * @param {string|null} e.from       perfil desde el que empezó el paseo (null si empieza aquí)
  * @param {string[]} e.tried         perfiles ya mirados
  * @param {string[]} e.approvers     perfiles que pueden aprobar, en el orden en que se ofrecen
- * @param {boolean} e.hasPending     ¿hay un pedido en el perfil abierto?
+ * @param {boolean} e.hasPending    ¿hay un pedido en el perfil abierto?
+ * @param {boolean} e.justFinished   este arranque ES la vuelta a casa de un paseo que acabó
  * @returns {{ go: string|null, back: string|null, tried: string[], done: boolean, nothingAnywhere: boolean }}
  */
-export function walkStep ({ aqui = null, from = null, tried = [], approvers = [], hasPending = false } = {}) {
-  const vistos = tried.includes(aqui) || !aqui ? [...tried] : [...tried, aqui]
+export function walkStep ({ aqui = null, from = null, tried = [], approvers = [], hasPending = false, justFinished = false } = {}) {
+  // UN PASEO QUE ACABA DE TERMINAR NO SE VUELVE A EMPEZAR, y este freno va AQUÍ y no en la
+  // pantalla: la vuelta a casa es una recarga más, así que al montar de nuevo el paseo veía
+  // su memoria ya borrada, se creía nuevo y salía otra vez al otro perfil — que a su vez
+  // acababa devolviéndote aquí. La pantalla rotaba entre cuentas para siempre.
+  //
+  // Quien llama solo tiene que decir «vengo de terminar uno» (la marca que dejó la última
+  // vuelta); decidir es de esta función, que es la que está probada.
+  if (justFinished) return { go: null, back: null, tried: [...tried], done: true, nothingAnywhere: true }
+  // SIN SABER DÓNDE ESTAMOS NO SE ANDA. Si no hay perfil abierto que reconocer, la lista de
+  // mirados no puede crecer, y un paseo que no avanza es un paseo que no termina: saldría al
+  // primer perfil que aprueba una y otra vez. Se para y se dice enseñando lo que haya.
+  if (!aqui) return { go: null, back: null, tried: [...tried], done: true, nothingAnywhere: false }
+  const vistos = tried.includes(aqui) ? [...tried] : [...tried, aqui]
   // El pedido está aquí: el paseo termina donde tenía que terminar.
   if (hasPending) return { go: null, back: null, tried: vistos, done: true, nothingAnywhere: false }
 

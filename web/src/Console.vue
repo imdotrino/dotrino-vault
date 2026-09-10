@@ -720,9 +720,23 @@ onMounted(async () => {
     // Preguntar PRIMERO por los de este perfil: si el pedido está aquí, no hay paseo que
     // dar. Y si no está, `walkToPending` prueba los demás y para en el que lo tenga.
     await refreshApprovals()
-    try { if (sessionStorage.getItem(WALK_DONE) === '1') { sessionStorage.removeItem(WALK_DONE); nadaEnNinguno.value = true } } catch (_) {}
+    // EL PASEO QUE ACABA DE TERMINAR NO SE VUELVE A EMPEZAR, y esto no es un detalle: sin
+    // ello la pantalla ROTABA ENTRE PERFILES para siempre. La última vuelta del paseo te
+    // devuelve a la cuenta desde la que entraste, y eso es una recarga; al montar de nuevo,
+    // el paseo veía su marca borrada, se creía nuevo y volvía a salir al otro perfil — que
+    // a su vez terminaba devolviéndote aquí. Ping-pong infinito.
+    //
+    // `WALK_DONE` ya venía puesta justo para este arranque: además de decir «no había nada
+    // en ninguno», es el freno. Se consume aquí y no queda nada guardado, así que la
+    // siguiente visita de verdad —otro timbre— vuelve a buscar como debe.
+    let paseoRecienTerminado = false
+    try {
+      if (sessionStorage.getItem(WALK_DONE) === '1') {
+        sessionStorage.removeItem(WALK_DONE); nadaEnNinguno.value = true; paseoRecienTerminado = true
+      }
+    } catch (_) {}
     if (leerPaseo()) buscandoPedido.value = true
-    if (await walkToPending()) return
+    if (await walkToPending(paseoRecienTerminado)) return
   }
   offVault = id.value.onVault?.((e) => {
     if (e?.phase === 'acta' || e?.phase === 'renounced') refresh()
@@ -1233,7 +1247,7 @@ const nadaEnNinguno = ref(false)
  */
 const buscandoPedido = ref(false)
 
-async function walkToPending () {
+async function walkToPending (recienTerminado = false) {
   if (!cameFromRing()) { borrarPaseo(); return false }
   const aqui = apvCurrent.value?.id || null
   const paseo = leerPaseo() || { from: aqui, tried: [] }
@@ -1243,7 +1257,8 @@ async function walkToPending () {
     from: paseo.from,
     tried: paseo.tried,
     approvers: apvProfiles.value.map((p) => p.id),
-    hasPending: approvals.value.length > 0
+    hasPending: approvals.value.length > 0,
+    justFinished: recienTerminado
   })
   if (paso.go) {
     guardarPaseo({ from: paseo.from || aqui, tried: paso.tried })
