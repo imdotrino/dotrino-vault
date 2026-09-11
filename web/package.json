@@ -18,7 +18,7 @@
     "@dotrino/proxy-client": "0.18.2",
     "@dotrino/support": "0.8.1",
     "@dotrino/topbar": "0.9.1",
-    "@dotrino/vault": "0.62.1",
+    "@dotrino/vault": "0.63.0",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4",
     "scrypt-js": "3.0.1",
