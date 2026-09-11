@@ -1267,6 +1267,23 @@ const limpiarRestosDelPaseo = () => {
  * quieras, sigue donde estaba: el botón de perfil de la barra de arriba.
  */
 
+/**
+ * LA VÍA DE UNA SOLA CUENTA, cuando la bóveda es vieja.
+ *
+ * `vaultApprovalsAll` trae los pedidos de todas las cuentas del aparato; un daemon sin
+ * actualizar no conoce ese método, así que se pregunta una vez y, si contesta «Unknown
+ * method», se baja a preguntar solo por la cuenta abierta durante el resto de la sesión.
+ *
+ * **Esta declaración faltaba**, y era el fallo entero: sin ella, la primerísima línea de
+ * `refreshApprovals` lanzaba un `ReferenceError` —un módulo va en modo estricto— que el
+ * `catch` de abajo se tragaba, dejando la lista vacía. Con la lista vacía la pantalla
+ * decía «este aparato no aprueba pedidos», que es falso y manda a arreglar lo que no es.
+ * Resultado: la pantalla de Pedidos NUNCA funcionó, y no había forma de verlo desde aquí
+ * porque el vault ni se enteraba de que alguien preguntaba (dueño, 2026-09-11: «me llega
+ * la notificación, pero en la web embebida no hay rastro de la petición»).
+ */
+let soloCuentaAbierta = false
+
 async function refreshApprovals () {
   try {
     if (!soloCuentaAbierta) {
