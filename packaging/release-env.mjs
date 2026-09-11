@@ -86,10 +86,18 @@ const npm = (args, cwd) => {
  * Preguntar es una pista; el 403 es la respuesta. Se distingue por el texto porque npm no
  * da otra cosa: el código `E403` también sale cuando no tienes permiso, y eso sí es un
  * fallo de verdad que tiene que seguir rompiendo.
+ *
+ * Y HAY UNA SEGUNDA REDACCIÓN, que costó el release de la 0.114.0: cuando el `npm publish`
+ * del paso anterior acaba de subir esa misma versión y el registro todavía la tiene a medio
+ * asentar, el segundo intento no da 403 sino **409 «Cannot publish over previously staged
+ * version»**. Es el mismo caso —está subida, no hay nada que hacer— con otras palabras, y
+ * como aquí no se reconocía, el script reventaba y se llevaba por delante la publicación de
+ * `@dotrino/env`, que era lo único que faltaba.
  */
 const esYaPublicado = (e) => {
   const txt = String(e?.stdout || '') + String(e?.stderr || '') + String(e?.message || '')
-  return /cannot publish over the previously published versions/i.test(txt)
+  return /cannot publish over the previously published versions/i.test(txt) ||
+    /cannot publish over previously staged version/i.test(txt)
 }
 
 /** ¿Esa versión exacta ya está en el registry? */

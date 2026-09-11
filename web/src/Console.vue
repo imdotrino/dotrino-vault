@@ -1308,7 +1308,19 @@ const grantRevoke = (g) => run('grant-' + g.id, async () => {
 const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id, profile: p.profile }); await refreshApprovals(); await refreshGrants() })
 
 const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id, profile: p.profile }); await refreshApprovals() })
-const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals().then(refreshGrants) }
+/**
+ * EL LATIDO ES PARA LOS PEDIDOS, no para las concesiones.
+ *
+ * Cada consulta abre y cierra una conexión al proxio POR CUENTA; los pedidos hay que verlos
+ * llegar (vencen en 5 min) pero una concesión dura una hora y solo cambia cuando tú apruebas
+ * o quitas algo — mirarla cada 5 s sería el doble de conexiones para enseñar lo mismo. Se
+ * mira al abrir, al aprobar, al quitar, y de refilón una vez por minuto.
+ */
+let apvTicks = 0
+const apvTick = () => {
+  if (document.visibilityState !== 'visible') return
+  refreshApprovals().then(() => { if (apvTicks++ % 12 === 0) return refreshGrants() })
+}
 
 // APP NATIVA: si esta página corre dentro de la app de Dotrino, el token de push (FCM en
 // Android) llega por `window.DotrinoNative.pushToken()` o por el evento
