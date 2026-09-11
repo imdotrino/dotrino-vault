@@ -25,7 +25,6 @@ import { buildSealedVar } from '@dotrino/vault/admin'
 import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
 import { avatarDataUri } from '@dotrino/identity/avatar' // identicon de cada perfil (subpath barato)
-import { walkStep } from './approvals-walk.js'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope } from '@dotrino/identity/acta'
 import jsQR from 'jsqr'
@@ -203,8 +202,6 @@ const T = {
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda, en tu computadora:',
     apv_profile: 'Perfil:',
-    apv_none_any: 'Nadie está pidiendo nada, en ninguno de tus perfiles.',
-    apv_looking: 'Buscando el pedido en tus perfiles…',
     apv_other: 'Estos pedidos no son de tu perfil abierto, son de otro. Ábrelo para verlos:',
     apv_switch: 'Abrir este perfil',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -366,8 +363,6 @@ const T = {
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
     apv_profile: 'Profile:',
-    apv_none_any: 'Nobody is asking for anything, in any of your profiles.',
-    apv_looking: 'Looking for the request in your profiles…',
     apv_other: 'These requests are not for the profile you have open, they are for another one. Open it to see them:',
     apv_switch: 'Open this profile',
     var_t: 'Your apps\u2019 variables',
@@ -709,34 +704,20 @@ onMounted(async () => {
   // reanuncia y sale un código nuevo.
   const payload = pairOnly.value ? extractPayload(location.hash) : null
   if (payload) announce(payload)
-  // PEDIDOS: los perfiles ANTES que nada. Si el que aprueba es otro y no hay dónde
-  // elegir, se salta a él y la página se recarga — preguntar por los pedidos del perfil
-  // equivocado solo sirve para enseñar «no hay nada» y que parezca que se perdió.
-  // Va aquí, y no en su propio `onMounted`, porque aquí `id` ya está conectado: esperarlo
-  // con un temporizador desde otro sitio es una carrera, no una espera.
+  // PEDIDOS: los perfiles ANTES que nada, para poder decir de qué cuenta son los que se
+  // enseñan y ofrecer las demás. Va aquí, y no en su propio `onMounted`, porque aquí `id`
+  // ya está conectado: esperarlo con un temporizador desde otro sitio es una carrera.
+  //
+  // AQUÍ NO SE CAMBIA DE CUENTA. La versión anterior salía sola a buscar el pedido en los
+  // otros perfiles, y cada salto era una recarga: el icono y el avatar cambiaban dos o tres
+  // veces por abrir la pantalla. Funcionaba y era insufrible («rotan los perfiles, cambia
+  // el icono y es molesto», dueño 2026-09-10). Mirar en los demás perfiles no puede costar
+  // cambiarse a ellos — eso se arregla en el pilar de identidad, no aquí.
   if (approvalsOnly.value) {
     await refreshProfiles()
     computeMyDeviceId()
-    // Preguntar PRIMERO por los de este perfil: si el pedido está aquí, no hay paseo que
-    // dar. Y si no está, `walkToPending` prueba los demás y para en el que lo tenga.
     await refreshApprovals()
-    // EL PASEO QUE ACABA DE TERMINAR NO SE VUELVE A EMPEZAR, y esto no es un detalle: sin
-    // ello la pantalla ROTABA ENTRE PERFILES para siempre. La última vuelta del paseo te
-    // devuelve a la cuenta desde la que entraste, y eso es una recarga; al montar de nuevo,
-    // el paseo veía su marca borrada, se creía nuevo y volvía a salir al otro perfil — que
-    // a su vez terminaba devolviéndote aquí. Ping-pong infinito.
-    //
-    // `WALK_DONE` ya venía puesta justo para este arranque: además de decir «no había nada
-    // en ninguno», es el freno. Se consume aquí y no queda nada guardado, así que la
-    // siguiente visita de verdad —otro timbre— vuelve a buscar como debe.
-    let paseoRecienTerminado = false
-    try {
-      if (sessionStorage.getItem(WALK_DONE) === '1') {
-        sessionStorage.removeItem(WALK_DONE); nadaEnNinguno.value = true; paseoRecienTerminado = true
-      }
-    } catch (_) {}
-    if (leerPaseo()) buscandoPedido.value = true
-    if (await walkToPending(paseoRecienTerminado)) return
+    limpiarRestosDelPaseo()
   }
   offVault = id.value.onVault?.((e) => {
     if (e?.phase === 'acta' || e?.phase === 'renounced') refresh()
@@ -1198,9 +1179,6 @@ const profiles = ref([])
 /** Los perfiles que pueden aprobar. Es lo que decide a dónde te lleva esta pantalla. */
 const apvProfiles = computed(() => profiles.value.filter((p) => p.approve))
 const apvCurrent = computed(() => profiles.value.find((p) => p.current) || null)
-/** Se llegó por el timbre (`#ring`), no a mano: entonces sí vale saltar de perfil solo. */
-const cameFromRing = () => /(^|[#&])ring\b/.test(location.hash || '')
-
 async function refreshProfiles () {
   try { profiles.value = await id.value.listProfiles() } catch (_) { profiles.value = [] }
 }
@@ -1209,74 +1187,15 @@ async function refreshProfiles () {
 const apvAvatar = (p) => p?.avatar || avatarDataUri(p?.pubkey || p?.id || '', { size: 44 })
 
 /**
- * BUSCAR EL PERFIL QUE TIENE EL PEDIDO, en vez de dejarte en el último que usaste.
+ * LO QUE QUEDÓ DEL PASEO, a la basura.
  *
- * El timbre NO dice a qué perfil llamó, y así se queda: viaja por FCM —o sea por Google—
- * y ahí no se mete nada que identifique la cuenta. Así que con varios perfiles que
- * aprueban, la única forma de saber dónde está el pedido es MIRAR en cada uno.
- *
- * Antes esto se rendía en cuanto había más de uno («elegir por ti no es una comodidad»),
- * y el resultado era peor que elegir mal: te dejaba en el perfil que estuviera abierto —el
- * último que usaste— diciendo «nadie está pidiendo nada», que es falso, y sin una pista de
- * dónde estaba el pedido. Preguntar tampoco servía: la pregunta solo salía cuando el
- * abierto NO podía aprobar; si podía y el pedido era del otro, no salía nada.
- *
- * Ahora se prueban de uno en uno, cada uno UNA vez, y el paseo se PARA en el primero que
- * tenga un pedido. Si ninguno tiene, se vuelve a donde estabas y se dice en voz alta.
- *
- * Dos cosas que lo hacen seguro: la marca vive en `sessionStorage` (cambiar de perfil
- * recarga la página, así que la memoria del paseo no puede estar en una variable) y cada
- * perfil se prueba una sola vez, así que no hay forma de dar vueltas.
- *
- * Y solo pasa con el timbre. Entrar a mano en /approvals no te mueve de perfil: para eso
- * está el selector de arriba, que ahora se ve SIEMPRE que hay más de uno.
+ * Durante unas horas esta pantalla buscaba el pedido saltando de perfil en perfil, y cada
+ * salto era una recarga. Se quitó: ver en qué cuentas hay algo no puede costar cambiarse a
+ * ellas. Estas dos marcas vivían en `sessionStorage`, así que una pestaña que estuviera
+ * abierta a mitad de un paseo se las trae; se borran al entrar y no se escriben nunca más.
  */
-const WALK = 'dotrino.apv.walk'
-const WALK_DONE = 'dotrino.apv.walk-done'
-const leerPaseo = () => { try { return JSON.parse(sessionStorage.getItem(WALK) || 'null') } catch (_) { return null } }
-const guardarPaseo = (v) => { try { sessionStorage.setItem(WALK, JSON.stringify(v)) } catch (_) {} }
-const borrarPaseo = () => { try { sessionStorage.removeItem(WALK) } catch (_) {} }
-/** Se recorrieron todos y ninguno tenía nada: hay que decirlo tras la última recarga. */
-const nadaEnNinguno = ref(false)
-/**
- * EL PASEO SE DICE MIENTRAS PASA.
- *
- * Cada perfil que se mira es una recarga de la página (cambiar de cuenta no es reactivo),
- * así que sin esto pulsar «Pedidos» y no tener nada pendiente parpadea dos o tres veces sin
- * explicación, y parece que la app se cuelga. Se avisa de que está BUSCANDO.
- */
-const buscandoPedido = ref(false)
-
-async function walkToPending (recienTerminado = false) {
-  if (!cameFromRing()) { borrarPaseo(); return false }
-  const aqui = apvCurrent.value?.id || null
-  const paseo = leerPaseo() || { from: aqui, tried: [] }
-  // La DECISIÓN vive en `approvals-walk.js`, pura y probada aparte; aquí solo se ejecuta.
-  const paso = walkStep({
-    aqui,
-    from: paseo.from,
-    tried: paseo.tried,
-    approvers: apvProfiles.value.map((p) => p.id),
-    hasPending: approvals.value.length > 0,
-    justFinished: recienTerminado
-  })
-  if (paso.go) {
-    guardarPaseo({ from: paseo.from || aqui, tried: paso.tried })
-    await id.value.switchProfile(paso.go)
-    location.reload()
-    return true
-  }
-  borrarPaseo()
-  if (paso.back && profiles.value.some((p) => p.id === paso.back)) {
-    // La recarga borra la memoria de la página, así que lo que hay que DECIR al llegar
-    // viaja en sessionStorage: si no, se vuelve al perfil de siempre sin explicar nada.
-    try { sessionStorage.setItem(WALK_DONE, '1') } catch (_) {}
-    await id.value.switchProfile(paso.back)
-    location.reload()
-    return true
-  }
-  if (paso.nothingAnywhere) nadaEnNinguno.value = true
-  return false
+const limpiarRestosDelPaseo = () => {
+  try { sessionStorage.removeItem('dotrino.apv.walk'); sessionStorage.removeItem('dotrino.apv.walk-done') } catch (_) {}
 }
 
 /** Cambiar de perfil a mano desde esta pantalla. Recarga: el perfil no es reactivo. */
@@ -1718,9 +1637,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         </div>
         <!-- Se miraron TODOS los perfiles y ninguno tenía nada: se dice, para que no
              parezca que el pedido se perdió en la cuenta que no estabas mirando. -->
-        <p v-if="buscandoPedido && !approvals.length" class="muted" data-testid="apv-looking">{{ t.apv_looking }}</p>
-        <p v-else-if="nadaEnNinguno && !approvals.length" class="muted" data-testid="apv-none-any">{{ t.apv_none_any }}</p>
-        <p v-else-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
+        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
         <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
           <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
