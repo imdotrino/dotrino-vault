@@ -23,6 +23,13 @@
  * otra máquina por el proxio, donde mandarlo en claro filtraría las rutas del dueño— no
  * tiene huella con la que emparejarse, y entonces se pide aprobación cada vez. No se
  * inventa una huella «vacía» que valdría para todo: eso sería exactamente un repliegue.
+ *
+ * Y PARA EL GESTOR DE CONTRASEÑAS ESO ES LO QUE SE QUIERE, no una carencia que arreglar
+ * (dueño, 2026-09-11: «para el gestor de contraseñas es perfecto»). La extensión es un
+ * navegador hablando por el proxio, no un proceso con línea de comandos, así que nunca va a
+ * traer huella — y así cada acceso a una credencial vuelve a pasar por tu mano, que es la
+ * protección por la que esto existe. No se le busque un sustituto del comando para que
+ * entre en la ventana.
  */
 import { commandFingerprint } from '../lib/src/proc.js'
 
