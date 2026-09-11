@@ -195,6 +195,7 @@ const T = {
     // PEDIDOS DE APROBACIÓN: un cajón con aprobación por uso espera la firma de este aparato.
     apv_t: 'Pedidos',
     apv_none: 'Nadie está pidiendo nada.',
+    apv_error: 'No se pudieron consultar los pedidos:',
     apv_asks: 'pide tus claves de',
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
@@ -367,6 +368,7 @@ const T = {
     invite_copy: 'Copy link', invite_copied: 'Copied',
     apv_t: 'Requests',
     apv_none: 'Nobody is asking for anything.',
+    apv_error: 'Could not check for requests:',
     apv_asks: 'asks for your keys of',
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
@@ -1188,7 +1190,23 @@ const approvals = computed(() => apvPorCuenta.value.flatMap((g) =>
 /** Las cuentas a las que no se pudo preguntar. Se enseñan: callarlas es el fallo mudo. */
 const apvFallos = computed(() => apvPorCuenta.value.filter((g) => g.error))
 /** ¿Aprueba alguna cuenta de este aparato? Con ninguna, la pantalla no tiene nada que hacer. */
-const canApprove = computed(() => apvPorCuenta.value.length > 0)
+/**
+ * ¿PUEDE ESTE APARATO APROBAR? Lo dice el CERT de sus perfiles, no si ahora mismo hay algo
+ * pendiente.
+ *
+ * Estaba atado a la lista de pedidos, y como esa lista viene vacía cuando no hay ninguno
+ * —o sea, casi siempre—, la pantalla decía «este aparato no aprueba pedidos» y mandaba a
+ * concederse un permiso que ya tenía. El «nadie está pidiendo nada» tiene su propia frase
+ * y no salía nunca. Costó un diagnóstico entero (dueño, 2026-09-11: *«me dice en el
+ * teléfono que ese aparato no acepta aprobaciones, aun así lo tenga»*).
+ *
+ * `apvProfiles` sale de leer el cert de cada perfil del aparato, que es lo único que
+ * contesta esa pregunta. Se conserva la otra mitad por si hay pedidos de una cuenta que
+ * `listProfiles` no alcanzó a ver: con un pedido delante, claro que puede aprobar.
+ */
+const canApprove = computed(() => apvProfiles.value.length > 0 || apvPorCuenta.value.length > 0)
+/** Lo que falló al preguntar. Sin esto, un fallo de red se veía como falta de permiso. */
+const apvError = ref('')
 /** Con una sola cuenta sobra decir de quién es cada pedido. */
 const apvVariasCuentas = computed(() => apvPorCuenta.value.length > 1)
 // ACORDEONES de /vault: la lista creció hasta hacerse ilegible, así que cada aparato y
@@ -1255,6 +1273,7 @@ async function refreshApprovals () {
       try {
         const r = await id.value.vaultApprovalsAll()
         apvPorCuenta.value = Array.isArray(r) ? r : []
+        apvError.value = ''
         return
       } catch (e) {
         if (!/Unknown method/i.test(e?.message || '')) throw e
@@ -1267,7 +1286,13 @@ async function refreshApprovals () {
       profile: apvCurrent.value?.id || '', name: apvCurrent.value?.name || '', current: true,
       items: Array.isArray(r?.items) ? r.items : []
     }]
-  } catch (_) { apvPorCuenta.value = [] }
+    apvError.value = ''
+  } catch (e) {
+    // NO se calla: preguntar y no poder es otra cosa que no tener nada que aprobar, y
+    // antes las dos se veían igual (y encima con el cartel equivocado).
+    apvPorCuenta.value = []
+    apvError.value = e?.message || String(e)
+  }
 }
 const apvLeft = (p) => Math.max(0, Math.round((p.exp - Date.now()) / 1000))
 /** El comando en una línea. Sin argumentos, el binario ya dice algo. */
@@ -1700,7 +1725,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           otra cuenta NO te cambia de cuenta. Lo que había antes —buscarlo saltando de
           cuenta en cuenta, con una recarga por salto— se quitó.
         -->
-        <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
+        <p v-if="apvError" class="banner err" data-testid="apv-error">{{ t.apv_error }} {{ apvError }}</p>
+        <p v-else-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
         <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending apv" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
