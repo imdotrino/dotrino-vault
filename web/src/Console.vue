@@ -24,7 +24,6 @@ import { buildSealedVar } from '@dotrino/vault/admin'
 // La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.
 import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
-import { avatarDataUri } from '@dotrino/identity/avatar' // identicon de cada perfil (subpath barato)
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope } from '@dotrino/identity/acta'
 import jsQR from 'jsqr'
@@ -200,10 +199,8 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
+    apv_error: 'no se pudo preguntar a esta cuenta:',
     apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda, en tu computadora:',
-    apv_profile: 'Perfil:',
-    apv_other: 'Estos pedidos no son de tu perfil abierto, son de otro. Ábrelo para verlos:',
-    apv_switch: 'Abrir este perfil',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
@@ -361,10 +358,8 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
+    apv_error: 'could not ask this account:',
     apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
-    apv_profile: 'Profile:',
-    apv_other: 'These requests are not for the profile you have open, they are for another one. Open it to see them:',
-    apv_switch: 'Open this profile',
     var_t: 'Your apps\u2019 variables',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. They are all stored encrypted. You can see the public ones here; a private one does not show its value \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one. Marking one private also asks to be told before it is handed over.',
     var_shared: 'used by every machine',
@@ -1145,7 +1140,28 @@ async function refreshAdmin () {
 // pedido y espera la firma de un aparato con `aprueba` (este). Lo que se ve es el
 // pedido —quién, qué cajón, cuánto le queda— y dos botones. Se sondea cada 5 s mientras
 // la pantalla está a la vista; el aviso que despierta a la app llega por otro camino.
-const canApprove = ref(false)
+/**
+ * LOS PEDIDOS, POR CUENTA — y todas a la vez.
+ *
+ * `vaultApprovalsAll` (identity ≥ 0.88) pregunta en cada cuenta de este aparato que
+ * apruebe, firmando con la llave de cada una y SIN tocar cuál es la activa. Antes esto se
+ * hacía cambiando de cuenta y recargando una vez por cuenta: el avatar y el icono de la app
+ * cambiaban dos o tres veces por abrir la pantalla, y era insufrible.
+ *
+ * Cada entrada es `{ profile, name, current, items }` — o trae `error` si a esa cuenta no se
+ * le pudo preguntar, y entonces se DICE: una cuenta muda se ve igual que una cuenta sin
+ * pedidos, y son cosas distintas.
+ */
+const apvPorCuenta = ref([])
+/** Los pedidos de todas las cuentas, planos y cada uno sabiendo de quién es. */
+const approvals = computed(() => apvPorCuenta.value.flatMap((g) =>
+  (g.items || []).map((it) => ({ ...it, profile: g.profile, profileName: g.name }))))
+/** Las cuentas a las que no se pudo preguntar. Se enseñan: callarlas es el fallo mudo. */
+const apvFallos = computed(() => apvPorCuenta.value.filter((g) => g.error))
+/** ¿Aprueba alguna cuenta de este aparato? Con ninguna, la pantalla no tiene nada que hacer. */
+const canApprove = computed(() => apvPorCuenta.value.length > 0)
+/** Con una sola cuenta sobra decir de quién es cada pedido. */
+const apvVariasCuentas = computed(() => apvPorCuenta.value.length > 1)
 // ACORDEONES de /vault: la lista creció hasta hacerse ilegible, así que cada aparato y
 // cada grupo de variables se pliega tras su cabecera. Nacen cerrados; el estado no se
 // guarda (abrir es un gesto de la visita, no una preferencia).
@@ -1156,7 +1172,6 @@ const openGroups = ref(new Set())
 const toggleIn = (ref_, key) => { const s = new Set(ref_.value); if (s.has(key)) s.delete(key); else s.add(key); ref_.value = s }
 const toggleMember = (key) => toggleIn(openMembers, key)
 const toggleGroup = (key) => toggleIn(openGroups, key)
-const approvals = ref([])
 let apvTimer = null
 
 /**
@@ -1183,9 +1198,6 @@ async function refreshProfiles () {
   try { profiles.value = await id.value.listProfiles() } catch (_) { profiles.value = [] }
 }
 
-/** El avatar de un perfil: el que subió, o su identicon (determinista, siempre hay uno). */
-const apvAvatar = (p) => p?.avatar || avatarDataUri(p?.pubkey || p?.id || '', { size: 44 })
-
 /**
  * LO QUE QUEDÓ DEL PASEO, a la basura.
  *
@@ -1198,43 +1210,42 @@ const limpiarRestosDelPaseo = () => {
   try { sessionStorage.removeItem('dotrino.apv.walk'); sessionStorage.removeItem('dotrino.apv.walk-done') } catch (_) {}
 }
 
-/** Cambiar de perfil a mano desde esta pantalla. Recarga: el perfil no es reactivo. */
-const apvSwitch = (p) => run('apv-sw-' + p.id, async () => {
-  borrarPaseo()
-  await id.value.switchProfile(p.id)
-  location.reload()
-})
-
-// EL SELECTOR DE PERFIL, siempre a la vista cuando hay más de uno (no solo cuando el
-// abierto no aprueba). Es un desplegable: enseña en qué perfil estás —con su avatar, que
-// es como se reconocen— y lleva a cualquier otro de un toque.
-const apvPicker = ref(false)
-// Pulsar fuera (o Escape) lo cierra. Un desplegable que solo se cierra con el mismo botón
-// se queda abierto tapando el pedido, que es justo lo que se venía a ver.
-const toggleApvPicker = (e) => { e?.stopPropagation?.(); apvPicker.value = !apvPicker.value }
-const cerrarApvPicker = () => { apvPicker.value = false }
-const onApvKey = (e) => { if (e.key === 'Escape') cerrarApvPicker() }
-onMounted(() => {
-  document.addEventListener('click', cerrarApvPicker)
-  document.addEventListener('keydown', onApvKey)
-})
-onBeforeUnmount(() => {
-  document.removeEventListener('click', cerrarApvPicker)
-  document.removeEventListener('keydown', onApvKey)
-})
+/**
+ * NO HAY SELECTOR DE CUENTA EN ESTA PANTALLA, Y ES A PROPÓSITO.
+ *
+ * Hubo uno, y antes de él la pantalla te cambiaba de cuenta sola. Los dos existían por lo
+ * mismo: los pedidos de las demás cuentas no se podían ver desde aquí. Ahora se ven todos
+ * juntos y se aprueban sin moverse, así que un conmutador aquí solo serviría para cambiarte
+ * de cuenta sin motivo — y cambiar de cuenta recarga la página. El de verdad, para cuando lo
+ * quieras, sigue donde estaba: el botón de perfil de la barra de arriba.
+ */
 
 async function refreshApprovals () {
   try {
-    canApprove.value = await id.value.canApproveVault()
-    if (!canApprove.value) { approvals.value = []; return }
+    if (!soloCuentaAbierta) {
+      try {
+        const r = await id.value.vaultApprovalsAll()
+        apvPorCuenta.value = Array.isArray(r) ? r : []
+        return
+      } catch (e) {
+        if (!/Unknown method/i.test(e?.message || '')) throw e
+        soloCuentaAbierta = true
+      }
+    }
+    if (!(await id.value.canApproveVault())) { apvPorCuenta.value = []; return }
     const r = await id.value.vaultApprovals('approvals')
-    approvals.value = Array.isArray(r?.items) ? r.items : []
-  } catch (_) { approvals.value = [] }
+    apvPorCuenta.value = [{
+      profile: apvCurrent.value?.id || '', name: apvCurrent.value?.name || '', current: true,
+      items: Array.isArray(r?.items) ? r.items : []
+    }]
+  } catch (_) { apvPorCuenta.value = [] }
 }
 const apvLeft = (p) => Math.max(0, Math.round((p.exp - Date.now()) / 1000))
-const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id }); await refreshApprovals() })
+// El `profile` viaja con la acción: el pedido es de una cuenta concreta y lo firma SU llave.
+// Sin esto, aprobar el de otra cuenta te obligaría a cambiarte a ella, que es lo que sobra.
+const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id, profile: p.profile }); await refreshApprovals() })
 
-const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id }); await refreshApprovals() })
+const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id, profile: p.profile }); await refreshApprovals() })
 const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals() }
 
 // APP NATIVA: si esta página corre dentro de la app de Dotrino, el token de push (FCM en
@@ -1610,56 +1621,26 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <template v-if="canApprove">
         <h2>{{ t.apv_t }}</h2>
         <!--
-          EN QUÉ PERFIL ESTÁS, Y CÓMO IR A OTRO. Con un solo perfil sobra decirlo; con
-          varios era el dato que faltaba: la pantalla enseñaba «nadie está pidiendo nada»
-          sin decir de quién hablaba ni que hubiera otra cuenta donde mirar.
+          LOS PEDIDOS DE TODAS TUS CUENTAS, JUNTOS. Cada uno dice de quién es cuando hay
+          más de una (el nombre de la cuenta delante), y se aprueba ahí mismo: aprobar el de
+          otra cuenta NO te cambia de cuenta. Lo que había antes —buscarlo saltando de
+          cuenta en cuenta, con una recarga por salto— se quitó.
         -->
-        <div v-if="profiles.length > 1" class="apvsel" data-testid="apv-profile">
-          <span class="muted">{{ t.apv_profile }}</span>
-          <div class="apvwrap">
-            <button class="apvbtn" type="button" data-testid="apv-picker"
-                    :aria-expanded="apvPicker ? 'true' : 'false'" @click="toggleApvPicker">
-              <img :src="apvAvatar(apvCurrent)" alt="" width="22" height="22" />
-              <b>{{ apvCurrent?.name || '—' }}</b>
-              <span aria-hidden="true">▾</span>
-            </button>
-            <div v-if="apvPicker" class="apvmenu" data-testid="apv-menu">
-              <button v-for="p in apvProfiles" :key="p.id" class="apvitem" type="button"
-                      :data-profile="p.id" data-testid="apv-pick"
-                      :aria-current="p.current ? 'true' : 'false'"
-                      :disabled="p.current || busy === 'apv-sw-' + p.id" @click="apvSwitch(p)">
-                <img :src="apvAvatar(p)" alt="" width="22" height="22" />
-                <span>{{ p.name || p.id }}</span>
-                <span v-if="p.current" aria-hidden="true">✓</span>
-              </button>
-            </div>
-          </div>
-        </div>
-        <!-- Se miraron TODOS los perfiles y ninguno tenía nada: se dice, para que no
-             parezca que el pedido se perdió en la cuenta que no estabas mirando. -->
         <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
-        <div v-for="p in approvals" :key="p.id" class="pending" :data-apv-id="p.id" data-testid="apv-item">
-          <span><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
+        <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
+          <span>
+            <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
+            <b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
           <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
         </div>
+        <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
+             preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
+        <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">
+          {{ g.name || g.profile }} — {{ t.apv_error }} <code class="mid">{{ g.error }}</code>
+        </p>
         <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
-      </template>
-      <!--
-        EL PERFIL EQUIVOCADO NO ES «NO APRUEBAS».
-        Antes todo lo que no fuera «puedo aprobar» caía en el mismo cartel, que manda a
-        conceder un permiso que ya está concedido — en otro perfil. Se separan los casos:
-        aquí aprueba otro perfil (y se ofrece), o de verdad no aprueba ninguno.
-      -->
-      <template v-else-if="apvProfiles.length">
-        <h2>{{ t.apv_t }}</h2>
-        <p class="muted" data-testid="apv-other">{{ t.apv_other }}</p>
-        <div v-for="p in apvProfiles" :key="p.id" class="pending" data-testid="apv-switch-item">
-          <span><b>{{ p.name || p.id }}</b></span>
-          <button class="btn sm" data-testid="apv-switch"
-                  :disabled="busy === 'apv-sw-' + p.id" @click="apvSwitch(p)">{{ t.apv_switch }}</button>
-        </div>
       </template>
       <p v-else class="muted" data-testid="apv-nocap">
         {{ t.apv_nocap }}
@@ -2134,31 +2115,10 @@ textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #
 .pending input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; width: 140px; font-family: ui-monospace, monospace; }
 details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
 
-/* EL SELECTOR DE PERFIL de la pantalla de pedidos: en qué cuenta estás y cómo ir a otra.
-   Mismo gesto que el del topbar (avatar + nombre + desplegable), aquí porque el pedido es
-   de UNA cuenta y con varias hay que poder verlo y cambiar sin salir de la pantalla. */
-.apvsel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
-.apvwrap { position: relative; }
-.apvbtn {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: #10203a; color: #dbe7f7; border: 1px solid #223047; border-radius: 999px;
-  padding: 5px 12px 5px 6px; cursor: pointer; font: inherit; font-size: 14px;
+/* LA CUENTA DE CADA PEDIDO. Solo aparece con más de una: es el dato que faltaba —«¿de
+   quién es esto?»— y va delante, donde se lee primero. */
+.apvtag {
+  display: inline-block; margin-right: 6px; padding: 1px 8px;
+  background: #1b2f4d; color: #9cc4ff; border-radius: 999px; font-size: 12px;
 }
-.apvbtn:hover { border-color: #2f4a6d; }
-.apvbtn img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
-.apvmenu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
-  min-width: 200px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
-  background: #0f1725; border: 1px solid #223047; border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.35);
-}
-.apvitem {
-  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
-  padding: 7px 8px; border: 0; border-radius: 9px; cursor: pointer;
-  background: transparent; color: #dbe7f7; font: inherit; font-size: 13px; text-align: left;
-}
-.apvitem:hover:not(:disabled) { background: #17263c; }
-.apvitem:disabled { cursor: default; color: #9cc4ff; font-weight: 600; }
-.apvitem img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
-.apvitem span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
