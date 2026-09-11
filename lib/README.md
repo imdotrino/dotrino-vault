@@ -127,6 +127,29 @@ Para procesos que no son Node, el CLI los inyecta en el entorno de un hijo:
 dotrino-env run --ns miapp -- ./mi-binario
 ```
 
+### El pedido dice QUÉ COMANDO pide, y desde dónde
+
+Cuando el cajón exige aprobación, el pedido que te llega al teléfono lleva **el comando
+entero y la carpeta** desde la que corre — `node server.js --port 8080` en `/srv/mi-app`—,
+no solo qué aparato pide qué cajón. En `dotrino-env run -- node server.js` el comando de
+destino va dentro de la propia línea de `dotrino-env`, así que sale medido y no hace falta
+creerle nada aparte.
+
+Dos límites que se dicen y no se esconden:
+
+- **Solo viaja por el mostrador local.** El pedido de secretos va firmado pero en claro
+  (CONVENCIONES §4.1), así que mandar el `argv` y el `cwd` por el proxio le enseñaría a quien
+  lo opere las rutas de tu disco. Desde otra máquina el pedido no lleva comando — y sin
+  comando no hay concesión: ese pide aprobación cada vez.
+- **No es una credencial.** La bóveda lo comprueba contra el proceso de verdad cuando está en
+  su misma máquina, pero cualquier proceso de tu mismo usuario puede leer el
+  `service-identity.json` y pedir con esa llave. Sirve para decidir mirando lo que pasa y
+  para dejar rastro, no para parar a quien ya tiene la llave.
+
+**Aprobar vale una hora y se renueva con cada uso**, así que un servicio que sigue pidiendo
+lo mismo no vuelve a timbrarte. Cambiar un argumento o la carpeta es otro comando: pregunta
+otra vez.
+
 ### Un agente tiene UNA identidad, y se la da el vault
 
 Un **aparato** puede llevar varios perfiles, y hasta meter su propia cuenta al vault

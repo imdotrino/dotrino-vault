@@ -1167,19 +1167,61 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   await settle()
   const list = vault.listApprovals()
   assert.equal(list.length, 1); assert.equal(pendingSeen?.id, list[0].id)
-  assert.equal((await rpc({ op: 'approvals' }, phoneCert, phone.device)).body.items.length, 1)
+
+  // QUÉ ESTÁ EJECUTANDO: el pedido lo dice, y la bóveda lo COMPROBÓ contra `/proc` porque
+  // quien pide corre en esta misma máquina. Es lo que hace que el pedido se pueda decidir.
+  assert.equal(list[0].ctx?.verified, 'proc', 'el comando lo mide el kernel, no lo cuenta el cliente')
+  assert.ok(list[0].ctx.argv.length, 'y viene el comando entero')
+  assert.equal(list[0].ctx.cwd, process.cwd())
+
+  // Y HACIA EL TELÉFONO VA SELLADO: el comando y el path son del dueño y el camino hasta el
+  // teléfono es el proxio, que no cifra. Lo abre la llave de cifrado de ESE aparato.
+  const listado = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
+  assert.equal(listado.items.length, 1)
+  assert.equal(listado.items[0].ctx, null, 'el comando NO viaja en claro')
+  assert.equal(listado.items[0].ctxSealed, true)
+  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
+  const encPriv = await crypto.subtle.importKey('jwk', phone.enc.privateJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits'])
+  const cek = await openWrap({ wrap: listado.items[0].ctxWrap, myEncPrivateKey: encPriv })
+  const abierto = JSON.parse(await decryptWithCek({ cek, envelope: listado.items[0].ctxEnvelope }))
+  assert.equal(abierto.cwd, process.cwd(), 'y quien aprueba sí puede leerlo')
+
   await assert.rejects(rpc({ op: 'approve', id: list[0].id }, agent.cert, agent.device), /unauthorized/)
   assert.equal((await rpc({ op: 'approve', id: list[0].id }, phoneCert, phone.device)).body.ok, true)
   assert.deepEqual(await waiting, { DEEPSEEK_API_KEY: 'sk-1' })
   assert.equal(vault.listApprovals().length, 0)
 
-  // 3) SIN VENTANA: la siguiente petición vuelve a pedir (un servicio pide por arranque).
+  // 3) LA HORA: decir que sí a ESTE comando vale para las siguientes veces que lo pida ese
+  // mismo comando desde esa misma carpeta (dueño, 2026-09-11). Así que ya no timbra.
+  assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
+  assert.equal(vault.listApprovals().length, 0, 'el mismo comando no vuelve a pedir')
+  const [g] = vault.listGrants()
+  assert.equal(g?.ns, 'claude')
+  assert.ok(g.uses >= 1, 'y se ve cuántas veces se usó')
+
+  // QUITARLA VUELVE A LA CASILLA DE SALIDA. Una concesión que se renueva con cada uso puede
+  // durar lo que dure el servicio: tiene que poder cortarse, y cortarla tiene que notarse ya.
+  assert.equal(vault.revokeGrant(g.id), true)
   const again = fetchSecrets(args).catch((e) => e)
   await settle()
   const [p3] = vault.listApprovals()
-  assert.ok(p3, 'pide otra vez')
+  assert.ok(p3, 'quitada la concesión, pide otra vez')
   await rpc({ op: 'approve', id: p3.id }, phoneCert, phone.device)
   assert.deepEqual(await again, { DEEPSEEK_API_KEY: 'sk-1' })
+  vault.revokeGrants()
+
+  // 3b) MENTIR SOBRE EL COMANDO NO CUELA. Si quien pide dice estar en esta misma máquina, la
+  //     bóveda no le cree: lee el proceso de verdad y compara. No es un matiz, es una mentira.
+  const { makeEphemeralKey } = await import('../lib/src/sealed.js')
+  const eph = await makeEphemeralKey()
+  await assert.rejects(
+    rpc({
+      op: 'secrets',
+      ns: 'claude',
+      ek: eph.ek,
+      ctx: { pid: process.pid, host: os.hostname(), exe: '/bin/inventado', cwd: '/', argv: ['inventado', '--todo'] }
+    }, agent.cert, agent.device),
+    /ctx/, 'un comando que no es el que corre ese pid se deniega')
 
   // 4) Lo no atendido vence solo; y DEVOLVERLE el permiso vuelve a la entrega directa.
   const { createApprovals } = await import('../src/approvals.js')

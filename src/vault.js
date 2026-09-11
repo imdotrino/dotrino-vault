@@ -36,7 +36,9 @@ import { loadManifest, brokenOf } from '@dotrino/roadmap'
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
 // que lo recorriera hasta que la hubo (dotrino-test, smoke:demonio, 2026-08-30).
-import { createApprovals, PENDING_TTL_MS } from './approvals.js'
+import { createApprovals, createGrants, PENDING_TTL_MS, GRANT_TTL_MS } from './approvals.js'
+import { readProcContext, sanitizeContext, commandFingerprint, commandLine } from '../lib/src/proc.js'
+import { makeContentKey, encryptWithCek, wrapForMember } from '@dotrino/identity/content'
 import { makeSealer } from './sealer.js'
 import { openSealKeys } from './sealKey.js'
 import { openCommKey, COMM_CN, COMM_CAPS } from './commKey.js'
@@ -44,6 +46,7 @@ import { seal } from '../lib/src/sealed.js'
 import { localSocketPath, socketDir } from '../lib/src/localdesk.js'
 import { dataDir, ensureDir } from './paths.js'
 import net from 'node:net'
+import os from 'node:os'
 import { atRestFor, kekFor, migrateFile, encryptText, decryptText } from './atrest.js'
 import { MSG, SCOPE, secretsScope, isValidSecretsNs, VAULT_PROTOCOL, VAULT_SPEAKS } from './protocol.js'
 
@@ -113,6 +116,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const store = openStore(dir)
   const threads = openThreadStore(dir)
   const approvals = createApprovals()
+  /**
+   * LO QUE YA SE APROBÓ: comando + carpeta, por una hora desde el último uso.
+   *
+   * En memoria a propósito. Reiniciar la bóveda las borra todas, que es lo correcto: un
+   * permiso que sobrevive a un reinicio es un permiso que nadie recuerda haber dado.
+   */
+  const grants = createGrants()
 
   /**
    * Pedidos de aprobación que NO son de un cajón de secretos: quien espera es una
@@ -142,6 +152,47 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   function needsApproval (pub, record) {
     if (!record) return true          // sin acta no se decide que sí: se pide permiso
     return !Acta.memberCan(record, pub, 'unattended')
+  }
+
+  /**
+   * QUÉ COMANDO ESTÁ PIDIENDO LAS CLAVES, Y DESDE QUÉ CARPETA — medido, no creído.
+   *
+   * Quien aprueba no puede decidir con «el aparato 904C-1002 pide el cajón proxy»: necesita
+   * ver qué se está ejecutando (dueño, 2026-09-11). El que pide lo cuenta en el pedido, pero
+   * contar no es probar, así que **si dice estar en esta misma máquina la bóveda lo lee del
+   * kernel** (`/proc/<pid>`) y lo compara. Si no cuadra, no es un matiz: es una mentira, y se
+   * deniega con un código que se puede buscar.
+   *
+   * SE MIRA EL PEDIDO, NUNCA EL CANAL. Sería más cómodo comprobar «vino por el socket local»,
+   * y está prohibido: el día que un handler decide algo por dónde entró el mensaje, el atajo
+   * local deja de ser un atajo y pasa a ser una puerta de atrás (`test/mostrador-local.test.mjs`).
+   * El `host` es un dato del pedido como cualquier otro, y mentirlo no consigue nada: lo que
+   * se gana es quedar marcado como no comprobado, que es exactamente lo que se quería evitar.
+   *
+   * Tres resultados, y son tres cosas distintas:
+   *   · `null` — no dijo nada. Se pide aprobación como siempre y no hay concesión posible.
+   *   · `verified: 'proc'` — lo leyó el kernel de esta máquina. Es lo que hay que enseñar.
+   *   · `verified: 'declared'` — lo dice quien pide y no hay forma de comprobarlo (otra
+   *     máquina, o un sistema sin `/proc`). Vale para decidir, pero la pantalla lo marca.
+   *
+   * Y EL LÍMITE, QUE NO SE ESCONDE: esto no autoriza nada. Cualquier proceso del mismo
+   * usuario puede leer el `service-identity.json` del servicio y pedir con esa llave, y puede
+   * llamarse como quiera. La frontera es el usuario, no el proceso: esto existe para que
+   * quien aprueba decida mirando lo que pasa, y para que quede rastro.
+   */
+  function contextoDelPedido (declarado) {
+    const dicho = sanitizeContext(declarado)
+    if (!dicho) return null
+    // Otra máquina: aquí no hay ningún `/proc` que hable de ese proceso.
+    if (!dicho.host || dicho.host !== os.hostname()) return { ...dicho, verified: 'declared' }
+    const medido = sanitizeContext(readProcContext(dicho.pid))
+    // El proceso ya no está, o no se puede mirar: no se sabe, y no saber se dice como no
+    // saber. Inventar un «comprobado» aquí sería el repliegue de siempre.
+    if (!medido) return { ...dicho, verified: 'declared' }
+    if (commandFingerprint(medido) !== commandFingerprint(dicho)) {
+      throw new Error(`ctx — it says it is running "${commandLine(dicho, 60)}" but pid ${dicho.pid} is "${commandLine(medido, 60)}"`)
+    }
+    return { ...medido, user: dicho.user, host: dicho.host, verified: 'proc' }
   }
   // LA BÓVEDA DE CONTRASEÑAS: entradas y su llave, en el dir del perfil y cifradas en
   // reposo como todo lo demás. QUIÉN PUEDE PEDIR LO DICE EL ACTA (capacidad
@@ -201,7 +252,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return key
   }
 
-  const approvalsSweeper = setInterval(() => { for (const g of approvals.sweep()) audit('secrets.expired', { id: g.id, ns: g.ns, device: g.deviceId }) }, 30 * 1000); approvalsSweeper.unref?.()
+  const approvalsSweeper = setInterval(() => {
+    for (const g of approvals.sweep()) audit('secrets.expired', { id: g.id, ns: g.ns, device: g.deviceId })
+    // Las concesiones vencidas también se anotan: si un servicio vuelve a timbrar el
+    // teléfono, esta línea es la que explica por qué (estuvo una hora sin pedir).
+    for (const g of grants.sweep()) audit('secrets.grant.expired', { id: g.id, ns: g.ns, device: g.deviceId })
+  }, 30 * 1000); approvalsSweeper.unref?.()
   const secrets = openSecretsStore(dir, {
     sealer: makeSealer(),
     // A QUIÉN se le envuelve la llave de cada cajón: los servicios de ese namespace (o el
@@ -1226,7 +1282,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // da acceso a nada por sí solo. Quien firma esta petición ya tiene la llave de firma
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
-    if (['approvals', 'approve', 'deny'].includes(p.data?.op)) return handleApproval(from, p)
+    if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
@@ -1263,6 +1319,27 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!publicOnly && needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
+      // QUÉ COMANDO, DESDE QUÉ CARPETA — medido contra `/proc` si se puede.
+      let ctx = null
+      try { ctx = contextoDelPedido(p.data?.ctx) } catch (e) {
+        audit('rejected', { what: 'secrets', ns, reason: 'ctx-mismatch' })
+        log(`[vault] ${ns}: refused ${deviceId || '????-????'} — ${e.message}`)
+        return reply(from, { type: MSG.ERROR, code: 'ctx-mismatch', error: 'unauthorized: ' + e.message })
+      }
+      // ¿YA DIJISTE QUE SÍ A ESTE COMANDO? Entonces no se vuelve a timbrar: la concesión
+      // dura una hora DESDE EL ÚLTIMO USO, así que un servicio que sigue pidiendo la
+      // mantiene viva. Cambia el comando o la carpeta y esto ya no encaja: otro pedido.
+      const vigente = grants.allows({ ns, device: chk.device, ctx })
+      if (vigente) {
+        try {
+          const res = await resultFor(ns, chk.device, p.data.ek, record, { publicOnly: false })
+          audit('secrets', { device: deviceId, ns, grant: vigente.id })
+          log(`[vault] ${ns}: ${deviceId || '????-????'} served without ringing (approved command, ${vigente.uses} use(s))`)
+          return reply(from, { type: MSG.SECRETS_RESULT, ...res })
+        } catch (e) {
+          return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
+        }
+      }
       // NADIE PUEDE APROBAR = SE DICE AHORA, no se deja esperando cinco minutos.
       //
       // La bóveda ya lo sabía —lo escribía en su propio log, «rang 0 approver(s)»— y aun
@@ -1288,9 +1365,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // volver POR DONDE VINO. Si la pregunta entró por el mostrador local, mandarla por el
       // proxio la deja en el vacío: quien preguntó está escuchando en el socket, no ahí.
       // Lo cazó el E2E de aprobación, que se quedó esperando cinco minutos.
-      const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek, from })
+      const pend = approvals.request({ ns, device: chk.device, deviceId, label, ek: p.data.ek, ctx, from })
       audit('secrets.pending', { device: deviceId, ns, id: pend.id })
-      log(`[vault] ${ns}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
+      log(`[vault] ${ns}: ${deviceId || '????-????'} is waiting for approval (${pend.id})` +
+        (ctx ? ` — ${commandLine(ctx, 80)}  [${ctx.cwd || '?'}]` : ' — it does not say what it is running'))
       const body = { op: 'secrets.pending', ns, id: pend.id, exp: pend.exp, ts: Date.now() }
       // El acta viaja también aquí: es con lo que el agente sabe qué llave podía firmar
       // esto. En `secrets.result` va dentro del sobre; en un «pendiente» no hay sobre.
@@ -1381,7 +1459,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       body = { ...body, ts: Date.now() }
       reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body) })
     }
-    if (op === 'approvals') return answer({ op: 'approvals', items: approvals.list() })
+    if (op === 'approvals') return answer({ op: 'approvals', items: await conContextoSellado(approvals.list(), chk.device, record) })
+    // LO QUE YA ESTÁ APROBADO SE VE Y SE CORTA DESDE DONDE SE APROBÓ. Una concesión que se
+    // renueva con cada uso puede durar indefinidamente: si no se puede mirar ni quitar desde
+    // el mismo sitio donde se dio, es un permiso invisible, y eso no lo damos por bueno.
+    if (op === 'grants') return answer({ op: 'grants', items: await conContextoSellado(grants.list(), chk.device, record), ttlMs: GRANT_TTL_MS })
+    if (op === 'grant-revoke') {
+      const gid = typeof p.data?.id === 'string' ? p.data.id : ''
+      const ok = gid ? grants.revoke(gid) : false
+      if (ok) {
+        audit('secrets.grant.revoked', { id: gid, by })
+        log(`[vault] grant ${gid} revoked by ${by} — that command will ring again`)
+      }
+      return answer({ op: 'grant-revoke.result', id: gid, ok })
+    }
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
     const pend = approvals.take(id)
     if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
@@ -1413,8 +1504,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     try { res = await resultFor(pend.ns, pend.device, pend.ek, record) } catch (e) {
       return reply(from, { type: MSG.ERROR, error: 'approval: could not seal the reply: ' + e.message })
     }
-    audit('secrets.approved', { device: pend.deviceId, ns: pend.ns, id, by })
+    // LA HORA EMPIEZA AQUÍ, y se estira con cada uso: decir que sí a este comando vale para
+    // las siguientes veces que lo pida ESE MISMO comando desde ESA MISMA carpeta. Un pedido
+    // que no dijo qué corría no deja nada anotado, y se dice por qué: si no, el dueño vería
+    // que unos pedidos dejan de timbrar y otros no, sin ninguna explicación a mano.
+    const grant = grants.grant({ ns: pend.ns, device: pend.device, deviceId: pend.deviceId, ctx: pend.ctx, by })
+    audit('secrets.approved', { device: pend.deviceId, ns: pend.ns, id, by, ...(grant ? { grant: grant.id } : {}) })
     log(`[vault] ${pend.ns}: request of ${pend.deviceId} approved by ${by}`)
+    log(grant
+      ? `[vault] ${pend.ns}: "${commandLine(pend.ctx, 80)}" approved for ${Math.round(GRANT_TTL_MS / 60000)} min from its last use (grant ${grant.id})`
+      : `[vault] ${pend.ns}: no grant — this request did not say what it is running, so the next one will ring again`)
     // Va por `sendByPubkey`: si el que pedía ya no está conectado, lo recoge al volver.
     // EL FALLO NO SE TRAGA. Tragarlo era lo peor de este mostrador: la bóveda apuntaba
     // «aprobado», el que pedía no recibía nada, y no quedaba una sola línea que mirar —
@@ -1427,6 +1526,43 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       else client.sendByPubkey(pend.device, { type: MSG.SECRETS_RESULT, ...res })
     } catch (e) { log(`[vault] ${pend.ns}: approved, but the reply did not reach ${pend.deviceId}: ${e.message}`) }
     return answer({ op: 'approve.result', id, ok: true })
+  }
+
+  /**
+   * EL COMANDO Y EL PATH VIAJAN DENTRO DE UN SOBRE, no en claro.
+   *
+   * La lista de pedidos sale hacia el teléfono por el proxio, que no cifra (CONVENCIONES
+   * §4.1): mandar ahí el `argv` y el `cwd` le enseñaría al que opera el proxio las rutas del
+   * disco del dueño y los argumentos de sus comandos, que es justo lo que este ecosistema
+   * promete que no pasa. Así que el contexto se cifra **para el aparato que está
+   * preguntando** —con la misma cripto de los secretos sellados: una llave de una vez,
+   * envuelta a su `encPub` del acta— y él lo abre con `openSealedValue`, con una privada que
+   * no sale de su dispositivo.
+   *
+   * Un aparato sin `encPub` en el acta no recibe el contexto, y se dice (`ctxSealed: false`)
+   * en vez de mandárselo en claro «para que al menos lo vea»: eso sería cambiar la promesa
+   * por comodidad, y encima sin avisar a nadie.
+   */
+  async function conContextoSellado (items, aprobador, record) {
+    const encPub = (record?.members || []).find((m) => m.pub === aprobador)?.encPub || null
+    const salida = []
+    for (const it of items) {
+      const { ctx, ...resto } = it
+      if (!ctx) { salida.push({ ...resto, ctx: null }); continue }
+      if (!encPub) { salida.push({ ...resto, ctx: null, ctxSealed: false, ctxReason: 'no-enc-key' }); continue }
+      try {
+        const cek = await makeContentKey()
+        const envelope = await encryptWithCek({ cek, gen: 0, plaintext: JSON.stringify(ctx) })
+        const wrap = await wrapForMember({ cek, memberEncPub: encPub })
+        salida.push({ ...resto, ctx: null, ctxSealed: true, ctxWrap: wrap, ctxEnvelope: envelope })
+      } catch (e) {
+        // NO SE TRAGA: sin esto, un fallo al sellar se vería en el teléfono igual que un
+        // pedido que no dice nada, y nadie sabría que hay algo que arreglar.
+        log(`[vault] could not seal the command of ${it.id} for ${aprobador.slice(0, 24)}…: ${e.message}`)
+        salida.push({ ...resto, ctx: null, ctxSealed: false, ctxReason: 'seal-failed' })
+      }
+    }
+    return salida
   }
 
   /**
@@ -3235,6 +3371,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     passwordDevices,
     passwordsVault: () => passwords?.vault || null,
     listApprovals: () => approvals.list(),
+    // LAS CONCESIONES VIVAS, para verlas y para cortarlas. Se enseñan en la máquina del
+    // dueño (TUI/CLI), donde el contexto ya es suyo y no hay nada que sellar.
+    listGrants: () => grants.list(),
+    revokeGrant: (id) => grants.revoke(id),
+    revokeGrants: (filtro) => grants.revokeAll(filtro || {}),
     // Aprobar desde el PC avisa igual que aprobar a distancia: el resto de tus
     // dispositivos se entera de que entró alguien, venga de donde venga.
     approveDevice: async (code, adminKey) => {

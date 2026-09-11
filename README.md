@@ -778,10 +778,31 @@ dotrino-env run --ns claude -- node mi-script.js     # el proceso espera el sí�
 ```
 
 …la bóveda apunta el pedido, avisa al teléfono (cola del proxio → aviso nativo en la app de
-Dotrino), y solo su firma entrega las claves — **al proceso que pidió, en memoria**. Pide en
-**cada petición**, que para un servicio bien hecho es **una por arranque**: pide al iniciar,
-se queda las claves en memoria y no vuelve a pedir. Lo denegado corta sin reintentos; lo que
-nadie atiende vence a los 5 min; todo queda en `dotrino-vault activity`.
+Dotrino), y solo su firma entrega las claves — **al proceso que pidió, en memoria**. Lo
+denegado corta sin reintentos; lo que nadie atiende vence a los 5 min; todo queda en
+`dotrino-vault activity`.
+
+**El pedido dice QUÉ COMANDO pide y DESDE QUÉ CARPETA** (2026-09-11). «El aparato 904C-1002
+pide el cajón claude» no alcanza para decidir: no distingue el arranque que acabas de lanzar
+de cualquier otra cosa de esa máquina. Dos cosas que conviene tener claras:
+
+- **Se mide, no se cree.** Si quien pide corre en la misma máquina que la bóveda, ella lee el
+  comando, la carpeta y el binario del propio proceso (`/proc/<pid>`) y los compara con lo
+  que dijo; si no cuadra, deniega (`ctx-mismatch`). Desde otra máquina no hay nada que leer y
+  la pantalla lo marca como *sin comprobar*. Y el dato **no autoriza nada**: cualquier proceso
+  del mismo usuario puede leer el `service-identity.json` y pedir con esa llave. La frontera
+  es el usuario, no el proceso; esto es para decidir mirando y para dejar rastro.
+- **Va cifrado hasta el teléfono.** El comando y la carpeta son del dueño y el camino es el
+  proxio, que no cifra (CONVENCIONES §4.1): viajan sellados a la llave de cifrado del aparato
+  que aprueba. Por eso `dotrino-env` **solo lo manda por el mostrador local** — mandarlo por
+  el proxio enseñaría las rutas del disco a quien lo opere.
+
+**Aprobar vale una hora, y se renueva con cada uso.** Ese mismo comando desde esa misma
+carpeta entra sin volver a timbrar; cada petición vuelve a poner el reloj en una hora, así
+que un servicio que sigue pidiendo la mantiene viva. Cambia un argumento o la carpeta y es
+otro comando: pregunta otra vez. Las concesiones vivas se ven y se quitan en
+`vault.dotrino.com/approvals`, viven **en memoria** (reiniciar la bóveda las borra) y un
+pedido que no dijo qué ejecutaba no deja ninguna.
 
 ### La llave SSH como un secreto más (`dotrino-env ssh-agent`)
 

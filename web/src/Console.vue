@@ -199,6 +199,19 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
+    apv_cmd: 'Está ejecutando',
+    apv_cwd: 'desde',
+    apv_nocmd: 'No dice qué está ejecutando.',
+    apv_cmderr: 'No se pudo leer qué está ejecutando:',
+    apv_proc: 'comprobado en la máquina de la bóveda',
+    apv_declared: 'lo dice el propio aparato, sin comprobar',
+    apv_grant_hint: 'Al aprobar, este mismo comando desde esta misma carpeta entra durante una hora, y la hora se renueva cada vez que lo pide. Cualquier otro comando vuelve a preguntarte.',
+    apv_grants_t: 'Aprobados por ahora',
+    apv_grants_none: 'Nada aprobado por ahora.',
+    apv_grants_left: 'caduca en',
+    apv_grants_min: 'min sin usarse',
+    apv_grants_revoke: 'Quitar',
+    apv_grants_uses: 'usos',
     apv_error: 'no se pudo preguntar a esta cuenta:',
     apv_nocap: 'Este aparato no aprueba pedidos. Concédeselo desde la bóveda, en tu computadora:',
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
@@ -358,6 +371,19 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
+    apv_cmd: 'Running',
+    apv_cwd: 'from',
+    apv_nocmd: 'It does not say what it is running.',
+    apv_cmderr: 'Could not read what it is running:',
+    apv_proc: 'checked on the vault machine',
+    apv_declared: 'as claimed by the device, unchecked',
+    apv_grant_hint: 'Approving lets this same command, from this same folder, through for an hour — and the hour restarts every time it asks. Any other command asks you again.',
+    apv_grants_t: 'Approved for now',
+    apv_grants_none: 'Nothing approved right now.',
+    apv_grants_left: 'expires in',
+    apv_grants_min: 'min unused',
+    apv_grants_revoke: 'Remove',
+    apv_grants_uses: 'uses',
     apv_error: 'could not ask this account:',
     apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
     var_t: 'Your apps\u2019 variables',
@@ -712,6 +738,9 @@ onMounted(async () => {
     await refreshProfiles()
     computeMyDeviceId()
     await refreshApprovals()
+    // Y lo que ya está aprobado: al abrir, no al primer latido. Si no, la lista de
+    // concesiones tarda cinco segundos en aparecer y parece que no hay ninguna.
+    await refreshGrants()
     limpiarRestosDelPaseo()
   }
   offVault = id.value.onVault?.((e) => {
@@ -1241,12 +1270,45 @@ async function refreshApprovals () {
   } catch (_) { apvPorCuenta.value = [] }
 }
 const apvLeft = (p) => Math.max(0, Math.round((p.exp - Date.now()) / 1000))
+/** El comando en una línea. Sin argumentos, el binario ya dice algo. */
+const apvCmd = (p) => {
+  const c = p?.ctx
+  if (!c) return ''
+  return (Array.isArray(c.argv) && c.argv.length ? c.argv.join(' ') : c.exe || '') + (c.truncated ? ' …' : '')
+}
+
+/**
+ * LO QUE YA ESTÁ APROBADO, y por cuánto.
+ *
+ * Aprobar deja pasar ese mismo comando durante una hora que se renueva con cada uso, así que
+ * puede durar indefinidamente mientras el servicio siga vivo. Por eso se enseña aquí y se
+ * puede cortar desde aquí: un permiso que no se ve es un permiso que nadie recuerda.
+ */
+const grantsPorCuenta = ref([])
+const grants = computed(() => grantsPorCuenta.value.flatMap((g) =>
+  (g.items || []).map((it) => ({ ...it, profile: g.profile, profileName: g.name }))))
+const grantLeft = (g) => Math.max(0, Math.round((g.exp - Date.now()) / 60000))
+async function refreshGrants () {
+  const salida = []
+  for (const c of apvPorCuenta.value) {
+    if (c.error) continue
+    try {
+      const r = await id.value.vaultApprovals('grants', { profile: c.profile })
+      salida.push({ profile: c.profile, name: c.name, items: Array.isArray(r?.items) ? r.items : [] })
+    } catch (_) { /* una bóveda vieja no conoce este op: no hay concesiones que enseñar */ }
+  }
+  grantsPorCuenta.value = salida
+}
+const grantRevoke = (g) => run('grant-' + g.id, async () => {
+  await id.value.vaultApprovals('grant-revoke', { id: g.id, profile: g.profile })
+  await refreshGrants()
+})
 // El `profile` viaja con la acción: el pedido es de una cuenta concreta y lo firma SU llave.
 // Sin esto, aprobar el de otra cuenta te obligaría a cambiarte a ella, que es lo que sobra.
-const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id, profile: p.profile }); await refreshApprovals() })
+const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id, profile: p.profile }); await refreshApprovals(); await refreshGrants() })
 
 const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id, profile: p.profile }); await refreshApprovals() })
-const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals() }
+const apvTick = () => { if (document.visibilityState === 'visible') refreshApprovals().then(refreshGrants) }
 
 // APP NATIVA: si esta página corre dentro de la app de Dotrino, el token de push (FCM en
 // Android) llega por `window.DotrinoNative.pushToken()` o por el evento
@@ -1627,20 +1689,60 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           cuenta en cuenta, con una recarga por salto— se quitó.
         -->
         <p v-if="!approvals.length" class="muted" data-testid="apv-none">{{ t.apv_none }}</p>
-        <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
-          <span>
+        <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending apv" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
+          <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
             <b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
-          <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
-          <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
+          <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
+               decidir. Sin esto solo se sabía qué aparato pide qué cajón, que no distingue
+               el arranque que acabas de lanzar de cualquier otra cosa de esa máquina. -->
+          <div v-if="p.ctx" class="apvcmd" data-testid="apv-cmd">
+            <div class="apvline">{{ t.apv_cmd }} <code class="cmd">{{ apvCmd(p) }}</code></div>
+            <div class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ p.ctx.cwd || '?' }}</code></div>
+            <div class="apvline muted small" :class="{ warn: p.ctx.verified !== 'proc' }">
+              {{ p.ctx.verified === 'proc' ? t.apv_proc : t.apv_declared }}
+            </div>
+          </div>
+          <!-- SELLADO PERO SIN ABRIR: una app que todavía no sabe abrirlo (identity < 0.89)
+               o una llave que no es la de este aparato. NO es lo mismo que un pedido que no
+               dice nada, y verlo como «no dice» mandaría a buscar el fallo al otro lado. -->
+          <div v-else-if="p.ctxError || p.ctxWrap || p.ctxSealed === false" class="apvcmd muted warn" data-testid="apv-cmd-error">
+            {{ t.apv_cmderr }} <code class="mid">{{ p.ctxError || p.ctxReason || 'cannot-open' }}</code>
+          </div>
+          <div v-else class="apvcmd muted" data-testid="apv-nocmd">{{ t.apv_nocmd }}</div>
+          <div class="apvbtns">
+            <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
+            <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
+          </div>
         </div>
+        <!-- QUÉ PASA AL APROBAR. Aprobar dejó de ser «esta vez»: es este comando durante una
+             hora que se renueva con cada uso. Decirlo aquí, antes de pulsar. -->
+        <p v-if="approvals.length" class="muted small">{{ t.apv_grant_hint }}</p>
         <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
              preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
         <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">
           {{ g.name || g.profile }} — {{ t.apv_error }} <code class="mid">{{ g.error }}</code>
         </p>
         <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+
+        <!-- LO QUE YA DIJISTE QUE SÍ. Se renueva con cada uso, así que puede durar mientras
+             el servicio viva: se ve y se corta desde el mismo sitio donde se aprobó. -->
+        <h2 class="apvh">{{ t.apv_grants_t }}</h2>
+        <p v-if="!grants.length" class="muted" data-testid="grants-none">{{ t.apv_grants_none }}</p>
+        <div v-for="g in grants" :key="g.profile + ':' + g.id" class="pending apv" :data-grant-id="g.id" data-testid="grant-item">
+          <span class="apvwho">
+            <b v-if="apvVariasCuentas" class="apvtag">{{ g.profileName || g.profile }}</b>
+            <code>{{ g.ns }}</code>
+            <span class="muted"> · {{ g.deviceId }} · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
+          </span>
+          <div class="apvcmd"><code class="cmd">{{ apvCmd(g) || '—' }}</code>
+            <div v-if="g.ctx" class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ g.ctx.cwd || '?' }}</code></div>
+          </div>
+          <div class="apvbtns">
+            <button class="btn ghost sm" data-testid="grant-revoke" :disabled="busy === 'grant-' + g.id" @click="grantRevoke(g)">{{ t.apv_grants_revoke }}</button>
+          </div>
+        </div>
       </template>
       <p v-else class="muted" data-testid="apv-nocap">
         {{ t.apv_nocap }}
@@ -2121,4 +2223,19 @@ details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
   display: inline-block; margin-right: 6px; padding: 1px 8px;
   background: #1b2f4d; color: #9cc4ff; border-radius: 999px; font-size: 12px;
 }
+
+/* EL PEDIDO, EN UN TELÉFONO. Una fila por dato y los botones al final: el comando puede ser
+   largo y es lo que hay que leer antes de decidir, así que manda el ancho entero. */
+.pending.apv { display: block; }
+.apvwho { display: block; }
+.apvcmd { margin: 8px 0 0; }
+.apvline { margin-top: 2px; word-break: break-all; }
+.apvcmd .cmd {
+  display: inline-block; max-width: 100%; padding: 4px 8px; border-radius: 6px;
+  background: #0d1521; color: #dbe7f7; border: 1px solid #223047;
+  font-family: ui-monospace, monospace; word-break: break-all; white-space: pre-wrap;
+}
+.apvbtns { display: flex; gap: 8px; margin-top: 10px; }
+.apvh { margin-top: 26px; }
+.small { font-size: 12px; }
 </style>
