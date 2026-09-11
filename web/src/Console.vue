@@ -63,6 +63,7 @@ const T = {
     loading: 'Cargando…',
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
     profile: 'Perfil', version: 'Versión del acta', master: 'Master',
+    page_build: 'Esta página sale del commit',
     copy_id: 'Copiar el identificador completo',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
     caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', sealer: 'Sella el acta (otra bóveda)' },
@@ -262,6 +263,7 @@ const T = {
     loading: 'Loading…',
     err_connect: 'Could not open your identity. Reload the page and try again.',
     profile: 'Profile', version: 'Record version', master: 'Master',
+    page_build: 'This page was built from commit',
     copy_id: 'Copy the full identifier',
     members: 'Devices', me: 'this device', is_master: 'Master',
     caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', sealer: 'Seals the record (another vault)' },
@@ -638,6 +640,23 @@ async function refresh () {
  */
 const runningBySub = ref(new Map())
 const vaultRunning = ref(null)
+
+/**
+ * DE QUÉ BUILD ES ESTA PÁGINA.
+ *
+ * Esta pantalla enseña la versión de la bóveda y la de cada aparato (§14), y no enseñaba
+ * la SUYA — la única que no se podía comprobar era justo la que hay que comprobar cuando
+ * algo no cuadra. Y hace falta de verdad: la consola es una PWA, así que un teléfono puede
+ * estar corriendo un paquete de hace horas mientras el dominio ya sirve otro, y desde
+ * fuera no hay forma de saberlo (dueño, 2026-09-11: «¿no puedes saber qué página tiene la
+ * app?» — no se podía).
+ *
+ * Sale del `<meta name="commit">` que escribe el despliegue, así que dice el commit EXACTO
+ * del que salió lo que estás mirando, no lo que el servidor tiene ahora.
+ */
+const thisBuild = (() => {
+  try { return document.querySelector('meta[name=commit]')?.content || '' } catch (_) { return '' }
+})()
 
 const devices = computed(() => members.value.map((m) => {
   const cert = certBySub.value.get(m.pub) || null
@@ -1974,6 +1993,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
            punto de comparación de todo lo de encima: sin él, «no cuadra» no dice con qué. -->
       <p v-if="vaultRunning" class="muted vault-runs" data-testid="vault-runs">
         {{ t.vault_runs(vaultRunning.product, vaultRunning.version, vaultRunning.protocol) }}
+      </p>
+      <!-- Y DE QUÉ BUILD ES ESTA PÁGINA. Va aquí, pegado a lo anterior, porque las dos
+           contestan la misma pregunta: qué está corriendo de verdad. -->
+      <p v-if="thisBuild" class="muted vault-runs" data-testid="this-build">
+        {{ t.page_build }} <code>{{ thisBuild }}</code>
       </p>
 
       <!-- LA BÓVEDA ES ESTE APARATO: lo único que se administra aquí es a quién se deja
