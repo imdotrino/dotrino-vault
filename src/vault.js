@@ -936,7 +936,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // `method: 'toString'` (o cualquier miembro heredado de Object) pasaba el filtro y
     // se llamaba como si fuera del store.
     if (!d || typeof d.method !== 'string' || !Object.hasOwn(threads.methods, d.method)) {
-      return reply(from, { type: MSG.ERROR, error: 'store: invalid method' })
+      // Con `code`: un aparato más nuevo que esta bóveda pide métodos que aquí no existen, y
+      // tiene que poder decir «actualiza la bóveda» en vez de enseñar la frase.
+      return reply(from, { type: MSG.ERROR, error: 'store: invalid method', code: 'store-unknown-method' })
     }
     if (!isFresh(d)) return staleReply(from)
     // EL PERFIL VA POR OTRO CAMINO, y por eso se atiende antes que nada

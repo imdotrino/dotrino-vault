@@ -14,10 +14,14 @@
  * que el ecosistema promete que no queda en claro en ningún disco.
  */
 import path from 'node:path'
+import * as core from '@dotrino/store/core'
 import { readJson, writeJson } from './paths.js'
 import { atRestFor } from './atrest.js'
 
-const MAX_PER_THREAD = 1000
+// El MISMO tope que acepta la página del almacén. Era 1000: una app que guarda más en un
+// hilo (los compradores de facturero, por ejemplo) perdía aquí lo más viejo sin decir nada,
+// y el navegador lo volvía a subir en cada sincronización.
+const MAX_PER_THREAD = core.MAX_PER_THREAD_LIMIT
 
 // DATOS SENSIBLES (F4): topes para que un dispositivo con `vault:store` no pueda
 // llenar el disco de la bóveda. Son generosos para el uso real (unas contraseñas,
@@ -33,24 +37,31 @@ export function openThreadStore (dir) {
   if (!data.threads) data.threads = {}
   if (!data.opens) data.opens = {}
   if (!data.secure) data.secure = {}
+  // Lápidas de lo borrado (`@dotrino/store/core`): sin ellas un borrado vuelve desde el
+  // primer aparato que todavía tenga la entrada.
+  if (!data.tombs) data.tombs = {}
+  core.pruneTombs(data.tombs, Date.now())
   const save = () => writeJson(file, data, atRest)
   save() // reescribe al abrir: cifra lo que venía en claro
-  const trim = (arr) => { if (arr.length > MAX_PER_THREAD) arr.splice(0, arr.length - MAX_PER_THREAD) }
+  const budget = (n) => Math.min(Math.max(Number(n) || core.PAGE_BYTES, 1024), core.PAGE_BYTES)
+  const needKeys = (keys) => {
+    if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string')) throw new Error('keys must be a list of thread keys')
+    return keys
+  }
+  const needMap = (value, what) => {
+    if (value == null) return {}
+    if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${what} must be an object`)
+    return value
+  }
 
   const methods = {
     appendMessage ({ threadKey, entry }) {
-      if (!threadKey || typeof threadKey !== 'string') throw new Error('threadKey required')
-      if (!entry || typeof entry !== 'object') throw new Error('entry required')
-      if (!entry.id) entry.id = crypto.randomUUID()
-      if (!entry.ts) entry.ts = Date.now()
-      const arr = data.threads[threadKey] || (data.threads[threadKey] = [])
-      const i = arr.findIndex((e) => e.id === entry.id)
-      if (i >= 0) arr[i] = { ...arr[i], ...entry }; else arr.push(entry)
-      trim(arr); save(); return entry
+      core.writeEntry(data.threads, data.tombs, threadKey, entry, { max: MAX_PER_THREAD, now: Date.now(), newId: () => crypto.randomUUID() })
+      save(); return entry
     },
     listThread ({ threadKey, limit, before }) {
-      if (!threadKey) return []
-      let arr = data.threads[threadKey] || []
+      if (!core.validKey(threadKey) || !Object.hasOwn(data.threads, threadKey)) return []
+      let arr = data.threads[threadKey]
       if (typeof before === 'number') arr = arr.filter((e) => (e.ts || 0) < before)
       if (typeof limit === 'number' && limit > 0) arr = arr.slice(-limit)
       return arr
@@ -62,14 +73,14 @@ export function openThreadStore (dir) {
       return out
     },
     removeThread ({ threadKey }) {
-      const removed = data.threads[threadKey]?.length || 0
-      delete data.threads[threadKey]; save(); return { removed }
+      const removed = core.removeWholeThread(data.threads, data.tombs, threadKey, Date.now())
+      if (removed) save()
+      return { removed }
     },
     removeMessage ({ threadKey, id }) {
-      const arr = data.threads[threadKey] || []; const before = arr.length
-      data.threads[threadKey] = arr.filter((e) => e.id !== id)
-      if (data.threads[threadKey].length === 0) delete data.threads[threadKey]
-      save(); return { removed: before - (data.threads[threadKey]?.length || 0) }
+      const removed = core.removeEntry(data.threads, data.tombs, threadKey, id, Date.now())
+      if (removed) save()
+      return { removed }
     },
     recordOpen ({ appId }) {
       if (!appId || typeof appId !== 'string') throw new Error('appId required')
@@ -79,17 +90,38 @@ export function openThreadStore (dir) {
     },
     getOpens () { return { ...data.opens } },
     clearOpens () { data.opens = {}; save(); return { ok: true } },
+    /** Mezcla el contador de un aparato (el mayor de cada lado) y devuelve el resultado. */
+    mergeOpens ({ opens }) {
+      if (core.mergeOpens(data.opens, needMap(opens, 'opens'))) save()
+      return { ...data.opens }
+    },
     exportThreads () { return { threads: data.threads } },
-    importThreads ({ threads, mode = 'merge' }) {
+    // ----- SINCRONIZAR POR PARTES (@dotrino/store ≥ 0.11) -----
+    // `exportThreads`/`importThreads` a secas mueven TODO en un mensaje, y el proxio corta
+    // los frames en 1 MB: con unos cientos de KB de datos la sincronización dejaba de caber.
+    // Con esto el aparato pregunta qué hilos difieren (una huella por hilo), baja su índice
+    // (id y ts) y pide solo las entradas que le faltan, todo por páginas con tope de bytes.
+    // Las reglas —huella, mezcla, lápidas— son las de `@dotrino/store/core`, las mismas que
+    // aplica el navegador: si cada lado llevara las suyas, las huellas no coincidirían nunca.
+    getThreadDigests ({ keys } = {}) {
+      return core.digestsOf(data.threads, keys == null ? undefined : needKeys(keys))
+    },
+    getThreadIndexes ({ keys, cursor, maxBytes }) {
+      return core.indexPage(data.threads, data.tombs, needKeys(keys), cursor || null, budget(maxBytes))
+    },
+    getEntries ({ refs, maxBytes }) {
+      return core.entriesPage(data.threads, needMap(refs, 'refs'), budget(maxBytes))
+    },
+    importThreads ({ threads, tombs, mode = 'merge' }) {
       if (!threads || typeof threads !== 'object') throw new Error('threads required')
       if (mode === 'replace') { data.threads = threads; save(); return { mode, count: Object.keys(threads).length } }
-      for (const [k, arr] of Object.entries(threads)) {
-        const cur = data.threads[k] || (data.threads[k] = [])
-        const byId = new Map(cur.map((e) => [e.id, e]))
-        for (const e of arr) { if (!e?.id) continue; const pr = byId.get(e.id); if (!pr || (e.ts || 0) > (pr.ts || 0)) byId.set(e.id, e) }
-        data.threads[k] = Array.from(byId.values()).sort((a, b) => (a.ts || 0) - (b.ts || 0)); trim(data.threads[k])
-      }
-      save(); return { mode, count: Object.keys(data.threads).length }
+      if (mode !== 'merge' && mode !== 'upsert') throw new Error(`unknown import mode: ${mode}`)
+      const now = Date.now()
+      const buried = core.applyTombs(data.threads, data.tombs, needMap(tombs, 'tombs'), now)
+      const merged = core.mergeEntries(data.threads, data.tombs, threads, { mode, max: MAX_PER_THREAD })
+      core.pruneTombs(data.tombs, now)
+      if (buried.tombsChanged || buried.changed.size || merged.size) save()
+      return { mode, count: Object.keys(data.threads).length, changed: [...new Set([...buried.changed, ...merged])] }
     },
     // ----- PERFIL del usuario (me): el vault es la copia AUTORITATIVA -----
     // Cada dispositivo emparejado lo empuja al editarlo y lo jala al arrancar →
@@ -182,7 +214,8 @@ export function openThreadStore (dir) {
  * dispositivo al que solo le diste «leer» no lee tus contraseñas.
  */
 export const STORE_READ_METHODS = new Set([
-  'listThread', 'listThreadKeys', 'getThreadSummaries', 'getOpens', 'exportThreads', 'getStats', 'profileGet'
+  'listThread', 'listThreadKeys', 'getThreadSummaries', 'getOpens', 'exportThreads', 'getStats', 'profileGet',
+  'getThreadDigests', 'getThreadIndexes', 'getEntries'
 ])
 
 /**

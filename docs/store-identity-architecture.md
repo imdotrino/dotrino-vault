@@ -74,6 +74,13 @@ El retorno gana un campo opcional `cert` **solo cuando** la firma fue local con 
 - `MSG.STORE_RES = 'vault.store.res'` (vault→device: `{ rid, result }`).
 - `data.op ∈ { appendMessage, listThread, listThreadKeys, getThreadSummaries, removeThread, removeMessage, recordOpen, getOpens, clearOpens, getStats, importThreads, clearAll, setMaxPerThread }` — **todas** las ops mutadoras se enrutan (las críticas señalaron que omitir `clearAll`/`importThreads`/`setMaxPerThread` deja cache y vault inconsistentes).
 
+> **Desde vaultd 0.115.0 / @dotrino/store 0.11.0 (2026-09-16)** el navegador ya no reenvía cada
+> operación ni mueve el almacén entero en un mensaje (no cabía en el 1 MB del proxio). Sincroniza
+> por partes: `getThreadDigests` (huella por hilo) → `getThreadIndexes` (id, ts y lápidas, por
+> páginas) → `getEntries` (solo lo que falta) → `importThreads` con `tombs` y modo `merge`/`upsert`,
+> más `mergeOpens`. Las reglas viven en `@dotrino/store/core`, que importan la página y la bóveda.
+> El tope por hilo de la bóveda pasó de 1000 a 50 000 (el mismo que acepta la página).
+
 ### `dotrino-vault/src/store.js`
 - `SCHEMA_VERSION` → 2; `data.threads = {}` y `data.opens = {}` junto a `data.tree`. Migración trivial: si faltan, inicializar vacíos (no toca el árbol existente).
 - Lógica de threads/opens con dedup por `id`, `trimThread(maxPerThread)`, `mergeThreads` por `id+ts`, opens `{count,ts}` con **set absoluto** (no incremento).
