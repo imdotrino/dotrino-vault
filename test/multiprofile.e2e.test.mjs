@@ -21,6 +21,10 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { enrollDevice, requestStore, requestSign } from '@dotrino/identity/vault/remote.js'
+import { makeDeviceEncKey } from '@dotrino/identity/capabilities'
+// El almacén de la bóveda solo entra CIFRADO: se le pide con el cliente de referencia, que
+// sella con la clave de contenido que la bóveda le envolvió al aparato al admitirlo.
+import { requestStore as requestSealedStore } from '../src/client.js'
 
 const require = createRequire(import.meta.url)
 const proxyServerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dotrino-proxy', 'server.js')
@@ -45,16 +49,24 @@ after(async () => {
   try { await proxy?.stop() } catch (_) {}
 })
 
-/** Empareja un dispositivo con un perfil: QR → enroll → el dueño aprueba con el código. */
+/**
+ * Empareja un dispositivo con un perfil: QR → enroll → el dueño aprueba con el código.
+ * Con su llave de CIFRADO, para que la bóveda le envuelva la clave de contenido (va en el acta).
+ */
 async function pair (vault) {
   const { qr } = await vault.startPairing({ scope: ['vault:sign', 'vault:read', 'vault:store'], label: 'test', ttlMs: 60_000 })
+  const enc = await makeDeviceEncKey()
   const res = await enrollDevice({
     qr: { ...qr, proxy: proxyUrl },
+    encPub: enc.encPublickey,
     onChallenge: ({ code }) => { vault.approveDevice(code).catch(() => {}) }
   })
-  return { device: res.device, cert: res.cert, master: res.master, proxy: proxyUrl }
+  return { device: { ...res.device, encPrivateJwk: enc.encPrivateJwk }, cert: res.cert, master: res.master, proxy: proxyUrl, acta: res.acta }
 }
-const store = (dev, method, args) => requestStore({ ...dev, method, args })
+const clientDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-mp-client-'))
+const store = (dev, method, args) => requestSealedStore({
+  masterPubkey: dev.master, proxyUrl: dev.proxy, device: dev.device, cert: dev.cert, acta: dev.acta, method, args, dir: clientDir
+})
 
 test('los perfiles son identidades distintas, cada una con su conexión al proxy', () => {
   const [a, b] = mgr.summary()
@@ -81,6 +93,21 @@ test('un dispositivo de un perfil no puede usar el otro perfil', async () => {
     () => store({ ...dev, master: mgr.get(b.id).master }, 'getStats'),
     /unauthorized/
   )
+})
+
+test('el almacén en claro no entra: la bóveda lo rechaza sin tocarlo', async () => {
+  const [a] = mgr.list()
+  const vault = mgr.get(a.id)
+  const dev = await pair(vault)
+  // El cliente de identity sin `enc` es exactamente lo que mandaba un aparato sin la clave.
+  await assert.rejects(
+    () => requestStore({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, method: 'appendMessage', args: { threadKey: 'claro', entry: { id: 'z', text: 'a la vista del proxio' } } }),
+    /must be sealed/
+  )
+  assert.equal(vault.threads.methods.listThread({ threadKey: 'claro' }).length, 0, 'y no se guardó nada')
+  // Cifrado, el mismo aparato sí guarda.
+  await store(dev, 'appendMessage', { threadKey: 'cifrado', entry: { id: 'z', text: 'sellado' } })
+  assert.equal(vault.threads.methods.listThread({ threadKey: 'cifrado' }).length, 1)
 })
 
 test('con el profile locked: NO se edita el perfil ni firma la maestra, pero sí se guarda y se lee', async () => {
@@ -228,19 +255,19 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
     await m2.profiles.setPassword(p.id, 'frase-de-prueba-larga')
 
     // Recién abierto: se edita.
-    await requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Antes' } } })
+    await store(dev, 'profileSet', { me: { nickname: 'Antes' } })
     assert.equal(vault.threads.methods.profileGet().me.nickname, 'Antes')
 
     await new Promise((r) => setTimeout(r, 1200))
     assert.equal(m2.profiles.isLocked(p.id), true, 'se cerró solo, sin que nadie lo cerrara')
     await assert.rejects(
-      () => requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } }),
+      () => store(dev, 'profileSet', { me: { nickname: 'Después' } }),
       /locked/, 'y con él cerrado ya no se edita el perfil')
 
     // LO QUE NO SE CORTA: leer y guardar. Es lo que las apps necesitan para no quedarse
     // muertas, y no pasa por la maestra.
-    assert.equal((await requestStore({ ...dev, method: 'profileGet' })).me.nickname, 'Antes')
-    await requestStore({ ...dev, method: 'appendMessage', args: { threadKey: 'chat', entry: { id: 'y', text: 'sigo' } } })
+    assert.equal((await store(dev, 'profileGet')).me.nickname, 'Antes')
+    await store(dev, 'appendMessage', { threadKey: 'chat', entry: { id: 'y', text: 'sigo' } })
 
     // LO QUE SÍ SE CORTA: que firme la MAESTRA. Este test decía lo contrario y era de
     // antes del modelo de sobres. Firmar no es lo que mantiene vivas a las apps: un
@@ -250,7 +277,7 @@ test('BLOQUEO AUTOMÁTICO: se cierra solo sin usarse, y el dispositivo sigue sir
 
     // Y se vuelve a abrir con la misma contraseña: cerrarse solo no es olvidarla.
     await m2.profiles.unlock(p.id, 'frase-de-prueba-larga')
-    await requestStore({ ...dev, method: 'profileSet', args: { me: { nickname: 'Después' } } })
+    await store(dev, 'profileSet', { me: { nickname: 'Después' } })
     assert.equal(vault.threads.methods.profileGet().me.nickname, 'Después')
   } finally {
     try { m2.close() } catch (_) {}

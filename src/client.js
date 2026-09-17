@@ -11,7 +11,8 @@
  * estrictamente (firmado por la maestra que vio en el QR, y para SU clave) antes de
  * guardarlo. La maestra nunca sale del vault.
  */
-import { makeDeviceKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
+import { myContentKey, encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
 import { sealersOf } from '@dotrino/identity/acta'
 
 /**
@@ -61,20 +62,25 @@ function waitFor (client, predicate, timeoutMs = 30000) {
  * @param {string} [opts.label]
  * @param {(c:{deviceId:string,code:string})=>void} [opts.onChallenge]  Para MOSTRAR el código que el usuario tipea en la bóveda.
  * @param {number} [opts.approveTimeoutMs]  Cuánto esperar la aprobación humana (def 3 min).
- * @returns {Promise<{ device, cert, iss:string }>}  GUARDAR `device` (incluye la privada) + `cert`. `iss` = qr.iss verificado.
+ * @returns {Promise<{ device, cert, iss:string, acta }>}  GUARDAR `device` (incluye las privadas de firma y de
+ *   cifrado), `cert` y `acta` (trae la clave de contenido envuelta para este aparato: sin ella el
+ *   almacén de la bóveda no se puede usar). `iss` = qr.iss verificado.
  */
 export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeoutMs = 180000 } = {}) {
   if (!qr?.iss || !qr?.proxy || !qr?.token || !qr?.sn) throw new Error('invalid qr (v2): missing iss/proxy/token/sn')
   const client = await freshClient({ proxyUrl: qr.proxy, dir })
   try {
     const device = await makeDeviceKey({ label })
+    // La llave de CIFRADO del aparato: con su pública en el acta, la bóveda le envuelve la
+    // clave de contenido al admitirlo. Sin ella no podría usar el almacén, que solo entra cifrado.
+    const enc = await makeDeviceEncKey()
     const myDeviceId = (await pubkeyId(device.publickey)).slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2')
     // ESTE dispositivo genera el código y lo MUESTRA; solo viaja su COMPROMISO. El vault
     // lo aprende cuando un humano lo tipea, y solo firma el cert si el compromiso coincide.
     const code = makePairingCode()
     const commit = await commitCode({ code, dpub: device.publickey, sn: qr.sn })
     // ENROLL firmado con D = prueba de posesión (un token robado ya no basta).
-    const data = { op: 'enroll', dpub: device.publickey, token: qr.token, sn: qr.sn, commit, label, ts: Date.now() }
+    const data = { op: 'enroll', dpub: device.publickey, encPub: enc.encPublickey, token: qr.token, sn: qr.sn, commit, label, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
 
     const enrolled = new Promise((resolve, reject) => {
@@ -102,7 +108,7 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
     if (!v.ok) throw new Error('invalid cert: ' + v.reason)
     if (res.cert.sub !== device.publickey) throw new Error('cert issued for a different device')
     // OJO: devolvemos qr.iss (la maestra que el usuario VIO), NO res.iss.
-    return { device, cert: res.cert, iss: qr.iss }
+    return { device: { ...device, encPublickey: enc.encPublickey, encPrivateJwk: enc.encPrivateJwk }, cert: res.cert, iss: qr.iss, acta: res.acta }
   } finally { client.close() }
 }
 
@@ -171,17 +177,28 @@ export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, dir 
   } finally { client.close() }
 }
 
-/** Llama un método del store de hilos/aperturas del vault (scope vault:store). */
-export async function requestStore ({ masterPubkey, proxyUrl, device, cert, method, args, dir } = {}) {
+/**
+ * Llama un método del almacén de la bóveda (scope vault:store), CIFRADO de punta a punta con
+ * la clave de contenido del perfil: la bóveda no acepta el almacén en claro, porque el proxio
+ * no cifra. `acta` es la que devolvió `enroll` (o una más nueva): de su `keyring` sale la
+ * clave envuelta para este aparato.
+ */
+export async function requestStore ({ masterPubkey, proxyUrl, device, cert, acta, method, args, dir } = {}) {
+  if (!device?.encPrivateJwk) throw Object.assign(new Error('this device has no encryption key: enrol it again'), { code: 'no-enc-key' })
+  const myEncPrivateKey = await importDeviceEncKey(device.encPrivateJwk)
+  const mine = await myContentKey({ keyring: acta?.keyring, myPub: device.publickey, myEncPrivateKey })
+  if (!mine) throw Object.assign(new Error('this device does not hold the profile content key yet'), { code: 'no-content-key' })
+  const enc = await encryptWithCek({ cek: mine.cek, gen: mine.gen, plaintext: JSON.stringify(args ?? {}) })
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const data = { op: 'store', method, args: args || {}, publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'store', method, enc, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.STORE_RESULT || p.type === MSG.ERROR)
     client.sendByPubkey(masterPubkey, { type: MSG.STORE, data, signature, cert })
     const res = await pending
-    if (res.type === MSG.ERROR) throw new Error(res.error)
-    return res.result
+    if (res.type === MSG.ERROR) throw Object.assign(new Error(res.error), res.code ? { code: res.code } : {})
+    if (!res.result?.__enc) throw Object.assign(new Error('the vault replied to the store without encrypting it'), { code: 'vault-reply-unsealed' })
+    return JSON.parse(await decryptWithKeyring({ envelope: res.result.__enc, keyring: acta.keyring, myPub: device.publickey, myEncPrivateKey }))
   } finally { client.close() }
 }
 

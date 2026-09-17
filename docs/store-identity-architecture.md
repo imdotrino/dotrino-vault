@@ -80,6 +80,12 @@ El retorno gana un campo opcional `cert` **solo cuando** la firma fue local con 
 > páginas) → `getEntries` (solo lo que falta) → `importThreads` con `tombs` y modo `merge`/`upsert`,
 > más `mergeOpens`. Las reglas viven en `@dotrino/store/core`, que importan la página y la bóveda.
 > El tope por hilo de la bóveda pasó de 1000 a 50 000 (el mismo que acepta la página).
+>
+> **Desde vaultd 0.116.0 el almacén solo entra CIFRADO** (`data.enc`, con la clave de contenido del
+> perfil). Un pedido en claro se rechaza con `code: 'store-unsealed'` y queda en la bitácora. El
+> perfil no cambia: `profilePut`/`profileBundle`/`profilePublic`/`profileRecipients` se atienden
+> antes, con lo privado en sobres y lo público en claro. El cliente de referencia (`src/client.js`)
+> manda su `encPub` al enrolarse, devuelve el `acta` y `requestStore` necesita esa acta para cifrar.
 
 ### `dotrino-vault/src/store.js`
 - `SCHEMA_VERSION` → 2; `data.threads = {}` y `data.opens = {}` junto a `data.tree`. Migración trivial: si faltan, inicializar vacíos (no toca el árbol existente).

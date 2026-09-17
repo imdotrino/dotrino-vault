@@ -951,6 +951,16 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     //     guardar un archivo en tu bóveda (dueño, 2026-09-03). El proxio tiene `guarda`
     //     para lo suyo y no debe poder cambiar quién eres.
     if (PROFILE_METHODS.has(d.method)) return await handleProfile(from, p, d)
+    // EL ALMACÉN SOLO ENTRA CIFRADO. Lo que va por aquí —hilos de las apps, contraseñas,
+    // el `me` heredado— viaja por el proxio, que no cifra; en claro lo leería quien lo
+    // opere. Los clientes del ecosistema cifran desde @dotrino/identity 0.91.0, y hasta
+    // entonces uno sin la clave de contenido mandaba en claro «como antes»: aceptarlo aquí
+    // era dejar ese camino abierto para cualquier cliente viejo. El perfil (arriba) va
+    // aparte a propósito: lo privado viaja en sobres y lo público es público.
+    if (!d.enc) {
+      audit('rejected', { what: 'store', method: d.method, reason: 'unsealed' })
+      return reply(from, { type: MSG.ERROR, error: 'store: requests must be sealed with the profile content key', code: 'store-unsealed' })
+    }
     // CANDADO del perfil (contraseña opcional): solo frena EDITAR el perfil heredado
     // (`profileSet`, el `me` plano). Un dispositivo enrolado puede seguir firmando,
     // leyendo y guardando contenido.
@@ -970,15 +980,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (!await actaAllows(from, chk, chk.scope === SCOPE.READ ? SCOPE.READ : SCOPE.STORE, 'store')) return
     try {
       // CIFRADO de punta a punta con la clave de contenido del perfil: el proxy transporta
-      // pero no ve nada de lo que el usuario guarda. Si el dispositivo mandó `enc`, se abre
-      // aquí con la clave de la bóveda (que también es miembro) y la respuesta vuelve igual.
-      let args = d.args || {}
-      let cek = null
-      if (d.enc) {
-        cek = await identity.contentKey?.().catch(() => null)
-        if (!cek) return reply(from, { type: MSG.ERROR, error: 'store: this vault does not hold the profile content key' })
-        args = JSON.parse(await identity.openContent(d.enc))
-      }
+      // pero no ve nada de lo que el usuario guarda. Se abre aquí con la clave de la bóveda
+      // (que también es miembro) y la respuesta vuelve igual.
+      const cek = await identity.contentKey()
+      if (!cek) return reply(from, { type: MSG.ERROR, error: 'store: this vault does not hold the profile content key', code: 'vault-no-content-key' })
+      const args = JSON.parse(await identity.openContent(d.enc))
       const result = await threads.methods[d.method](args)
       // Que un aparato ESCRIBA en tu bóveda queda anotado. Antes solo se auditaba el
       // rechazo, así que la bitácora contaba quién entró pero no qué hizo después.
@@ -987,11 +993,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (!STORE_READ_METHODS.has(d.method)) {
         audit('store', { device: await deviceIdOf(chk.device), method: d.method })
       }
-      if (cek) {
-        const enc = await identity.sealContent(JSON.stringify(result ?? null))
-        return reply(from, { type: MSG.STORE_RESULT, method: d.method, result: { __enc: enc } })
-      }
-      reply(from, { type: MSG.STORE_RESULT, method: d.method, result })
+      const enc = await identity.sealContent(JSON.stringify(result ?? null))
+      reply(from, { type: MSG.STORE_RESULT, method: d.method, result: { __enc: enc } })
     } catch (e) { reply(from, { type: MSG.ERROR, error: e.message }) }
   }
 
