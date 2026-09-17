@@ -221,6 +221,35 @@ test('un solo emparejamiento a la vez: abrir otro invalida el anterior', async (
  * con la invitación de siempre y lo que la deja pedir credenciales es la capacidad
  * `passwords` del acta, que sale del scope con el que se emparejó.
  */
+test('if the device cannot be added to the record, no certificate is delivered and the signed one is revoked', async () => {
+  const { identity, desk, sent } = await mount()
+  const revoked = []
+  identity.admitMember = async () => { throw new Error('vault-locked') }
+  identity.revokeDelegation = async (nonce) => { revoked.push(nonce); return { ok: true, nonce } }
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000, label: 'cel' })
+  const dev = await deviceEnroll(qr)
+  await desk.handleEnroll('tok-1', dev.payload)
+
+  await assert.rejects(() => desk.approve(dev.code), (e) => e.code === 'admit-failed' && /vault-locked/.test(e.message))
+  assert.ok(!sent.some((m) => m.type === 'vault.enrolled'), 'the device must not receive a certificate')
+  assert.equal(sent.at(-1).type, 'vault.error', 'the device is told the pairing failed')
+  assert.equal(identity.issued.length, 1)
+  assert.deepEqual(revoked, [identity.issued[0].nonce], 'the signed certificate is revoked')
+  assert.equal(desk.listPending().length, 0, 'the failed pairing does not stay pending')
+})
+
+test('a vault that cannot admit devices does not even sign the certificate', async () => {
+  const { identity, desk, sent } = await mount()
+  delete identity.admitMember
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000, label: 'cel' })
+  const dev = await deviceEnroll(qr)
+  await desk.handleEnroll('tok-1', dev.payload)
+
+  await assert.rejects(() => desk.approve(dev.code), (e) => e.code === 'admit-unavailable')
+  assert.equal(identity.issued.length, 0, 'no certificate was signed')
+  assert.ok(!sent.some((m) => m.type === 'vault.enrolled'))
+})
+
 test('contraseñas: el scope del emparejamiento se convierte en la capacidad del acta', async () => {
   const admitidos = []
   const { desk, identity } = await mount()

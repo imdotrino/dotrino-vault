@@ -1864,7 +1864,14 @@ export async function runCtl (argv) {
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'secret': return cmdSecret(rest)
-    case 'approval': return cmdApproval(rest)
+    // `approval` se quitó el 2026-09-01 (ahora es el permiso `unattended`), pero la ruta se
+    // quedó apuntando a una función que ya no existía: reventaba con un ReferenceError. Se
+    // rechaza en voz alta, igual que `caps +approval`.
+    case 'approval':
+      console.error('`dotrino-vault approval` ya no existe. Pedir aprobación es el DEFECTO; lo que se concede es lo contrario:')
+      console.error('  dotrino-vault caps <ID> +desatendido   ← se lleva las claves privadas sin aprobación')
+      console.error('  dotrino-vault caps <ID> -desatendido   ← vuelve a pedir aprobación')
+      process.exit(2)
     case 'atrest': return cmdAtrest(rest)
     case 'activity': return cmdActivity(Number(rest.find((a) => /^\d+$/.test(a))) || 30, {
       verify: rest.includes('--verify'), exportar: rest.includes('--export')

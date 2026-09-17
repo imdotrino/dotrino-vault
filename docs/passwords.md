@@ -33,7 +33,8 @@ sola. `list` no existe en remoto.
 
 Dos condiciones, y **las dos** tienen que darse:
 
-1. que ese **aparato** esté marcado para aprobar (`approval <ID> on`), que es la política
+1. que ese **aparato** no tenga el permiso `unattended` (desde el 2026-09-01 pedir aprobación
+   es el defecto; `caps <ID> +desatendido` se lo quita), que es la política
    del vault: se pide una vez y vale mientras el vault siga encendido;
 2. y que lo que pide sea **privado** — una contraseña, un código de dos pasos, unas notas,
    una passkey, o un campo que el usuario marcó como privado.
@@ -70,7 +71,7 @@ las contesta esta bóveda igual que las otras dos:
 ```bash
 dotrino-vault pair --scope contrasenas   # conectar el gestor, ya con su permiso
 dotrino-vault caps <ID> +contrasenas     # o dárselo después a un aparato que ya está
-dotrino-vault approval <ID> on           # y que además te pida el visto bueno en el teléfono
+dotrino-vault caps <ID> +desatendido     # que NO pida el visto bueno (por defecto lo pide)
 ```
 
 **No hay códigos que pegar.** El gestor se empareja como cualquier otro aparato:
