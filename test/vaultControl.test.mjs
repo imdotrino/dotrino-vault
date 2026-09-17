@@ -380,6 +380,30 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
   assert.equal(after2.revoked.length, 1)
 })
 
+test('join: la invitación viaja al daemon y cada respuesta se lee por su `id`', async () => {
+  const { encodeInvite } = await import('../lib/src/invite.js')
+  const qr = { v: 2, sn: 'abcdef0123456789', conn: 'xy12ab', proxy: 'wss://proxy.dotrino.com' }
+
+  await assert.rejects(vc.startJoin({ invite: 'no es nada' }), { code: 'INVITE_INVALID' })
+  assert.equal(fs.existsSync(P('join-request.json')), false, 'una invitación que no vale no llega a escribirse')
+
+  const id = await vc.startJoin({ invite: encodeInvite(qr), name: 'Cepi' })
+  const req = readRaw('join-request.json')
+  assert.equal(req.id, id)
+  assert.deepEqual(req.qr, qr)
+  assert.equal(req.name, 'Cepi')
+  rm('join-request.json')
+
+  assert.equal(vc.joinStatus(id), null, 'sin respuesta todavía')
+  writeAtomic('join.json', { req: 'de-otro', state: 'error', errorCode: 'JOIN_BUSY' })
+  assert.equal(vc.joinStatus(id), null, 'la respuesta a OTRO intento no es la mía')
+  writeAtomic('join.json', { req: id, state: 'waiting', code: '482913', profile: 'p9' })
+  assert.equal(vc.joinStatus(id).code, '482913')
+  writeAtomic('join.json', { req: id, state: 'done', seq: 7, profile: 'p9' })
+  assert.equal(vc.joinStatus(id).state, 'done')
+  rm('join.json')
+})
+
 test('reject limpia el pendiente', async () => {
   fs.writeFileSync(P('pending-enroll.json'), canal.encrypt(JSON.stringify({ v: 2, at: Date.now(), deviceId: 'EE99-FF00', profile: 'p1' })))
   assert.ok(vc.pendingEnroll())

@@ -353,7 +353,9 @@ dispositivos/variables que estás viendo:
 1. **Bóvedas** es la pantalla de entrada: lista tus perfiles (`↑↓` mover, `Enter`
    **entrar** a uno — lo activa si no lo estaba). Ahí también **conectas un
    dispositivo** con `p` (sin entrar: activa la bóveda elegida y abre la pregunta de
-   a qué cuenta entra), creas una bóveda nueva, renombras, borras y pones/quitas/usas
+   a qué cuenta entra), **metes esta bóveda en la cuenta de otra** con `j` (pegas la
+   invitación que enseña la otra y tecleas allí el código que sale aquí: lo mismo que
+   `dotrino-vault join`), creas una bóveda nueva, renombras, borras y pones/quitas/usas
    la contraseña (candado).
 2. Al entrar caes en sus **pestañas horizontales**, que cambias con `←→`:
    - **Dispositivos (pares):** verlos, **emparejar** uno nuevo, **aprobar** con el
@@ -391,7 +393,8 @@ se recuerda en `prefs.json` del dir de datos, y al arrancar se decide en este or
 sistema (`LC_ALL`, `LC_MESSAGES`, `LANGUAGE` o `LANG`) → español.
 
 **Las teclas NO cambian con el idioma**: son mnemónicos en **inglés** y valen igual en
-español (solo se traduce la palabra que las explica en la barra de ayuda).
+español (solo se traduce la palabra que las explica en la barra de ayuda). Si la barra no
+cabe en una línea, se reparte en varias; nunca se esconde una tecla.
 
 | Tecla | Acción | Dónde |
 |---|---|---|
@@ -400,6 +403,7 @@ español (solo se traduce la palabra que las explica en la barra de ayuda).
 | `r` | rename (Bóvedas) · refresh (Dispositivos/Scopes) · restart (Emparejar) | — |
 | `d` | delete — borrar la bóveda | Bóvedas |
 | `p` | **pair — conectar un dispositivo** (desde Bóvedas entra directo, sin `Enter`) | Bóvedas · Dispositivos |
+| `j` | join — entrar en la cuenta de otra bóveda (pegando su invitación) | Bóvedas |
 | `c` | change password — poner/cambiar la contraseña | Bóvedas |
 | `x` | quitar: contraseña · dispositivo pendiente · variable/scope | Bóvedas · Dispositivos · Scopes · Emparejar |
 | `u` / `k` | unlock / locK — candado de la bóveda | Bóvedas |

@@ -24,7 +24,7 @@
  *
  * LAS TECLAS NO CAMBIAN CON EL IDIOMA: son mnemónicos en INGLÉS y son las mismas
  * en español (lo que se traduce es la palabra que las explica en la barra de
- * ayuda). new · rename · delete · password · unlock · locK · pair · approve ·
+ * ayuda). new · rename · delete · password · unlock · locK · pair · join · approve ·
  * reject · reVoke · refresh · back · language · quit. Una tecla significa LO MISMO
  * en todas las pantallas: `p` es SIEMPRE emparejar (también en Bóvedas, sin tener
  * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
@@ -67,6 +67,8 @@ function humanErr (e, st) {
     NOT_APPLIED: t.errNotApplied,
     NOT_DELETED: t.errNotDeleted,
     PAIR_FAILED: t.errPairFailed,
+    INVITE_INVALID: t.errInviteInvalid,
+    JOIN_BUSY: t.errJoinBusy,
     APPROVE_FAILED: t.errWrongCode,
     MASTER_WITH_MEMBERS: t.errMasterWithMembers,
     PROFILE_LOCKED: t.errProfileLocked
@@ -228,6 +230,41 @@ function fitHelp (segs, cols) {
     if (widthOf(cand) + 1 <= cols) return cand
   }
   return join([...head, '…', ...tail])
+}
+
+/**
+ * La barra de ayuda en VARIAS líneas cuando no cabe en una. Recortar del medio escondía
+ * justo las teclas de la pantalla —en 80 columnas, Bóvedas perdía la mitad—, y una tecla
+ * que no se ve es una tecla que no existe para quien no la sepa de memoria.
+ *
+ * Se reparte por segmentos enteros (una tecla nunca se parte en dos líneas). `maxLines`
+ * es lo que deja el alto del terminal: si ni así caben, la última línea vuelve a recortar
+ * del medio con `fitHelp`, que conserva el idioma y la salida.
+ */
+function wrapHelp (segs, cols, maxLines = Infinity) {
+  const sep = ' · '
+  const lines = []
+  let cur = []
+  for (const seg of segs) {
+    if (cur.length && widthOf([...cur, seg].join(sep)) + 1 > cols) { lines.push(cur); cur = [seg] } else cur.push(seg)
+  }
+  if (cur.length) lines.push(cur)
+  if (!lines.length) return ['']
+  if (lines.length <= maxLines) return lines.map((l) => l.join(sep))
+  const keep = Math.max(0, maxLines - 1)
+  return [...lines.slice(0, keep).map((l) => l.join(sep)), fitHelp(lines.slice(keep).flat(), cols)]
+}
+
+/** Texto corrido partido por palabras para que quepa en `width` columnas. */
+function wrapWords (text, width) {
+  const out = []
+  let line = ''
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const cand = line ? line + ' ' + word : word
+    if (line && widthOf(cand) > width) { out.push(line); line = word } else line = cand
+  }
+  if (line) out.push(line)
+  return out
 }
 
 // --------------------------------- pantallas -------------------------------
@@ -852,6 +889,8 @@ async function onKeyProfiles (term, st, key) {
       st.scroll.pairmode = { value: 0 }
       st.screen = 'pairmode'
     })
+  } else if (ch === 'j') {
+    promptJoin(term, st)
   } else if (ch === 'n') {
     setInput(st, {
       label: i.newVaultLabel,
@@ -1231,6 +1270,104 @@ function promptApprove (term, st) {
   })
 }
 
+/**
+ * `j`: ESTA bóveda entra en la cuenta de otra (multivault). Es el papel contrario a `p`:
+ * aquí no se invita a nadie, se acepta la invitación que enseña la otra bóveda.
+ */
+function promptJoin (term, st, api = vc) {
+  const i = L(st)
+  setInput(st, {
+    label: i.joinInviteLabel,
+    hint: i.joinInviteHint,
+    onSubmit: (text) => {
+      st.input = null
+      const invite = text.trim()
+      // Se mira ANTES de preguntar el nombre: pedirte cómo llamar a la cuenta y decir
+      // después que la invitación no vale es hacerte teclear para nada.
+      if (!api.joinInvite(invite)) { flash(st, i.errInviteInvalid, 'danger'); return }
+      setInput(st, {
+        label: i.joinNameLabel,
+        hint: i.joinNameHint,
+        onSubmit: async (name) => {
+          st.input = null
+          const r = await guard(term, st, i.startingJoin, () => api.startJoin({ invite, name: name.trim().slice(0, 60) || null }))
+          if (!r.ok) return
+          st.join = { id: r.v, startedAt: Date.now(), state: 'waiting', code: null }
+          st.scroll.join = { value: 0 }
+          st.screen = 'join'
+        },
+        onCancel: () => { st.input = null }
+      })
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
+/** Lo que la bóveda espera a que la otra apruebe (`approveTimeoutMs` de @dotrino/identity). */
+const JOIN_APPROVE_MS = 180_000
+/** Y lo que espera la pantalla antes de darlo por perdido: el daemon contesta antes. */
+const JOIN_GIVE_UP_MS = JOIN_APPROVE_MS + 20_000
+
+async function onKeyJoin (term, st, key, api = vc) {
+  const j = st.join
+  if (!j) { st.screen = 'profiles'; return true }
+  if (key.name === 'tick') {
+    if (j.state !== 'waiting') return true
+    const d = api.joinStatus(j.id)
+    if (d?.state === 'waiting' && d.code) j.code = d.code
+    else if (d?.state === 'done') {
+      Object.assign(j, { state: 'done', seq: d.seq, profile: d.profile })
+      // La cuenta nueva es ya la activa (lo decide el daemon): la lista tiene que decirlo,
+      // y la selección se pone encima para que Enter entre en ELLA.
+      await refreshAll(term, st, api)
+      const idx = (st.profiles?.profiles || []).findIndex((p) => p.id === d.profile)
+      if (idx >= 0) st.sel.profiles = idx
+    } else if (d?.state === 'error') {
+      Object.assign(j, { state: 'error', error: d.errorCode ? humanErr({ code: d.errorCode }, st) : d.error })
+    } else if (Date.now() - j.startedAt > JOIN_GIVE_UP_MS) {
+      Object.assign(j, { state: 'error', error: L(st).joinNoReply })
+    }
+    return true
+  }
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (key.name === 'escape' || ch === 'b' || (key.name === 'enter' && j.state !== 'waiting')) {
+    // Salir no cancela: la bóveda sigue esperando el código en segundo plano (no hay forma
+    // de abortar un enrolamiento a medias). Se dice, para que nadie crea que lo paró.
+    if (j.state === 'waiting') flash(st, L(st).joinInBackground, 'warn')
+    st.join = null
+    st.screen = 'profiles'
+    await refreshProfiles(term, st, api)
+  }
+  return true
+}
+
+function joinBody (st, t, cols) {
+  const i = L(st)
+  const j = st.join
+  if (!j) return []
+  const width = Math.max(10, cols - 2)
+  const lines = []
+  if (j.state === 'done') {
+    for (const l of wrapWords(i.joinDone(j.seq ?? '?'), width)) lines.push(t.ok(l))
+    lines.push('')
+    for (const l of wrapWords(i.joinNextPassword, width)) lines.push(t.warn(l))
+  } else if (j.state === 'error') {
+    for (const l of wrapWords(i.joinFailed(j.error || '?'), width)) lines.push(t.danger(l))
+  } else if (!j.code) {
+    lines.push(t.muted(i.joinWaiting))
+  } else {
+    lines.push(t.bold(i.joinCodeIntro))
+    lines.push('')
+    lines.push('    ' + t.accent(t.bold(j.code)))
+    lines.push('')
+    for (const l of wrapWords(i.joinCodeWhere(j.code), width)) lines.push(t.muted(l))
+    lines.push('')
+    const left = Math.max(0, Math.round((j.startedAt + JOIN_APPROVE_MS - Date.now()) / 1000))
+    lines.push(t.muted(i.joinLeft(left)))
+  }
+  return lines
+}
+
 async function onKeyPairing (term, st, key) {
   const i = L(st)
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
@@ -1241,9 +1378,9 @@ async function onKeyPairing (term, st, key) {
   }
   // Scroll vertical para ver el QR completo cuando no cabe en la pantalla.
   if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) {
-    const { rows } = term.size()
-    const contentH = Math.max(1, rows - 7)
-    const pb = pairingBody(st, term.t, term.size().cols, contentH)
+    const { cols, rows } = term.size()
+    const contentH = contentHeight(st, cols, rows)
+    const pb = pairingBody(st, term.t, cols, contentH)
     const maxScroll = Math.max(0, pb.length - contentH)
     const scroll = st.scroll.pairing || (st.scroll.pairing = { value: 0 })
     if (key.name === 'up') scroll.value = Math.max(0, scroll.value - 1)
@@ -1672,6 +1809,7 @@ const helpSegs = (i, screen, st = {}) => {
     secrets: i.helpSecrets,
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
+    join: i.helpJoin,
     me: i.helpMe,
     caps: i.helpCaps,
     devvars: i.helpDevVars
@@ -1694,6 +1832,7 @@ const title = (i, screen) => ({
   profiles: i.titleProfiles,
   pairing: i.titlePairing,
   pairmode: i.titlePairMode,
+  join: i.titleJoin,
   caps: i.titleCaps,
   devvars: i.titleDevVars
 })[screen] || ''
@@ -1747,6 +1886,24 @@ function pairingBody (st, t, cols, height) {
   return lines
 }
 
+/** Filas fijas de arriba: cabecera, bóveda activa, aviso de versión, título y un hueco. */
+const TOP = 5
+/** Filas de contenido que deja libres como mínimo una ayuda larga. */
+const MIN_CONTENT = 3
+
+/** Las líneas de la barra de ayuda de la pantalla actual, ya repartidas al ancho. */
+function helpLines (st, i, cols, rows) {
+  if (st.input) return [i.helpInput]
+  if (st.confirm) return [i.helpConfirm]
+  const maxLines = Math.max(1, rows - TOP - 1 - MIN_CONTENT)
+  return wrapHelp(helpSegs(i, st.screen, st), cols, maxLines)
+}
+
+/** Alto del contenido: lo que queda entre la cabecera, la línea de estado y la ayuda. */
+function contentHeight (st, cols, rows, help = helpLines(st, L(st), cols, rows)) {
+  return Math.max(1, rows - TOP - 1 - help.length)
+}
+
 function render (term, st) {
   const t = term.t
   const i = L(st)
@@ -1777,9 +1934,9 @@ function render (term, st) {
   lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + title(i, st.screen))
   lines[4] = ''
 
-  const top = 5
-  const bottom = 2 // status + help
-  const contentH = Math.max(1, rows - top - bottom)
+  const help = helpLines(st, i, cols, rows)
+  const contentH = contentHeight(st, cols, rows, help)
+  const top = TOP
   const scrollRef = st.scroll[st.screen] || (st.scroll[st.screen] = { value: 0 })
 
   let body = []
@@ -1793,11 +1950,11 @@ function render (term, st) {
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = scrollBody(pb, contentH, scrollRef)
-  }
+  } else if (st.screen === 'join') body = scrollBody(joinBody(st, t, cols), contentH, scrollRef)
   for (let n = 0; n < contentH; n++) lines[top + n] = body[n] ?? ''
 
-  // línea de estado: input / confirm / flash / busy
-  const statusRow = rows - 2
+  // línea de estado: input / confirm / flash / busy, justo encima de la ayuda
+  const statusRow = rows - 1 - help.length
   if (st.busy) lines[statusRow] = ' ' + t.accent('⏳ ' + st.busy)
   else if (st.input) {
     const inp = st.input
@@ -1812,11 +1969,8 @@ function render (term, st) {
     lines[statusRow] = ' ' + style((kind === 'danger' ? '✗ ' : kind === 'warn' ? '! ' : '✓ ') + st.flash.text)
   } else lines[statusRow] = ''
 
-  // barra de ayuda
-  let help = fitHelp(helpSegs(i, st.screen, st), cols)
-  if (st.input) help = i.helpInput
-  else if (st.confirm) help = i.helpConfirm
-  lines[rows - 1] = t.bar(help, cols)
+  // barra de ayuda (una o varias líneas, pegadas abajo)
+  help.forEach((h, n) => { lines[rows - help.length + n] = t.bar(h, cols) })
 
   term.render(lines)
 }
@@ -1846,8 +2000,9 @@ async function daemonDownScreen (term, st) {
     ]
     if (st.flash) content.push('', (st.flash.kind === 'danger' ? t.danger : t.warn)(st.flash.text))
     lines[0] = t.bar(i.downHeader, cols)
-    for (let n = 0; n < content.length && 2 + n < rows - 1; n++) lines[2 + n] = ' ' + content[n]
-    lines[rows - 1] = t.bar(fitHelp(i.downHelp, cols), cols)
+    const help = wrapHelp(i.downHelp, cols, Math.max(1, rows - 4))
+    for (let n = 0; n < content.length && 2 + n < rows - help.length; n++) lines[2 + n] = ' ' + content[n]
+    help.forEach((h, n) => { lines[rows - help.length + n] = t.bar(h, cols) })
     term.render(lines)
 
     const key = await term.readKey()
@@ -1916,7 +2071,7 @@ export async function runTui () {
       if (st.flash && Date.now() - st.flash.at > 4000) st.flash = null
       render(term, st)
 
-      const base = (st.screen === 'pairing' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
+      const base = (st.screen === 'pairing' || st.screen === 'join' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
       // Despertar a tiempo del bloqueo automático, además del sondeo de la pantalla.
       const wake = autoLockWakeIn(st)
       const tick = base && wake ? Math.min(base, wake) : (base || wake)
@@ -1926,7 +2081,7 @@ export async function runTui () {
       // Un despertar del bloqueo automático no es una tecla: ya se atendió arriba, y las
       // pantallas que NO esperan `tick` (todas menos aparatos y emparejamiento) no tienen
       // por qué verlo.
-      if (key.name === 'tick' && st.screen !== 'pairing' && st.screen !== 'devices') continue
+      if (key.name === 'tick' && !['pairing', 'join', 'devices'].includes(st.screen)) continue
       // input/confirm se AWAITan: serializa las ops contra el daemon (ver onInputKey).
       // Ctrl-C dentro de un modal lo CANCELA (no sale); fuera de un modal, sale.
       if (st.input) { await onInputKey(st, key); continue }
@@ -1968,6 +2123,7 @@ export async function runTui () {
       else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
+      else if (st.screen === 'join') running = await onKeyJoin(term, st, key)
     }
   } finally {
     // AL SALIR SE VUELVE A CERRAR lo que se abrió aquí. Sin esto, teclear la contraseña una
@@ -1982,4 +2138,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, onKeySecrets, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, onKeySecrets, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

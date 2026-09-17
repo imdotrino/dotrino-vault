@@ -256,6 +256,58 @@ export async function runDaemon () {
   // es el papel contrario — aquí no se invita a nadie, se acepta una invitación ajena.
   const joinReqFile = path.join(dir, 'join-request.json')
   const joinResFile = path.join(dir, 'join.json')
+  /** Hay un `join` esperando su código. Uno a la vez: el perfil que nace es para ESE intento. */
+  let joining = false
+
+  async function runJoin (join, answer) {
+    // LA CUENTA AJENA VA EN UN PERFIL DEL GESTOR, no en una cuenta interna de la
+    // identidad. Antes esto usaba `enrollDevice(…, { join: 'new' })`, que crea una
+    // cuenta más DENTRO de la identidad de un perfil que ya existía —y el gestor no se
+    // enteraba—: no había instancia de bóveda para ella, nadie se identificaba en el
+    // proxio con esa llave, y el aviso de la otra bóveda —con el acta donde acababa de
+    // conceder `sella`— no llegaba a ninguna parte. Se unía y no servía para nada.
+    //
+    // Un perfil nace vacío y `adopt: true`, que es la marca que deja a `joinProfile`
+    // cambiar su acta recién nacida por la que traiga la otra bóveda; sin ella, unirse
+    // sería pisar una cuenta con datos y se rechaza, que es lo correcto por defecto.
+    let nacido = null
+    try {
+      const p = await mgr.add(join.name || 'cuenta de la otra bóveda', { adopt: true, kek: join.kek || null })
+      nacido = p.id
+      const id = mgr.get(p.id)?.identity
+      if (!id) throw new Error('no identity for the new profile')
+      const off = id.onVault?.((e) => {
+        if (e?.phase === 'challenge' && e.code) {
+          console.log('[vault] type this code in the other vault:  %s', e.code)
+          answer({ code: e.code, state: 'waiting', profile: p.id })
+        }
+      })
+      // `'current'` y no `'new'`: el perfil que se acaba de crear ES el sitio, y su
+      // llave recién hecha es la que entra en el acta de la otra bóveda. Crear ahí
+      // dentro otra cuenta más sería el bug de arriba otra vez, un nivel más abajo.
+      // `seq` es el del acta con la que la otra bóveda emitió el papel (`pairWithVault`
+      // de @dotrino/identity). Antes se leía `r.acta.seq`, que no existe: el aviso decía
+      // siempre «acta #?».
+      let r
+      try { r = await id.enrollDevice(join.qr, { label: join.label || 'bóveda', join: 'current' }) } finally { off?.() }
+      // LA CUENTA RECIÉN ADOPTADA PASA A SER LA ACTIVA, y no es un capricho: es la
+      // razón por la que se hizo el `join`. Sin esto, el `Perfil 1` vacío que nace en
+      // el primer arranque sigue siendo el destino por defecto y todo lo que hagas
+      // después —emparejar un aparato, aprobarlo— entra en la cuenta equivocada sin
+      // decir nada. En un contenedor que arranca para respaldar una cuenta, ese perfil
+      // vacío no es más que un accidente del primer arranque.
+      try { mgr.profiles.setCurrent(p.id) } catch (_) {}
+      console.log('[vault] joined the account of the other vault (record #%s) as profile %s (now the active one)', r.seq, p.id)
+      answer({ state: 'done', seq: r.seq, profile: p.id })
+      writeState()
+    } catch (e) {
+      console.error('[vault] could not join:', e.message)
+      // El perfil nació para esto y está vacío: si el intento no llegó a término se va
+      // con él. Si no, cada reintento dejaba una cuenta fantasma en el conmutador.
+      if (nacido) { try { await mgr.remove(nacido) } catch (_) {} }
+      answer({ state: 'error', error: e.message })
+    }
+  }
   const secretsListFile = path.join(dir, 'secrets-list.json')
   /**
    * Por qué falló la última orden de variables. La consola pide el cambio y el volcado
@@ -512,49 +564,22 @@ export async function runDaemon () {
       const join = readJsonSafe(joinReqFile)
       if (join?.qr) {
         rm(joinReqFile)
-        rm(joinResFile)
-        // LA CUENTA AJENA VA EN UN PERFIL DEL GESTOR, no en una cuenta interna de la
-        // identidad. Antes esto usaba `enrollDevice(…, { join: 'new' })`, que crea una
-        // cuenta más DENTRO de la identidad de un perfil que ya existía —y el gestor no se
-        // enteraba—: no había instancia de bóveda para ella, nadie se identificaba en el
-        // proxio con esa llave, y el aviso de la otra bóveda —con el acta donde acababa de
-        // conceder `sella`— no llegaba a ninguna parte. Se unía y no servía para nada.
-        //
-        // Un perfil nace vacío y `adopt: true`, que es la marca que deja a `joinProfile`
-        // cambiar su acta recién nacida por la que traiga la otra bóveda; sin ella, unirse
-        // sería pisar una cuenta con datos y se rechaza, que es lo correcto por defecto.
-        let nacido = null
-        try {
-          const p = await mgr.add(join.name || 'cuenta de la otra bóveda', { adopt: true, kek: join.kek || null })
-          nacido = p.id
-          const id = mgr.get(p.id)?.identity
-          if (!id) throw new Error('no identity for the new profile')
-          const off = id.onVault?.((e) => {
-            if (e?.phase === 'challenge' && e.code) {
-              console.log('[vault] type this code in the other vault:  %s', e.code)
-              ipcWrite(joinResFile, { at: Date.now(), code: e.code, state: 'waiting', profile: p.id })
-            }
-          })
-          // `'current'` y no `'new'`: el perfil que se acaba de crear ES el sitio, y su
-          // llave recién hecha es la que entra en el acta de la otra bóveda. Crear ahí
-          // dentro otra cuenta más sería el bug de arriba otra vez, un nivel más abajo.
-          const r = await id.enrollDevice(join.qr, { label: join.label || 'bóveda', join: 'current' })
-          off?.()
-          // LA CUENTA RECIÉN ADOPTADA PASA A SER LA ACTIVA, y no es un capricho: es la
-          // razón por la que se hizo el `join`. Sin esto, el `Perfil 1` vacío que nace en
-          // el primer arranque sigue siendo el destino por defecto y todo lo que hagas
-          // después —emparejar un aparato, aprobarlo— entra en la cuenta equivocada sin
-          // decir nada. En un contenedor que arranca para respaldar una cuenta, ese perfil
-          // vacío no es más que un accidente del primer arranque.
-          try { mgr.profiles.setCurrent(p.id) } catch (_) {}
-          console.log('[vault] joined the account of the other vault (record #%s) as profile %s (now the active one)', r?.acta?.seq ?? '?', p.id)
-          ipcWrite(joinResFile, { at: Date.now(), state: 'done', seq: r?.acta?.seq ?? null, profile: p.id })
-        } catch (e) {
-          console.error('[vault] could not join:', e.message)
-          // El perfil nació para esto y está vacío: si el intento no llegó a término se va
-          // con él. Si no, cada reintento dejaba una cuenta fantasma en el conmutador.
-          if (nacido) { try { await mgr.remove(nacido) } catch (_) {} }
-          ipcWrite(joinResFile, { at: Date.now(), state: 'error', error: e.message })
+        // Cada respuesta lleva el `id` de la petición, para que quien espera no tome por
+        // suya la de otro intento (la TUI y la CLI leen el mismo archivo).
+        const answer = (extra) => ipcWrite(joinResFile, { at: Date.now(), req: join.id || null, ...extra })
+        if (joining) {
+          console.error('[vault] join rejected: another join is still waiting for its code')
+          answer({ state: 'error', errorCode: 'JOIN_BUSY', error: 'another join is still waiting for its code' })
+        } else {
+          rm(joinResFile)
+          joining = true
+          // NO SE ESPERA AQUÍ. Unirse aguarda a que una persona teclee el código en la otra
+          // bóveda —hasta 3 minutos—, y `serve()` atiende las peticiones de una en una: con
+          // un `await` en este punto el daemon no contestaba NADA durante ese rato. La CLI
+          // no lo notaba porque se quedaba quieta esperando; la TUI sí, porque sigue pidiendo
+          // cosas (la lista de bóvedas, el «sigo aquí» del candado) y cada una acababa en
+          // «el daemon no respondió».
+          runJoin(join, answer).finally(() => { joining = false })
         }
       }
       // Secretos: `secret set/rm` (por SCOPE) y `secret device set/rm` (por APARATO),

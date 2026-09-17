@@ -113,6 +113,7 @@ const es = {
   titleProfiles: 'Bóvedas',
   titlePairing: 'Emparejar un dispositivo',
   titlePairMode: 'Emparejar: ¿a qué cuenta entra?',
+  titleJoin: 'Entrar en la cuenta de otra bóveda',
 
   // bóvedas (perfiles)
   noPassword: 'sin clave',
@@ -285,6 +286,22 @@ const es = {
   pairWaiting: 'Esperando a que el dispositivo se conecte…',
   pairQrTooNarrow: (cols, need) => `Agranda el terminal (el QR necesita ${need} cols; hay ${cols}).`,
 
+  // unirse a la cuenta de OTRA bóveda: el papel contrario a emparejar
+  joinInviteLabel: 'Invitación de la otra bóveda',
+  joinInviteHint: 'pega el código o la URL que enseña la otra al pulsar p (Esc cancela)',
+  joinNameLabel: '¿Cómo se llamará aquí esa cuenta?',
+  joinNameHint: 'el nombre con el que la verás en esta lista; vacío = «cuenta de la otra bóveda»',
+  startingJoin: 'Pidiendo entrar en la cuenta…',
+  joinWaiting: 'Conectando con la otra bóveda…',
+  joinCodeIntro: 'Teclea este código en la OTRA bóveda:',
+  joinCodeWhere: (code) => `allí: pulsa a en la pantalla del QR, o ejecuta  dotrino-vault approve ${code}`,
+  joinLeft: (s) => `Esperando la aprobación · quedan ~${s} s`,
+  joinDone: (seq) => `Listo: esta bóveda ya es miembro de esa cuenta (acta #${seq}). Ahora es la bóveda activa.`,
+  joinNextPassword: 'Si la otra bóveda le va a dar «sella», ponle antes contraseña a esta cuenta (c en Bóvedas): sin ella, cualquiera con acceso a esta máquina podría firmar el acta en tu nombre.',
+  joinFailed: (err) => `No se pudo entrar: ${err}`,
+  joinNoReply: 'La bóveda no contestó a tiempo. ¿Se aprobó el código en la otra?',
+  joinInBackground: 'La espera sigue: si la otra bóveda aprueba, la cuenta aparecerá en esta lista.',
+
   // confirmación / entrada
   confirmKeys: '  (s / N)',
   helpInput: 'Enter confirmar · Esc cancelar · Ctrl-U limpiar',
@@ -293,8 +310,8 @@ const es = {
   // Barras de ayuda. Las TECLAS son las mismas en los dos idiomas (mnemónico
   // INGLÉS: new/rename/delete/password/unlock/locK/pair/approve/revoke/refresh/
   // language/quit); lo único que se traduce es la palabra que las explica.
-  // Segmentos, no una línea: el render recorta del medio si no caben.
-  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'u desbloq', 'k bloquear', 'l English', 'q salir'],
+  // Segmentos, no una línea: si no caben en una, el render los reparte en varias.
+  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'u desbloq', 'k bloquear', 'l English', 'q salir'],
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
@@ -330,6 +347,7 @@ const es = {
   revealNoPwd: 'Este perfil no tiene contraseña: se abre con la llave de esta máquina.',
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
+  helpJoin: ['Esc bóvedas', 'l English', 'q salir'],
 
   // pantalla "daemon caído"
   downTitle: 'El daemon del vault no está corriendo.',
@@ -354,6 +372,8 @@ const es = {
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
   errPairFailed: 'El daemon no inició el emparejamiento.',
+  errInviteInvalid: 'Esa invitación no se entiende: pega el código o la URL completos que enseña la otra bóveda.',
+  errJoinBusy: 'Ya hay otra entrada en curso esperando su código: termina esa primero.',
   // El código NO es la contraseña de la bóveda: son los seis dígitos que el aparato
   // enseña en su pantalla. Si no coincide, la bóveda no firma nada y el aparato sigue
   // esperando ahí, así que se puede volver a intentar con A.
@@ -444,6 +464,7 @@ const en = {
   titleProfiles: 'Vaults',
   titlePairing: 'Pair a device',
   titlePairMode: 'Pairing: which account does it join?',
+  titleJoin: 'Join the account of another vault',
 
   noPassword: 'no password',
   noPasswordWarn: 'This profile has no password: a copy of this disk opens the private variables.',
@@ -599,11 +620,26 @@ const en = {
   pairWaiting: 'Waiting for the device to connect…',
   pairQrTooNarrow: (cols, need) => `Widen the terminal (the QR needs ${need} cols; you have ${cols}).`,
 
+  joinInviteLabel: 'Invitation from the other vault',
+  joinInviteHint: 'paste the code or the URL the other one shows when you press p (Esc cancels)',
+  joinNameLabel: 'What should that account be called here?',
+  joinNameHint: 'the name you will see in this list; empty = “account of the other vault”',
+  startingJoin: 'Asking to join the account…',
+  joinWaiting: 'Connecting to the other vault…',
+  joinCodeIntro: 'Type this code in the OTHER vault:',
+  joinCodeWhere: (code) => `there: press a on the QR screen, or run  dotrino-vault approve ${code}`,
+  joinLeft: (s) => `Waiting for approval · ~${s} s left`,
+  joinDone: (seq) => `Done: this vault is now a member of that account (record #${seq}). It is now the active vault.`,
+  joinNextPassword: 'If the other vault is going to grant it “sealer”, set a password on this account first (c in Vaults): without one, anyone with access to this machine could sign the record as you.',
+  joinFailed: (err) => `Could not join: ${err}`,
+  joinNoReply: 'The vault did not answer in time. Was the code approved in the other one?',
+  joinInBackground: 'Still waiting: if the other vault approves, the account will show up in this list.',
+
   confirmKeys: '  (y / N)',
   helpInput: 'Enter confirm · Esc cancel · Ctrl-U clear',
   helpConfirm: 'y confirm · n/Esc cancel',
 
-  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
+  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
   helpDevices: ({ pending, hasDevices, isService } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(pending ? ['a approve', 'x reject'] : []),
@@ -633,6 +669,7 @@ const en = {
   revealNoPwd: 'This profile has no password: it opens with this machine key.',
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
+  helpJoin: ['Esc vaults', 'l Español', 'q quit'],
 
   downTitle: 'The vault daemon is not running.',
   downBody1: 'The TUI gives orders to the daemon (the keeper of your key). Without it',
@@ -655,6 +692,8 @@ const en = {
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',
   errPairFailed: 'The daemon did not start the pairing.',
+  errInviteInvalid: 'That invitation cannot be read: paste the whole code or URL the other vault shows.',
+  errJoinBusy: 'Another join is already waiting for its code: finish that one first.',
   errWrongCode: 'The code does not match the one shown by the device: nobody got in. Check it and press A again.',
   errProfileLocked: 'Vault locked: open it with its password',
   errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,

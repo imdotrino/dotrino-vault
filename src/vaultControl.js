@@ -22,7 +22,7 @@ import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir } from './paths.js'
 // El canal local va cifrado en reposo (ver `ipc.js`).
 import { ipcRead, ipcWrite } from './ipc.js'
-import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
+import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
 
 const dir = dataDir()
 
@@ -37,8 +37,10 @@ const F = {
   me: 'me.json',
   acta: 'acta.json',
   approve: 'approve.json',
+  join: 'join.json',
   // peticiones (las escribe el control; el daemon las consume y borra)
   pairReq: 'pair-request.json',
+  joinReq: 'join-request.json',
   approveReq: 'approve-request.json',
   rejectReq: 'reject-request.json',
   revokeReq: 'revoke-request.json',
@@ -696,4 +698,51 @@ export async function rejectPending (deviceId, profile) {
   await writeReq(F.rejectReq, { deviceId }, profile)
   signalOrCleanup('SIGUSR2', [F.rejectReq])
   await sleep(200)
+}
+
+// ---------------------------------------------------------------------------
+// Unirse a la cuenta de otra bóveda (multivault)
+// ---------------------------------------------------------------------------
+
+/**
+ * La invitación de otra bóveda, lista para `startJoin`, o null si no se entiende. Vale el
+ * código suelto y la URL del QR: es lo que enseña la otra al pulsar `p`.
+ *
+ * Lo que hace falta de verdad es el nonce de la sesión (`sn`) y una forma de alcanzar a la
+ * otra bóveda: la cita del proxio (`conn`) o su llave (`iss`). Misma regla que `join` en
+ * la CLI.
+ */
+export function joinInvite (text) {
+  const qr = parseInvite(String(text || '').trim())
+  return qr?.sn && (qr.conn || qr.iss) ? qr : null
+}
+
+/**
+ * Pide al daemon que ESTA bóveda entre en la cuenta de la otra. Devuelve el `id` de la
+ * petición; el progreso se lee con `joinStatus(id)`.
+ *
+ * No espera al final a propósito: entre medias una persona tiene que teclear en la otra
+ * bóveda el código que sale aquí, y eso son minutos.
+ *
+ * @param {{ invite?: string, name?: string|null }} [opts]
+ */
+export async function startJoin ({ invite, name } = {}) {
+  const qr = joinInvite(invite)
+  if (!qr) throw coded('invalid invitation', 'INVITE_INVALID')
+  requireAlive()
+  rm(F.join)
+  const id = await writeReq(F.joinReq, { qr, label: 'bóveda', ...(name ? { name } : {}) })
+  signalOrCleanup('SIGUSR2', [F.joinReq])
+  return id
+}
+
+/**
+ * Por dónde va el `join` con ese `id`: `{ state: 'waiting', code }`, `{ state: 'done',
+ * seq, profile }` o `{ state: 'error', error, errorCode? }`. null si aún no hay nada suyo.
+ */
+export function joinStatus (id) {
+  const d = read(F.join, null)
+  if (!d) return null
+  if ('req' in d && d.req !== id) return null
+  return d
 }

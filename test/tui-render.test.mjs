@@ -9,6 +9,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { makeTheme, widthOf, trunc } from '../src/tui/term.js'
 import { __test as V } from '../src/tui/app.js'
+import { dict } from '../src/tui/i18n.js'
+import { encodeInvite, inviteUrl } from '../lib/src/invite.js'
+import { joinInvite } from '../src/vaultControl.js'
 
 function fakeTerm (cols = 80, rows = 24) {
   let last = []
@@ -161,18 +164,47 @@ test('el idioma cambia el texto (pestañas, título y ayuda), no el tamaño', ()
   assert.match(term.last[23], /q salir/)
 })
 
-test('la barra de ayuda siempre deja ver el idioma y la salida', () => {
-  // En 80 columnas la ayuda de Bóvedas no cabe entera: se recorta del MEDIO.
+test('la barra de ayuda se reparte en varias líneas y no pierde ninguna tecla', () => {
+  // Antes, en 80 columnas, Bóvedas recortaba la ayuda por el medio y la mitad de las teclas
+  // no existían en pantalla. Ahora tienen que estar TODAS, en las líneas que hagan falta.
   for (const lang of ['es', 'en']) {
+    const segs = dict(lang).helpProfiles
     for (const cols of [120, 80, 60, 40]) {
       const term = fakeTerm(cols, 24)
       V.render(term, baseState({ screen: 'profiles', lang }))
-      const help = term.last[23]
-      assert.ok(/ l /.test(help) || /·\s*l /.test(help), `falta la tecla de idioma en ${cols} cols (${lang}): ${help}`)
-      assert.match(help, /q (salir|quit)/, `falta la salida en ${cols} cols (${lang})`)
-      assert.equal(widthOf(help), cols)
+      const n = V.wrapHelp(segs, cols).length
+      const block = term.last.slice(24 - n)
+      for (const l of block) assert.equal(widthOf(l), cols, `cada línea de ayuda llena el ancho (${cols})`)
+      const text = block.join('\n')
+      for (const seg of segs) assert.ok(text.includes(seg), `falta «${seg}» en ${cols} cols (${lang}):\n${text}`)
+      assert.match(term.last[23], /q (salir|quit)/, 'la salida sigue en la última fila')
+      // La línea de estado va justo encima, y el contenido no se pisa con la ayuda.
+      assert.ok(!/·/.test(term.last[24 - n - 1]), 'la fila de estado no es ayuda')
     }
   }
+})
+
+test('en un terminal bajo, la ayuda no se come el contenido y conserva idioma y salida', () => {
+  for (const lang of ['es', 'en']) {
+    const term = fakeTerm(40, 10)
+    V.render(term, baseState({ screen: 'profiles', lang }))
+    const last = term.last[9]
+    assert.ok(/ l /.test(last) || /·\s*l /.test(last), `falta el idioma: ${last}`)
+    assert.match(last, /q (salir|quit)/)
+  }
+})
+
+test('wrapHelp: segmentos enteros, ancho respetado y tope de líneas', () => {
+  const segs = ['↑↓', 'aaaa uno', 'bbbb dos', 'cccc tres', 'dddd cuatro', 'l English', 'q salir']
+  assert.deepEqual(V.wrapHelp(segs, 200), [segs.join(' · ')], 'si cabe, una sola línea')
+  const lines = V.wrapHelp(segs, 30)
+  assert.ok(lines.length > 1)
+  for (const l of lines) assert.ok(widthOf(l) + 1 <= 30, `no cabe: ${l}`)
+  assert.deepEqual(lines.join(' · ').split(' · '), segs, 'ningún segmento se parte ni se pierde')
+  const capped = V.wrapHelp(segs, 30, 2)
+  assert.equal(capped.length, 2)
+  assert.ok(capped[1].includes('l English') && capped[1].includes('q salir'), 'con tope, la última conserva la cola')
+  assert.deepEqual(V.wrapHelp([], 40), [''], 'sin segmentos, una línea vacía')
 })
 
 test('fitHelp respeta el ancho y conserva la cola', () => {
@@ -861,4 +893,116 @@ test('renombrar una variable no bloquea el bucle de teclas', async () => {
   // Y el cuadro se cierra solo con Esc, sin dejar nada colgado.
   await st.input.onCancel()
   assert.equal(st.input, null)
+})
+
+// ---------------------------------------------------------------------------
+// Unirse a la cuenta de otra bóveda desde la TUI (`j` en Bóvedas)
+// ---------------------------------------------------------------------------
+
+const QR = { v: 2, sn: 'abcdef0123456789', conn: 'xy12ab', proxy: 'wss://proxy.dotrino.com' }
+
+test('j: una invitación que no se entiende se dice ANTES de preguntar el nombre', async () => {
+  const term = fakeTerm()
+  const st = baseState()
+  let started = false
+  const api = { joinInvite, startJoin: async () => { started = true; return 'r1' } }
+  V.promptJoin(term, st, api)
+  st.input.value = 'esto no es una invitación'
+  await st.input.onSubmit(st.input.value)
+  assert.equal(st.input, null, 'no se pide el nombre')
+  assert.equal(started, false, 'ni se le pide nada al daemon')
+  assert.match(st.flash.text, /invitación no se entiende/)
+})
+
+test('j: vale el código suelto y la URL del QR, y lleva el nombre al daemon', async () => {
+  for (const pegado of [encodeInvite(QR), inviteUrl(QR)]) {
+    const term = fakeTerm()
+    const st = baseState()
+    let pedido = null
+    const api = { joinInvite, startJoin: async (o) => { pedido = o; return 'r1' } }
+    V.promptJoin(term, st, api)
+    await st.input.onSubmit(pegado)
+    assert.ok(st.input, 'la invitación vale: ahora pregunta el nombre')
+    await st.input.onSubmit('  Cepi  ')
+    assert.deepEqual(pedido, { invite: pegado, name: 'Cepi' })
+    assert.equal(st.screen, 'join')
+    assert.equal(st.join.id, 'r1')
+    assert.equal(st.join.state, 'waiting')
+  }
+})
+
+test('j: la pantalla enseña el código, termina en la cuenta nueva y avisa de la contraseña', async () => {
+  const term = fakeTerm()
+  const perfiles = { current: 'p2', profiles: [
+    { id: 'p1', name: 'Perfil 1', protected: false, locked: false, current: false, fingerprint: 'fp1' },
+    { id: 'p2', name: 'Cepi', protected: false, locked: false, current: true, fingerprint: 'fp2' }
+  ] }
+  let status = null
+  const api = {
+    joinStatus: (id) => (id === 'r1' ? status : null),
+    listProfiles: async () => perfiles,
+    snapshot: async () => ({ profiles: perfiles, devices: { issued: [], revoked: [] }, secrets: { ns: {}, dev: [] }, record: { members: [] } }),
+    deviceIdOf: async () => 'AB12-CD34'
+  }
+  const st = baseState({ screen: 'join', join: { id: 'r1', startedAt: Date.now(), state: 'waiting', code: null } })
+  const tick = { name: 'tick' }
+
+  await V.onKeyJoin(term, st, tick, api)
+  assert.match(V.joinBody(st, term.t, 80).join('\n'), /Conectando/)
+
+  status = { req: 'r1', state: 'waiting', code: '482913' }
+  await V.onKeyJoin(term, st, tick, api)
+  const conCodigo = V.joinBody(st, term.t, 80).join('\n')
+  assert.match(conCodigo, /482913/)
+  assert.match(conCodigo, /OTRA bóveda/)
+  V.render(term, st)
+  assert.match(term.last[3], /Entrar en la cuenta de otra bóveda/)
+
+  status = { req: 'r1', state: 'done', seq: 7, profile: 'p2' }
+  await V.onKeyJoin(term, st, tick, api)
+  assert.equal(st.join.state, 'done')
+  assert.equal(st.sel.profiles, 1, 'la selección queda sobre la cuenta nueva')
+  const hecho = V.joinBody(st, term.t, 60).join('\n')
+  assert.match(hecho, /acta #7/)
+  assert.match(hecho, /contraseña/)
+  for (const l of V.joinBody(st, term.t, 60)) assert.ok(widthOf(l) <= 60, 'el aviso se parte al ancho')
+
+  await V.onKeyJoin(term, st, { name: 'enter' }, api)
+  assert.equal(st.screen, 'profiles')
+  assert.equal(st.join, null)
+})
+
+test('j: un error del daemon se traduce, y salir esperando dice que la espera sigue', async () => {
+  const term = fakeTerm()
+  const api = { joinStatus: () => ({ req: 'r1', state: 'error', errorCode: 'JOIN_BUSY', error: 'another join is still waiting for its code' }), listProfiles: async () => baseState().profiles }
+  const st = baseState({ screen: 'join', join: { id: 'r1', startedAt: Date.now(), state: 'waiting', code: null } })
+  await V.onKeyJoin(term, st, { name: 'tick' }, api)
+  assert.equal(st.join.state, 'error')
+  assert.match(V.joinBody(st, term.t, 80).join(' '), /Ya hay otra entrada en curso/)
+
+  const st2 = baseState({ screen: 'join', join: { id: 'r2', startedAt: Date.now(), state: 'waiting', code: '111222' } })
+  await V.onKeyJoin(term, st2, { name: 'escape' }, { listProfiles: async () => baseState().profiles })
+  assert.equal(st2.screen, 'profiles')
+  assert.match(st2.flash.text, /La espera sigue/)
+})
+
+test('j: la respuesta de OTRO intento no se toma por la propia', async () => {
+  const term = fakeTerm()
+  const st = baseState({ screen: 'join', join: { id: 'r1', startedAt: Date.now(), state: 'waiting', code: null } })
+  // `joinStatus` de verdad filtra por `req`; aquí se simula que ya lo hizo y no hay nada.
+  await V.onKeyJoin(term, st, { name: 'tick' }, { joinStatus: () => null })
+  assert.equal(st.join.state, 'waiting')
+  // Y si nunca contesta nadie, se rinde con un mensaje que dice qué mirar.
+  st.join.startedAt = Date.now() - 10 * 60 * 1000
+  await V.onKeyJoin(term, st, { name: 'tick' }, { joinStatus: () => null })
+  assert.equal(st.join.state, 'error')
+  assert.match(st.join.error, /aprobó el código/)
+})
+
+test('j en Bóvedas abre el cuadro de la invitación', async () => {
+  const term = fakeTerm()
+  const st = baseState()
+  await V.onKeyProfiles(term, st, { name: 'char', ch: 'j' })
+  assert.ok(st.input)
+  assert.match(st.input.label, /Invitación de la otra bóveda/)
 })

@@ -453,7 +453,10 @@ async function cmdJoin (rest) {
   const s = requireDaemon()
   const res = path.join(dir, 'join.json')
   try { fs.rmSync(res, { force: true }) } catch (_) {}
-  writeReq('join-request.json', { qr, label: 'bóveda', ...(name ? { name } : {}), ...(kek ? { kek } : {}) })
+  // El `id` vuelve en cada respuesta: el daemon ya no se bloquea mientras espera, así que
+  // otra consola puede lanzar su propio `join` y su respuesta cae en el mismo archivo.
+  const reqId = crypto.randomUUID()
+  writeReq('join-request.json', { id: reqId, qr, label: 'bóveda', ...(name ? { name } : {}), ...(kek ? { kek } : {}) })
   sendSignal(s.pid, 'SIGUSR2')
 
   console.log('Entrando en la cuenta de la otra bóveda…')
@@ -461,7 +464,7 @@ async function cmdJoin (rest) {
   for (let i = 0; i < 900; i++) {          // hasta 3 min: hay un humano tipeando al otro lado
     await sleep(200)
     const d = ipcRead(res, null)
-    if (!d) continue
+    if (!d || ('req' in d && d.req !== reqId)) continue
     if (d.code && d.code !== visto) {
       visto = d.code
       console.log('\n  Tipea este código en la OTRA bóveda:   dotrino-vault approve %s\n', d.code)
