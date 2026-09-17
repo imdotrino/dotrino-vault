@@ -226,7 +226,7 @@ F4 lleva las dos cosas a la misma pantalla a propósito. Dos listas —«mis ses
 | **Correo respaldado** | ¿`profile:email` se bloquea hasta que `@dotrino/verifier` esté cableado, o se entrega marcado como *declarado*? |
 | **Sesión sin teléfono a mano** | Si el único miembro con `approve` está apagado, ¿se puede entrar de otro modo, o se acepta que no? |
 | **Enseñar la sesión al otro lado** | Un servicio que ve una sesión, ¿debe distinguirla de un aparato en su registro? |
-| **Contraseñas desde una sesión** | Propuesta del 2026-09-17: que una sesión **pida** contraseñas (`passwords:ask`) y cada entrega la apruebe el teléfono. Choca con §8 («ni con permiso») y por eso no se construye sin decisión. Detalle en [`dotrino-passmanager/docs/temporary-access.md`](../../dotrino-passmanager/docs/temporary-access.md). |
+| ~~**Contraseñas desde una sesión**~~ | **Descartado (2026-09-17).** Para usar el gestor en un equipo prestado el dueño eligió **un aparato que se abre con usuario y contraseña** —miembro del acta, llave cifrada en la bóveda, OPAQUE—, no una sesión. §8 no cambia. Detalle en [`dotrino-passmanager/docs/temporary-access.md`](../../dotrino-passmanager/docs/temporary-access.md). |
 
 ## 10. Referencias
 
