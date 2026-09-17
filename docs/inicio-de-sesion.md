@@ -226,11 +226,11 @@ F4 lleva las dos cosas a la misma pantalla a propósito. Dos listas —«mis ses
 | Tema | Pregunta |
 |---|---|
 | ~~**Alcance de la sesión**~~ | **Decidido (2026-09-05): firma sola lo de bajo riesgo.** Todo a demanda obliga a molestar al aparato que respalda en cada mensaje del transporte. La lista quedó en `id:whoami` y `vault:store`; firmar por la persona no está, y eso es lo que se pide al aparato. |
-| **Duración** | Por ahora 8 h por defecto y tope de 24, sin renovación: cuando vence se vuelve a entrar. Falta decidir si se renueva sola mientras el que respalda esté vivo. |
-| **Identificador por pares** | Heredada del SSO: ¿el mismo `sub` en todas las aplicaciones, o derivado por aplicación para que nadie pueda cruzarlas? |
-| **Correo respaldado** | ¿`profile:email` se bloquea hasta que `@dotrino/verifier` esté cableado, o se entrega marcado como *declarado*? |
-| **Sesión sin teléfono a mano** | Si el único miembro con `approve` está apagado, ¿se puede entrar de otro modo, o se acepta que no? |
-| **Enseñar la sesión al otro lado** | Un servicio que ve una sesión, ¿debe distinguirla de un aparato en su registro? |
+| ~~**Duración**~~ | **Decidido (2026-09-17): no se renueva.** 8 h por defecto y tope de 24; cuando vence se vuelve a entrar. |
+| ~~**Identificador por pares**~~ | **Decidido (2026-09-17): el mismo `sub` en todas las aplicaciones.** La misma persona es reconocible entre servicios; a cambio, dos aplicaciones pueden cruzarla. |
+| ~~**Correo respaldado**~~ | **Decidido (2026-09-17): se bloquea hasta verificar.** `profile:email` no entrega nada hasta que `@dotrino/verifier` respalde el correo; un correo declarado no sale. **Pendiente de implementar**: hoy el puente lo entrega sin `email_verified`. |
+| ~~**Sesión sin teléfono a mano**~~ | **Decidido (2026-09-17): por ahora no.** Sin un aprobador encendido no se abre una sesión con QR. (Otra puerta distinta es el aparato que se abre con usuario y contraseña, `dotrino-passmanager/docs/temporary-access.md`.) |
+| ~~**Enseñar la sesión al otro lado**~~ | **Decidido (2026-09-17): sí.** Un servicio que recibe algo de una sesión lo registra como sesión —con su `sid` y el aparato que la respalda—, no como si fuera ese aparato. **Pendiente de implementar.** |
 | ~~**Contraseñas desde una sesión**~~ | **Descartado (2026-09-17).** Para usar el gestor en un equipo prestado el dueño eligió **un aparato que se abre con usuario y contraseña** —miembro del acta, llave cifrada en la bóveda, OPAQUE—, no una sesión. §8 no cambia. Detalle en [`dotrino-passmanager/docs/temporary-access.md`](../../dotrino-passmanager/docs/temporary-access.md). |
 
 ## 10. Referencias
