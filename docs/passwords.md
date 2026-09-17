@@ -4,6 +4,11 @@
 > ecosistema el 2026-08-27. Al día con `@dotrino/passmanager` 0.5.1 el 2026-08-29: la
 > aprobación es **solo para lo privado**, y guardar es `patch`. 15 tests propios, 278 en
 > la suite del vault.
+>
+> ⚠️ **Agujero abierto (2026-09-17):** la `cek` de esta bóveda vive en `passwords.json` bajo
+> la llave de la **máquina**, así que la mesa descifra y entrega con el perfil cerrado.
+> Propuesta para cerrarlo, sin decidir:
+> [`dotrino-passmanager/docs/sealed-passwords.md`](../../dotrino-passmanager/docs/sealed-passwords.md).
 
 ## Qué es
 
