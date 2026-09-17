@@ -58,6 +58,11 @@ Decisión del dueño: **existen las dos, y cada una tiene su caso.**
 abierta y la aprobación de siempre. **Ninguna aplicación decide eso sola**, y
 tampoco se ofrece «recuérdame en este equipo» como forma encubierta de enrolar.
 
+> **Matiz del dueño (2026-09-17):** el aparato que se abre con usuario y contraseña **sí**
+> lleva una casilla «Recordar». No es una sesión convertida en aparato: ese aparato ya está en
+> el acta con sus permisos, su llave vive en la bóveda, y el inicio se cierra desde la consola.
+> Ver [`dotrino-passmanager/docs/temporary-access.md`](../../dotrino-passmanager/docs/temporary-access.md) §3.4.
+
 ## 3. La pieza común: la prueba con destinatario
 
 Es la **fase 0** y sirve a las tres direcciones. Vive en `@dotrino/identity` y su
