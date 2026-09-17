@@ -22,6 +22,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { makeDeviceKey, signDelegationWith } from '@dotrino/identity/capabilities'
+import { genesisActa, applyChanges, sealActa } from '@dotrino/identity/acta'
 import { startDeviceVault } from '../lib/src/index.js'
 import { startRemoteAgent } from '@dotrino/remote-agent/agent'
 
@@ -33,31 +34,27 @@ async function deviceIdentity () {
   const iss = JSON.stringify(await crypto.subtle.exportKey('jwk', pair.publicKey))
   const issued = []
   const revoked = []
-  // ACTA de mentira con la forma que importa: quién es miembro, qué puede y su `seq`. Hace
-  // falta porque el papel ya no se juzga solo — lleva el `seq` del acta con el que se emitió
-  // y todos los mostradores cruzan el cert con lo que el acta dice HOY.
-  const acta = {
-    v: 5, profileId: iss, sealedBy: iss, seq: 1,
-    members: [{ pub: iss, label: 'esta bóveda', caps: ['sign', 'read', 'store', 'sealer'] }],
-    renounced: []
-  }
+  // ACTA DE VERDAD, sellada con la llave de esta bóveda. Hace falta porque el papel ya no se
+  // juzga solo —lleva el `seq` del acta con el que se emitió— y porque quien recibe el papel
+  // comprueba que el acta que viaja con él esté bien firmada (`checkVaultReply`, identity
+  // 0.92.0). Antes era un objeto «con la forma que importa» y sin firma, que es exactamente
+  // lo que un acta inventada por el camino también tiene.
+  const privateJwk = await crypto.subtle.exportKey('jwk', pair.privateKey)
+  const sellar = (a) => sealActa({ acta: a, privateJwk })
+  let acta = await sellar(genesisActa({ pub: iss, label: 'esta bóveda' }))
+  const cambiar = async (changes) => { acta = await sellar(await applyChanges(acta, changes, { by: iss })); return { ok: true, seq: acta.seq } }
   return {
     me: { publickey: iss, encryptionPubkey: null },
     iss,
     issued,
     revoked,
-    acta,
+    get acta () { return acta },
     async profileActa () { return { acta, isMaster: true } },
     async admitMember ({ pub, label = '', cn = null, caps = [] }) {
-      acta.members.push({ pub, label, ...(cn ? { cn } : {}), caps })
-      acta.seq++
-      return { ok: true, seq: acta.seq }
+      return cambiar([{ op: 'admit', member: { pub, label, cn, caps } }])
     },
     async setCaps (pub, caps) {
-      const m = acta.members.find((x) => x.pub === pub)
-      if (m) m.caps = caps
-      acta.seq++
-      return { ok: true, seq: acta.seq }
+      return cambiar([{ op: 'caps', pub, caps }])
     },
     async signDelegation (sub, scope, { label = '' } = {}) {
       const iat = Date.now()
