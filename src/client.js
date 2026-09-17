@@ -11,19 +11,10 @@
  * estrictamente (firmado por la maestra que vio en el QR, y para SU clave) antes de
  * guardarlo. La maestra nunca sale del vault.
  */
-import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey, signWithDevice, verifyDelegation, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey, signWithDevice, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
 import { myContentKey, encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
-import { sealersOf } from '@dotrino/identity/acta'
-
-/**
- * Con qué se juzga un papel: el ACTA que la bóveda manda junto a él. Sustituye a comparar
- * `cert.iss` con la maestra — con varias selladoras el emisor puede ser otra llave del mismo
- * perfil, así que lo que se fija es el PERFIL, no la llave.
- */
-function contexto (acta) {
-  if (!acta) throw new Error('the vault did not send its record: cannot check who signed this cert')
-  return { actaSeq: acta.seq, sealers: sealersOf(acta) }
-}
+// Con qué se juzga lo que devuelve la bóveda (papel + acta): la regla del pilar, una sola.
+import { checkVaultReply } from '@dotrino/identity/acta'
 import { installNodeGlobals } from './node-globals.js'
 import { MSG } from './protocol.js'
 
@@ -102,11 +93,11 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
     client.sendByPubkey(qr.iss, { type: MSG.ENROLL, data, signature })
     const res = await enrolled
 
-    // VALIDACIÓN ESTRICTA antes de persistir (cierra inyección de cert / sustitución de maestra).
-    if (res.acta?.profileId !== qr.iss) throw new Error('the record is from a profile other than the one you saw (possible malicious proxy)')
-    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey, ...contexto(res.acta) })
-    if (!v.ok) throw new Error('invalid cert: ' + v.reason)
-    if (res.cert.sub !== device.publickey) throw new Error('cert issued for a different device')
+    // VALIDACIÓN ESTRICTA antes de persistir (cierra inyección de cert / sustitución de maestra),
+    // contra la llave de la bóveda del QR y con la regla del pilar: vale también para una
+    // segunda bóveda o una que adoptó la cuenta, donde esa llave no es el `profileId`.
+    const chk = await checkVaultReply({ acta: res.acta, cert: res.cert, vault: qr.iss, sub: device.publickey, justSealed: true })
+    if (!chk.ok) throw new Error('the vault reply does not check out: ' + chk.reason)
     // OJO: devolvemos qr.iss (la maestra que el usuario VIO), NO res.iss.
     return { device: { ...device, encPublickey: enc.encPublickey, encPrivateJwk: enc.encPrivateJwk }, cert: res.cert, iss: qr.iss, acta: res.acta }
   } finally { client.close() }
@@ -168,11 +159,10 @@ export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, dir 
     client.sendByPubkey(masterPubkey, { type: MSG.RENEW, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) throw new Error(res.error)
-    // Se valida antes de devolverlo, igual que en el enrolamiento: un cert que no está
-    // firmado por la maestra que ya conocemos, o que no es para esta llave, no se guarda.
-    if (res.acta?.profileId !== masterPubkey) throw new Error('the record is from a profile other than the pinned one')
-    const v = await verifyDelegation({ cert: res.cert, expectedSub: device.publickey, ...contexto(res.acta) })
-    if (!v.ok) throw new Error('invalid cert: ' + v.reason)
+    // Se valida antes de devolverlo, igual que en el enrolamiento: un cert que no firmó la
+    // bóveda que ya conocemos, o que no es para esta llave, no se guarda.
+    const chk = await checkVaultReply({ acta: res.acta, cert: res.cert, vault: masterPubkey, sub: device.publickey })
+    if (!chk.ok) throw new Error('invalid renewed cert: ' + chk.reason)
     return { cert: res.cert }
   } finally { client.close() }
 }
