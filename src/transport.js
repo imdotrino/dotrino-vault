@@ -202,5 +202,50 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
   // Re-identificar al reconectar (el token cambia).
   client.on('token', () => { fallos = 0; identifyWithRetry() })
 
+  /**
+   * QUE NO SE PUEDA VOLVER A QUEDAR MUDA.
+   *
+   * El 16 de septiembre esta bóveda se cayó del proxio y no volvió en 36 HORAS, con el
+   * proceso vivo y sin una sola línea en el log: el cliente del transporte se rendía tras
+   * un reintento fallido (arreglado en `@dotrino/proxy-client` 0.23.0). Desde fuera eso se
+   * ve igual que «no pasa nada»: el teléfono no timbra y nadie sabe por qué.
+   *
+   * El arreglo del pilar quita ESA causa. Esto quita el SILENCIO, que es lo que costó las
+   * 36 horas — con cualquier causa, futura incluida:
+   *
+   *   · se dice cuándo se cae y cuándo vuelve, una vez cada cosa (no una línea cada 4 s);
+   *   · y si lleva 5 minutos fuera, se vuelve a marcar en vez de esperar sentada.
+   *
+   * `connect()` es seguro de repetir: si ya está conectado devuelve el token y no abre
+   * nada.
+   */
+  const RECHECK_MS = 60_000
+  const PATIENCE_MS = 5 * 60_000
+  let downSince = 0
+  let saidDown = false
+  client.on('disconnect', ({ code, reason } = {}) => {
+    if (!downSince) downSince = Date.now()
+    if (saidDown) return
+    saidDown = true
+    log(`[vault] off the proxy (${code || '?'}${reason ? ': ' + reason : ''}) — nobody can reach this vault while this lasts`)
+  })
+  client.on('reconnect_failed', (attempts) => {
+    log(`[vault] the transport gave up reconnecting after ${attempts} attempt(s) — this vault is unreachable until it is restarted`)
+  })
+  const watchdog = setInterval(async () => {
+    if (identificado && client.token) {
+      if (downSince) log(`[vault] back on the proxy after ${Math.round((Date.now() - downSince) / 1000)}s`)
+      downSince = 0; saidDown = false
+      return
+    }
+    if (!downSince) downSince = Date.now()
+    const downMs = Date.now() - downSince
+    if (downMs < PATIENCE_MS) return
+    log(`[vault] ${Math.round(downMs / 60000)} min off the proxy — dialling again`)
+    try { await client.connect() } catch (e) { log(`[vault] could not reconnect: ${e.message}`) }
+    await identifyWithRetry()
+  }, RECHECK_MS)
+  watchdog.unref?.()
+
   return { client, token: client.token, identify: identifyWithRetry, isIdentified: () => identificado }
 }
