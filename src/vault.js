@@ -15,8 +15,9 @@ import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain as verifyChainRaw, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
+import { createLoginDesk, registerLogin } from '../lib/src/passwordLogins.js'
 import * as ActaPilar from '@dotrino/identity/acta'
-import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS } from '../lib/src/enroll.js'
+import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS, scopeToCaps, scopeToCn } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
 import { shouldNotifyRevoked } from '../lib/src/revocation.js'
 // El sobre del gestor, el mismo que usan la bóveda-en-pestaña y la extensión.
@@ -217,6 +218,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       writePasswordsFile(d)
     },
   }
+
+  // ENTRAR CON USUARIO Y CONTRASEÑA (`passwordLogins.js`). Va cifrado en reposo con la llave
+  // de la MÁQUINA y no con la de la contraseña del perfil, por lo mismo que la llave de
+  // comunicación: entrar tiene que funcionar con el perfil cerrado. Lo que hay dentro no
+  // abre nada por sí solo — el registro de OPAQUE no deja probar contraseñas sin el
+  // protocolo, y el paquete de llaves está cerrado con la llave que sale de la contraseña.
+  const loginsFile = path.join(dir, 'logins.json')
+  const loginsAtRest = atRestFor(dir)
+  const logins = createLoginDesk({
+    load: () => { try { return JSON.parse(loginsAtRest.decrypt(fs.readFileSync(loginsFile, 'utf8'))) } catch (_) { return null } },
+    save: (state) => fs.writeFileSync(loginsFile, loginsAtRest.encrypt(JSON.stringify(state)), { mode: 0o600 })
+  })
 
   /** Los aparatos que el acta autoriza a pedir credenciales (`caps <ID> +contraseñas`). */
   const passwordDevices = () => (actaCache?.members || []).filter((m) => Acta.memberCan(actaCache, m.pub, 'passwords'))
@@ -1071,6 +1084,66 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * nombre de SU propia llave, que no le sirve contra nadie más (`verifyRevoke` exige que
    * el aviso nombre al aparato que lo recibe).
    */
+  // --- ENTRAR CON USUARIO Y CONTRASEÑA ---------------------------------------------------
+  //
+  // Los tres únicos mensajes que se atienden SIN certificado, porque quien pregunta todavía
+  // no tiene llaves: están dentro del paquete que solo abre su contraseña. La bóveda no ve
+  // la contraseña en ningún momento (OPAQUE), y responde igual exista o no el usuario.
+  //
+  // Funcionan con el perfil CERRADO: el paquete se devuelve tal cual, sin abrir nada. Lo que
+  // sí exige la bóveda abierta es CREAR el aparato, porque eso sella el acta.
+
+  function loginError (from, e) {
+    if (e?.code === 'too-many-tries') {
+      return reply(from, { type: MSG.ERROR, error: e.message, code: e.code, waitMs: e.waitMs || 0 })
+    }
+    if (e?.code === 'login-failed' || e?.code === 'no-exchange' || e?.code === 'bad-input' || e?.code === 'bad-user') {
+      return reply(from, { type: MSG.ERROR, error: e.message, code: e.code })
+    }
+    log('[vault] login: %s', e?.message || e)
+    reply(from, { type: MSG.ERROR, error: 'login failed', code: 'login-error' })
+  }
+
+  async function handleLoginStart (from, p) {
+    try {
+      const { lid, response } = logins.loginBegin({ user: p?.user, request: p?.request })
+      audit('login.start', { user: String(p?.user || '').slice(0, 32) })
+      reply(from, { type: MSG.LOGIN_RESPONSE, lid, response })
+    } catch (e) { loginError(from, e) }
+  }
+
+  async function handleLoginFinish (from, p) {
+    try {
+      const r = logins.loginEnd({ lid: p?.lid, finalization: p?.finalization, label: p?.label })
+      const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+      audit('login.ok', { user: r.user, sid: r.sid.slice(0, 8) })
+      log('[vault] login: %s entered (session %s)', r.user, r.sid.slice(0, 8))
+      reply(from, { type: MSG.LOGIN_OK, sid: r.sid, blob: r.blob, cert: r.cert, iss: r.iss || identity.me?.publickey || null, acta: record })
+    } catch (e) { loginError(from, e) }
+  }
+
+  /**
+   * SALIR. Va firmado con la llave del propio aparato —la que acaba de abrir— porque cerrar
+   * la sesión de otro sería echarlo de su cuenta.
+   */
+  async function handleLoginClose (from, p) {
+    if (!isFresh(p?.data)) return staleReply(from)
+    const d = p.data
+    if (d?.op !== 'login.close' || typeof d.publickey !== 'string' || typeof d.user !== 'string' || typeof d.sid !== 'string') {
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: shape', code: 'bad-input' })
+    }
+    if (!(await verifyDeviceSig({ publickey: d.publickey, data: d, signature: p.signature }))) {
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: bad-signature', code: 'bad-signature' })
+    }
+    const mine = logins.list().find((x) => x.user === d.user)
+    if (!mine || mine.pub !== d.publickey) {
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: that key does not own this login', code: 'not-yours' })
+    }
+    const r = logins.closeSession({ user: d.user, sid: d.sid })
+    audit('login.close', { user: d.user, sid: d.sid.slice(0, 8), by: 'device' })
+    reply(from, { type: MSG.LOGIN_CLOSED, ok: r.ok })
+  }
+
   async function handleCheck (from, p) {
     if (!isFresh(p?.data)) return staleReply(from)
     const pub = p.data.publickey
@@ -1632,6 +1705,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
       if (payload.type === MSG.ADMIN_EVENT) return await handleAdminEvent(payload)
       if (payload.type === MSG.REPLICA_ACK) return await handleReplicaAck(from, payload)
+      if (payload.type === MSG.LOGIN_START) return await handleLoginStart(from, payload)
+      if (payload.type === MSG.LOGIN_FINISH) return await handleLoginFinish(from, payload)
+      if (payload.type === MSG.LOGIN_CLOSE) return await handleLoginClose(from, payload)
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: e.message })
     }
@@ -3375,6 +3451,42 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // llave. Lo que no puede es listarla un aparato.
     passwordDevices,
     passwordsVault: () => passwords?.vault || null,
+    // --- ENTRAR CON USUARIO Y CONTRASEÑA -------------------------------------------------
+    //
+    // El alta va en DOS pasos porque la contraseña no pasa por aquí: quien crea el aparato
+    // (la CLI, en esta máquina) hace su mitad de OPAQUE, genera las llaves del aparato y las
+    // cierra con la llave que sale de la contraseña. La bóveda solo guarda lo que no puede
+    // abrir, sella el acta y firma el certificado — y eso último sí pide el perfil abierto.
+    listLogins: () => logins.list(),
+    loginRegisterBegin: ({ user, request, replace = false }) => logins.registerBegin({ user, request, replace }),
+    // El alta es la MISMA pieza que usa la bóveda-pestaña (`registerLogin`): aquí solo se
+    // añade lo que es del binario — la bitácora y el aviso a los demás aparatos.
+    loginRegisterFinish: async (opts) => {
+      const r = await registerLogin({ ...opts, identity, logins })
+      if (r.replaced) { audit('login.passwd', { user: r.user }); return r }
+      audit('login.create', { user: r.user, device: r.deviceId, caps: r.caps })
+      await notifyMembers('enrolled', { deviceId: r.deviceId, by: 'login' })
+      return r
+    },
+    // ENTRAR DESDE ESTA MISMA MÁQUINA. Es el mismo intercambio que hace un navegador por el
+    // proxio, y pasa por el mismo freno: lo usa `logins passwd`, que necesita abrir el
+    // paquete de llaves con la contraseña vieja antes de volver a cerrarlo con la nueva.
+    loginBegin: ({ user, request }) => logins.loginBegin({ user, request }),
+    loginEnd: ({ lid, finalization, label }) => logins.loginEnd({ lid, finalization, label }),
+    closeLogin: ({ user, sid }) => {
+      const r = logins.closeSession({ user, sid })
+      if (r.ok) audit('login.close', { user, sid: String(sid).slice(0, 8), by: 'console' })
+      return r
+    },
+    clearLoginBlock: ({ user }) => logins.clearBlock({ user }),
+    removeLogin: async ({ user }) => {
+      const found = logins.list().find((x) => x.user === user)
+      if (!found) return { ok: false }
+      logins.remove({ user })
+      audit('login.remove', { user, device: found.deviceId })
+      // Quitarlo de aquí no lo saca del acta: lo suyo es revocar el aparato, y eso ya existe.
+      return { ok: true, pub: found.pub, deviceId: found.deviceId }
+    },
     listApprovals: () => approvals.list(),
     // LAS CONCESIONES VIVAS, para verlas y para cortarlas. Se enseñan en la máquina del
     // dueño (TUI/CLI), donde el contexto ya es suyo y no hay nada que sellar.

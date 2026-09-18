@@ -324,6 +324,12 @@ export async function runDaemon () {
   let lastSecretValue = null
   /** Y las versiones anteriores que se acaban de pedir. Mismo camino, mismo volcado. */
   let lastSecretHistory = null
+  // ENTRAR CON USUARIO Y CONTRASEÑA, desde esta máquina (`dotrino-vault logins`).
+  //
+  // La respuesta NO se llama `logins.json`: ese nombre ya es el almacén del escritorio en
+  // el dir del perfil, y pisarlo sería borrar los inicios de sesión al listarlos.
+  const loginsReqFile = path.join(dir, 'logins-request.json')
+  const loginsFile = path.join(dir, 'logins-list.json')
   const profileReqFile = path.join(dir, 'profile-request.json')
   const dumpReqFile = path.join(dir, 'dump-request.json')
   const meReqFile = path.join(dir, 'me-request.json')
@@ -365,6 +371,54 @@ export async function runDaemon () {
    * milisegundos, que es la diferencia entre «estaba ahí» y «estuvo».
    */
   const wipe = (k) => { try { if (k instanceof Uint8Array) k.fill(0) } catch (_) {} }
+
+  /**
+   * Los inicios de sesión con contraseña de ESTA máquina (`dotrino-vault logins`).
+   *
+   * LA CONTRASEÑA NO PASA POR AQUÍ, y esa es la razón de que el alta vaya en dos viajes en
+   * vez de uno: quien la teclea es la CLI, que hace su mitad de OPAQUE, genera las llaves
+   * del aparato y las cierra con la llave que sale de la contraseña. Aquí solo entran
+   * mensajes del protocolo y un paquete que esta máquina no puede abrir.
+   */
+  async function handleLoginsRequest (req) {
+    const vault = targetOf(req)
+    if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
+    // La huella de la CUENTA viaja en cada respuesta: es la mitad de después de la `@` de
+    // la dirección, y quien pregunta no puede sacarla por su cuenta sin adivinar a qué
+    // perfil apuntaba la petición.
+    return { fingerprint: vault.fingerprint || null, ...(await loginsOp(vault, req)) }
+  }
+
+  async function loginsOp (vault, req) {
+    switch (req.op) {
+      case 'list': return { logins: vault.listLogins() }
+      case 'register-begin': return vault.loginRegisterBegin({ user: req.user, request: req.request, replace: !!req.replace })
+      case 'register-finish': return vault.loginRegisterFinish({
+        user: req.user, upload: req.upload, pub: req.pub, encPub: req.encPub || null,
+        label: req.label || '', blob: req.blob, scope: req.scope, unattended: !!req.unattended, replace: !!req.replace
+      })
+      // Entrar desde la propia máquina de la bóveda. Lo usa `logins passwd`: para volver a
+      // cerrar el paquete de llaves hay que ABRIRLO antes, y eso solo puede hacerlo quien
+      // sabe la contraseña vieja. Pasa por el mismo freno que cualquier otro intento.
+      case 'login-begin': return vault.loginBegin({ user: req.user, request: req.request })
+      case 'login-end': return vault.loginEnd({ lid: req.lid, finalization: req.finalization, label: req.label || '' })
+      case 'close': return vault.closeLogin({ user: req.user, sid: req.sid })
+      case 'unblock': return vault.clearLoginBlock({ user: req.user })
+      // QUITARLO ES QUITARLO: el usuario se va y su llave sale del acta. Borrar solo el
+      // inicio de sesión dejaba un miembro que ya no puede entrar pero sigue siendo de la
+      // cuenta — media baja, que es peor que ninguna.
+      case 'rm': {
+        const r = await vault.removeLogin({ user: req.user })
+        if (r.ok && r.pub) {
+          try { await vault.revokeDevice({ sub: r.pub }) } catch (e) {
+            throw Object.assign(new Error(`the login is gone but its key is still in the record: ${e.message}`), { code: 'REVOKE_FAILED' })
+          }
+        }
+        return r
+      }
+      default: throw Object.assign(new Error(`unknown logins op: ${req.op}`), { code: 'BAD_OP' })
+    }
+  }
 
   async function handleProfileRequest (req) {
     // Resolver el destino de una orden de perfil CUENTA COMO USO: estira el plazo del
@@ -661,6 +715,19 @@ export async function runDaemon () {
           }
           console.error('[vault] secret failed:', e.message)
         } finally { wipe(ak) }
+      }
+      // Inicios de sesión con contraseña (`dotrino-vault logins`). La respuesta lleva el
+      // `id` de la petición, para que quien espera no lea la de la vuelta anterior.
+      const lreq = readJsonSafe(loginsReqFile)
+      if (lreq?.op) {
+        rm(loginsReqFile)
+        const answer = (extra) => ipcWrite(loginsFile, { at: Date.now(), req: lreq.id || null, ...extra })
+        try { answer({ ok: true, ...(await handleLoginsRequest(lreq)) }) } catch (e) {
+          console.error('[vault] logins: %s', e.message)
+          // `waitMs` viaja con el error: cuánto falta es el único dato que cambia lo que
+          // hace quien lo lee, y sin él «demasiados intentos» no dice nada accionable.
+          answer({ ok: false, error: e.message, code: e.code || 'LOGINS_FAILED', ...(e.waitMs ? { waitMs: e.waitMs } : {}) })
+        }
       }
       // Perfiles / candado.
       const preq = readJsonSafe(profileReqFile)

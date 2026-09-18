@@ -13,6 +13,7 @@
  *   reject <id>       rechaza un dispositivo pendiente
  *   devices           lista dispositivos enrolados / revocados
  *   revoke <nonce>    revoca un dispositivo (y le ordena autoborrarse)
+ *   logins …          aparatos que se abren con usuario y contraseña (equipo prestado)
  *   profile …         perfiles (varias identidades en el mismo PC) y su contraseña
  *   unlock / lock     candado del perfil (la contraseña solo hace falta para EDITAR)
  *   logs              últimos logs del servicio
@@ -1479,6 +1480,199 @@ async function profileRequest (op, extra = {}) {
   console.error('El daemon no respondió.'); process.exit(1)
 }
 
+// ---------------------------------------------------------------------------
+// ENTRAR CON USUARIO Y CONTRASEÑA (`docs/temporary-access.md`)
+//
+// LA CONTRASEÑA NO SALE DE ESTA TERMINAL. Aquí se hace la mitad del cliente de OPAQUE, se
+// generan las llaves del aparato y se cierran con la llave que sale de la contraseña; al
+// daemon solo le llegan mensajes del protocolo y un paquete que no puede abrir. Por eso el
+// alta va en dos viajes y cambiar la contraseña en cuatro, y no en uno: si el daemon
+// hiciera la parte del cliente, la contraseña tendría que cruzar hasta él.
+// ---------------------------------------------------------------------------
+
+const loginsFile = path.join(dir, 'logins-list.json')
+let loginsSeq = 0
+
+/**
+ * Un viaje al daemon. La respuesta lleva el `id` de la petición, para no quedarse con la
+ * del intento anterior, y se BORRA al leerla: puede traer el paquete de llaves del aparato.
+ */
+async function loginsRequest (op, extra = {}) {
+  const s = requireDaemon()
+  try { fs.rmSync(loginsFile, { force: true }) } catch (_) {}
+  const id = `${process.pid}-${++loginsSeq}`
+  writeReq('logins-request.json', { op, id, ...extra })
+  sendSignal(s.pid, 'SIGUSR2')
+  for (let i = 0; i < 100; i++) {
+    await sleep(100)
+    const d = ipcRead(loginsFile, null)
+    if (!d?.at || (d.req && d.req !== id)) continue
+    try { fs.rmSync(loginsFile, { force: true }) } catch (_) {}
+    if (d.ok === false) {
+      if (d.code === 'PROFILE_LOCKED') { console.error('Perfil bloqueado. Ábrelo con:  dotrino-vault unlock'); process.exit(1) }
+      // `too-many-tries` trae cuánto falta: es el único dato que cambia lo que se hace.
+      if (d.code === 'too-many-tries') console.error('Demasiados intentos. Espera %d s, o quita la espera con:  dotrino-vault logins unblock <usuario>', Math.ceil((d.waitMs || 0) / 1000))
+      else console.error('%s', d.error)
+      process.exit(1)
+    }
+    return d
+  }
+  console.error('El daemon no respondió.'); process.exit(1)
+}
+
+/**
+ * Pide la contraseña dos veces y comprueba que coinciden.
+ *
+ * El mínimo no es una manía: quien tenga una COPIA DEL DISCO de la bóveda puede probar
+ * contraseñas contra el registro de OPAQUE sin límite y sin que nadie se entere
+ * (`temporary-access.md` §4). Contra eso lo único que aguanta es la contraseña.
+ */
+const MIN_PASSWORD = 12
+async function askNewPassword (user) {
+  const pw = await askPassword(`Contraseña para ${user} (mínimo ${MIN_PASSWORD} caracteres): `)
+  if (pw.length < MIN_PASSWORD) {
+    console.error('Demasiado corta. Con una copia del disco de esta bóveda se pueden probar contraseñas sin límite, así que lo único que aguanta es su largo.')
+    process.exit(2)
+  }
+  if (await askPassword('Repítela: ') !== pw) { console.error('No coinciden.'); process.exit(2) }
+  return pw
+}
+
+/**
+ * Entrar de verdad, desde aquí: es la única forma de conseguir la llave que abre el paquete.
+ *
+ * Con la contraseña equivocada quien se entera es ESTA punta, al recibir la respuesta —así
+ * funciona OPAQUE, y por eso los intentos se cuentan al empezar—. Se dice y se para: sin la
+ * contraseña vieja no hay nada que volver a cerrar.
+ */
+async function loginHere (opaqueClient, user, password) {
+  const start = opaqueClient.loginStart({ password })
+  const begun = await loginsRequest('login-begin', { user, request: start.request })
+  let fin
+  try { fin = opaqueClient.loginFinish({ state: start.state, response: begun.response, password }) }
+  catch (e) { console.error('Contraseña incorrecta (o ese usuario no existe).'); process.exit(1) }
+  const done = await loginsRequest('login-end', { lid: begun.lid, finalization: fin.finalization, label: 'consola' })
+  return { ...done, exportKey: fin.exportKey }
+}
+
+const LOGINS_USAGE = `uso: dotrino-vault logins <orden>
+
+  logins [ls]                 los aparatos que se abren con usuario y contraseña
+  logins add <usuario> [nombre del equipo]
+  logins passwd <usuario>     cambia la contraseña (cierra lo que estuviera abierto)
+  logins close <usuario> [sid]  cierra una sesión abierta (sin sid, todas)
+  logins unblock <usuario>    quita la espera de los intentos fallidos
+  logins rm <usuario>         lo quita y saca su llave del acta`
+
+async function cmdLogins (rest) {
+  const [sub, ...args] = rest
+  const user = args[0]
+  const needUser = () => { if (!user) { console.error(LOGINS_USAGE); process.exit(2) } return user }
+
+  switch (sub || 'ls') {
+    case 'ls': {
+      const { logins, fingerprint } = await loginsRequest('list')
+      if (!logins.length) {
+        console.log('No hay ningún inicio de sesión con contraseña.')
+        console.log('Crea uno con:  dotrino-vault logins add <usuario>')
+        return
+      }
+      const { loginAddress } = await import('../lib/src/passwordLogins.js')
+      console.log('Inicios de sesión con contraseña: %d', logins.length)
+      for (const l of logins) {
+        const espera = l.blockedUntil > Date.now() ? `  ${R}espera ${Math.ceil((l.blockedUntil - Date.now()) / 1000)} s${Z}` : ''
+        console.log('  · %s%s%s  %s%s  creado %s%s', B, loginAddress(l.user, fingerprint), Z, l.deviceId || '????-????',
+          l.label ? '  «' + l.label + '»' : '', fechaCorta(l.createdAt), espera)
+        for (const s of l.sessions || []) {
+          console.log('      %sabierto%s %s  %s  usado %s', D, Z, s.sid.slice(0, 8), s.label || '(sin nombre)', fechaCorta(s.lastUsedAt))
+        }
+      }
+      console.log('\nCerrar una sesión:  dotrino-vault logins close <usuario> [sid]')
+      return
+    }
+    case 'add': {
+      needUser()
+      const label = args.slice(1).join(' ').trim() || 'equipo prestado'
+      const { client: opaqueClient } = await import('@dotrino/opaque')
+      const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
+      const { sealDeviceKeys } = await import('../lib/src/passwordLogins.js')
+      const password = await askNewPassword(user)
+
+      const start = opaqueClient.registrationStart({ password })
+      const begun = await loginsRequest('register-begin', { user, request: start.request })
+      // La bóveda contesta con su mitad; el registro se termina AQUÍ, con la contraseña.
+      const fin = opaqueClient.registrationFinish({ state: start.state, response: begun.response, password })
+      // Las llaves del aparato NACEN en esta terminal y salen de aquí ya cerradas.
+      const device = await makeDeviceKey({ label })
+      const enc = await makeDeviceEncKey()
+      const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+      const r = await loginsRequest('register-finish', {
+        user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob
+      })
+      const { loginAddress } = await import('../lib/src/passwordLogins.js')
+      console.log('\nListo. Se entra con esta dirección y esa contraseña:')
+      console.log('  %s%s%s', B, loginAddress(user, r.fingerprint), Z)
+      console.log('  aparato : %s  «%s»', r.deviceId, label)
+      console.log('  permisos: %s', (r.caps || []).join(', ') || '(ninguno)')
+      console.log('\nLa dirección no es secreta: dice DÓNDE está tu cuenta, no quién eres.')
+      return
+    }
+    // CAMBIAR LA CONTRASEÑA ES ABRIR Y VOLVER A CERRAR. El aparato, su llave y su
+    // certificado siguen siendo los mismos: lo único que cambia es con qué se abre el
+    // paquete. Por eso hace falta la vieja — sin ella no hay nada que volver a cerrar.
+    case 'passwd': {
+      needUser()
+      const { client: opaqueClient } = await import('@dotrino/opaque')
+      const { sealDeviceKeys, openDeviceKeys } = await import('../lib/src/passwordLogins.js')
+      const old = await askPassword(`Contraseña ACTUAL de ${user}: `)
+      const entered = await loginHere(opaqueClient, user, old)
+      const keys = await openDeviceKeys(entered.exportKey, entered.blob)
+
+      const password = await askNewPassword(user)
+      const start = opaqueClient.registrationStart({ password })
+      const begun = await loginsRequest('register-begin', { user, request: start.request, replace: true })
+      const fin = opaqueClient.registrationFinish({ state: start.state, response: begun.response, password })
+      await loginsRequest('register-finish', {
+        user, upload: fin.upload, blob: await sealDeviceKeys(fin.exportKey, keys), replace: true
+      })
+      console.log('Listo: %s entra con la contraseña nueva, y lo que estuviera abierto se cerró.', user)
+      return
+    }
+    case 'close': {
+      needUser()
+      const sid = args[1]
+      if (sid) {
+        const r = await loginsRequest('close', { user, sid })
+        console.log(r.ok ? `Sesión cerrada: ${sid}` : 'Esa sesión ya no estaba abierta.')
+        return
+      }
+      const { logins } = await loginsRequest('list')
+      const fila = logins.find((x) => x.user === user)
+      if (!fila) { console.error('No hay ningún inicio de sesión con ese usuario. Míralos con: dotrino-vault logins'); process.exit(1) }
+      const abiertas = fila.sessions || []
+      if (!abiertas.length) { console.log('No tiene ninguna sesión abierta.'); return }
+      for (const s of abiertas) await loginsRequest('close', { user, sid: s.sid })
+      console.log('Cerradas %d sesión(es) de %s. Para entrar otra vez hace falta la contraseña.', abiertas.length, user)
+      return
+    }
+    case 'unblock': {
+      needUser()
+      await loginsRequest('unblock', { user })
+      console.log('Listo: %s puede volver a intentarlo. La contraseña no cambió.', user)
+      return
+    }
+    case 'rm': {
+      needUser()
+      const r = await loginsRequest('rm', { user })
+      if (!r.ok) { console.error('No hay ningún inicio de sesión con ese usuario. Míralos con: dotrino-vault logins'); process.exit(1) }
+      console.log('Quitado %s (aparato %s). Su llave sale del acta y se autoborrará al reconectar.', user, r.deviceId || '????-????')
+      return
+    }
+    default:
+      console.error(LOGINS_USAGE); process.exit(2)
+  }
+}
+
 function reportProfiles (d) {
   if (d.error) {
     // Los dos rechazos del candado se dicen con palabras y con el dato que hace falta; el
@@ -1728,6 +1922,15 @@ function help () {
                       +sella = OTRA BÓVEDA que puede sellar el acta de esta cuenta, para
                       que perder una máquina no se la lleve. No es un traspaso
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
+  logins              los aparatos que se abren con usuario y contraseña (para un equipo
+                      prestado, donde no puedes emparejar nada)
+  logins add <usuario> [nombre del equipo]
+                      crea uno. La contraseña se teclea aquí y no sale de esta terminal:
+                      la bóveda guarda un paquete de llaves que solo ella abre
+  logins passwd <usuario>       cambia la contraseña (cierra lo que estuviera abierto)
+  logins close <usuario> [sid]  cierra una sesión abierta (sin sid, todas)
+  logins unblock <usuario>      quita la espera de los intentos fallidos
+  logins rm <usuario>           lo quita y saca su llave del acta
   atrest status       de dónde sale la clave que cifra el disco (esta máquina, o un KMS)
   atrest test         comprueba que el KMS envuelve y desenvuelve, SIN tocar los datos
   atrest rekey <f>    cambia de proveedor: descifra con la vieja y recifra con la nueva
@@ -1863,6 +2066,7 @@ export async function runCtl (argv) {
     case 'label': return cmdLabel(rest)
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
+    case 'logins': return cmdLogins(rest)
     case 'secret': return cmdSecret(rest)
     // `approval` se quitó el 2026-09-01 (ahora es el permiso `unattended`), pero la ruta se
     // quedó apuntando a una función que ya no existía: reventaba con un ReferenceError. Se

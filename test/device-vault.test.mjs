@@ -11,7 +11,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeDeviceKey, signWithDevice, signDelegationWith, verifyDelegation, verifyDeviceSig } from '@dotrino/identity/capabilities'
+import { client as opaqueClient } from '@dotrino/opaque'
 import { startDeviceVault } from '../lib/src/index.js'
+import { createLoginDesk } from '../lib/src/passwordLogins.js'
 import { MSG } from '../lib/src/protocol.js'
 
 /** Identidad P mínima que firma de verdad (misma forma que la del vault real). */
@@ -89,6 +91,17 @@ function fakeClient () {
     async requestPairingCode () { return { code: 'ABC123' } },
     close () {}
   }
+}
+
+/** Lo mismo, pero con el almacén de inicios de sesión que en el navegador pone el anfitrión. */
+async function mountWithLogins () {
+  const identity = await fakeIdentity()
+  const client = fakeClient()
+  let saved = null
+  const logins = createLoginDesk({ load: () => (saved ? JSON.parse(saved) : null), save: (s) => { saved = JSON.stringify(s) } })
+  const vault = await startDeviceVault(identity, { client, logins })
+  client.sent.length = 0
+  return { identity, client, vault, logins }
 }
 
 /** Levanta la bóveda del dispositivo con el transporte de mentira. */
@@ -294,6 +307,63 @@ test('SIGN: sin cert, con cert de otro scope o con ts viejo, NO se firma', async
   await new Promise(r => setTimeout(r, 80))
   assert.equal(client.sent.filter(x => x.type === MSG.SIGNED).length, 0, 'firmó algo que no debía')
   assert.equal(client.sent.filter(x => x.type === MSG.ERROR).length, 3, 'no rechazó los tres')
+})
+
+/**
+ * ENTRAR CON USUARIO Y CONTRASEÑA en la bóveda-pestaña.
+ *
+ * Es la misma pieza que el binario (`lib/src/passwordLogins.js`), con el almacén puesto por
+ * quien monta la bóveda: en el navegador no hay archivos. Lo que se comprueba aquí es que el
+ * aparato que sale de la pestaña es el mismo que sale del binario —papel firmado y sitio en el
+ * acta— y que sin almacén se dice, en vez de contestar que la contraseña está mal.
+ */
+test('LOGIN: la bóveda-pestaña crea el aparato y lo deja entrar', async () => {
+  const { identity, client, vault } = await mountWithLogins()
+  const password = 'una contraseña larga de verdad'
+
+  // Alta, desde la consola de esta bóveda.
+  const device = await makeDeviceKey({ label: 'equipo prestado' })
+  const reg = opaqueClient.registrationStart({ password })
+  const { response } = vault.loginRegisterBegin({ user: 'ana', request: reg.request })
+  const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
+  const created = await vault.loginRegisterFinish({
+    user: 'ana', upload: fin.upload, pub: device.publickey, label: 'equipo prestado',
+    blob: 'sealed:' + fin.exportKey.slice(0, 16)
+  })
+  assert.ok(created.cert?.sig, 'el aparato sale con su papel')
+  assert.ok(identity.acta.members.some((m) => m.pub === device.publickey), 'y con su sitio en el acta')
+
+  // Y ahora entra desde fuera, por el proxio, sin tener ninguna llave.
+  const start = opaqueClient.loginStart({ password })
+  client.emit('message', 'nadie', { type: MSG.LOGIN_START, user: 'ana', request: start.request })
+  await new Promise((r) => setTimeout(r, 60))
+  const first = client.sent.find((x) => x.type === MSG.LOGIN_RESPONSE)
+  assert.ok(first, 'no contestó al LOGIN_START')
+  const l2 = opaqueClient.loginFinish({ state: start.state, response: first.response, password })
+  client.emit('message', 'nadie', { type: MSG.LOGIN_FINISH, lid: first.lid, finalization: l2.finalization, label: 'cyber' })
+  await new Promise((r) => setTimeout(r, 60))
+  const ok = client.sent.find((x) => x.type === MSG.LOGIN_OK)
+  assert.ok(ok?.sid && ok.blob && ok.cert?.sig, 'no devolvió el paquete de llaves')
+  assert.equal(l2.exportKey, fin.exportKey, 'lo que abre el paquete sale de la contraseña')
+  assert.equal(ok.acta.seq, identity.acta.seq, 'el acta viaja con el papel')
+
+  // La contraseña equivocada falla igual que un usuario que no existe.
+  for (const user of ['ana', 'nadie']) {
+    const wrong = opaqueClient.loginStart({ password: 'no es' })
+    client.emit('message', 'x', { type: MSG.LOGIN_START, user, request: wrong.request })
+  }
+  await new Promise((r) => setTimeout(r, 60))
+  assert.equal(client.sent.filter((x) => x.type === MSG.LOGIN_RESPONSE).length, 3, 'un usuario que no existe se distingue por fuera')
+})
+
+test('LOGIN: sin almacén, la bóveda-pestaña lo DICE (no dice que la contraseña está mal)', async () => {
+  const { client, vault } = await mount()
+  client.emit('message', 'x', { type: MSG.LOGIN_START, user: 'ana', request: 'x' })
+  await new Promise((r) => setTimeout(r, 40))
+  const out = client.sent.at(-1)
+  assert.equal(out.type, MSG.ERROR)
+  assert.equal(out.code, 'logins-unavailable')
+  assert.throws(() => vault.listLogins(), (e) => e.code === 'logins-unavailable')
 })
 
 test('CHECK: un aparato pregunta si sigue dentro, y se le contesta', async () => {
