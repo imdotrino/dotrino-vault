@@ -22,7 +22,7 @@ import { client as opaqueClient } from '@dotrino/opaque'
 // El paquete de llaves lo cierra QUIEN CREA el aparato, con la misma pieza que usan la CLI,
 // la pestaña y la extensión: si esto tuviera su propia copia, la prueba dejaría de probar
 // que las tres cierran igual.
-import { sealDeviceKeys, openDeviceKeys } from '../lib/src/passwordLogins.js'
+import { sealDeviceKeys, openDeviceKeys, vaultChannel } from '../lib/src/passwordLogins.js'
 
 const require = createRequire(import.meta.url)
 const proxyServerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dotrino-proxy', 'server.js')
@@ -87,6 +87,23 @@ async function login (b, { user, password, label = '' }) {
   if (ok.type === MSG.ERROR) throw Object.assign(new Error(ok.error), { code: ok.code })
   return { ...ok, exportKey: fin.exportKey }
 }
+
+/**
+ * ENCONTRAR LA BÓVEDA SIN TENER NINGUNA LLAVE.
+ *
+ * Es el primer paso del equipo prestado, y sin él lo demás no empieza: quien escribe
+ * `nombre@AB12-CD34-EF56` no sabe la pubkey de nadie, así que lo único con lo que puede
+ * buscar es el código de la dirección. La bóveda se anuncia en ese canal al identificarse.
+ */
+test('a machine with no keys finds the vault through the account channel', async () => {
+  const b = await browser()
+  try {
+    const canal = vaultChannel(vault.fingerprint)
+    // `watch` y no `publish`: quien busca no es una bóveda y no debe salir en la lista.
+    const tokens = await b.client.watch(canal)
+    assert.ok(tokens.includes(vault.client.token), 'the vault is announced in its account channel: ' + canal)
+  } finally { b.close() }
+})
 
 test('a browser with no keys logs in with user and password, and what it gets really works', async () => {
   const creado = await createLogin({ user: 'ana', password: 'una contraseña larga de verdad' })

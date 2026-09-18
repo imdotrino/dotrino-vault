@@ -15,7 +15,7 @@ import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain as verifyChainRaw, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
-import { createLoginDesk, registerLogin } from '../lib/src/passwordLogins.js'
+import { createLoginDesk, registerLogin, vaultChannel } from '../lib/src/passwordLogins.js'
 import * as ActaPilar from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS, scopeToCaps, scopeToCn } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
@@ -375,7 +375,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   await ensureCommKeyInActa()
 
-  const { client, identify: reidentificar, isIdentified } = await createTransport({ identity, dir, url: proxyUrl, commKey, log })
+  // `announce`: el canal de ESTA cuenta, para que una máquina prestada —que no tiene
+  // ninguna llave y solo sabe la dirección `nombre@AB12-CD34-EF56`— pueda encontrar a quien
+  // la atiende. Lo construye la pieza compartida, porque quien lo busca es la extensión.
+  const { client, identify: reidentificar, isIdentified } = await createTransport({
+    identity, dir, url: proxyUrl, commKey, log, announce: vaultChannel(fp)
+  })
 
   // El registro público de cadenas de selladores: deposita, si hay a dónde, los eslabones
   // que le dicen a un tercero si esta cuenta sigue sellada por quien él cree. Ver

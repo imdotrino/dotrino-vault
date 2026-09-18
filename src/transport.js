@@ -36,7 +36,7 @@ export async function masterPubkeyOf (identity) {
  * @param {string} [opts.url] URL del proxy (default wss://proxy.dotrino.com).
  * @returns {Promise<{ client, token:string, identify():Promise<void> }>}
  */
-export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null }) {
+export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null, announce = null }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
   // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
@@ -160,12 +160,34 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
    * intento se dice en voz alta: una bóveda inalcanzable en silencio es el fallo que ya
    * costó un día entero (`CLAUDE.md`, el apagón del 1-2 de septiembre).
    */
+  /**
+   * EL ANUNCIO DE LA CUENTA (`temporary-access.md` §3.2).
+   *
+   * Quien entra con usuario y contraseña no tiene ninguna llave todavía: no sabe la pubkey
+   * de esta bóveda y no puede escribirle. Lo único que trae es el código de la dirección
+   * (`nombre@AB12-CD34-EF56`), y con él lista este canal para encontrar a quien atiende esa
+   * cuenta — esta bóveda, o cualquiera de sus réplicas.
+   *
+   * Va PEGADO a `identify` y no en el arranque, porque la pertenencia a un canal es del
+   * token, y el token cambia en cada reconexión: anunciarse una sola vez deja a la bóveda
+   * fuera del canal en cuanto se cae el socket, y eso se ve desde fuera como «esa cuenta no
+   * existe». Si el anuncio falla, la bóveda sigue sirviendo a todo lo demás y se dice en voz
+   * alta: lo que se pierde es que la encuentren por su dirección, no que deje de funcionar.
+   */
+  const announceAccount = async () => {
+    if (!announce || !identificado) return
+    try { await client.publish(announce) } catch (e) {
+      log(`[vault] could not announce this account on the proxy (${e.message}) — a borrowed machine will not find this vault by its address`)
+    }
+  }
+
   let reintento = null
   let fallos = 0
   const identifyWithRetry = async () => {
     if (reintento) { clearTimeout(reintento); reintento = null }
     try {
       await identify()
+      await announceAccount()
       if (fallos) log(`[vault] identified on the proxy after ${fallos + 1} attempt(s)`)
       fallos = 0
     } catch (e) {
