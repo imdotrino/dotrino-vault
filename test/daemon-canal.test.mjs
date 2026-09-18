@@ -39,6 +39,21 @@ function start (dir) {
   return { p, log: () => output }
 }
 
+/**
+ * Mata el daemon Y ESPERA A QUE MUERA antes de tocar su carpeta.
+ *
+ * `kill()` solo manda la señal: el daemon sigue vivo unos milisegundos y sigue escribiendo
+ * (`state.json`, los volcados), así que borrar la carpeta en la línea siguiente se cruzaba
+ * con esa escritura y el `rmSync` moría con ENOTEMPTY. Es una carrera, o sea que falla una
+ * de cada muchas — y la única vez que la vi fue tumbando una publicación en CI.
+ */
+async function matar (p) {
+  if (!p || p.exitCode !== null || p.signalCode !== null) return
+  const muerto = new Promise((r) => p.once('exit', r))
+  p.kill()
+  await Promise.race([muerto, sleep(5000)])
+}
+
 /** Espera a que exista un archivo, hasta `ms`. Devuelve si apareció. */
 async function waitForFile (file, ms = 12000) {
   const until = Date.now() + ms
@@ -58,7 +73,7 @@ test('el daemon atiende una petición SIN que nadie le mande una señal (el caso
   fs.writeFileSync(path.join(dir, 'pair-request.json'), atRestFor(dir).encrypt(JSON.stringify({ at: Date.now() })))
 
   const served = await waitForFile(path.join(dir, 'pair.json'))
-  p.kill()
+  await matar(p)
   assert.ok(served, 'el daemon leyó la petición solo con verla aparecer')
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -70,7 +85,7 @@ test('una segunda bóveda sobre los MISMOS datos no arranca', async () => {
 
   const second = start(dir)
   const code = await new Promise((r) => second.p.on('exit', r))
-  first.p.kill()
+  await matar(first.p)
 
   assert.equal(code, 3, 'sale con error, no se pone a competir')
   assert.match(second.log(), /vault is already running/i)
@@ -97,7 +112,7 @@ test('nadie pregunta: el daemon NO vuelca devices.json por su cuenta', async () 
   fs.rmSync(dev, { force: true })
   await sleep(5000)
   const solo = fs.existsSync(dev)
-  p.kill()
+  await matar(p)
   assert.equal(solo, false, 'sin petición no hay volcado')
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -120,7 +135,7 @@ test('y la respuesta a una petición NO se la pisa el repaso siguiente', async (
   // Lo que rompía: dos vueltas del repaso después, el archivo era otro (`req: null`) y
   // quien esperaba su respuesta ya no la encontraba nunca.
   await sleep(5000)
-  p.kill()
+  await matar(p)
   assert.equal(leer()?.req, 'yo-1', 'la respuesta sigue ahí, sin pisar')
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -163,7 +178,7 @@ test('una petición ILEGIBLE se conserva, y se contesta cuando llega entera', as
     assert.equal(d?.req, 'yo-2', 'la respuesta llega y dice a quién contesta')
     assert.ok(!fs.existsSync(req), 'la petición atendida sí se consume')
   } finally {
-    p.kill()
+    await matar(p)
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
@@ -183,7 +198,7 @@ test('un pid MUERTO en state.json no bloquea (se cortó la luz)', async () => {
     ok = Number(s.pid) === p.pid
     if (!ok) await sleep(200)
   }
-  p.kill()
+  await matar(p)
   assert.ok(ok, 'arrancó igual: el candado era de un proceso que ya no existe')
   fs.rmSync(dir, { recursive: true, force: true })
 })
