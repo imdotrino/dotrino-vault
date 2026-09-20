@@ -23,6 +23,7 @@ import { dataDir } from './paths.js'
 import { ipcRead, ipcWrite, migrateIpcDir } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
 import { watchBinary } from './selfupdate.js'
+import { latestRelease, isNewer, CHECK_EVERY_MS } from './update.js'
 import { VERSION } from './version.js'
 import crypto from 'node:crypto'
 
@@ -87,6 +88,8 @@ export async function runDaemon () {
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
   const daemonVersion = VERSION
+  /** `{ version, checkedAt }` de la última consulta que salió bien, o null si aún ninguna. */
+  let ultimaPublicada = null
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
   // instalador y la web, que son anteriores al multi-perfil. La lista completa va
   // en `profiles`.
@@ -98,6 +101,10 @@ export async function runDaemon () {
       // Cuánto aguanta abierto el candado sin usarse. Va en la foto para que la consola
       // pueda DECIRLO en vez de llevar su propio número (que se desincronizaría).
       autoLockMs: mgr.profiles.autoLockMs,
+      // LO QUE HAY PUBLICADO, si se pudo mirar. Va en la foto para que `status` lo enseñe
+      // sin salir a la red: una pantalla de estado tiene que contestar al instante y
+      // también sin conexión.
+      ...(ultimaPublicada ? { latest: ultimaPublicada } : {}),
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -982,6 +989,33 @@ export async function runDaemon () {
     exit: () => shutdown('new binary installed')
   })
   if (vigia) console.log('[vault] watching for updates: a new binary restarts the service on its own')
+
+  /**
+   * ¿SALIÓ UNA VERSIÓN NUEVA? Una lectura al día, y nada más.
+   *
+   * Esto NO descarga ni instala: sería meter código en la máquina que guarda la maestra sin
+   * que nadie diga que sí, y eso es justo el interruptor remoto que el proyecto no tiene
+   * (`src/update.js` lo explica entero). Traerla la escribe una persona: `dotrino-vault
+   * update`.
+   *
+   * Lo que arregla es lo que de verdad dolió el 2026-09-19: el replicador llevaba quince
+   * días atrás y las bóvedas dos versiones, y NADA lo decía en ninguna pantalla.
+   *
+   * Si no se puede mirar, no se dice nada y ya está: no saber si hay versión nueva no es un
+   * problema del usuario, y llenarle el log de fallos de red tampoco ayuda.
+   */
+  const mirarRelease = async () => {
+    const r = await latestRelease()
+    if (!r.ok) return
+    ultimaPublicada = { version: r.version, checkedAt: Date.now() }
+    writeState()
+    if (isNewer(r.version, daemonVersion)) {
+      console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · update it with: dotrino-vault update`)
+    }
+  }
+  mirarRelease()
+  const relojRelease = setInterval(mirarRelease, CHECK_EVERY_MS)
+  relojRelease.unref?.()
 
   console.log('[vault] servicio listo.')
   return mgr

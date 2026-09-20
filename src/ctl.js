@@ -37,6 +37,7 @@ import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
 import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
 import { VERSION } from './version.js'
+import { isNewer } from './update.js'
 
 const dir = dataDir()
 const stateFile = path.join(dir, 'state.json')
@@ -144,6 +145,13 @@ function cmdStatus () {
   console.log('  proxy       : %s', s.proxy)
   console.log('  pid         : %s%s', s.pid, up ? '' : ' (no responde)')
   console.log('  datos       : %s', dir)
+  // HAY VERSIÓN NUEVA. Lo mira el daemon una vez al día y lo deja en `state.json`; aquí
+  // solo se lee, para que `status` conteste al instante y también sin conexión. Es lo que
+  // faltaba el 2026-09-19: el replicador llevaba quince días atrás y nada lo decía.
+  if (s.latest?.version && isNewer(s.latest.version, VERSION)) {
+    console.log('  %s⬆ hay %s publicada%s (esta es la %s) · tráela con:  dotrino-vault update',
+      B, s.latest.version, Z, VERSION)
+  }
   const profiles = s.profiles || []
   if (profiles.length) {
     console.log('  perfiles    : %d', profiles.length)
@@ -1689,6 +1697,77 @@ async function cmdLogins (rest) {
   }
 }
 
+/**
+ * `dotrino-vault update` — TRAER LA VERSIÓN NUEVA, cuando lo escribe una persona.
+ *
+ * La mitad automática es MIRAR, y la hace el daemon una vez al día (`src/update.js`
+ * explica por qué la otra mitad no se automatiza: sería un canal para meter código en la
+ * máquina que guarda la maestra sin que nadie diga que sí).
+ *
+ * Lo que se baja SE VERIFICA contra la atestación de sigstore antes de tocar el disco, y
+ * si no se puede verificar NO SE INSTALA. Que la URL sea la correcta no prueba nada.
+ *
+ * Instalar no reinicia nada a mano: el daemon vigila su propio binario y, al cambiar, se
+ * va para que systemd lo levante con el nuevo (`src/selfupdate.js`).
+ */
+async function cmdUpdate (args = []) {
+  const { latestRelease, assetFor, download, verifyArtifact, isNewer } = await import('./update.js')
+  const soloMirar = args.includes('--check')
+
+  process.stdout.write('Mirando qué hay publicado… ')
+  const r = await latestRelease()
+  if (!r.ok) {
+    console.log('')
+    console.error('No se pudo mirar (%s). No es que estés al día: es que no se sabe.', r.reason)
+    process.exit(1)
+  }
+  console.log('%s', r.version)
+
+  if (!isNewer(r.version, VERSION)) {
+    console.log('Estás al día (%s).', VERSION)
+    return
+  }
+  console.log('%sHay %s y esta es la %s.%s', B, r.version, VERSION, Z)
+  if (soloMirar) { console.log('Tráela con:  dotrino-vault update'); return }
+
+  const pick = assetFor(r.assets)
+  if (!pick.ok) { console.error('%s', pick.reason); process.exit(1) }
+
+  process.stdout.write(`Bajando ${pick.asset.name}… `)
+  let file
+  try { file = await download(pick.asset) } catch (e) { console.log(''); console.error('%s', e.message); process.exit(1) }
+  console.log('listo')
+
+  process.stdout.write('Comprobando la firma… ')
+  const v = verifyArtifact(file)
+  if (!v.ok) {
+    console.log('')
+    console.error('%sNO se instala nada.%s %s', R, Z, v.reason)
+    console.error('El archivo quedó en %s, sin tocar el sistema.', file)
+    process.exit(1)
+  }
+  console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
+
+  if (pick.kind === 'deb') {
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      execFileSync('dpkg', ['-i', file], { stdio: 'inherit' })
+    } else {
+      // No se pide sudo por dentro: que la contraseña la escriba quien la escribe, en su
+      // terminal y viendo qué comando la pide.
+      console.log('\nYa verificada. Instálala con:')
+      console.log('  %ssudo dpkg -i %s%s', B, file, Z)
+      console.log('\nEl servicio se reinicia solo al cambiar el binario.')
+      return
+    }
+  } else {
+    console.log('\nYa verificada. Descomprímela y reemplaza el binario:')
+    console.log('  %star xzf %s -C /tmp && sudo install -m0755 /tmp/dotrino-vault-%s-linux-x64/dotrino-vault{,d} /usr/bin/%s',
+      B, file, r.version, Z)
+    return
+  }
+  console.log('Listo. El servicio se reinicia solo; compruébalo con:  dotrino-vault status')
+}
+
 function reportProfiles (d) {
   if (d.error) {
     // Los dos rechazos del candado se dicen con palabras y con el dato que hace falta; el
@@ -2085,6 +2164,7 @@ export async function runCtl (argv) {
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
     case 'logins': return cmdLogins(rest)
+    case 'update': return cmdUpdate(rest)
     case 'secret': return cmdSecret(rest)
     // `approval` se quitó el 2026-09-01 (ahora es el permiso `unattended`), pero la ruta se
     // quedó apuntando a una función que ya no existía: reventaba con un ReferenceError. Se
