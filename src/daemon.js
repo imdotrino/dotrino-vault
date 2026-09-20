@@ -1009,9 +1009,26 @@ export async function runDaemon () {
     if (!r.ok) return
     ultimaPublicada = { version: r.version, checkedAt: Date.now() }
     writeState()
-    if (isNewer(r.version, daemonVersion)) {
-      console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · update it with: dotrino-vault update`)
-    }
+    if (!isNewer(r.version, daemonVersion)) return
+
+    /**
+     * PIDE PERMISO SOLO SI HAY A QUIÉN PEDÍRSELO (dueño, 2026-09-20).
+     *
+     * La bóveda es la pieza sensible del ecosistema: quien le cuele una actualización se
+     * lleva la maestra, y eso no se rota — se pierde la cuenta. Por eso no se actualiza
+     * sola mientras haya un aparato con `aprueba` que pueda decidirlo, igual que ya pasa
+     * con las claves privadas.
+     *
+     * Y si NO hay aprobadores, esperar un sí que nadie puede dar sería condenarla a no
+     * actualizarse nunca. Entonces se actualiza sola, que es lo que hace el resto del
+     * ecosistema (§15).
+     */
+    let quienAprueba = []
+    try { quienAprueba = (await mgr.current()?.approvers?.()) || [] } catch (_) {}
+    const comoLoDice = quienAprueba.length
+      ? `waiting for one of ${quienAprueba.length} approver(s) to say yes`
+      : 'no approver in the record, so this vault may update itself'
+    console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · ${comoLoDice} · dotrino-vault update`)
   }
   mirarRelease()
   const relojRelease = setInterval(mirarRelease, CHECK_EVERY_MS)

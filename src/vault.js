@@ -3552,6 +3552,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // (`unattended`), no una lista de esta máquina — por eso ya no hay `setApproval` ni
     // `supervised`: se concede y se quita como cualquier otro permiso, con `caps`.
     needsApproval: async (pub) => needsApproval(pub, await refreshActa()),
+    /**
+     * QUIÉN PUEDE APROBAR EN ESTA CUENTA. Lo usa la actualización (§15): la bóveda pide
+     * permiso al teléfono **solo si hay a quién pedírselo**; si no hay ningún aparato con
+     * `aprueba`, se actualiza sola.
+     *
+     * Es la regla del dueño (2026-09-20) y evita la trampa evidente: una bóveda sin
+     * aprobadores que se quedaría sin poder actualizarse nunca, esperando un sí que nadie
+     * puede dar. Mismo sitio del que ya sale el «rang N approver(s)» de los secretos.
+     */
+    approvers: async () => {
+      const record = await refreshActa()
+      if (!record) return []
+      return (record.members || [])
+        .filter((m) => Acta.memberCan(record, m.pub, 'approve'))
+        .map((m) => ({ id: m.id, label: m.label || '', pub: m.pub }))
+    },
     // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
     // llave. Lo que no puede es listarla un aparato.
     passwordDevices,
