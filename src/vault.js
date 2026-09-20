@@ -15,7 +15,7 @@ import nodeCrypto from 'node:crypto'
 import path from 'node:path'
 import { Identity } from '@dotrino/identity/node'
 import { verifyChain as verifyChainRaw, pubkeyId, verifyDeviceSig } from '@dotrino/identity/capabilities'
-import { createLoginDesk, registerLogin, vaultChannel } from '../lib/src/passwordLogins.js'
+import { createLoginDesk, registerLogin, vaultChannel, accountFingerprint } from '../lib/src/passwordLogins.js'
 import * as ActaPilar from '@dotrino/identity/acta'
 import { createEnrollDesk, deviceIdOf, DEVICE_TTL_MS, scopeToCaps, scopeToCn } from '../lib/src/enroll.js'
 import { createAdminDesk, authorBody } from '../lib/src/admin.js'
@@ -300,7 +300,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   } catch (_) {}
 
   const master = await masterPubkeyOf(identity)
-  const fp = (await pubkeyId(master)).slice(0, 16)
+  /**
+   * LA HUELLA DE LA CUENTA, no la de esta bóveda. Sale del `profileId` del acta (la pieza
+   * compartida la calcula), y con ella se arman la dirección `nombre@AB12-CD34-EF56` y el
+   * canal donde se anuncia esta cuenta.
+   *
+   * Antes salía de la llave de ESTA bóveda. Coinciden mientras la cuenta haya nacido aquí,
+   * y dejan de coincidir en cuanto hay una réplica o la bóveda adoptó la cuenta de otro
+   * aparato: cada bóveda daba entonces una dirección distinta para la misma cuenta, y el
+   * canal las separaba justo cuando lo que hace falta es que se junten.
+   */
+  const fp = await accountFingerprint(identity)
 
   /**
    * El acta tiene que nombrar una llave de sellado QUE SEA NUESTRA. Si no nombra ninguna
