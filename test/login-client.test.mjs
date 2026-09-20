@@ -11,7 +11,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeDeviceKey, makeDeviceEncKey, signDelegationWith, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, signDelegationWith, signWithDevice, pubkeyId } from '@dotrino/identity/capabilities'
 import { genesisActa, sealActa, applyChanges } from '@dotrino/identity/acta'
 import { client as opaqueClient } from '@dotrino/opaque'
 import { startDeviceVault } from '../lib/src/index.js'
@@ -182,6 +182,52 @@ test('salir cierra el inicio de sesión en la bóveda', async () => {
   })
   assert.equal(r.ok, true)
   assert.equal(vault.listLogins().find((l) => l.user === user).sessions.length, 0, 'la plaza sigue ocupada tras salir')
+})
+
+test('el OPAQUE se puede inyectar, y puede ser ASÍNCRONO (la extensión)', async () => {
+  // En una extensión el WASM vive en una página sandbox, así que cada llamada cruza un
+  // `postMessage` y vuelve una promesa. Se prueba con un envoltorio que promete a propósito:
+  // si el cliente dejara de esperar, `start.request` sería una promesa y OPAQUE lo rechazaría
+  // con «request is required» — un error que no se parece en nada a la causa.
+  const { proxy, address, password } = await conLogin()
+  const prestado = proxy.connect('prestado')
+  const llamadas = []
+  const lento = {
+    loginStart: async (a) => { llamadas.push('start'); await null; return opaqueClient.loginStart(a) },
+    loginFinish: async (a) => { llamadas.push('finish'); await null; return opaqueClient.loginFinish(a) }
+  }
+
+  const entrada = await loginWithPassword({ transport: prestado, address, password, opaque: lento })
+
+  assert.ok(entrada.sid, 'no entró con un OPAQUE asíncrono')
+  assert.deepEqual(llamadas, ['start', 'finish'], 'no usó el OPAQUE que se le pasó')
+})
+
+test('salir se puede firmar A DISTANCIA (sin entregar la llave)', async () => {
+  // En una extensión la llave vive en el service worker y el socket lo tiene la página:
+  // o se firma con un `sign(data)`, o la privada tendría que cruzar para nada.
+  const { proxy, vault, address, password, user } = await conLogin()
+  const prestado = proxy.connect('prestado')
+  const entrada = await loginWithPassword({ transport: prestado, address, password })
+
+  const r = await closeLogin({
+    transport: prestado, token: entrada.vaultToken, user, sid: entrada.sid,
+    publickey: entrada.publickey,
+    sign: (data) => signWithDevice({ privateJwk: entrada.keys.sign, data })
+  })
+
+  assert.equal(r.ok, true)
+  assert.equal(vault.listLogins().find((l) => l.user === user).sessions.length, 0)
+})
+
+test('sin llave y sin sign(), salir NO se finge: se para', async () => {
+  const { proxy, address, password, user } = await conLogin()
+  const prestado = proxy.connect('prestado')
+  const entrada = await loginWithPassword({ transport: prestado, address, password })
+  const e = await closeLogin({
+    transport: prestado, token: entrada.vaultToken, user, sid: entrada.sid, publickey: entrada.publickey
+  }).catch((x) => x)
+  assert.equal(e.code, 'no-signature')
 })
 
 test('la dirección se lee como la teclea una persona, y se para si no es una dirección', () => {
