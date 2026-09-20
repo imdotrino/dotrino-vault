@@ -54,7 +54,7 @@ async function createLogin ({ user, password, label = 'equipo prestado' }) {
   const device = await makeDeviceKey({ label })
   const enc = await makeDeviceEncKey()
   const start = opaqueClient.registrationStart({ password })
-  const { response } = vault.loginRegisterBegin({ user, request: start.request })
+  const { response } = await vault.loginRegisterBegin({ user, request: start.request })
   const fin = opaqueClient.registrationFinish({ state: start.state, response, password })
   const blob = await seal(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
   const r = await vault.loginRegisterFinish({
@@ -188,7 +188,7 @@ test('a password login cannot take the passwords permission yet', async () => {
   async function createLoginConScope (scope) {
     const device = await makeDeviceKey({ label: 'x' })
     const start = opaqueClient.registrationStart({ password: 'una contraseña larga' })
-    const { response } = vault.loginRegisterBegin({ user: 'dora', request: start.request })
+    const { response } = await vault.loginRegisterBegin({ user: 'dora', request: start.request })
     const fin = opaqueClient.registrationFinish({ state: start.state, response, password: 'una contraseña larga' })
     return vault.loginRegisterFinish({
       user: 'dora', upload: fin.upload, pub: device.publickey, blob: await seal(fin.exportKey, { sign: device.privateJwk }), scope: [scope]

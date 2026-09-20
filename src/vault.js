@@ -1147,7 +1147,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   async function handleLoginStart (from, p) {
     try {
-      const { lid, response } = logins.loginBegin({ user: p?.user, request: p?.request })
+      const { lid, response } = await logins.loginBegin({ user: p?.user, request: p?.request })
       audit('login.start', { user: String(p?.user || '').slice(0, 32) })
       reply(from, { type: MSG.LOGIN_RESPONSE, lid, response })
     } catch (e) { loginError(from, e) }
@@ -1155,7 +1155,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   async function handleLoginFinish (from, p) {
     try {
-      const r = logins.loginEnd({ lid: p?.lid, finalization: p?.finalization, label: p?.label })
+      const r = await logins.loginEnd({ lid: p?.lid, finalization: p?.finalization, label: p?.label })
       const record = (await identity.profileActa?.().catch(() => null))?.acta || null
       audit('login.ok', { user: r.user, sid: r.sid.slice(0, 8) })
       log('[vault] login: %s entered (session %s)', r.user, r.sid.slice(0, 8))

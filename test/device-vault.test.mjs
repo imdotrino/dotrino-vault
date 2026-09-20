@@ -324,7 +324,7 @@ test('LOGIN: la bóveda-pestaña crea el aparato y lo deja entrar', async () => 
   // Alta, desde la consola de esta bóveda.
   const device = await makeDeviceKey({ label: 'equipo prestado' })
   const reg = opaqueClient.registrationStart({ password })
-  const { response } = vault.loginRegisterBegin({ user: 'ana', request: reg.request })
+  const { response } = await vault.loginRegisterBegin({ user: 'ana', request: reg.request })
   const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
   const created = await vault.loginRegisterFinish({
     user: 'ana', upload: fin.upload, pub: device.publickey, label: 'equipo prestado',

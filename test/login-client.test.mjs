@@ -102,7 +102,7 @@ async function conLogin ({ password = 'una contraseña larga de verdad', user = 
   const device = await makeDeviceKey({ label: 'equipo prestado' })
   const enc = await makeDeviceEncKey()
   const reg = opaqueClient.registrationStart({ password })
-  const { response } = vault.loginRegisterBegin({ user, request: reg.request })
+  const { response } = await vault.loginRegisterBegin({ user, request: reg.request })
   const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
   const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.encPrivateJwk })
   await vault.loginRegisterFinish({ user, upload: fin.upload, pub: device.publickey, encPub: enc.encPublickey, label: 'equipo prestado', blob })
