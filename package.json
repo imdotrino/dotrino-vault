@@ -28,6 +28,7 @@
     "@dotrino/proxy-client": "0.23.1",
     "@dotrino/roadmap": "0.3.3",
     "@dotrino/store": "0.11.0",
+    "@dotrino/update": "0.1.1",
     "ws": "^8.18.0"
   },
   "license": "MIT",
