@@ -73,6 +73,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@dotrino/opaque": "0.1.0"
+    "@dotrino/opaque": "0.1.0",
+    "@dotrino/update": "0.1.1"
   }
 }
