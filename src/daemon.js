@@ -467,6 +467,15 @@ export async function runDaemon () {
             for (const f of r.failed) console.error('[vault] %s: could not reseal (%s)', f.owner, f.error)
             note += ` · ⚠ ${r.failed.length} cajón(es) NO se pudieron reenvolver (${r.failed.map((f) => f.owner).join(', ')}): sus aparatos no podrán leerlos`
           }
+          // Y LAS CONTRASEÑAS, por lo mismo y en el mismo momento: convertirlas al formato
+          // sellado es un acto único que necesita la frase, y repasar sus envolturas hace
+          // falta cada vez que cambia quién puede leer. Un aparato que entró después de
+          // guardada una contraseña no puede abrirla hasta que alguien se la envuelva, y
+          // con la bóveda cerrada nadie puede.
+          const p = await mgr.get(id)?.sealPasswords?.(ak)
+          if (p?.converted) note += ` · ${p.converted} contraseña(s) pasadas al formato sellado`
+          if (p?.wrapped || p?.dropped) note += ` · contraseñas: llavero al día${p.dropped ? ` (${p.dropped} envoltura(s) retirada(s))` : ''}`
+          if (p?.convertError) note += ` · ⚠ las contraseñas NO se pudieron convertir (${p.convertError})`
         } catch (e) {
           console.error('[vault] could not rebuild the keyring on unlock:', e.message)
           note += ` · ⚠ el llavero NO se pudo rehacer (${e.message}): los aparatos no podrán leer sus cajones`

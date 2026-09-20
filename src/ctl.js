@@ -695,6 +695,12 @@ async function cmdCaps (args = []) {
     // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
     // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
     contrasenas: 'passwords', 'contraseñas': 'passwords',
+    // `passkeys`: además de las contraseñas, puede abrir la LLAVE PRIVADA de una passkey.
+    // Va aparte porque una passkey copiada sirve hasta que la borres en cada sitio donde
+    // la registraste — de una contraseña, al menos, se puede cambiar
+    // (`dotrino-passmanager/docs/sealed-passwords.md` §2.8). Sin `contraseñas` no
+    // significa nada: la passkey vive en una entrada de contraseñas.
+    passkeys: 'passkeys', llaves: 'passkeys',
     // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
     // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
     //

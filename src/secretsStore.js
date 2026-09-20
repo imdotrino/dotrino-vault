@@ -1145,6 +1145,20 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * decidir si hay que migrarla. Preguntarlo intentando reenvolver un cajón mezcla dos
      * cosas y deja el fallo diciendo «wrong password» sobre el cajón, que no es donde está.
      */
+    /**
+     * ABRE UNA ENVOLTURA DE RECUPERACIÓN y devuelve lo que lleva dentro.
+     *
+     * Es para OTROS almacenes de este mismo perfil —hoy la bóveda de contraseñas—, que
+     * comparten ESTA copia de recuperación en vez de estrenar una segunda. Una segunda
+     * sería otra llave que custodiar, otra que rotar y otra que se queda atrás.
+     *
+     * Sigue siendo la única puerta a un valor en claro, y sigue pidiendo la frase.
+     */
+    async openRecoveryWrap (wrap, adminKey = null) {
+      const priv = await openRecovery(adminKey)
+      return sealer.openWrapWith(priv, wrap)
+    },
+
     async recoveryOpensWith (key) {
       needSealer('check the recovery key')
       if (!data.recovery?.priv) throw new NeedsPassword('this store has no recovery key yet')

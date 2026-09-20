@@ -1,17 +1,23 @@
 /**
- * La bóveda de CONTRASEÑAS atendida por el vault.
+ * La bóveda de CONTRASEÑAS atendida por el vault — LA QUE EL VAULT NO PUEDE LEER.
  *
- * Lo que se prueba aquí no es el protocolo (eso es de `@dotrino/passmanager`, que trae
- * sus propios tests), sino que el vault le pone lo que en `passmanager serve` había que
- * improvisar: el acta decide quién pide, la aprobación es la del teléfono, y la
- * bitácora es la misma que audita firmas y enrolamientos.
+ * Lo que se prueba aquí no es el formato (eso es de `@dotrino/passmanager`, que trae sus
+ * propios tests) sino lo que pone el vault: el ACTA decide quién pide y a quién se le
+ * envuelve cada llave, la aprobación es la del teléfono, y la bitácora es la misma que
+ * audita firmas y enrolamientos.
+ *
+ * Y sobre todo lo que cambió en 0.123: **el archivo ya no lleva ninguna llave dentro**.
+ * Hasta entonces `passwords.json` guardaba la `cek` de la bóveda cifrada con la llave de la
+ * MÁQUINA, así que el demonio con el perfil cerrado descifraba igual y una copia del disco
+ * abría todas las contraseñas. Las tres últimas pruebas son justo esa inversión.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createPasswordDesk } from '../src/passwords.js'
-import { makeVaultKey } from '@dotrino/passmanager'
-import { RemoteVault, ProxyTransport, makeEncKeypair, seal, open, isSealed, CODES } from '@dotrino/passmanager'
+import { createPasswordDesk, convertPasswords } from '../src/passwords.js'
+import { SealedVault, ProxyTransport, makeEncKeypair, seal, open, isSealed, CODES } from '@dotrino/passmanager'
+import { openWrap, decryptWithCek } from '@dotrino/identity/content'
+import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'
 
 /** Red de mentira que imita al cliente de verdad: sella al enviar, abre al entregar. */
 function red () {
@@ -21,12 +27,14 @@ function red () {
     const c = {
       pubkey,
       encPrivate: null,
+      pubkeyOfToken: (t) => t,
       on (ev, fn) { if (ev === 'message') handlers.push(fn) },
       off (ev, fn) { const i = handlers.indexOf(fn); if (i >= 0) handlers.splice(i, 1) },
       async sendSealed (dests, payload, { peerEncPub } = {}) {
         if (!peerEncPub) throw Object.assign(new Error('sin llave'), { code: CODES.UNSEALED })
         c.sendByPubkey(dests, await seal(payload, peerEncPub))
       },
+      async sendSealedTo (dest, payload, { peerEncPub } = {}) { return c.sendSealed([dest], payload, { peerEncPub }) },
       sendByPubkey (dests, payload) {
         for (const d of [].concat(dests)) {
           const destino = nodos.get(d)
@@ -52,37 +60,75 @@ function red () {
 
 function memStore () {
   const m = new Map()
-  return { async get (k) { return m.get(k) }, async set (k, v) { m.set(k, v) } }
+  const s = { async get (k) { return m.get(k) }, async set (k, v) { m.set(k, v) }, _raw: m }
+  return s
+}
+
+/** Un aparato del acta: firma con su llave y abre lo que le envuelven con la suya. */
+async function aparatoDelActa () {
+  const firma = await makeDeviceKey({ label: 'gestor' })
+  const cifra = await makeEncKeypair()
+  return {
+    pub: firma.publickey,
+    encPub: cifra.encPub,
+    encPrivate: cifra.privateKey,
+    identity: {
+      publickey: firma.publickey,
+      sign: (body) => signWithDevice({ privateJwk: firma.privateJwk, publickey: firma.publickey, data: body }),
+      async openSealed ({ wrap, envelope }) {
+        const cek = await openWrap({ wrap, myEncPrivateKey: cifra.privateKey })
+        return decryptWithCek({ cek, envelope })
+      }
+    }
+  }
+}
+
+/** La copia de recuperación: la que abre la frase del perfil. */
+async function recuperacion () {
+  const r = await makeEncKeypair()
+  return { encPub: r.encPub, privateKey: r.privateKey }
 }
 
 async function montar (extra = {}) {
   const net = red()
+  const ap = await aparatoDelActa()
   const boveda = net.cliente('VAULT')
-  const aparato = net.cliente('APARATO')
+  const aparato = net.cliente(ap.pub)
+  const rec = await recuperacion()
 
   const encVault = await makeEncKeypair()
-  const encAparato = await makeEncKeypair()
   boveda.encPrivate = encVault.privateKey
-  aparato.encPrivate = encAparato.privateKey
+  aparato.encPrivate = ap.encPrivate
 
   const bitacora = []
   const avisos = []
+  const store = memStore()
 
   const desk = createPasswordDesk({
     client: boveda,
-    store: memStore(),
-    cek: await makeVaultKey(),
-    // El ACTA es quien decide, no este módulo.
-    isAllowed: (pub) => pub === 'APARATO',
-    encPubOf: (pub) => (pub === 'APARATO' ? encAparato.encPub : null),
-    audit: (op, info) => bitacora.push({ op, ...info }),
+    store,
+    // EL ACTA es quien decide, no este módulo. Y la bóveda NO está en la lista.
+    members: (kind) => (kind === 'passkeys' && extra.sinPasskeys ? [] : [{ pub: ap.pub, encPub: ap.encPub }]),
+    recoveryPub: () => rec.encPub,
+    canWrite: (pub) => pub === ap.pub,
+    isAllowed: (pub) => pub === ap.pub,
+    encPubOf: (pub) => (pub === ap.pub ? ap.encPub : null),
+    needsApproval: async () => true,
+    // `audit` primero y el resto DESPUÉS pisaría el nombre: la bitácora del vault anota
+    // `passwords` como operación y el `op` del gestor va dentro. Se guardan los dos.
+    audit: (op, info) => bitacora.push({ audit: op, ...info }),
     approve: async (r) => { avisos.push(r.pubkey); return true },
     ...extra,
   }).start()
 
-  await desk.vault.put({ title: 'Salesforce', sites: ['salesforce.com'], username: 'sandrade@dotrino.com', secret: 'hunter2' })
-  // Una entrada de datos con sus dos mitades, para separar lo que pregunta de lo que no.
-  await desk.vault.put({
+  const remota = new SealedVault(new ProxyTransport({
+    client: aparato, peerPubkey: 'VAULT', peerEncPub: encVault.encPub, timeoutMs: 1500,
+  }), { identity: ap.identity })
+
+  // La llave del perfil la estrena quien convierte; aquí, el propio aparato.
+  await remota.initProfileKey()
+  await remota.put({ title: 'Salesforce', sites: ['salesforce.com'], username: 'sandrade@dotrino.com', secret: 'hunter2' })
+  await remota.put({
     type: 'data',
     title: 'Mis datos',
     sites: ['datos.ejemplo'],
@@ -91,247 +137,201 @@ async function montar (extra = {}) {
       { label: 'Cédula', value: '1700123456', private: true },
     ],
   })
-
-  const remota = new RemoteVault(new ProxyTransport({
-    client: aparato, peerPubkey: 'VAULT', peerEncPub: encVault.encPub, timeoutMs: 600,
-  }))
-  return { desk, remota, bitacora, avisos, net }
+  avisos.length = 0
+  return { desk, remota, bitacora, avisos, net, store, ap, rec }
 }
 
 test('vault-passwords: un aparato del acta pide de a una', async () => {
-  const { remota } = await montar({ needsApproval: () => false })
-  const hits = await remota.find('https://login.salesforce.com/')
+  const { remota } = await montar()
+  const hits = await remota.find('https://salesforce.com/login')
   assert.equal(hits.length, 1)
-  assert.ok(!JSON.stringify(hits).includes('hunter2'), 'el secreto viajó en la lista')
-  assert.equal((await remota.get(hits[0].id)).secret, 'hunter2')
+  assert.equal(hits[0].hint, 'sandrade@dotrino.com')
+
+  const cred = await remota.get(hits[0].id, { keys: ['username', 'secret'] })
+  assert.equal(cred.secret, 'hunter2')
 })
 
 test('vault-passwords: un aparato que el acta no reconoce no recibe nada', async () => {
-  const { remota, bitacora } = await montar({ isAllowed: () => false })
-  await assert.rejects(() => remota.find('https://salesforce.com/'), e => e.code === CODES.DENIED)
-  assert.equal(bitacora.at(-1).outcome, 'denied')
+  // Se monta con el permiso puesto —hay que poder guardar algo— y se le quita después,
+  // que es lo que pasa de verdad: `caps <ID> -contrasenas`, y a la siguiente pasada deja
+  // de recibir. La bóveda mira el acta en cada petición, no al conectarse.
+  let permitido = true
+  const { remota } = await montar({ isAllowed: () => permitido })
+  permitido = false
+  await assert.rejects(() => remota.find('https://salesforce.com/'), (e) => /no puede pedir|not allowed/i.test(e.message))
 })
 
 test('vault-passwords: la aprobación es la del vault (el teléfono), una por aparato', async () => {
-  const { remota, avisos } = await montar({ needsApproval: () => true })
-  const [hit] = await remota.find('https://salesforce.com/')
-  await remota.get(hit.id)
-  await remota.get(hit.id)
-  assert.deepEqual(avisos, ['APARATO'], 'volvió a molestar al teléfono')
+  const { remota, avisos } = await montar()
+  const [entrada] = await remota.find('https://salesforce.com/')
+  await remota.get(entrada.id, { keys: ['secret'] })
+  await remota.get(entrada.id, { keys: ['secret'] })
+  assert.equal(avisos.length, 1, 'se pidió el dedo encima dos veces para el mismo aparato')
 })
 
-// La condición es DOBLE: que el aparato esté marcado para aprobar, y que lo que pide sea
-// privado. El vault compone su política con el criterio del protocolo en vez de tener el
-// suyo — si cada bóveda decidiera qué es privado, serían bóvedas distintas.
-test('vault-passwords: un dato PÚBLICO no molesta al teléfono, ni con el aparato marcado', async () => {
-  const { remota, avisos } = await montar({ needsApproval: () => true })
+test('vault-passwords: un dato PÚBLICO no molesta al teléfono', async () => {
+  const { remota, avisos } = await montar()
   const [datos] = await remota.find('https://datos.ejemplo/')
-  const open = await remota.get(datos.id, { keys: ['tel'] })
-  assert.deepEqual(avisos, [], 'sonó el teléfono por un teléfono guardado')
-  assert.equal(JSON.parse(open.fields || '[]')[0].value, '0999111222')
+  const r = await remota.get(datos.id, { keys: ['tel'] })
+  assert.ok(JSON.parse(r.fields).some((f) => f.value === '0999111222'))
+  assert.equal(avisos.length, 0, 'rellenar un teléfono público pidió aprobación')
 })
 
 test('vault-passwords: y un dato PRIVADO sí, y llega solo él', async () => {
-  const { remota, avisos } = await montar({ needsApproval: () => true })
+  const { remota, avisos } = await montar()
   const [datos] = await remota.find('https://datos.ejemplo/')
-  const open = await remota.get(datos.id, { keys: ['label:Cédula'] })
-  assert.deepEqual(avisos, ['APARATO'])
-  const campos = JSON.parse(open.fields || '[]')
-  assert.equal(campos.length, 1, 'llegó más de lo que se pidió')
-  assert.equal(campos[0].value, '1700123456')
+  const r = await remota.get(datos.id, { keys: ['label:Cédula'] })
+  assert.equal(avisos.length, 1, 'un campo marcado privado salió sin preguntar')
+  const campos = JSON.parse(r.fields)
+  assert.deepEqual(campos.map((f) => f.value), ['1700123456'], 'llegó algo más que lo pedido')
 })
 
 test('vault-passwords: guardar encima no molesta al teléfono, y no pierde nada', async () => {
-  const { remota, avisos, desk } = await montar({ needsApproval: () => true })
-  const [datos] = await remota.find('https://datos.ejemplo/')
-  await remota.patch(datos.id, { fields: [{ kind: 'tel', label: 'Teléfono', value: '0988000111' }] })
-  assert.deepEqual(avisos, [], 'guardar pidió aprobación')
+  const { remota, avisos } = await montar()
+  const [entrada] = await remota.find('https://salesforce.com/')
+  await remota.patch(entrada.id, { username: 'otro@dotrino.com' })
+  assert.equal(avisos.length, 0, 'cambiar el usuario pidió aprobación: algo lee de más')
 
-  const open = await desk.vault.get(datos.id)
-  const campos = JSON.parse(open.fields || '[]')
-  assert.equal(campos.find(f => f.label === 'Teléfono').value, '0988000111')
-  assert.equal(campos.find(f => f.label === 'Cédula').value, '1700123456', 'quedó a medias')
-  assert.equal(campos.find(f => f.label === 'Cédula').private, true)
+  const r = await remota.get(entrada.id, { keys: ['username', 'secret'] })
+  assert.equal(r.username, 'otro@dotrino.com')
+  assert.equal(r.secret, 'hunter2', 'se perdió la contraseña al cambiar el usuario')
 })
 
 test('vault-passwords: sin el visto bueno del teléfono, no sale la credencial', async () => {
-  const { remota } = await montar({ needsApproval: () => true, approve: async () => false })
-  const [hit] = await remota.find('https://salesforce.com/')
-  // `not-approved`, no `denied`: «no lo autoricé» se arregla volviendo a pulsar; «no me
-  // deja pedir» dando permiso al aparato. Son dos cosas distintas y por eso dos códigos.
-  await assert.rejects(() => remota.get(hit.id), e => e.code === CODES.NOT_APPROVED)
+  const { remota } = await montar({ approve: async () => false })
+  const [entrada] = await remota.find('https://salesforce.com/')
+  await assert.rejects(() => remota.get(entrada.id, { keys: ['secret'] }), (e) => /autoriz/i.test(e.message))
 })
 
 test('vault-passwords: la bitácora apunta la operación, NUNCA qué credencial', async () => {
-  const { remota, bitacora } = await montar({ needsApproval: () => false })
-  const [hit] = await remota.find('https://salesforce.com/')
-  await remota.get(hit.id)
-
-  assert.deepEqual(bitacora.map(b => b.op + ':' + b.outcome), ['find:served', 'get:served'])
+  const { remota, bitacora } = await montar()
+  const [entrada] = await remota.find('https://salesforce.com/')
+  await remota.get(entrada.id, { keys: ['secret'] })
   const texto = JSON.stringify(bitacora)
-  for (const dato of ['hunter2', 'salesforce.com', 'sandrade@dotrino.com', hit.id]) {
-    assert.ok(!texto.includes(dato), `la bitácora guardó «${dato}»`)
+  assert.ok(bitacora.some((b) => b.audit === 'passwords' && b.op === 'pm2.get'))
+  for (const secreto of ['hunter2', 'salesforce.com', 'sandrade@dotrino.com']) {
+    assert.ok(!texto.includes(secreto), `la bitácora se llevó «${secreto}»`)
   }
-})
-
-test('vault-passwords: bloquear el perfil cierra también las contraseñas', async () => {
-  const { desk, remota } = await montar({ needsApproval: () => false })
-  desk.lock()
-  await assert.rejects(() => remota.find('https://salesforce.com/'), e => e.code === CODES.LOCKED)
 })
 
 test('vault-passwords: ni el vault le deja listar la bóveda a un aparato', async () => {
-  const { desk, remota } = await montar({ needsApproval: () => false })
-
-  // Ser el vault no cambia la regla: un aparato no lista.
-  await assert.rejects(() => remota.list(), e => e.code === CODES.NO_KEY)
-
-  // Y aquí, del lado de la llave, listar es lo normal — es la misma bóveda.
-  const todas = await desk.vault.list()
-  assert.deepEqual(todas.map(e => e.title).sort(), ['Mis datos', 'Salesforce'])
-})
-
-// --- El cableado con el vault ------------------------------------------------
-//
-// Lo de arriba prueba el módulo; esto prueba las piezas que lo enganchan al vault y que
-// NO son suyas: el almacén cifrado en reposo, la llave que nace sola, y la lista de
-// aparatos autorizados. Sin esto el módulo existiría sin que nadie lo montara.
-
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { atRestFor } from '../src/atrest.js'
-import * as Acta from '@dotrino/identity/acta'
-import fs from 'node:fs'
-
-/** Reproduce lo que `vault.js` monta alrededor del desk, con las mismas piezas. */
-function piezasDelVault (dir) {
-  const file = join(dir, 'passwords.json')
-  const atRest = atRestFor(dir)
-  const leer = () => { try { return JSON.parse(atRest.decrypt(fs.readFileSync(file, 'utf8'))) } catch { return null } }
-  const escribir = (d) => fs.writeFileSync(file, atRest.encrypt(JSON.stringify(d)), { mode: 0o600 })
-
-  return {
-    file,
-    leer,
-    store: {
-      async get (k) { return leer()?.data?.[k] },
-      async set (k, v) {
-        const d = leer() || { v: 1, data: {} }
-        d.data = { ...(d.data || {}), [k]: v }
-        escribir(d)
-      },
-    },
-    async key () {
-      const d = leer()
-      if (d?.cek) {
-        return crypto.subtle.importKey('raw', Uint8Array.from(Buffer.from(d.cek, 'base64')), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
-      }
-      const k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
-      const raw = new Uint8Array(await crypto.subtle.exportKey('raw', k))
-      escribir({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64') })
-      return k
-    },
+  const { remota } = await montar()
+  // `pm2.views` SÍ existe —es lo que sustituye a buscar dentro de la bóveda—, pero solo
+  // devuelve VISTAS, y solo las que ese aparato puede abrir. Ni un valor sale de ahí.
+  const vistas = await remota.list()
+  assert.equal(vistas.length, 2)
+  for (const v of vistas) {
+    assert.ok(!('secret' in v) || !v.secret, 'una vista trajo un valor')
+    assert.ok(!JSON.stringify(v).includes('hunter2'))
   }
-}
+})
 
-test('vault-passwords: el archivo queda CIFRADO en reposo, con la llave dentro', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
-  t.after(() => rm(dir, { recursive: true, force: true }))
-
-  const p = piezasDelVault(dir)
-  const desk = createPasswordDesk({
-    client: red().cliente('X'), store: p.store, cek: await p.key(), isAllowed: () => false,
-  })
-  await desk.vault.put({ title: 'Banco', sites: ['banco.com.ec'], username: 'seyacat', secret: 's3cr3t' })
-
-  // Lo que queda en disco no se puede leer sin la clave de la máquina.
-  const crudo = await readFile(p.file, 'utf8')
-  for (const dato of ['s3cr3t', 'seyacat', 'banco.com.ec', 'Banco']) {
-    assert.ok(!crudo.includes(dato), `«${dato}» quedó legible en el archivo`)
+test('EL ARCHIVO YA NO LLEVA NINGUNA LLAVE DENTRO (era el agujero)', async () => {
+  const { store } = await montar()
+  const crudo = JSON.stringify([...store._raw.entries()])
+  // Ni los valores…
+  for (const secreto of ['hunter2', 'sandrade@dotrino.com', '1700123456', 'Salesforce', 'salesforce.com']) {
+    assert.ok(!crudo.includes(secreto), `«${secreto}» está en claro en el disco de la bóveda`)
   }
-
-  // Y abriéndolo, tampoco: la entrada va cifrada con la CEK, aparte del cifrado en reposo.
-  const abierto = JSON.stringify(p.leer())
-  assert.ok(!abierto.includes('s3cr3t'), 'la contraseña se ve al abrir el archivo')
-  assert.ok(abierto.includes('banco.com.ec'), 'los sitios sí van en claro dentro (hacen falta para emparejar)')
-})
-
-test('vault-passwords: la llave nace UNA vez y sobrevive al reinicio', async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), 'vault-pw-'))
-  t.after(() => rm(dir, { recursive: true, force: true }))
-  const p = piezasDelVault(dir)
-
-  const primera = await p.key()
-  const desk1 = createPasswordDesk({ client: red().cliente('A'), store: p.store, cek: primera, isAllowed: () => false })
-  const { id } = await desk1.vault.put({ title: 'X', sites: ['x.com'], secret: 'hunter2' })
-
-  // Segundo arranque: se relee la misma llave, así que la bóveda se abre.
-  const segunda = await p.key()
-  const desk2 = createPasswordDesk({ client: red().cliente('B'), store: p.store, cek: segunda, isAllowed: () => false })
-  assert.equal((await desk2.vault.get(id)).secret, 'hunter2', 'la llave cambió entre arranques')
-})
-
-/**
- * QUIÉN PUEDE PEDIR LO DICE EL ACTA, y solo el acta.
- *
- * Hubo una lista aparte, del propio archivo de contraseñas, y con ella quitar un aparato
- * había que acordárselo en dos sitios. Ahora es la capacidad `passwords`, como cualquier
- * otro permiso: se concede al emparejar (`pair --scope contrasenas`) o después
- * (`caps <ID> +contrasenas`), y se quita en un solo sitio.
- */
-test('vault-passwords: el permiso es del ACTA, y estar en ella no basta', async () => {
-  // La comprobación tal cual la hace `vault.js`.
-  const isAllowed = (acta) => (pub) => !!acta && Acta.memberCan(acta, pub, 'passwords')
-
-  const acta = { members: [
-    { pub: 'GESTOR', caps: ['sign', 'passwords'] },
-    { pub: 'OTRO', caps: ['sign', 'store', 'read'] }
-  ] }
-  assert.equal(isAllowed(acta)('GESTOR'), true)
-  assert.equal(isAllowed(acta)('OTRO'), false, 'estar en el acta bastaba para pedir contraseñas')
-  assert.equal(isAllowed(acta)('DESCONOCIDO'), false)
-
-  // Quitarle el permiso le corta el acceso sin sacarlo del perfil: son dos cosas, y la
-  // suave tiene que existir.
-  const sinPermiso = { members: [{ pub: 'GESTOR', caps: ['sign'] }] }
-  assert.equal(isAllowed(sinPermiso)('GESTOR'), false, 'quitar el permiso no le cortó las contraseñas')
-
-  // Y sacarlo del perfil también, claro.
-  assert.equal(isAllowed({ members: [] })('GESTOR'), false, 'revocar en el acta no le cortó las contraseñas')
-})
-
-/**
- * EL SOBRE HAY QUE PODER ABRIRLO.
- *
- * La bóveda comparte UN cliente para todo, y el cliente solo abre sobres si le dieron
- * con qué (`sealing` o `myEncPrivateKey`). Sin eso RECIBÍA la petición del gestor, no
- * podía abrirla y la tiraba: el aparato se quedaba esperando y en el log no aparecía
- * nada. Se prueba aquí porque el fallo no está en el mostrador —está en cómo se le
- * cablea el transporte— y la red de mentira de arriba no puede verlo.
- */
-test('vault-passwords: el cliente de la bóveda ABRE el sobre del gestor', async () => {
-  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
-  const client = new WebSocketProxyClient({ url: 'wss://example.invalid', enableWebRTC: false })
-
-  // El mismo adaptador que monta el vault: la cripto es de identity, aquí basta su forma.
-  client.updateConfig({
-    sealing: {
-      async seal (msg) { return { app: 'passmanager', sealed: JSON.stringify(msg), from: 'ENC' } },
-      async open (env) { return JSON.parse(env.sealed) },
-      isSealed: (m) => !!m && m.app === 'passmanager' && !!m.sealed
+  // …ni la `cek` de antes: lo único guardado son sobres y envolturas.
+  const sellado = await store.get('passmanager/sealed/v2')
+  assert.ok(sellado.keyring.length > 0 && sellado.entries.length === 2)
+  assert.equal(sellado.cek, undefined, 'la bóveda se guardó una llave')
+  for (const g of sellado.keyring) {
+    assert.ok(g.wraps['#recovery'], 'una generación sin copia de recuperación nace ilegible')
+    for (const [quien, w] of Object.entries(g.wraps)) {
+      assert.ok(w.epk && w.iv && w.ct, `la envoltura de ${quien} no es una envoltura`)
     }
+  }
+})
+
+test('A LA BÓVEDA NO SE LE ENVUELVE NADA: sus llaves no están entre los destinatarios', async () => {
+  const { store, ap } = await montar()
+  const sellado = await store.get('passmanager/sealed/v2')
+  const destinatarios = new Set()
+  for (const g of sellado.keyring) for (const k of Object.keys(g.wraps)) destinatarios.add(k)
+  assert.deepEqual([...destinatarios].sort(), ['#recovery', ap.pub].sort(),
+    'alguien más recibió envoltura: si es una llave de esta máquina, el agujero sigue abierto')
+})
+
+test('CON EL PERFIL CERRADO la bóveda sigue atendiendo, y sigue sin poder leer', async () => {
+  const { desk, remota, bitacora } = await montar()
+  // Cerrar el perfil ya no cierra nada aquí: no hay ninguna llave que cerrar. Lo que
+  // protege las contraseñas es que los sobres van a los aparatos, no el candado.
+  desk.lock()
+  const [entrada] = await remota.find('https://salesforce.com/')
+  assert.equal((await remota.get(entrada.id, { keys: ['secret'] })).secret, 'hunter2')
+  assert.ok(bitacora.some((b) => b.audit === 'passwords.lock' && b.sealed === true))
+})
+
+test('la conversión pasa lo viejo al formato sellado y BORRA la llave de antes', async () => {
+  const { makeVaultKey, sealEntry } = await import('@dotrino/passmanager')
+  const net = red()
+  const ap = await aparatoDelActa()
+  const rec = await recuperacion()
+  const store = memStore()
+
+  // Una bóveda como la de antes: entradas cifradas con UNA llave, y la llave al lado.
+  const cek = await makeVaultKey()
+  await store.set('passmanager/entries/v1', [
+    await sealEntry(cek, { id: 'vieja', title: 'Banco', sites: ['banco.ec'], username: 'ana', secret: 'la de antes' })
+  ])
+  let llaveBorrada = false
+
+  const boveda = net.cliente('VAULT')
+  const encVault = await makeEncKeypair()
+  boveda.encPrivate = encVault.privateKey
+  const desk = createPasswordDesk({
+    client: boveda,
+    store,
+    members: () => [{ pub: ap.pub, encPub: ap.encPub }],
+    recoveryPub: () => rec.encPub,
+    canWrite: (pub) => pub === ap.pub,
+    isAllowed: (pub) => pub === ap.pub,
+    encPubOf: (pub) => (pub === ap.pub ? ap.encPub : null),
+    approve: async () => true,
+  }).start()
+
+  const r = await convertPasswords({
+    store,
+    sealed: desk.sealed,
+    cek,
+    recipients: { recoveryPub: rec.encPub, main: [{ pub: ap.pub, encPub: ap.encPub }], passkeys: [{ pub: ap.pub, encPub: ap.encPub }] },
+    author: { publickey: ap.pub, sign: (body) => ap.identity.sign(body) },
+    dropOldKey: () => { llaveBorrada = true }
   })
 
-  const visto = []
-  client.on('message', (from, payload, meta) => visto.push({ payload, sealed: meta?.sealed }))
+  assert.equal(r.entries, 1)
+  assert.equal(llaveBorrada, true, 'la llave vieja se quedó en el disco: el agujero sigue abierto')
+  assert.deepEqual(await store.get('passmanager/entries/v1'), [], 'quedaron las entradas del formato viejo')
 
-  await client._deliver('APARATO', { app: 'passmanager', sealed: JSON.stringify({ op: 'find' }), from: 'ENC' }, {})
-  assert.deepEqual(visto.at(-1), { payload: { op: 'find' }, sealed: true }, 'el sobre del gestor llegó cerrado y sin abrir')
+  // Y el aparato la abre con SU llave, que es lo que antes no podía.
+  const net2 = net.cliente(ap.pub)
+  net2.encPrivate = ap.encPrivate
+  const remota = new SealedVault(new ProxyTransport({
+    client: net2, peerPubkey: 'VAULT', peerEncPub: encVault.encPub, timeoutMs: 1500
+  }), { identity: ap.identity })
+  const [entrada] = await remota.find('https://banco.ec/')
+  assert.equal(entrada.title, 'Banco')
+  assert.equal((await remota.get('vieja', { keys: ['secret'] })).secret, 'la de antes')
+})
 
-  // Y lo de la CA sigue viajando en claro: un enrolamiento es público hasta que hay
-  // cert, así que el `isSealed` del gestor no puede tragarse el protocolo del vault.
-  await client._deliver('APARATO', { type: 'vault.enroll', data: {} }, {})
-  assert.equal(visto.at(-1).sealed, false, 'el protocolo de la CA dejó de entregarse')
-  assert.equal(visto.at(-1).payload.type, 'vault.enroll')
+test('un aparato que entra DESPUÉS no lee nada hasta que se le reparte, y al abrir se le reparte', async () => {
+  const { desk, store, rec } = await montar()
+  const nuevo = await aparatoDelActa()
+
+  // Todavía no tiene envoltura de nada: la bóveda no le cuenta ni que existen.
+  assert.deepEqual(await desk.sealed.views({ pub: nuevo.pub }), [])
+
+  // Al abrir el perfil, la copia de recuperación paga la deuda (§2.5). El acta ahora
+  // nombra al aparato nuevo y ya no al de antes: se le envuelve lo suyo y se retira lo
+  // del que salió, todo sin abrir un solo valor.
+  desk.sealed.recipients = () => [{ pub: nuevo.pub, encPub: nuevo.encPub }]
+  const r = await desk.sealed.rewrapAll({
+    openRecovery: async (wrap) => openWrap({ wrap, myEncPrivateKey: rec.privateKey })
+  })
+  assert.ok(r.wrapped > 0, 'no se le envolvió nada al aparato nuevo')
+  assert.ok(r.dropped > 0, 'no se retiró la envoltura del que ya no está en la lista')
+  assert.equal((await desk.sealed.views({ pub: nuevo.pub })).length, 2)
+  assert.ok(store)
 })

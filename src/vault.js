@@ -235,6 +235,25 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const passwordDevices = () => (actaCache?.members || []).filter((m) => Acta.memberCan(actaCache, m.pub, 'passwords'))
 
   /**
+   * A QUIÉN SE LE ENVUELVE LA LLAVE DE UNA CONTRASEÑA — Y LA BÓVEDA NUNCA ESTÁ EN LA LISTA.
+   *
+   * Es la comprobación que sostiene todo el modelo sellado: si la maestra o la llave de
+   * comunicación de esta máquina recibieran envoltura, el demonio volvería a poder leer las
+   * contraseñas y no habríamos arreglado nada —solo lo habríamos escrito más bonito—. Por
+   * eso se filtran explícitamente aquí, que es donde se construye la lista, y no en quien la
+   * consume (`sealed-passwords.md` §2.1).
+   *
+   * `main` son los aparatos con `contraseñas`; `passkeys`, los que además pueden abrir la
+   * privada de una passkey (§2.8). Un miembro sin llave de cifrado no puede recibir nada: se
+   * queda fuera y se ve en `incompleteMembers`.
+   */
+  const noEsLaBoveda = (pub) => pub !== master && pub !== commKey.pub()
+  const passwordRecipients = (kind = 'main') => (actaCache?.members || [])
+    .filter((m) => m.encPub && noEsLaBoveda(m.pub) && Acta.memberCan(actaCache, m.pub, 'passwords'))
+    .filter((m) => kind !== 'passkeys' || Acta.memberCan(actaCache, m.pub, 'passkeys'))
+    .map((m) => ({ pub: m.pub, encPub: m.encPub }))
+
+  /**
    * El acta vigente, en caché.
    *
    * `isAllowed`/`encPubOf` del responder son SÍNCRONOS (se llaman por cada mensaje que
@@ -249,20 +268,27 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /**
-   * La llave de la bóveda de contraseñas. Nace con el primer uso y vive cifrada en
-   * reposo, como la identidad: aquí no hace falta envolverla a cada aparato porque
-   * ningún aparato abre la bóveda — piden de a una y el vault responde.
+   * LA LLAVE VIEJA DE LA BÓVEDA DE CONTRASEÑAS, la que había que quitar.
+   *
+   * Vivía DENTRO del mismo archivo que las entradas, cifrada con la llave de la máquina y
+   * no con la contraseña del perfil. O sea: el demonio con el perfil cerrado seguía
+   * descifrando, y una copia del disco las abría todas. Esto ya no la crea — solo la LEE,
+   * y solo para convertir lo que quedó escrito con ella; en cuanto la conversión termina,
+   * `soltarLlaveVieja` la borra del archivo.
    */
-  async function passwordsKey () {
+  async function llaveViejaDeContrasenas () {
     const d = readPasswordsFile()
-    if (d?.cek) {
-      const raw = Uint8Array.from(Buffer.from(d.cek, 'base64'))
-      return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
-    }
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
-    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key))
-    writePasswordsFile({ ...(d || { v: 1, data: {} }), cek: Buffer.from(raw).toString('base64') })
-    return key
+    if (!d?.cek) return null
+    const raw = Uint8Array.from(Buffer.from(d.cek, 'base64'))
+    return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
+  }
+  const soltarLlaveVieja = () => {
+    const d = readPasswordsFile()
+    if (!d?.cek) return
+    delete d.cek
+    writePasswordsFile(d)
+    log('[vault] passwords: the old vault key is gone from the disk')
+    audit('passwords.converted', {})
   }
 
   const approvalsSweeper = setInterval(() => {
@@ -1871,7 +1897,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     passwords = createPasswordDesk({
       client,
       store: passwordsStore,
-      cek: await passwordsKey(),
+      // LA BÓVEDA NO TIENE LLAVE. Lo que pone aquí es a quién envolverle las que hacen los
+      // aparatos, y la pública de la copia de recuperación —la que abre la frase del perfil
+      // y es la única forma de volver a repartir una entrada si un día no queda ningún
+      // aparato—. Ninguna de las dos abre nada por sí sola.
+      members: (kind) => passwordRecipients(kind),
+      recoveryPub: () => secrets.recoveryPub(),
+      canWrite: (pub) => !!actaCache && !!pub && Acta.memberCan(actaCache, pub, 'passwords'),
       // UNA sola condición, y es del ACTA: el aparato tiene la capacidad `passwords`.
       // Quitársela —o quitar el aparato— le corta esto en la siguiente pasada, sin
       // que haya una segunda lista que acordarse de tocar.
@@ -3092,6 +3124,64 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   }
 
+  /**
+   * LAS CONTRASEÑAS, AL FORMATO SELLADO (§2.7) Y CON SUS ENVOLTURAS AL DÍA (§2.5).
+   *
+   * Las dos cosas se hacen aquí, al ABRIR el perfil, porque las dos necesitan lo mismo: la
+   * frase. Convertir hay que hacerlo una vez; repasar las envolturas, cada vez que cambie
+   * quién puede leer — y este es el único momento en que hay con qué.
+   *
+   * La bóveda ve los valores SOLO mientras convierte, que es cuando tiene que reescribirlos.
+   * Después no puede: lo último que hace la conversión es borrar la llave vieja.
+   */
+  async function sealPasswords (adminKey = null) {
+    if (!passwords) return null
+    const recipients = {
+      recoveryPub: secrets.recoveryPub(),
+      main: passwordRecipients('main'),
+      passkeys: passwordRecipients('passkeys')
+    }
+    if (!recipients.recoveryPub) {
+      log('[vault] passwords: no recovery key yet — nothing can be sealed until there is one')
+      return null
+    }
+    const out = {}
+    try {
+      const { convertPasswords } = await import('./passwords.js')
+      const r = await convertPasswords({
+        store: passwordsStore,
+        sealed: passwords.sealed,
+        cek: await llaveViejaDeContrasenas(),
+        recipients,
+        // LA MAESTRA FIRMA LO QUE ESCRIBE, como cualquier aparato que guarda una entrada.
+        // Firmar no es leer: lo que se le envuelve a esta bóveda sigue siendo nada.
+        author: { publickey: master, sign: (body) => identity.signData(body) },
+        dropOldKey: soltarLlaveVieja,
+        log
+      })
+      out.converted = r?.entries || 0
+      if (r?.already) out.converted = 0
+    } catch (e) {
+      log(`[vault] passwords: could not convert to the sealed format (${e.message})`)
+      out.convertError = e.message
+    }
+    try {
+      const r = await passwords.sealed.rewrapAll({
+        openRecovery: (wrap) => secrets.openRecoveryWrap(wrap, adminKey)
+      })
+      out.wrapped = r.wrapped
+      out.dropped = r.dropped
+      if (r.wrapped || r.dropped) {
+        log(`[vault] passwords: keyring rebuilt (${r.wrapped} wrap(s), ${r.dropped} stale one(s) dropped)`)
+      }
+      if (r.failed?.length) log(`[vault] passwords: ${r.failed.length} generation(s) could NOT be rewrapped`)
+    } catch (e) {
+      log(`[vault] passwords: could not rebuild the keyring (${e.message})`)
+      out.rewrapError = e.message
+    }
+    return out
+  }
+
   async function resealAll (adminKey = null) {
     // ANTES de reenvolver nada: si la copia de recuperación se quedó bajo la llave de la
     // máquina, se pasa a la frase. Sin esto, todo lo de abajo falla con «wrong password».
@@ -3558,6 +3648,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * diseño dice que sí (§8.2). Lo de siempre: dos sitios decidiendo lo mismo.
      */
     resealAll,
+    /** Convierte las contraseñas al formato sellado y repasa sus envolturas (§2.5, §2.7). */
+    sealPasswords,
     delegateRewrap,
     incompleteMembers,
     migrateSecrets: (membersOf, adminKey) => secrets.migrate(

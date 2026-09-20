@@ -60,6 +60,7 @@ const es = {
     read: 'lee',
     admin: 'administra',
     passwords: 'contrasenas',
+    passkeys: 'passkeys',
     approve: 'aprueba',
     sealer: 'sella',
     unattended: 'desatendido',
@@ -75,6 +76,9 @@ const es = {
     read: 'ver lo que guardaste',
     admin: 'conectar y quitar aparatos desde ahí, sin venir aquí. No puede cambiar permisos',
     passwords: 'pedir una contraseña por sitio, nunca la lista entera',
+    // Una passkey copiada sirve hasta que la borres en cada sitio: de una contraseña, al
+    // menos, se puede cambiar. Por eso es una decisión aparte.
+    passkeys: 'abrir además las passkeys guardadas, que son llaves y no se pueden cambiar. Sin «contrasenas» no hace nada',
     approve: 'dar el visto bueno cuando otro aparato pide claves privadas',
     // Sellar solo significa algo en un aparato que HAGA de bóveda (otra máquina con el
     // daemon, o un navegador que se puso de bóveda). En un teléfono normal se concede y no
@@ -419,6 +423,7 @@ const en = {
     read: 'read',
     admin: 'admin',
     passwords: 'passwords',
+    passkeys: 'passkeys',
     approve: 'approve',
     sealer: 'sealer',
     unattended: 'unattended',
@@ -432,6 +437,7 @@ const en = {
     read: 'see what you saved',
     admin: 'connect and remove devices from there, without coming here. It cannot change permissions',
     passwords: 'ask for one password per site, never the whole list',
+    passkeys: 'also open saved passkeys, which are keys and cannot be changed. Without «passwords» it does nothing',
     approve: 'give the go-ahead when another device asks for private keys',
     sealer: 'admit devices and change permissions on its own when this vault is away. Only useful on another VAULT',
     unattended: 'take private keys without asking you. Off, it must be approved from a device with «approve» every time it starts',
