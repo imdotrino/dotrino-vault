@@ -186,6 +186,28 @@ const T = {
     self_caps_b: 'Lo mismo que elige el PC al conectar un aparato (`pair --scope`). Se puede cambiar después, aparato por aparato, en la lista de arriba.',
     self_pending: 'Un dispositivo quiere conectarse',
     pass_t: 'Contraseñas que guarda esta bóveda',
+    // ENTRAR CON USUARIO Y CONTRASEÑA. Pantalla administrativa (§5.1): lista, datos y
+    // botones. El qué-es-esto va detrás de la (i).
+    lg_t: 'Entrar con usuario y contraseña',
+    lg_b: 'Un aparato de tu cuenta que se abre escribiendo una dirección y una contraseña, sin tener que conectar nada. Sirve para entrar desde un equipo prestado. Su llave vive aquí, cerrada con algo que solo sale de esa contraseña.',
+    lg_none: 'No hay ninguno.',
+    lg_user: 'Usuario', lg_user_ph: 'ana',
+    lg_label: 'Para qué equipo', lg_label_ph: 'el cyber de la esquina',
+    lg_pass: 'Contraseña', lg_pass2: 'Repítela',
+    lg_caps: 'Qué podrá hacer',
+    lg_add: 'Crear', lg_adding: 'Creando…',
+    lg_short: 'La contraseña tiene que tener al menos 12 caracteres.',
+    lg_mismatch: 'Las dos contraseñas no son iguales.',
+    lg_made: (a) => `Listo. Se entra con ${a} y esa contraseña.`,
+    lg_addr: 'Dirección',
+    lg_open: (n) => `${n} abierto${n === 1 ? '' : 's'}`,
+    lg_used: 'usado',
+    lg_blocked: (s) => `en espera ${s} s`,
+    lg_close: 'Cerrar sesiones', lg_unblock: 'Quitar la espera',
+    lg_passwd: 'Cambiar contraseña', lg_rm: 'Quitar',
+    lg_old: 'Contraseña actual', lg_new: 'Contraseña nueva',
+    lg_rm_sure: (u) => `¿Quitar «${u}»? Su llave sale del acta y ese equipo deja de entrar.`,
+    lg_only_vault: 'Esto solo se administra desde la bóveda: abre esta página en el aparato que la hace.',
     self_code_ph: 'Los 6 dígitos que muestra',
     self_approve: 'Aprobar', self_reject: 'Rechazar',
     // --- Administrar la bóveda desde aquí (consola remota) ---
@@ -366,6 +388,26 @@ const T = {
     self_caps_b: 'The same choice the PC makes when connecting a device (`pair --scope`). It can be changed later, device by device, in the list above.',
     self_pending: 'A device wants to connect',
     pass_t: 'Passwords kept in this vault',
+    lg_t: 'Sign in with a username and password',
+    lg_b: 'A device of your account that opens by typing an address and a password, with nothing to connect. It is how you sign in from a borrowed computer. Its key lives here, sealed with something only that password produces.',
+    lg_none: 'There are none.',
+    lg_user: 'Username', lg_user_ph: 'ana',
+    lg_label: 'For which computer', lg_label_ph: 'the cybercafé downstairs',
+    lg_pass: 'Password', lg_pass2: 'Again',
+    lg_caps: 'What it will be able to do',
+    lg_add: 'Create', lg_adding: 'Creating…',
+    lg_short: 'The password must be at least 12 characters.',
+    lg_mismatch: 'The two passwords are not the same.',
+    lg_made: (a) => `Done. Sign in with ${a} and that password.`,
+    lg_addr: 'Address',
+    lg_open: (n) => `${n} open`,
+    lg_used: 'used',
+    lg_blocked: (s) => `waiting ${s} s`,
+    lg_close: 'Close sessions', lg_unblock: 'Clear the wait',
+    lg_passwd: 'Change password', lg_rm: 'Remove',
+    lg_old: 'Current password', lg_new: 'New password',
+    lg_rm_sure: (u) => `Remove “${u}”? Its key leaves the account record and that computer stops getting in.`,
+    lg_only_vault: 'This is managed from the vault itself: open this page on the device that acts as one.',
     invite_url: 'Or send it this link:',
     invite_copy: 'Copy link', invite_copied: 'Copied',
     apv_t: 'Requests',
@@ -1113,6 +1155,7 @@ async function refreshSelf () {
   try {
     self.value = await id.value.selfVaultStatus()
     selfPending.value = self.value.running ? await id.value.selfVaultPending() : []
+    if (self.value.running) await refreshLogins()
   } catch (_) {}
 }
 /**
@@ -1146,6 +1189,77 @@ const selfPair = () => run('selfpair', async () => {
   clearInterval(selfTimer)
   selfTimer = setInterval(refreshSelf, 2000)
 })
+// ---------- ENTRAR CON USUARIO Y CONTRASEÑA (`temporary-access.md`) ----------
+//
+// La bóveda-pestaña ya sabía ATENDER estos inicios de sesión; lo que no había era forma de
+// crearlos, así que solo el binario daba de alta el aparato. Esto es la otra mitad, y va
+// aquí porque es donde se administra lo de ESTA bóveda.
+//
+// La contraseña no sale del iframe de identidad: se la lleva `selfVaultLoginAdd`, que hace
+// el OPAQUE y sella las llaves del aparato nuevo con lo que deriva de ella.
+/** Fecha corta y local. Es un dato operativo: dice si un inicio de sesión sigue vivo. */
+const fecha = (ms) => {
+  if (!ms) return '—'
+  try { return new Date(ms).toLocaleString(props.lang === 'en' ? 'en-US' : 'es-ES', { dateStyle: 'short', timeStyle: 'short' }) }
+  catch (_) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') }
+}
+
+const logins = ref([])
+const lgUser = ref('')
+const lgLabel = ref('')
+const lgPass = ref('')
+const lgPass2 = ref('')
+const lgCaps = ref(['sign', 'read', 'store'])
+const lgMsg = ref('')
+const lgAddr = ref('')
+const lgPasswdFor = ref('')
+const lgOld = ref('')
+const lgNew = ref('')
+
+const toggleLgCap = (cap) => {
+  lgCaps.value = lgCaps.value.includes(cap)
+    ? lgCaps.value.filter((c) => c !== cap)
+    : [...lgCaps.value, cap]
+}
+
+async function refreshLogins () {
+  try { logins.value = await id.value.selfVaultLogins() } catch (_) { logins.value = [] }
+}
+
+const lgAdd = () => run('lg-add', async () => {
+  lgMsg.value = ''; lgAddr.value = ''
+  if (lgPass.value.length < 12) { lgMsg.value = t.value.lg_short; return }
+  if (lgPass.value !== lgPass2.value) { lgMsg.value = t.value.lg_mismatch; return }
+  const r = await id.value.selfVaultLoginAdd({
+    user: lgUser.value.trim().toLowerCase(),
+    password: lgPass.value,
+    label: lgLabel.value.trim(),
+    // Los permisos del acta viajan como scopes del cert, igual que al emparejar.
+    scope: lgCaps.value.map((c) => capScope(c)).filter(Boolean),
+    unattended: lgCaps.value.includes('unattended')
+  })
+  lgAddr.value = r?.address || ''
+  lgUser.value = ''; lgLabel.value = ''; lgPass.value = ''; lgPass2.value = ''
+  await refreshLogins()
+})
+
+const lgClose = (user) => run('lg-close-' + user, async () => {
+  await id.value.selfVaultLoginClose({ user }); await refreshLogins()
+})
+const lgUnblock = (user) => run('lg-unb-' + user, async () => {
+  await id.value.selfVaultLoginUnblock(user); await refreshLogins()
+})
+const lgRemove = (user) => run('lg-rm-' + user, async () => {
+  await id.value.selfVaultLoginRemove(user); await refreshLogins()
+})
+const lgPasswd = (user) => run('lg-pw-' + user, async () => {
+  lgMsg.value = ''
+  if (lgNew.value.length < 12) { lgMsg.value = t.value.lg_short; return }
+  await id.value.selfVaultLoginPasswd({ user, oldPassword: lgOld.value, newPassword: lgNew.value })
+  lgOld.value = ''; lgNew.value = ''; lgPasswdFor.value = ''
+  await refreshLogins()
+})
+
 const selfApprove = (deviceId) => run('sa-' + deviceId, async () => {
   await id.value.selfVaultApprove(deviceId, selfCode.value.trim())
   selfCode.value = ''; selfQr.value = null; selfUrl.value = ''; clearInterval(selfTimer); await refreshSelf()
@@ -2068,6 +2182,82 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
       </div>
+
+      <!-- ENTRAR CON USUARIO Y CONTRASEÑA. Pantalla administrativa: la lista con lo que
+           hace falta para operar (dirección, sesiones abiertas, último uso, espera) y los
+           botones. El qué-es-esto va detrás de la (i). Solo cuando la bóveda es ESTE
+           aparato: los inicios de sesión los guarda quien los atiende. -->
+      <template v-if="vaultAt === 'self'">
+        <h2>
+          {{ t.lg_t }}
+          <button type="button" class="i" data-testid="info-logins" :aria-expanded="info === 'logins'"
+                  :aria-label="t.info_label" @click="toggleInfo('logins')">i</button>
+        </h2>
+        <p v-if="info === 'logins'" class="muted info-panel">{{ t.lg_b }}</p>
+
+        <p v-if="!logins.length" class="muted" data-testid="lg-none">{{ t.lg_none }}</p>
+        <div v-for="l in logins" :key="l.user" class="row lg-row" data-testid="lg-row">
+          <div>
+            <strong>{{ l.user }}</strong>
+            <span v-if="l.label" class="muted"> · {{ l.label }}</span>
+            <br />
+            <span class="muted">
+              <code>{{ l.deviceId || '????-????' }}</code>
+              · {{ t.lg_open(l.sessions.length) }}
+              <template v-if="l.sessions.length">· {{ t.lg_used }} {{ fecha(l.sessions[0].lastUsedAt) }}</template>
+              <template v-if="l.blockedUntil > Date.now()">
+                · {{ t.lg_blocked(Math.ceil((l.blockedUntil - Date.now()) / 1000)) }}
+              </template>
+            </span>
+          </div>
+          <div class="row">
+            <button class="btn ghost sm" :disabled="!l.sessions.length || busy === 'lg-close-' + l.user"
+                    data-testid="lg-close" @click="lgClose(l.user)">{{ t.lg_close }}</button>
+            <button class="btn ghost sm" :disabled="!(l.blockedUntil > Date.now()) || busy === 'lg-unb-' + l.user"
+                    @click="lgUnblock(l.user)">{{ t.lg_unblock }}</button>
+            <button class="btn ghost sm" data-testid="lg-passwd"
+                    @click="lgPasswdFor = lgPasswdFor === l.user ? '' : l.user">{{ t.lg_passwd }}</button>
+            <button class="btn ghost sm danger" :disabled="busy === 'lg-rm-' + l.user"
+                    data-testid="lg-rm" @click="confirming = { kind: 'login', pub: l.user }">{{ t.lg_rm }}</button>
+          </div>
+          <!-- La confirmación es de esta pantalla, no un `confirm()` del navegador: ese
+               bloquea, no se traduce y se ve fatal en un móvil (CONVENCIONES §5). -->
+          <div v-if="confirming && confirming.kind === 'login' && confirming.pub === l.user" class="confirm">
+            <span>{{ t.lg_rm_sure(l.user) }}</span>
+            <button class="btn sm danger" data-testid="lg-rm-yes" @click="lgRemove(l.user)">{{ t.yes }}</button>
+            <button class="btn ghost sm" @click="confirming = null">{{ t.cancel }}</button>
+          </div>
+        </div>
+
+        <!-- CAMBIAR LA CONTRASEÑA es abrir y volver a cerrar: hace falta la vieja, y lo que
+             estuviera abierto se cierra. -->
+        <div v-if="lgPasswdFor" class="lg-form" data-testid="lg-passwd-form">
+          <label>{{ t.lg_old }}<input v-model="lgOld" type="password" autocomplete="off" /></label>
+          <label>{{ t.lg_new }}<input v-model="lgNew" type="password" autocomplete="new-password" /></label>
+          <button class="btn sm" :disabled="busy === 'lg-pw-' + lgPasswdFor"
+                  @click="lgPasswd(lgPasswdFor)">{{ t.lg_passwd }}</button>
+        </div>
+
+        <!-- ALTA. Se pueden tener VARIOS por perfil y cada uno con sus permisos: son
+             miembros del acta como cualquier otro aparato. -->
+        <div class="lg-form" data-testid="lg-add-form">
+          <label>{{ t.lg_user }}<input v-model="lgUser" :placeholder="t.lg_user_ph" autocomplete="off" data-testid="lg-user" /></label>
+          <label>{{ t.lg_label }}<input v-model="lgLabel" :placeholder="t.lg_label_ph" autocomplete="off" data-testid="lg-label" /></label>
+          <label>{{ t.lg_pass }}<input v-model="lgPass" type="password" autocomplete="new-password" data-testid="lg-pass" /></label>
+          <label>{{ t.lg_pass2 }}<input v-model="lgPass2" type="password" autocomplete="new-password" data-testid="lg-pass2" /></label>
+          <p class="muted">{{ t.lg_caps }}</p>
+          <div class="caps" data-testid="lg-caps">
+            <button v-for="c in PAIRABLE_CAPS" :key="c" class="cap" :class="{ on: lgCaps.includes(c) }"
+                    :data-cap="c" @click="toggleLgCap(c)">{{ t.caps[c] }}</button>
+          </div>
+          <button class="btn" :disabled="!lgUser || !lgPass || busy === 'lg-add'"
+                  data-testid="lg-add" @click="lgAdd">{{ busy === 'lg-add' ? t.lg_adding : t.lg_add }}</button>
+          <p v-if="lgMsg" class="muted bad" data-testid="lg-msg">{{ lgMsg }}</p>
+          <p v-if="lgAddr" class="ok" data-testid="lg-addr">
+            {{ t.lg_made(lgAddr) }}<br /><span class="muted">{{ t.lg_addr }}:</span> <code>{{ lgAddr }}</code>
+          </p>
+        </div>
+      </template>
 
       <!-- LO QUE ESTA BÓVEDA GUARDA Y ATIENDE. Solo cuando la bóveda es este aparato: si
            vive en otra máquina, es ella quien responde a las peticiones y montar aquí un

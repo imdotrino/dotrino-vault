@@ -676,40 +676,48 @@ async function findMember (id) {
  *   dotrino-vault caps <ID> -desatendido    ← vuelve a pedir permiso (el defecto)
  */
 
+/**
+ * LAS PALABRAS DE LOS PERMISOS, en un solo sitio.
+ *
+ * Las usa `caps <ID> ±permiso` y también `logins add`, que da de alta un aparato que se abre
+ * con usuario y contraseña: los dos hablan de lo mismo, así que tienen que llamarlo igual.
+ * Tenerlo dos veces es cómo se acaba aceptando `+aprueba` en un comando y no en el otro.
+ */
+const CAP_BY_WORD = {
+  firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
+  // `sella`: SELLAR EL ACTA. Es lo que convierte a otra bóveda en respaldo de esta —
+  // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
+  // quien manda sigue mandando. Como `administra`, no se empareja: se concede aquí.
+  sella: 'sealer', sealer: 'sealer',
+  // `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No
+  // tiene maestra y no puede abrir nada. A diferencia de `sella`, SÍ se empareja.
+  replica: 'replica', replicador: 'replica',
+  // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
+  // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
+  contrasenas: 'passwords', 'contraseñas': 'passwords',
+  // `passkeys`: además de las contraseñas, puede abrir la LLAVE PRIVADA de una passkey.
+  // Va aparte porque una passkey copiada sirve hasta que la borres en cada sitio donde
+  // la registraste — de una contraseña, al menos, se puede cambiar
+  // (`dotrino-passmanager/docs/sealed-passwords.md` §2.8). Sin `contraseñas` no
+  // significa nada: la passkey vive en una entrada de contraseñas.
+  passkeys: 'passkeys', llaves: 'passkeys',
+  // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
+  // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
+  //
+  // No se llama `permiso` —como la marca local de antes— a propósito: aquella significaba
+  // «este aparato PIDE permiso» y esta significa lo contrario. Reusar la palabra con el
+  // sentido invertido es la clase de trampa que se paga una madrugada.
+  desatendido: 'unattended', unattended: 'unattended',
+  sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
+  passwords: 'passwords'
+}
+
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
     console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+sella|-sella|+desatendido|-desatendido')
     process.exit(2)
-  }
-  const CAP_BY_WORD = {
-    firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
-    // `sella`: SELLAR EL ACTA. Es lo que convierte a otra bóveda en respaldo de esta —
-    // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
-    // quien manda sigue mandando. Como `administra`, no se empareja: se concede aquí.
-    sella: 'sealer', sealer: 'sealer',
-    // `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No
-    // tiene maestra y no puede abrir nada. A diferencia de `sella`, SÍ se empareja.
-    replica: 'replica', replicador: 'replica',
-    // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
-    // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
-    contrasenas: 'passwords', 'contraseñas': 'passwords',
-    // `passkeys`: además de las contraseñas, puede abrir la LLAVE PRIVADA de una passkey.
-    // Va aparte porque una passkey copiada sirve hasta que la borres en cada sitio donde
-    // la registraste — de una contraseña, al menos, se puede cambiar
-    // (`dotrino-passmanager/docs/sealed-passwords.md` §2.8). Sin `contraseñas` no
-    // significa nada: la passkey vive en una entrada de contraseñas.
-    passkeys: 'passkeys', llaves: 'passkeys',
-    // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
-    // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
-    //
-    // No se llama `permiso` —como la marca local de antes— a propósito: aquella significaba
-    // «este aparato PIDE permiso» y esta significa lo contrario. Reusar la palabra con el
-    // sentido invertido es la clase de trampa que se paga una madrugada.
-    desatendido: 'unattended', unattended: 'unattended',
-    sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
-    passwords: 'passwords'
   }
   const s = requireDaemon()
   const m = await findMember(id)
@@ -1564,7 +1572,9 @@ async function loginHere (opaqueClient, user, password) {
 const LOGINS_USAGE = `uso: dotrino-vault logins <orden>
 
   logins [ls]                 los aparatos que se abren con usuario y contraseña
-  logins add <usuario> [nombre del equipo]
+  logins add <usuario> [nombre del equipo] [±permiso …]
+                              permisos como en «caps» (+aprueba, -guarda, +desatendido…).
+                              Sin decir nada: firma, lee y guarda
   logins passwd <usuario>     cambia la contraseña (cierra lo que estuviera abierto)
   logins close <usuario> [sid]  cierra una sesión abierta (sin sid, todas)
   logins unblock <usuario>    quita la espera de los intentos fallidos
@@ -1930,7 +1940,9 @@ function help () {
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
   logins              los aparatos que se abren con usuario y contraseña (para un equipo
                       prestado, donde no puedes emparejar nada)
-  logins add <usuario> [nombre del equipo]
+  logins add <usuario> [nombre del equipo] [±permiso …]
+                              permisos como en «caps» (+aprueba, -guarda, +desatendido…).
+                              Sin decir nada: firma, lee y guarda
                       crea uno. La contraseña se teclea aquí y no sale de esta terminal:
                       la bóveda guarda un paquete de llaves que solo ella abre
   logins passwd <usuario>       cambia la contraseña (cierra lo que estuviera abierto)
