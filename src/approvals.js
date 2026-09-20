@@ -38,7 +38,27 @@ const rnd = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.to
 /** Separador de la llave compuesta. Es un byte que no puede aparecer en un cajón ni en una pubkey. */
 const SEP = String.fromCharCode(0)
 
+/**
+ * LO QUE DURA UN PEDIDO SIN CONTESTAR, y por qué son dos números y no uno.
+ *
+ * CINCO MINUTOS es lo correcto para un COMANDO: hay un proceso bloqueado esperando, y
+ * aprobar media hora más tarde entregaría claves a algo cuyo contexto ya cambió — la
+ * carpeta, el comando o la máquina pueden ser otros. Que caduque rápido es la protección.
+ *
+ * UNA ACTUALIZACIÓN no se parece en nada (dueño, 2026-09-20): no hay nadie esperando, y
+ * caducar no protege de nada — solo significa que mañana se vuelve a pedir y se vuelve a
+ * perder, porque mirar el teléfono puede tardar horas. Un pedido que nunca llega a tiempo
+ * es una función que no existe.
+ *
+ * Por eso el plazo es DEL PEDIDO y no de la mesa. Quien pide dice cuánto aguanta lo suyo.
+ */
 export const PENDING_TTL_MS = 5 * 60 * 1000
+/**
+ * Y el de una actualización: un día. Cuadra con que la bóveda mire una vez al día — pedir
+ * otra vez reemplaza el pedido anterior del mismo cajón y aparato, así que siempre hay
+ * exactamente uno vivo, en vez de una cola de avisos caducados.
+ */
+export const UPDATE_TTL_MS = 24 * 60 * 60 * 1000
 /** Lo que dura una concesión SIN USARSE. Cada uso la vuelve a poner en una hora. */
 export const GRANT_TTL_MS = 60 * 60 * 1000
 
@@ -62,10 +82,12 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
      * apruebe— y tiene que volver por el mismo sitio: desde que la bóveda atiende también
      * por un socket local, mandarla siempre por el proxio la dejaba en el vacío.
      */
-    request ({ ns, device, deviceId, label = '', ek, ctx = null, from = null }) {
+    request ({ ns, device, deviceId, label = '', ek, ctx = null, from = null, ttlMs = null }) {
       for (const [id, p] of pending) if (p.ns === ns && p.device === device) pending.delete(id)
       const ts = now()
-      const p = { id: rnd(), ns, device, deviceId, label, ek, ctx, ts, exp: ts + pendingTtlMs, from }
+      // `ttlMs` lo pone quien pide: una actualización aguanta un día y un comando cinco
+      // minutos, y la mesa no tiene por qué saber cuál es cuál (ver `PENDING_TTL_MS`).
+      const p = { id: rnd(), ns, device, deviceId, label, ek, ctx, ts, exp: ts + (ttlMs || pendingTtlMs), from }
       pending.set(p.id, p)
       return publicOf(p)
     },
@@ -158,4 +180,4 @@ export function createGrants ({ now = Date.now, ttlMs = GRANT_TTL_MS } = {}) {
   return api
 }
 
-export default { createApprovals, createGrants, PENDING_TTL_MS, GRANT_TTL_MS }
+export default { createApprovals, createGrants, PENDING_TTL_MS, UPDATE_TTL_MS, GRANT_TTL_MS }
