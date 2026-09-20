@@ -24,7 +24,7 @@
     "@dotrino/compat": "0.4.0",
     "@dotrino/identity": "0.92.0",
     "@dotrino/opaque": "0.1.0",
-    "@dotrino/passmanager": "0.12.0",
+    "@dotrino/passmanager": "0.14.1",
     "@dotrino/proxy-client": "0.23.1",
     "@dotrino/roadmap": "0.3.3",
     "@dotrino/store": "0.11.0",

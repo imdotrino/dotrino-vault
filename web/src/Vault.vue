@@ -18,7 +18,10 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { Identity } from '@dotrino/identity'
 import { WebSocketProxyClient } from '@dotrino/proxy-client'
-import { LocalVault, VaultResponder, samePubkey, importAuto, identitySealing } from '@dotrino/passmanager'
+import { samePubkey, importAuto, identitySealing, SealedStore, SealedResponder } from '@dotrino/passmanager'
+import { RECOVERY, makeRecovery, openRecovery, hasRecovery, recoveryPubOf, convertToSealed, buildSealedEntry, profileKeys } from '@dotrino/passmanager/sealed'
+import { openWrap, decryptWithCek } from '@dotrino/identity/content'
+import { verifyDeviceSig } from '@dotrino/identity/capabilities'
 
 const props = defineProps({
   lang: { type: String, default: 'es' },
@@ -48,6 +51,23 @@ function proxyUrl () {
 
 const T = {
   es: {
+    // --- la copia de recuperación y la conversión (sealed-passwords.md §2.7) ---
+    pwTitle: 'Elige la contraseña de tus contraseñas',
+    pwWhy: 'Desde ahora esta bóveda guarda tus contraseñas cerradas para tus aparatos, y ella no puede abrirlas. Esta contraseña es la única forma de volver a abrirlas el día que no te quede ningún aparato.',
+    pwWarn: 'No se puede recuperar. Si la pierdes, pierdes lo que haya aquí dentro.',
+    pw1: 'Contraseña',
+    pw2: 'Otra vez',
+    pwGo: 'Crear',
+    pwWorking: 'Convirtiendo…',
+    pwShort: 'Tiene que tener al menos 12 caracteres.',
+    pwMismatch: 'No coinciden.',
+    badPassword: 'Esa contraseña no abre la copia de recuperación.',
+    converted: (n) => n ? `Listo: ${n} entrada${n === 1 ? '' : 's'} pasada${n === 1 ? '' : 's'} al formato nuevo.` : 'Listo.',
+    importAsk: 'Escribe la contraseña de tus contraseñas para poder guardarlas.',
+    askPwOk: 'Continuar',
+    askPwNo: 'Cancelar',
+    keptCount: (n) => n ? `${n} entrada${n === 1 ? '' : 's'}` : 'Nada guardado todavía.',
+    keptBlind: 'Esta bóveda no puede leerlas: las guarda cerradas para tus aparatos. Lo único que sabe de ellas es cuántas hay.',
     opening: 'Abriendo tus contraseñas…',
     active: 'Respondiendo a tus aparatos',
     inactive: 'No está respondiendo',
@@ -74,6 +94,22 @@ const T = {
     noIdentity: 'Hace falta tu perfil de Dotrino. Créalo y vuelve.',
   },
   en: {
+    pwTitle: 'Choose the password for your passwords',
+    pwWhy: 'From now on this vault keeps your passwords sealed for your devices, and it cannot open them. This password is the only way to open them again the day you have no device left.',
+    pwWarn: 'It cannot be recovered. If you lose it, you lose whatever is in here.',
+    pw1: 'Password',
+    pw2: 'Again',
+    pwGo: 'Create',
+    pwWorking: 'Converting…',
+    pwShort: 'It must be at least 12 characters.',
+    pwMismatch: 'They do not match.',
+    badPassword: 'That password does not open the recovery copy.',
+    converted: (n) => n ? `Done: ${n} entr${n === 1 ? 'y' : 'ies'} moved to the new format.` : 'Done.',
+    importAsk: 'Type the password for your passwords so they can be saved.',
+    askPwOk: 'Continue',
+    askPwNo: 'Cancel',
+    keptCount: (n) => n ? `${n} entr${n === 1 ? 'y' : 'ies'}` : 'Nothing kept yet.',
+    keptBlind: 'This vault cannot read them: it keeps them sealed for your devices. All it knows about them is how many there are.',
     opening: 'Opening your passwords…',
     active: 'Answering your devices',
     inactive: 'Not answering',
@@ -139,35 +175,84 @@ const store = {
 }
 
 /**
- * La llave vive como `CryptoKey` NO EXTRAÍBLE: IndexedDB la clona en vez de
- * serializarla, así que nunca existe en forma exportable — ni este código puede sacarla.
- * Y se comprueba QUÉ hay guardado, no solo que haya algo: un dato viejo reventaba dentro
- * de WebCrypto con un error que no dice de dónde viene.
+ * LA LLAVE VIEJA, y ya no se estrena ninguna.
+ *
+ * Hasta ahora esta bóveda tenía una llave suya con la que cifraba todo, aquí mismo en
+ * IndexedDB. No extraíble, sí — pero de este navegador, así que **la bóveda podía leer
+ * todas las contraseñas**. Es el mismo agujero que se cerró en el binario, y esta pestaña
+ * era una de las tres que seguía con él.
+ *
+ * Ahora solo se lee, y para una cosa: convertir lo que quedó del formato viejo. Después se
+ * borra. Si no hay nada que convertir, no se crea ninguna.
  */
-async function vaultKey () {
+async function llaveVieja () {
   const saved = await store.get('cek')
-  if (saved instanceof CryptoKey) return saved
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-  await store.set('cek', key)
-  return key
+  return saved instanceof CryptoKey ? saved : null
 }
+
+/** Y se va con lo último que cifraba: mientras siga ahí, el agujero sigue abierto. */
+async function soltarLlaveVieja () { await store.set('cek', null) }
 
 // --- estado -------------------------------------------------------------------
 
 const ready = ref(false)
 const error = ref('')
 const devices = ref([])
-const entries = ref([])
 const note = ref('')
 const asking = ref(null)
+// LA CONTRASEÑA DE LA COPIA DE RECUPERACIÓN. Mientras esto esté puesto, la pantalla pide
+// crearla: sin ella no se puede convertir nada, y la bóveda no atiende.
+const pidiendoClave = ref(false)
+const clave1 = ref('')
+const clave2 = ref('')
+const claveError = ref('')
+const convirtiendo = ref(false)
+const claveUna = ref('')
+// Cuántas entradas guarda. Es TODO lo que una bóveda que no puede leer sabe de lo suyo, y
+// decir eso es más honesto que enseñar una lista de títulos que ya no puede sacar.
+const cuantas = ref(0)
 // El TIMBRE: si este navegador puede recibir el aviso que despierta la bóveda.
 const pushListo = ref(false)
 const pushError = ref('')
 let encender = null
 
 let identity = null
-let vault = null
+let sealed = null          // la SealedStore: sobres que esta bóveda no puede abrir
 let responder = null
+let miPub = null           // la llave de ESTE navegador, para no envolvérsela a sí mismo
+let sweeper = null         // el refresco del acta; se para al desmontar
+
+// --- las piezas que necesita quien ESCRIBE (el dueño con su contraseña) -------
+
+/** Los destinatarios de ahora mismo, tal como los pide `buildSealedEntry`. */
+async function recipientsAhora () {
+  return {
+    recoveryPub: recoveryPubOf(await store.get('recovery')),
+    main: await recipientsOf('main'),
+    passkeys: await recipientsOf('passkeys')
+  }
+}
+
+/**
+ * LA LLAVE DEL PERFIL, abierta con la copia de recuperación. De ella salen el índice de
+ * sitios y los resúmenes, así que sin ella no se puede ni guardar ni buscar.
+ *
+ * Se abre por la envoltura `#recovery`, que es la de quien sabe la contraseña — el mismo
+ * camino que usaría el dueño para reparar la bóveda.
+ */
+async function baseDelPerfil (privateKey) {
+  const { envelope, wrap } = await sealed.profile({ pub: RECOVERY })
+  const cek = await openWrap({ wrap, myEncPrivateKey: privateKey })
+  return decryptWithCek({ cek, envelope })
+}
+
+/** Quien firma lo que se escribe: este navegador, que es miembro del acta. */
+function autor () {
+  // `sign` devuelve `{ signature }`, que es lo que espera `buildSealedEntry` —y es
+  // justo lo que da `identity.signData`, así que se pasa tal cual. Desenvolverlo aquí
+  // dejaba una firma `undefined` que la bóveda rechaza sin decir por qué.
+  return { publickey: miPub, sign: (body) => identity.signData(body) }
+}
 
 /**
  * Quién puede pedir credenciales lo dice el ACTA, como cualquier otro permiso: los
@@ -181,6 +266,24 @@ async function listDevices () {
 }
 
 /**
+ * A QUIÉN HAY QUE ENVOLVERLE CADA LLAVE, y aquí está la regla que sostiene todo esto:
+ * **esta bóveda NUNCA está en la lista**. Ni su llave ni ninguna otra suya.
+ *
+ * Es la misma que aplica el binario en `passwordRecipients()`. Si se colara, la bóveda
+ * volvería a poder leer y no se notaría nada: seguiría funcionando igual.
+ *
+ * Un miembro sin `encPub` no puede recibir envolturas — no se le salta en silencio, se
+ * queda fuera de la lista y `SealedStore` lo dirá al comprobar los destinatarios.
+ */
+async function recipientsOf (kind) {
+  const r = await identity.profileMembers()
+  const cap = kind === 'passkeys' ? 'passkeys' : 'passwords'
+  return (r?.members || [])
+    .filter((m) => (m.caps || []).includes(cap) && m.encPub && !samePubkey(m.pub, miPub))
+    .map((m) => ({ pub: m.pub, encPub: m.encPub }))
+}
+
+/**
  * El sobre lo arma el PILAR, no esta pantalla: es la misma pieza que usa la extensión al
  * otro lado (`identitySealing` de `@dotrino/passmanager`). Estaba escrito aquí y allí, y
  * son las dos puntas del mismo sobre — dos copias es una que se queda atrás, y cuando eso
@@ -191,19 +294,98 @@ let sealing = null
 
 async function refresh () {
   devices.value = await listDevices()
-  entries.value = vault ? await vault.list() : []
+  // NO se listan las entradas, y no es que falte: **esta bóveda ya no puede leerlas**. Lo
+  // único que sabe de lo suyo es cuántas hay, y eso es lo que se enseña. Una lista de
+  // títulos aquí querría decir que la bóveda los tiene, que es justo lo que se quitó.
+  cuantas.value = sealed ? (await sealed.stats()).entries : 0
 }
 
+/**
+ * IMPORTAR ya no es cosa de la bóveda, y es la consecuencia visible del cambio: para
+ * escribir una entrada hay que CERRARLA, y cerrarla necesita la llave del perfil, que
+ * ninguna bóveda tiene. Aquí la abre quien sabe la contraseña de la copia de recuperación
+ * — que es el dueño, actuando como un aparato más.
+ *
+ * Se pide en el momento y no se guarda: tenerla en memoria «por comodidad» sería volver a
+ * poner una llave dentro de la bóveda con otro nombre.
+ */
 async function importFile (ev) {
   const f = ev.target.files?.[0]
   if (!f) return
+  const texto = await f.text().catch(() => null)
+  ev.target.value = ''
+  if (!texto) return
+  const pwd = await pedirClave(t('importAsk'))
+  if (pwd == null) return
   try {
-    const { entries: list } = importAuto(await f.text())
-    for (const e of list) await vault.put(e)
+    const { entries: list } = importAuto(texto)
+    const priv = await openRecovery({ record: await store.get('recovery'), password: pwd })
+    const keys = await profileKeys(await baseDelPerfil(priv))
+    const recipients = await recipientsAhora()
+    for (const e of list) {
+      await sealed.putSealed(await buildSealedEntry({ plain: e, keys, recipients, author: autor() }))
+    }
     note.value = t('imported', list.length)
     await refresh()
-  } catch (e) { error.value = e.message }
-  ev.target.value = ''
+  } catch (e) {
+    error.value = e?.code === 'wrong-password' ? t('badPassword') : (e?.message || String(e))
+  }
+}
+
+/**
+ * CREAR LA COPIA DE RECUPERACIÓN Y CONVERTIR. Es el paso que abre todo lo demás.
+ *
+ * La contraseña no se guarda en ninguna parte y no se puede recuperar — se dice en
+ * pantalla, porque es la mitad del trato: una copia que se pudiera reponer desde este
+ * mismo navegador no sería una copia de recuperación, sería otra llave de la bóveda.
+ */
+async function crearYConvertir () {
+  claveError.value = ''
+  if (clave1.value.length < 12) { claveError.value = t('pwShort'); return }
+  if (clave1.value !== clave2.value) { claveError.value = t('pwMismatch'); return }
+  convirtiendo.value = true
+  try {
+    let record = await store.get('recovery')
+    if (!hasRecovery(record)) {
+      const hecha = await makeRecovery({ password: clave1.value })
+      record = hecha.record
+      await store.set('recovery', record)
+    }
+    const r = await convertToSealed({
+      store,
+      sealed,
+      cek: await llaveVieja(),
+      recipients: await recipientsAhora(),
+      author: autor(),
+      dropOldKey: soltarLlaveVieja
+    })
+    note.value = t('converted', r.entries)
+    clave1.value = ''; clave2.value = ''
+    pidiendoClave.value = false
+    // La bóveda ya puede atender: se arranca lo que se saltó al entrar.
+    ready.value = false
+    await arrancar()
+  } catch (e) {
+    claveError.value = e?.message || String(e)
+  } finally { convirtiendo.value = false }
+}
+
+/**
+ * Pide la contraseña para UNA operación y la devuelve, o `null` si se canceló. No se
+ * guarda: tenerla en memoria «por comodidad» sería volver a poner una llave dentro de la
+ * bóveda con otro nombre.
+ */
+let pidiendo = null
+const pidiendoTexto = ref('')
+function pedirClave (texto) {
+  pidiendoTexto.value = texto
+  return new Promise((resolve) => { pidiendo = resolve })
+}
+function responderClave (valor) {
+  pidiendoTexto.value = ''
+  claveUna.value = ''
+  const r = pidiendo; pidiendo = null
+  r?.(valor)
 }
 
 /**
@@ -269,13 +451,39 @@ function answer (yes) {
   cerrarAviso()
 }
 
-onMounted(async () => {
+async function arrancar () {
   try {
     // `identity` NUNCA en un ref reactivo: el Proxy de Vue rompe el postMessage al
     // iframe («could not be cloned»). Por eso es un `let` suelto y no un `ref`.
     identity = props.identity || await Identity.connect()
-    vault = new LocalVault(store)
-    vault.unlock(await vaultKey())
+
+    // QUIÉN ES ESTE NAVEGADOR dentro del acta. Hace falta antes que nada: es lo que se
+    // excluye de los destinatarios (una bóveda no se envuelve a sí misma) y lo que firma.
+    const yo = await identity.profileMembers()
+    miPub = (yo?.members || []).find((m) => m.isMe)?.pub
+    if (!miPub) throw new Error('este navegador no está en el acta de su propio perfil')
+
+    // LA BÓVEDA: guarda sobres y comprueba lo que se puede comprobar SIN llave — que los
+    // destinatarios son exactamente los del acta, que está la copia de recuperación, y que
+    // quien escribe lo firmó y puede escribir.
+    sealed = new SealedStore(store, {
+      recipients: (kind) => recipientsOf(kind),
+      verifyAuthor: async ({ body, author }) => {
+        const miembros = (await identity.profileMembers())?.members || []
+        const m = miembros.find((x) => samePubkey(x.pub, author?.pub))
+        if (!m || !(m.caps || []).includes('passwords')) return false
+        return verifyDeviceSig({ publickey: author.pub, data: body, signature: author.sig })
+      }
+    })
+
+    // ¿HAY QUE CONVERTIR? Si no hay copia de recuperación, esta bóveda todavía es la de
+    // antes —una llave suya abriendo todo— y no se atiende hasta arreglarlo. Nada de
+    // servir con la llave vieja «mientras tanto»: eso es el agujero con otro nombre.
+    if (!hasRecovery(await store.get('recovery')) || !(await sealed.sealed())) {
+      pidiendoClave.value = true
+      ready.value = true
+      return
+    }
 
     sealing = identitySealing(identity)
     const client = new WebSocketProxyClient({
@@ -295,9 +503,7 @@ onMounted(async () => {
     // las peticiones salían, no llegaban a nadie, y del otro lado se veían como «nadie
     // respondió a tiempo». Con el daemon no pasaba, porque él sí se identifica con la
     // suya. Encontrado el 2026-08-29 al probar la bóveda de pestaña de punta a punta.
-    const { members } = await identity.profileMembers()
-    const publickey = (members || []).find((m) => m.isMe)?.pub
-    if (!publickey) throw new Error('este navegador no está en el acta de su propio perfil')
+    const publickey = miPub
     const data = { op: 'identify', publickey, token: client.token, ts: Date.now() }
     const { signature } = await identity.signData(data)
     await client.identify({ data, signature })
@@ -306,12 +512,16 @@ onMounted(async () => {
     // son SÍNCRONOS, así que se refresca aparte. Quitarle el permiso a un aparato —o
     // quitarlo del perfil— le corta esto en la siguiente pasada.
     let known = await listDevices()
-    const sweeper = setInterval(() => { listDevices().then(l => { known = l }).catch(() => {}) }, 5000)
-    onBeforeUnmount(() => clearInterval(sweeper))
+    // El intervalo se guarda fuera: `arrancar()` se puede llamar otra vez (al convertir),
+    // y `onBeforeUnmount` solo vale mientras el componente se está montando — registrarlo
+    // aquí una segunda vez es un aviso de Vue y un intervalo que no se para.
+    if (sweeper) clearInterval(sweeper)
+    sweeper = setInterval(() => { listDevices().then(l => { known = l }).catch(() => {}) }, 5000)
 
-    responder = new VaultResponder({
+    responder = new SealedResponder({
       client,
-      vault,
+      store: sealed,
+      recipients: () => recipientsAhora(),
       isAllowed: (pub) => known.some(d => samePubkey(d.pub, pub)),
       encPubOf: (pub) => known.find(d => samePubkey(d.pub, pub))?.encPub || null,
       // Qué exige un dedo encima lo decide el responder por defecto: **solo `get`, y
@@ -346,9 +556,11 @@ onMounted(async () => {
   } catch (e) {
     error.value = e?.message || String(e)
   }
-})
+}
 
-onBeforeUnmount(() => responder?.stop())
+onMounted(arrancar)
+
+onBeforeUnmount(() => { responder?.stop(); if (sweeper) clearInterval(sweeper) })
 </script>
 
 <template>
@@ -361,7 +573,23 @@ onBeforeUnmount(() => responder?.stop())
       <p class="hint">{{ t('noIdentity') }}</p>
     </template>
 
-    <template v-if="ready">
+    <!-- CONVERTIR. Mientras esto esté, la bóveda NO atiende: servir con la llave vieja
+         «mientras tanto» sería el mismo agujero con otro nombre. -->
+    <template v-if="ready && pidiendoClave">
+      <h2>{{ t('pwTitle') }}</h2>
+      <p class="hint">{{ t('pwWhy') }}</p>
+      <p class="warn">{{ t('pwWarn') }}</p>
+      <form class="pw" @submit.prevent="crearYConvertir">
+        <input v-model="clave1" type="password" :placeholder="t('pw1')" autocomplete="new-password" data-testid="pw1">
+        <input v-model="clave2" type="password" :placeholder="t('pw2')" autocomplete="new-password" data-testid="pw2">
+        <button type="submit" :disabled="convirtiendo" data-testid="pw-go">
+          {{ convirtiendo ? t('pwWorking') : t('pwGo') }}
+        </button>
+      </form>
+      <p v-if="claveError" class="err" data-testid="pw-error">{{ claveError }}</p>
+    </template>
+
+    <template v-if="ready && !pidiendoClave">
       <div class="state"><span class="dot on"></span><span>{{ t('active') }}</span></div>
       <p class="warn">{{ t('warning') }}</p>
 
@@ -378,16 +606,10 @@ onBeforeUnmount(() => responder?.stop())
       <p v-if="devices.length" class="hint">{{ t('manage') }}</p>
 
       <h2>{{ t('kept') }}</h2>
-      <ul v-if="entries.length" class="rows">
-        <li v-for="e in entries" :key="e.id" class="row">
-          <div>
-            <strong>{{ e.title || e.sites?.[0] || '—' }}</strong>
-            <div class="hint">{{ (e.sites || []).join(' ') || t('anySite') }}</div>
-          </div>
-          <span class="hint">{{ [e.hasSecret && '🔑', e.hasTotp && '2FA', e.hasFields && '+'].filter(Boolean).join(' ') }}</span>
-        </li>
-      </ul>
-      <p v-else class="hint">{{ t('empty') }}</p>
+      <!-- NI UN TÍTULO, y eso es la noticia: esta bóveda ya no puede leer lo que guarda.
+           Enseñar aquí una lista querría decir que los tiene. -->
+      <p class="hint" data-testid="kept-count">{{ t('keptCount', cuantas) }}</p>
+      <p class="hint">{{ t('keptBlind') }}</p>
       <p v-if="note" class="hint">{{ note }}</p>
 
       <!-- EL TIMBRE. Es lo único que hace que una bóveda que vive en una pestaña sirva
@@ -407,6 +629,19 @@ onBeforeUnmount(() => responder?.stop())
         <input type="file" accept=".csv,.json,.txt" hidden @change="importFile">
       </label>
     </template>
+
+    <!-- Pedir la contraseña para UNA operación (importar). Sin `prompt()`: bloquea, no se
+         traduce y se ve fatal (CONVENCIONES §5). -->
+    <div v-if="pidiendoTexto" class="ask-backdrop">
+      <form class="ask" @submit.prevent="responderClave(claveUna)">
+        <strong>{{ pidiendoTexto }}</strong>
+        <input v-model="claveUna" type="password" :placeholder="t('pw1')" autocomplete="current-password" data-testid="ask-pw">
+        <div class="ask-row">
+          <button type="button" class="danger" @click="responderClave(null); claveUna = ''">{{ t('askPwNo') }}</button>
+          <button type="submit" data-testid="ask-pw-ok">{{ t('askPwOk') }}</button>
+        </div>
+      </form>
+    </div>
 
     <!-- Sin `confirm()`: bloquea, no se traduce y se ve mal (CONVENCIONES §5). -->
     <div v-if="asking" class="ask-backdrop">
@@ -445,4 +680,8 @@ button.danger { background: transparent; color: #ff8a8a; border: 1px solid rgba(
 .ask { max-width: 26rem; background: #14161c; padding: 1.4rem; border-radius: .8rem;
        border: 1px solid rgba(255,255,255,.12); }
 .ask-row { display: flex; gap: .6rem; justify-content: flex-end; margin-top: 1rem; }
+.pw { display: flex; flex-wrap: wrap; gap: .6rem; margin: .8rem 0; }
+.pw input, .ask input { flex: 1 1 12rem; padding: .55rem .7rem; border-radius: .5rem; font: inherit;
+        border: 1px solid rgba(255,255,255,.18); background: #0f1116; color: inherit; }
+.ask input { margin-top: .8rem; width: 100%; }
 </style>

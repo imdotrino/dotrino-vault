@@ -109,47 +109,17 @@ export function createPasswordDesk (opts = {}) {
  * hace al ABRIR la bóveda, que es cuando la frase está a mano y hay con qué reescribirlo
  * todo.
  *
- * Durante este paso —y solo durante este paso— la bóveda ve los valores: los tiene que
- * abrir con la llave vieja para volver a cerrarlos uno por uno, con una llave por escritura
- * envuelta a los aparatos. Después ya no puede, y por eso lo último que hace es **borrar la
- * llave vieja**: mientras siga ahí, el agujero sigue abierto.
+ * El trabajo está en `@dotrino/passmanager/sealed` y no aquí, porque lo hacen las CUATRO
+ * bóvedas: esta, la pestaña, la de dentro de la extensión y `passmanager serve`. Cuatro
+ * copias serían cuatro formas sutilmente distintas de reescribir lo mismo, y la que se
+ * quedara atrás no fallaría al convertir — fallaría al leerlo otra bóveda, meses después.
  *
- * @param {object} o
- *   `store`   el almacén con las entradas viejas y donde irán los sobres
- *   `sealed`  la `SealedStore` de esta bóveda
- *   `cek`     la llave vieja (`CryptoKey`), o `null` si ya no hay nada que convertir
- *   `recipients` `{ recoveryPub, main, passkeys }`
- *   `author`  `{ publickey, sign(body) }` — la maestra, que firma lo que escribe
- *   `dropOldKey()`  borra la llave vieja del disco. Se llama AL FINAL y solo si todo salió
+ * Lo que sí es de aquí: `dropOldKey`, porque dónde vive la llave vieja lo sabe cada una.
  */
 export async function convertPasswords ({ store, sealed, cek, recipients, author, dropOldKey, log = () => {} } = {}) {
-  const { openEntry } = await import('@dotrino/passmanager')
-  const { buildSealedEntry, buildProfileKey } = await import('@dotrino/passmanager/sealed')
-
-  const viejas = (await store.get('passmanager/entries/v1')) || []
-  if (await sealed.sealed()) return { already: true, entries: 0 }
-
-  // 1. La llave del perfil, de la que salen el índice de sitios y los resúmenes.
-  const pk = await buildProfileKey({ recipients })
-  await sealed.setProfile({ envelope: pk.envelope, wraps: pk.wraps })
-  const { profileKeys } = await import('@dotrino/passmanager/sealed')
-  const keys = await profileKeys(pk.base)
-
-  // 2. Cada entrada, reescrita: un sobre por campo, la vista sellada, sus huellas.
-  let hechas = 0
-  for (const vieja of viejas) {
-    if (!cek) break
-    const abierta = await openEntry(cek, vieja)
-    const sobre = await buildSealedEntry({ plain: abierta, keys, recipients, author })
-    await sealed.putSealed(sobre)
-    hechas++
-  }
-
-  // 3. Y se va lo viejo: las entradas con la llave que las abría, y la llave misma.
-  if (hechas === viejas.length) {
-    await store.set('passmanager/entries/v1', [])
-    await dropOldKey?.()
-  }
-  log(`[vault] passwords: ${hechas} entries converted to the sealed format`)
-  return { already: false, entries: hechas }
+  const { convertToSealed } = await import('@dotrino/passmanager/sealed')
+  return convertToSealed({
+    store, sealed, cek, recipients, author, dropOldKey,
+    log: (m) => log('[vault] ' + m)
+  })
 }
