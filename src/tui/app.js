@@ -42,6 +42,12 @@ import { DEVICE_CAPS } from '@dotrino/identity/acta'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // Regex de validación (mismas que el store de secretos, protocol.js).
+// El mínimo de la contraseña de un inicio de sesión. No es manía: quien tenga una COPIA
+// DEL DISCO de la bóveda puede probar contraseñas contra el registro de OPAQUE sin límite y
+// sin que nadie se entere (`temporary-access.md` §4). Contra eso lo único que aguanta es la
+// contraseña. Mismo número que la CLI, que es la misma regla.
+const MIN_LOGIN_PASSWORD = 12
+
 const NS_RE = /^[a-z0-9-]{1,32}$/
 const KEY_RE = /^[A-Z0-9_]{1,64}$/
 
@@ -339,6 +345,42 @@ function deviceRows (st, t) {
   if (revoked.length) {
     rows.push({ text: '', sel: false })
     rows.push({ text: t.muted(i.revokedCount(revoked.length)), sel: false })
+  }
+  return rows
+}
+
+/**
+ * ENTRAR CON USUARIO Y CONTRASEÑA (`docs/temporary-access.md`).
+ *
+ * Esto estaba SOLO en la línea de comandos, y es lo que la regla de las tres versiones no
+ * admite: lo que hace el binario tiene que poder hacerse en su pantalla. El canal es el
+ * MISMO que usa `dotrino-vault logins` —una pieza, no dos—, así que no se pueden
+ * desincronizar.
+ *
+ * Lo que se ve de cada uno es lo que hace falta para decidir: su DIRECCIÓN (que es lo que
+ * se teclea en el equipo prestado), cuántas sesiones tiene abiertas, y si está esperando
+ * por intentos fallidos.
+ */
+function loginRows (st, t) {
+  const i = L(st)
+  const rows = []
+  const list = st.logins || []
+  if (!list.length) {
+    rows.push({ text: t.muted(i.noLogins), sel: false })
+    rows.push({ text: '', sel: false })
+    rows.push({ text: t.muted(i.loginsHint), sel: false })
+    return rows
+  }
+  for (const l of list) {
+    const espera = l.blockedUntil > Date.now() ? Math.ceil((l.blockedUntil - Date.now()) / 1000) : 0
+    const abiertas = (l.sessions || []).length
+    const extra = [
+      abiertas ? t.warn('  ' + i.loginOpen(abiertas)) : t.muted('  ' + i.loginOpen(0)),
+      l.label ? t.muted('  «' + l.label + '»') : '',
+      espera ? t.danger('  ' + i.loginWait(espera)) : '',
+      l.createdAt ? t.muted('  ' + i.loginCreated(fmtExp(l.createdAt))) : ''
+    ].join('')
+    rows.push({ text: ` ${t.bold(l.address || l.user)}  ${t.muted(l.deviceId || '????-????')}${extra}`, sel: true, meta: l })
   }
   return rows
 }
@@ -753,6 +795,17 @@ async function refreshMembers (term, st) {
   const r = await guard(term, st, L(st).loadingMembers, () => vc.listMembers(activeId(st)))
   if (r.ok) st.members = r.v
 }
+/**
+ * Los inicios de sesión de la bóveda activa. Es una petición aparte del volcado normal a
+ * propósito: no hace falta para nada más, y pedirla siempre sería sacar del cifrado algo
+ * que nadie está mirando.
+ */
+async function refreshLogins (term, st, api = vc) {
+  const r = await guard(term, st, L(st).refreshing, () => api.listLogins(activeId(st)))
+  if (r.ok) st.logins = r.v
+  else st.logins = []
+}
+
 async function refreshMe (term, st) {
   const r = await guard(term, st, L(st).loadingProfile, () => vc.getMe(activeId(st)))
   st.me = r.ok ? r.v : null
@@ -1043,6 +1096,105 @@ async function onKeyDevices (term, st, key) {
     st.screen = 'devvars'
   } else if (key.name === 'f5') {
     await refreshDevices(term, st)
+  }
+  return true
+}
+
+/**
+ * ENTRAR CON USUARIO Y CONTRASEÑA: las mismas acciones que el CLI, con las mismas teclas
+ * que el resto de la TUI (`n` nuevo, `c` contraseña, `v` quitar, `x` cerrar, `u` desbloquear).
+ *
+ * `x` es CERRAR SESIONES y no «quitar», porque aquí «quitar» ya es `v` —revocar, como en
+ * Dispositivos— y una tecla significa lo mismo en todas las pantallas.
+ */
+async function onKeyLogins (term, st, key, api = vc) {
+  const i = L(st)
+  const list = st.logins || []
+  moveSel(st, key, 'logins', list.length)
+  const cur = list[Math.min(st.sel.logins || 0, Math.max(0, list.length - 1))]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+
+  if (ch === 'n') {
+    // Tres preguntas encadenadas: usuario → de dónde entra → contraseña (dos veces). Van
+    // en cadena y no en un formulario porque la TUI pregunta de a una, como en el resto.
+    setInput(st, {
+      label: i.loginUserLabel,
+      hint: i.loginUserHint,
+      onSubmit: async (raw) => {
+        const user = String(raw || '').trim().toLowerCase()
+        if (!user) return
+        setInput(st, {
+          label: i.loginLabelLabel(user),
+          hint: i.loginLabelHint,
+          value: 'equipo prestado',
+          onSubmit: async (rawLabel) => {
+            const label = String(rawLabel || '').trim() || 'equipo prestado'
+            setInput(st, {
+              label: i.loginPassLabel(user),
+              hint: i.loginPassHint,
+              mask: true,
+              onSubmit: async (pw1) => {
+                if (String(pw1 || '').length < MIN_LOGIN_PASSWORD) { flash(st, i.loginPassShort, 'warn'); return }
+                setInput(st, {
+                  label: i.loginPassAgain,
+                  hint: i.loginPassHint,
+                  mask: true,
+                  onSubmit: async (pw2) => {
+                    if (pw1 !== pw2) { flash(st, i.loginPassMismatch, 'warn'); return }
+                    const r = await guard(term, st, i.loginCreating,
+                      () => api.addLogin({ user, password: pw1, label }))
+                    if (r.ok) {
+                      await refreshLogins(term, st, api)
+                      const nuevo = (st.logins || []).find((l) => l.user === user)
+                      flash(st, i.loginCreatedOk(nuevo?.address || user))
+                    }
+                  }
+                })
+              }
+            })
+          }
+        })
+      }
+    })
+  } else if (ch === 'c' && cur) {
+    setInput(st, {
+      label: i.loginOldPass(cur.user),
+      hint: i.loginPassHint,
+      mask: true,
+      onSubmit: async (vieja) => {
+        setInput(st, {
+          label: i.loginNewPass,
+          hint: i.loginPassHint,
+          mask: true,
+          onSubmit: async (nueva) => {
+            if (String(nueva || '').length < MIN_LOGIN_PASSWORD) { flash(st, i.loginPassShort, 'warn'); return }
+            const r = await guard(term, st, i.loginChanging,
+              () => api.passwdLogin({ user: cur.user, oldPassword: vieja, newPassword: nueva }))
+            if (r.ok) { flash(st, i.loginChanged); await refreshLogins(term, st, api) }
+          }
+        })
+      }
+    })
+  } else if (ch === 'x' && cur) {
+    if (!(cur.sessions || []).length) { flash(st, i.loginNoSessions, 'warn'); return true }
+    const r = await guard(term, st, i.loginClosing, () => api.closeLoginSession(cur.user))
+    if (r.ok) { flash(st, i.loginClosed(r.v?.closed ?? (cur.sessions || []).length)); await refreshLogins(term, st, api) }
+  } else if (ch === 'u' && cur) {
+    if (!(cur.blockedUntil > Date.now())) { flash(st, i.loginNotBlocked, 'warn'); return true }
+    const r = await guard(term, st, i.loginUnblocking, () => api.unblockLogin(cur.user))
+    if (r.ok) { flash(st, i.loginUnblocked); await refreshLogins(term, st, api) }
+  } else if ((ch === 'v' || key.name === 'delete') && cur) {
+    setConfirm(st, {
+      text: i.loginRemoveConfirm(cur.user),
+      onYes: async () => {
+        st.confirm = null
+        const r = await guard(term, st, i.loginRemoving, () => api.removeLogin(cur.user))
+        if (r.ok) { flash(st, i.loginRemoved(cur.user)); st.sel.logins = 0; await refreshLogins(term, st, api) }
+      },
+      onNo: () => { st.confirm = null }
+    })
+  } else if (key.name === 'f5') {
+    await refreshLogins(term, st, api)
   }
   return true
 }
@@ -1794,8 +1946,8 @@ async function onConfirmKey (st, key) {
 
 // Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
 // bóvedas (profiles) es el nivel de arriba (se entra con Enter, no es una pestaña).
-const INNER_TABS = ['devices', 'secrets', 'me']
-const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, me: i.tabMe })[k]
+const INNER_TABS = ['devices', 'secrets', 'logins', 'me']
+const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, logins: i.tabLogins, me: i.tabMe })[k]
 
 /**
  * Las teclas que se pueden usar AHORA, no el catálogo entero. Aprobar/rechazar sin nadie
@@ -1807,6 +1959,7 @@ const helpSegs = (i, screen, st = {}) => {
     profiles: i.helpProfiles,
     devices: i.helpDevices,
     secrets: i.helpSecrets,
+    logins: i.helpLogins,
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
     join: i.helpJoin,
@@ -1819,12 +1972,18 @@ const helpSegs = (i, screen, st = {}) => {
   // el único que las lee), y las filas seleccionables de la lista son justo los aparatos.
   const devs = mergeMembersAndCerts(st.members, st.devices?.issued || [])
   const cur = devs[Math.min(st.sel?.devices || 0, devs.length - 1)]
+  // El inicio de sesión señalado: `x cerrar` solo tiene sentido si tiene alguna abierta, y
+  // `u quitar espera` solo si está esperando.
+  const lg = (st.logins || [])[Math.min(st.sel?.logins || 0, Math.max(0, (st.logins || []).length - 1))]
   return segs({
     pending: !!st.pending,
     hasDevices: (st.devices?.issued || []).length > 0,
     isService: !!cur?.cn,
     hasSecrets: Object.keys(st.secrets?.ns || {}).length > 0,
-    hasVars: devVarsOf(st, st.varsFor?.pub).length > 0
+    hasVars: devVarsOf(st, st.varsFor?.pub).length > 0,
+    hasLogins: (st.logins || []).length > 0,
+    hasSessions: ((lg?.sessions) || []).length > 0,
+    blocked: (lg?.blockedUntil || 0) > Date.now()
   })
 }
 
@@ -1843,7 +2002,9 @@ function renderTabs (st, t) {
   return INNER_TABS.map((k) => {
     const active = st.screen === k
     return active ? t.bold(t.accent('▐ ' + tabLabel(i, k) + ' ▌')) : t.muted('  ' + tabLabel(i, k) + '  ')
-  }).join('   ') + t.muted(i.tabsHint)
+    // UN espacio entre pestañas, no tres: con cuatro ya no cabía el «(←→ cambiar)» en 80
+    // columnas, y lo que se perdía era justamente la pista de que se puede cambiar.
+  }).join(' ') + t.muted(i.tabsHint)
 }
 
 function pairingBody (st, t, cols, height) {
@@ -1943,6 +2104,7 @@ function render (term, st) {
   if (st.screen === 'profiles') body = renderList(profileRows(st, t), st.sel.profiles, contentH, cols, t, scrollRef)
   else if (st.screen === 'devices') body = renderList(deviceRows(st, t), st.sel.devices, contentH, cols, t, scrollRef)
   else if (st.screen === 'secrets') body = renderList(secretRows(st, t), st.sel.secrets, contentH, cols, t, scrollRef)
+  else if (st.screen === 'logins') body = renderList(loginRows(st, t), st.sel.logins || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'me') body = renderList(meRows(st, t), -1, contentH, cols, t, scrollRef)
   else if (st.screen === 'caps') body = renderList(capsRows(st, t), st.sel.caps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'devvars') body = renderList(devVarRows(st, t), st.sel.devvars || 0, contentH, cols, t, scrollRef)
@@ -2029,7 +2191,7 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0, logins: 0 },
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
     unlockedHere: new Set(),
     // Su contraseña, SOLO en memoria y SOLO mientras la TUI esté abierta: sirve para
@@ -2040,6 +2202,8 @@ export async function runTui () {
     profiles: null,
     devices: null,
     secrets: null,
+    // Los inicios de sesión se piden al ENTRAR en su pestaña, no al arrancar.
+    logins: null,
     pending: null,
     pairing: null,
     state: null,
@@ -2107,6 +2271,7 @@ export async function runTui () {
         // El perfil se pide al ENTRAR en su pestaña, no al arrancar: es contenido del
         // usuario y no hay por qué sacarlo del cifrado si nadie lo está mirando.
         if (st.screen === 'me' && st.me === undefined) await refreshMe(term, st)
+        if (st.screen === 'logins' && st.logins === null) await refreshLogins(term, st)
         continue
       }
       // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
@@ -2118,6 +2283,7 @@ export async function runTui () {
       if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
       else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
       else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
+      else if (st.screen === 'logins') running = await onKeyLogins(term, st, key)
       else if (st.screen === 'me') running = await onKeyMe(term, st, key)
       else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
       else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
@@ -2138,4 +2304,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, onKeySecrets, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

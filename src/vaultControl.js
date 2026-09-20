@@ -49,7 +49,11 @@ const F = {
   secretReq: 'secret-request.json',
   profileReq: 'profile-request.json',
   meReq: 'me-request.json',
-  dumpReq: 'dump-request.json'
+  dumpReq: 'dump-request.json',
+  // ENTRAR CON USUARIO Y CONTRASEÑA. La respuesta NO se llama `logins.json`: ese nombre ya
+  // es el almacén del escritorio dentro del dir del perfil, y pisarlo los borraría.
+  loginsReq: 'logins-request.json',
+  loginsList: 'logins-list.json'
 }
 
 const p = (name) => path.join(dir, name)
@@ -241,6 +245,96 @@ export const touchProfile = (profile) => profileOp('touch', { profile })
 export const setProfilePassword = (profile, password, current) => profileOp('password-set', { profile, password, ...(current ? { current } : {}) })
 // Quitarla también la pide: se re-sella a la llave de la máquina antes de que se vaya.
 export const removeProfilePassword = (profile, password) => profileOp('password-rm', { profile, password })
+
+// ---------------------------------------------------------------------------
+// Inicios de sesión con contraseña (`docs/temporary-access.md`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un viaje al mostrador de inicios de sesión del daemon. Es el MISMO canal que usa el CLI
+ * (`dotrino-vault logins`) —una pieza, no dos— y por eso la pantalla de la TUI y el
+ * comando no se pueden desincronizar.
+ *
+ * La respuesta se BORRA al leerla: puede traer el paquete de llaves de un aparato.
+ */
+export async function loginsOp (op, extra = {}) {
+  requireAlive()
+  rm(F.loginsList)
+  const since = Date.now()
+  const id = await writeReq(F.loginsReq, { op, ...extra })
+  signalOrCleanup('SIGUSR2', [F.loginsReq])
+  const d = await waitFor(F.loginsList, { req: id, since })
+  rm(F.loginsList)
+  if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
+  if (d.ok === false) {
+    // `too-many-tries` trae cuánto falta, y `PROFILE_LOCKED` se arregla abriendo la bóveda:
+    // los dos cambian lo que hay que hacer, así que viajan con su dato.
+    throw Object.assign(coded(d.error || 'logins: the vault refused', d.code), { waitMs: d.waitMs })
+  }
+  return d
+}
+
+/** Los inicios de sesión de este perfil, con la dirección ya montada. */
+export async function listLogins (profile) {
+  const { logins = [], fingerprint } = await loginsOp('list', profile ? { profile } : {})
+  const { loginAddress } = await import('../lib/src/passwordLogins.js')
+  return logins.map((l) => ({ ...l, address: fingerprint ? loginAddress(l.user, fingerprint) : '' }))
+}
+
+/**
+ * ALTA. Las llaves del aparato NACEN aquí, en esta terminal, y salen ya cerradas con lo
+ * que deriva de la contraseña: lo que la bóveda guarda es un paquete que no puede abrir.
+ *
+ * Se pueden tener VARIOS por perfil, cada uno con sus permisos: son miembros del acta como
+ * cualquier otro aparato.
+ */
+export async function addLogin ({ user, password, label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
+  const { client: opaque } = await import('@dotrino/opaque')
+  const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
+  const { capScope } = await import('@dotrino/identity/acta')
+  const { sealDeviceKeys } = await import('../lib/src/passwordLogins.js')
+  const start = opaque.registrationStart({ password })
+  const begun = await loginsOp('register-begin', { user, request: start.request })
+  const fin = opaque.registrationFinish({ state: start.state, response: begun.response, password })
+  const device = await makeDeviceKey({ label })
+  const enc = await makeDeviceEncKey()
+  const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+  // El acta habla de PERMISOS y el papel de SCOPES: los traduce el pilar, no esta pantalla.
+  // `unattended` no es un scope —es «no me pidas aprobación»— y por eso viaja aparte.
+  return loginsOp('register-finish', {
+    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob,
+    scope: caps.filter((c) => c !== 'unattended').map((c) => capScope(c)).filter(Boolean),
+    unattended: caps.includes('unattended')
+  })
+}
+
+/**
+ * Cambiar la contraseña es ABRIR y volver a cerrar, así que hace falta la vieja: el
+ * paquete de llaves está cerrado con lo que salía de ella, y sin abrirlo no hay qué
+ * volver a cerrar. Perderla no se arregla desde aquí — se quita el aparato y se crea otro.
+ */
+export async function passwdLogin ({ user, oldPassword, newPassword } = {}) {
+  const { client: opaque } = await import('@dotrino/opaque')
+  const { sealDeviceKeys, openDeviceKeys } = await import('../lib/src/passwordLogins.js')
+  const start = opaque.loginStart({ password: oldPassword })
+  const begun = await loginsOp('login-begin', { user, request: start.request })
+  let fin
+  try { fin = opaque.loginFinish({ state: start.state, response: begun.response, password: oldPassword }) }
+  catch (_) { throw coded('wrong password', 'login-failed') }
+  const entrada = await loginsOp('login-end', { lid: begun.lid, finalization: fin.finalization, label: 'la consola' })
+  const keys = await openDeviceKeys(fin.exportKey, entrada.blob)
+  const reg = opaque.registrationStart({ password: newPassword })
+  const { response } = await loginsOp('register-begin', { user, request: reg.request, replace: true })
+  const nueva = opaque.registrationFinish({ state: reg.state, response, password: newPassword })
+  return loginsOp('register-finish', {
+    user, upload: nueva.upload, blob: await sealDeviceKeys(nueva.exportKey, keys), replace: true
+  })
+}
+
+export const closeLoginSession = (user, sid = null) => loginsOp('close', { user, ...(sid ? { sid } : {}) })
+export const unblockLogin = (user) => loginsOp('unblock', { user })
+/** Quitarlo lo saca del mostrador **y su llave del acta**: las dos cosas, o ninguna. */
+export const removeLogin = (user) => loginsOp('rm', { user })
 
 // ---------------------------------------------------------------------------
 // Volcado de dispositivos + secretos de un perfil
