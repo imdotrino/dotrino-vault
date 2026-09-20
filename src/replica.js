@@ -66,9 +66,44 @@ export function mergeBundle (viejo, nuevo) {
     if (gb > ga) entries[k] = e
     else if (gb === ga && String(e.e?.ct ?? e.pubv ?? '') < String(a.e?.ct ?? a.pubv ?? '')) entries[k] = e
   }
-  const porGen = new Map()
-  for (const w of [...(viejo.wraps || []), ...(nuevo.wraps || [])]) porGen.set(w.gen, w)
-  return { ...viejo, ...nuevo, entries, wraps: [...porGen.values()].sort((x, y) => x.gen - y.gen) }
+  const wraps = mergeWraps(viejo.wraps, nuevo.wraps)
+  // `ns`/`dev` son la envoltura VIGENTE de cada lado, y salen de la lista ya mezclada: con
+  // `{...viejo, ...nuevo}` se quedaba la del empujón aunque su generación fuera menor, o
+  // sea justo lo contrario de lo que decide la lista.
+  return {
+    ...viejo,
+    ...nuevo,
+    entries,
+    wraps,
+    ns: wraps.ns[wraps.ns.length - 1] || null,
+    dev: wraps.dev[wraps.dev.length - 1] || null
+  }
+}
+
+/**
+ * `wraps` es `{ ns: [...], dev: [...] }`, NO una lista.
+ *
+ * Aquí se esparcía como si fuera una lista, así que cada empujón sobre un sobre que ya
+ * existía moría con «(viejo.wraps || []) is not iterable» — y solo en producción: el
+ * primer guardado sale por `if (!viejo) return nuevo` y nunca llega aquí. El replicador de
+ * Cepi lleva así desde que se desplegó, guardando el primer sobre de cada cajón y
+ * rechazando en silencio todas las actualizaciones.
+ *
+ * La forma la fija quien lo produce (`secretsStore.js`, `sealedBundleFor`) y quien lo lee
+ * (`lib/src/service.js`, que recorre `wraps.ns` y `wraps.dev`). Los dos estaban de acuerdo;
+ * el único equivocado era esto. Y de haber funcionado habría sido peor: escribía `wraps`
+ * como lista y el servicio se habría quedado sin envolturas, que es no poder abrir nada.
+ *
+ * Las de cada lado se SUMAN por generación: son de aparatos distintos y ninguna estorba.
+ */
+function mergeWraps (a, b) {
+  const out = {}
+  for (const side of ['ns', 'dev']) {
+    const byGen = new Map()
+    for (const w of [...(a?.[side] || []), ...(b?.[side] || [])]) byGen.set(w.gen, w)
+    out[side] = [...byGen.values()].sort((x, y) => x.gen - y.gen)
+  }
+  return out
 }
 
 /** La clave de un sobre: es POR (cajón, aparato), porque va tallado a quien lo pide. */
