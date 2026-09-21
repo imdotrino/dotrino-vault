@@ -27,7 +27,7 @@ import { startSealersPublisher } from './sealers.js'
 import { assertKeyOwnsDir } from './keyowner.js'
 import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
-import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_NS, PROFILE_OWNER } from './secretsStore.js'
+import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
 import { openSubacta } from './subacta.js'
 import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
@@ -2785,8 +2785,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /**
-   * Lo que deben las VARIABLES, por cajón: las rotaciones anotadas y, CALCULADO, cada
-   * envoltura que falta. El perfil no entra (ver el bucle). La falta de una envoltura no se anota nunca: se mira. Una nota
+   * TODO lo que está a deber, por cajón: las rotaciones anotadas y, CALCULADO, cada
+   * envoltura que falta. La falta de una envoltura no se anota nunca: se mira. Una nota
    * se desincroniza en cuanto alguien salda la deuda por un camino que no pasa por donde
    * se anotó (pasó dos veces: el reparto por el hermano y el rehacer al abrir), y
    * entonces la consola avisa de algo que ya no existe. Lo que se calcula no miente.
@@ -2796,11 +2796,6 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const out = rotationsDue()
     for (const m of await incompleteMembers()) {
       for (const [owner, keys] of Object.entries(m.owners)) {
-        // El perfil tampoco va aquí: esto es lo que se enseña como «variables sin
-        // entregar». Lo que un aparato no puede abrir del perfil sigue a la vista en SU
-        // fila (`incomplete`), y `secret settle` y abrir la bóveda lo saldan igual, porque
-        // leen `incompleteMembers` y no esto.
-        if (owner === PROFILE_OWNER) continue
         if (out[owner]?.kind === 'rotate') continue
         out[owner] = out[owner] || { kind: 'rewrap', members: [] }
         out[owner].members.push({ pub: m.pub, keys })
@@ -3414,15 +3409,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // sobre, «pública» dejó de significar «en claro»: dice a quién se le despacha sin
     // aprobación, nada más. Para ver un valor hay que poder abrirlo, igual que cualquiera —
     // y en un cajón con dueño, quien administra deliberadamente no puede.
-    //
-    // EL PERFIL NO ES UN GRUPO DE VARIABLES (dueño, 2026-09-21). `@me` vive en este
-    // almacén porque se guarda igual —mismo sobre, mismo llavero—, pero no es configuración
-    // de nadie: salía en `secret list` como «scope vault:secrets:@me», un scope que por
-    // diseño no puede existir, y en la pantalla de variables como un grupo más. El perfil
-    // tiene su sitio (`dotrino-vault me`, profile.dotrino.com).
-    const variables = secrets.list()
-    delete variables[PROFILE_NS]
-    return variables
+    return secrets.list()
   }
   /** Cambiar SOLO quién puede ver el valor (no toca el valor ni avisa: el servicio lee lo mismo). */
   async function setSecretVisibility (ns, key, isPublic, adminKey) {
