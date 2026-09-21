@@ -25,7 +25,7 @@ import { buildSealedVar } from '@dotrino/vault/admin'
 import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
-import { capScope } from '@dotrino/identity/acta'
+import { capScope, DEVICE_CAPS } from '@dotrino/identity/acta'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
 import Vars from './Vars.vue'
@@ -66,7 +66,7 @@ const T = {
     page_build: 'Esta página sale del commit',
     copy_id: 'Copiar el identificador completo',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', sealer: 'Sella el acta (otra bóveda)' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', passkeys: 'Abre tus passkeys', sealer: 'Sella el acta (otra bóveda)', unattended: 'Recibe claves sin aprobación', replica: 'Atiende cuando la bóveda no está' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     debt_t: 'Este aparato todavía no puede abrir:',
@@ -288,7 +288,7 @@ const T = {
     page_build: 'This page was built from commit',
     copy_id: 'Copy the full identifier',
     members: 'Devices', me: 'this device', is_master: 'Master',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', sealer: 'Seals the record (another vault)' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', passkeys: 'Opens your passkeys', sealer: 'Seals the record (another vault)', unattended: 'Gets keys without approval', replica: 'Answers while the vault is away' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     debt_t: 'This device cannot open yet:',
@@ -1234,9 +1234,8 @@ const lgAdd = () => run('lg-add', async () => {
     user: lgUser.value.trim().toLowerCase(),
     password: lgPass.value,
     label: lgLabel.value.trim(),
-    // Los permisos del acta viajan como scopes del cert, igual que al emparejar.
-    scope: lgCaps.value.map((c) => capScope(c)).filter(Boolean),
-    unattended: lgCaps.value.includes('unattended')
+    // Los permisos del acta, tal cual y cualquiera de ellos: los traduce el pilar.
+    caps: lgCaps.value
   })
   lgAddr.value = r?.address || ''
   lgUser.value = ''; lgLabel.value = ''; lgPass.value = ''; lgPass2.value = ''
@@ -2251,7 +2250,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <label>{{ t.lg_pass2 }}<input v-model="lgPass2" type="password" autocomplete="new-password" data-testid="lg-pass2" /></label>
           <p class="muted">{{ t.lg_caps }}</p>
           <div class="caps" data-testid="lg-caps">
-            <button v-for="c in PAIRABLE_CAPS" :key="c" class="cap" :class="{ on: lgCaps.includes(c) }"
+            <button v-for="c in DEVICE_CAPS" :key="c" class="cap" :class="{ on: lgCaps.includes(c) }"
                     :data-cap="c" @click="toggleLgCap(c)">{{ t.caps[c] }}</button>
           </div>
           <button class="btn" :disabled="!lgUser || !lgPass || busy === 'lg-add'"

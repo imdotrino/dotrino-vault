@@ -181,17 +181,28 @@ test('the console sees the open logins and can close them', async () => {
   } finally { b.close() }
 })
 
-test('a password login cannot take the passwords permission yet', async () => {
-  const e = await createLoginConScope('vault:passwords').then(() => null, (x) => x)
-  assert.ok(e && /contrasenas|passwords/.test(e.message), 'it must refuse until the sealed passwords exist: ' + e?.message)
+test('a password login takes ANY permission of the account record, all the same way', async () => {
+  // Dueño, 2026-09-21: «al crear debe poder asignársele cualquier permiso». Antes
+  // `passwords` se rechazaba (`passwords-not-yet`) y `unattended` viajaba aparte.
+  const r = await crear('dora', { caps: ['sign', 'passwords', 'unattended'] })
+  assert.deepEqual([...r.caps].sort(), ['passwords', 'sign', 'unattended'])
+  const m = (await vault.profileMembers()).members.find((x) => x.id && x.label === 'x')
+  assert.deepEqual([...(m?.caps || [])].sort(), ['passwords', 'sign', 'unattended'], 'the account record says exactly what was chosen')
 
-  async function createLoginConScope (scope) {
+  // Lo que no es un permiso de aparato, o el parámetro viejo, se para con su código: ignorarlo
+  // daría al aparato otros permisos que los elegidos, y nadie lo notaría.
+  const raro = await crear('eva', { caps: ['sign', 'volar'] }).then(() => null, (x) => x)
+  assert.equal(raro?.code, 'bad-caps')
+  const viejo = await crear('fer', { scope: ['vault:sign'] }).then(() => null, (x) => x)
+  assert.equal(viejo?.code, 'use-caps')
+
+  async function crear (user, extra) {
     const device = await makeDeviceKey({ label: 'x' })
     const start = opaqueClient.registrationStart({ password: 'una contraseña larga' })
-    const { response } = await vault.loginRegisterBegin({ user: 'dora', request: start.request })
+    const { response } = await vault.loginRegisterBegin({ user, request: start.request })
     const fin = opaqueClient.registrationFinish({ state: start.state, response, password: 'una contraseña larga' })
     return vault.loginRegisterFinish({
-      user: 'dora', upload: fin.upload, pub: device.publickey, blob: await seal(fin.exportKey, { sign: device.privateJwk }), scope: [scope]
+      user, upload: fin.upload, pub: device.publickey, label: 'x', blob: await seal(fin.exportKey, { sign: device.privateJwk }), ...extra
     })
   }
 })

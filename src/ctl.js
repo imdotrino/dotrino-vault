@@ -1620,7 +1620,18 @@ async function cmdLogins (rest) {
     }
     case 'add': {
       needUser()
-      const label = args.slice(1).join(' ').trim() || 'equipo prestado'
+      // `±permiso` se lee con las MISMAS palabras que `caps <ID> ±permiso`, sobre los de
+      // siempre (firma, lee, guarda); lo demás es el nombre del equipo. Antes el texto de
+      // ayuda lo anunciaba y aquí se juntaba todo como nombre.
+      const caps = new Set(['sign', 'read', 'store'])
+      const nombre = []
+      for (const a of args.slice(1)) {
+        if (a[0] !== '+' && a[0] !== '-') { nombre.push(a); continue }
+        const cap = CAP_BY_WORD[a.slice(1).toLowerCase()]
+        if (!cap) { console.error('permiso no reconocido: %s', a); process.exit(2) }
+        if (a[0] === '+') caps.add(cap); else caps.delete(cap)
+      }
+      const label = nombre.join(' ').trim() || 'equipo prestado'
       const { client: opaqueClient } = await import('@dotrino/opaque')
       const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
       const { sealDeviceKeys } = await import('../lib/src/passwordLogins.js')
@@ -1635,7 +1646,7 @@ async function cmdLogins (rest) {
       const enc = await makeDeviceEncKey()
       const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
       const r = await loginsRequest('register-finish', {
-        user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob
+        user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps: [...caps]
       })
       const { loginAddress } = await import('../lib/src/passwordLogins.js')
       console.log('\nListo. Se entra con esta dirección y esa contraseña:')

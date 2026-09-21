@@ -19,40 +19,58 @@ import { SealedVault, ProxyTransport, makeEncKeypair, seal, open, isSealed, CODE
 import { openWrap, decryptWithCek } from '@dotrino/identity/content'
 import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'
 
-/** Red de mentira que imita al cliente de verdad: sella al enviar, abre al entregar. */
+/**
+ * Red de mentira que imita al cliente de verdad: sella al enviar, abre al entregar.
+ *
+ * Y como el de verdad, **el token NO es la llave**: se entrega desde un token y la llave de
+ * quien envía viaja aparte, en `meta.fromPubkey`. Antes el token era la propia llave, y eso
+ * escondía que el responder leía un campo que no existe (`meta.pubkey`): aquí contestaba y
+ * en producción la bóveda no sabía a quién sellar la respuesta.
+ */
 function red () {
-  const nodos = new Map()
+  const porLlave = new Map()
+  const porToken = new Map()
+  let n = 0
   function cliente (pubkey) {
     const handlers = []
+    const token = `tok-${++n}`
     const c = {
       pubkey,
+      token,
       encPrivate: null,
-      pubkeyOfToken: (t) => t,
+      // Un token no dice de quién es hasta que alguien saluda: aquí nadie saluda.
+      pubkeyOfToken: () => null,
       on (ev, fn) { if (ev === 'message') handlers.push(fn) },
       off (ev, fn) { const i = handlers.indexOf(fn); if (i >= 0) handlers.splice(i, 1) },
       async sendSealed (dests, payload, { peerEncPub } = {}) {
         if (!peerEncPub) throw Object.assign(new Error('sin llave'), { code: CODES.UNSEALED })
         c.sendByPubkey(dests, await seal(payload, peerEncPub))
       },
-      async sendSealedTo (dest, payload, { peerEncPub } = {}) { return c.sendSealed([dest], payload, { peerEncPub }) },
+      async sendSealedTo (destToken, payload, { peerEncPub } = {}) {
+        if (!peerEncPub) throw Object.assign(new Error('sin llave'), { code: CODES.UNSEALED })
+        const sobre = await seal(payload, peerEncPub)
+        const destino = porToken.get(destToken)
+        if (destino) setTimeout(() => destino._deliver(token, pubkey, sobre), 0)
+      },
       sendByPubkey (dests, payload) {
         for (const d of [].concat(dests)) {
-          const destino = nodos.get(d)
-          if (destino) setTimeout(() => destino._deliver(pubkey, payload), 0)
+          const destino = porLlave.get(d)
+          if (destino) setTimeout(() => destino._deliver(token, pubkey, payload), 0)
         }
       },
-      async _deliver (from, payload) {
+      async _deliver (fromToken, fromPubkey, payload) {
         if (isSealed(payload)) {
           if (!c.encPrivate) return
           let abierto
           try { abierto = await open(payload, c.encPrivate) } catch { return }
-          for (const h of handlers) h(from, abierto, { fromPubkey: from, sealed: true })
+          for (const h of handlers) h(fromToken, abierto, { fromPubkey, sealed: true })
           return
         }
-        for (const h of handlers) h(from, payload, { fromPubkey: from, sealed: false })
+        for (const h of handlers) h(fromToken, payload, { fromPubkey, sealed: false })
       },
     }
-    nodos.set(pubkey, c)
+    porLlave.set(pubkey, c)
+    porToken.set(token, c)
     return c
   }
   return { cliente }
@@ -158,7 +176,8 @@ test('vault-passwords: un aparato que el acta no reconoce no recibe nada', async
   let permitido = true
   const { remota } = await montar({ isAllowed: () => permitido })
   permitido = false
-  await assert.rejects(() => remota.find('https://salesforce.com/'), (e) => /no puede pedir|not allowed/i.test(e.message))
+  // Por CÓDIGO: «este aparato no puede» es `denied`. Antes cruzaba sin código.
+  await assert.rejects(() => remota.find('https://salesforce.com/'), (e) => e.code === 'denied')
 })
 
 test('vault-passwords: la aprobación es la del vault (el teléfono), una por aparato', async () => {
@@ -200,7 +219,8 @@ test('vault-passwords: guardar encima no molesta al teléfono, y no pierde nada'
 test('vault-passwords: sin el visto bueno del teléfono, no sale la credencial', async () => {
   const { remota } = await montar({ approve: async () => false })
   const [entrada] = await remota.find('https://salesforce.com/')
-  await assert.rejects(() => remota.get(entrada.id, { keys: ['secret'] }), (e) => /autoriz/i.test(e.message))
+  // «El teléfono dijo que no» es `not-approved`, distinto de `denied`: se arregla volviendo a pedir.
+  await assert.rejects(() => remota.get(entrada.id, { keys: ['secret'] }), (e) => e.code === 'not-approved')
 })
 
 test('vault-passwords: la bitácora apunta la operación, NUNCA qué credencial', async () => {

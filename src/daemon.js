@@ -402,7 +402,7 @@ export async function runDaemon () {
       case 'register-begin': return vault.loginRegisterBegin({ user: req.user, request: req.request, replace: !!req.replace })
       case 'register-finish': return vault.loginRegisterFinish({
         user: req.user, upload: req.upload, pub: req.pub, encPub: req.encPub || null,
-        label: req.label || '', blob: req.blob, scope: req.scope, unattended: !!req.unattended, replace: !!req.replace
+        label: req.label || '', blob: req.blob, ...(req.caps ? { caps: req.caps } : {}), replace: !!req.replace
       })
       // Entrar desde la propia máquina de la bóveda. Lo usa `logins passwd`: para volver a
       // cerrar el paquete de llaves hay que ABRIRLO antes, y eso solo puede hacerlo quien

@@ -291,7 +291,6 @@ export async function listLogins (profile) {
 export async function addLogin ({ user, password, label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
   const { client: opaque } = await import('@dotrino/opaque')
   const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
-  const { capScope } = await import('@dotrino/identity/acta')
   const { sealDeviceKeys } = await import('../lib/src/passwordLogins.js')
   const start = opaque.registrationStart({ password })
   const begun = await loginsOp('register-begin', { user, request: start.request })
@@ -299,12 +298,10 @@ export async function addLogin ({ user, password, label = 'equipo prestado', cap
   const device = await makeDeviceKey({ label })
   const enc = await makeDeviceEncKey()
   const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
-  // El acta habla de PERMISOS y el papel de SCOPES: los traduce el pilar, no esta pantalla.
-  // `unattended` no es un scope —es «no me pidas aprobación»— y por eso viaja aparte.
+  // Los PERMISOS del acta, tal cual: cualquiera, y todos por el mismo camino. Traducirlos a
+  // los scopes del certificado es cosa del pilar (`registerLogin`), no de esta pantalla.
   return loginsOp('register-finish', {
-    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob,
-    scope: caps.filter((c) => c !== 'unattended').map((c) => capScope(c)).filter(Boolean),
-    unattended: caps.includes('unattended')
+    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps
   })
 }
 
