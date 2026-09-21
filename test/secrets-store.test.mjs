@@ -660,6 +660,27 @@ test('lo público va EN CLARO y firmado: es lo que ve quien pregunta de fuera', 
 })
 
 /**
+ * LA GENERACIÓN SOLO SUBE, TAMBIÉN EN LO PÚBLICO (`docs/datos-del-perfil.md` §4).
+ *
+ * Un dato público no deja nada en el llavero, y la generación se sacaba solo del llavero:
+ * editar el apodo dos veces seguidas daba la MISMA generación. Entre réplicas eso es un
+ * empate, y el empate lo gana el hash menor — que puede ser el apodo viejo.
+ */
+test('un dato público del perfil estrena generación en cada escritura', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  const a = await s.profilePutPublic('nickname', 'zeta')
+  const b = await s.profilePutPublic('nickname', 'alfa')
+  assert.ok(b.gen > a.gen, 'la segunda escritura va por delante de la primera')
+  const c = await s.putSealed('ns:@me', 'telefono', {
+    e: { iv: 'iv', ct: 'opaco' }, wraps: { A: 'W(A)', [RECOVERY]: 'W(rec)' }
+  })
+  assert.ok(c.gen > b.gen, 'y un sobre escrito después no reutiliza la de un dato público')
+  assert.deepEqual(s.missingFor('ns:@me', 'B'), ['telefono'],
+    'y lo público no se cuenta como envoltura que falta: no lleva sobre')
+})
+
+/**
  * `pubv` y no `v`: un `v` suelto dentro de un paquete de VARIABLES es un error duro desde
  * el 2026-09-02 (`plaintext-var`). Aquí un valor en claro es lo correcto, así que se
  * escribe con otro nombre y aquella invariante se queda intacta.

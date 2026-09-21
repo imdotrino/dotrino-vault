@@ -1097,6 +1097,54 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
   assert.equal(first.device.publickey && true, true)
 })
 
+/**
+ * EL CAJÓN DEL PERFIL SE DEBE A QUIEN LO RECIBE, Y QUIÉN LO RECIBE LO DICE `recipientsOf`.
+ *
+ * La consola avisaba «sin llave todavía» de `ns:@me` a tres aparatos, con todos los datos
+ * del perfil, y no había forma de que dejara de hacerlo: abrir la bóveda rehace el llavero
+ * con `recipientsOf` —quien puede FIRMAR por ti— mientras la deuda se calculaba con otra
+ * lista —cualquier aparato sin `cn`—. Dos listas para la misma pregunta. Y encima contaba
+ * como deuda lo PÚBLICO, que va en claro y no tiene sobre que repartir.
+ */
+test('el cajón del perfil: la deuda la dice `recipientsOf`, y lo público no debe nada', async () => {
+  const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
+  const { makeSealer } = await import('../src/sealer.js')
+  const encDe = new Map()
+  const nuevo = async (label, caps, cn = null) => {
+    const k = await makeDeviceKey()
+    const e = await makeDeviceEncKey()
+    await vault.identity.admitMember({ pub: k.publickey, label, caps, cn, encPub: e.encPublickey })
+    encDe.set(k.publickey, e.encPublickey)
+    return k.publickey
+  }
+  const firma = await nuevo('telefono', ['sign'])           // habla por ti: lee tu perfil
+  const lector = await nuevo('solo-lee', ['read'])          // no firma: no se le envuelve
+  const bot = await nuevo('service:eco', ['sign'], 'eco')   // servicio que SÍ firma por ti
+
+  await vault.secrets.profilePutPublic('nickname', 'seyacat')
+  // Sellado a quien firma, menos al bot: es el que llegó después y le falta. Con sobres
+  // DE VERDAD, como los arma el aparato: la bóveda es compartida y el siguiente que la abra
+  // reenvuelve este cajón, así que una envoltura de mentira le rompería la prueba a otro.
+  const sealer = makeSealer()
+  const cek = await sealer.newKey()
+  await vault.secrets.putSealed('ns:@me', 'email', {
+    e: await sealer.encrypt(cek, 'yo@ejemplo.com'),
+    wraps: {
+      [firma]: await sealer.wrapForKey(cek, encDe.get(firma)),
+      '#recovery': await sealer.wrapForKey(cek, vault.secrets.recoveryPub())
+    }
+  })
+
+  const debts = await vault.incompleteMembers()
+  const de = (pub) => debts.find((d) => d.pub === pub)?.owners['ns:@me']
+  assert.equal(de(firma), undefined, 'quien tiene su envoltura no debe nada')
+  assert.equal(de(lector), undefined,
+    'sin `firma` el perfil no se le envuelve nunca: contarlo como deuda es un aviso que no se apaga')
+  assert.deepEqual(de(bot), ['email'], 'el servicio que firma sí lo lee, y le falta el privado')
+  assert.ok(!debts.some((d) => d.owners['ns:@me']?.includes('nickname')),
+    'lo público va en claro: no hay sobre que repartirle a nadie')
+})
+
 test('aparato con approval: pide en cada petición, el aparato con `approve` firma, denegar corta', async () => {
   const { enrollWithVault, fetchSecrets, waitForSecrets } = await import('../lib/src/service.js')
   const { signWithDevice } = await import('@dotrino/identity/capabilities')

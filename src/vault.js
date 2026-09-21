@@ -2745,28 +2745,28 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function incompleteMembers () {
     if (secrets.isLegacy?.()) return []
-    const record = (await identity.profileActa?.().catch(() => null))?.acta
-    const out = []
-    for (const m of record?.members || []) {
-      if (!m.encPub || m.pub === master) continue
-      const owners = {}
-      // Un servicio lee su cajón de ns y el suyo propio; un aparato que administra
-      // puede DESTAPAR cualquiera, así que se le miran todos: sin envoltura, el botón
-      // «Ver» de la consola le fallaría sin explicar por qué.
-      // Un aparato que administra NO debe tener envoltura de los cajones con dueño
-      // (`recipientsOf`), así que no se le cuenta como falta: lo que ahí falta es a
-      // propósito y ponerlo en la lista sería pedir que se «arregle» lo correcto.
-      const ownedNs = new Set((record?.members || []).filter((x) => x.cn).map((x) => x.cn))
-      const drawers = m.cn
-        ? [`ns:${m.cn}`, `dev:${m.pub}`]
-        : [...Object.keys(secrets.list()).filter((ns) => !ownedNs.has(ns)).map((ns) => `ns:${ns}`), `dev:${m.pub}`]
-      for (const owner of drawers) {
-        const missing = secrets.missingFor(owner, m.pub)
-        if (missing.length) owners[owner] = missing
+    // A QUIÉN LE FALTA ALGO LO DICE `recipientsOf`, Y SOLO ÉL — la misma lista con la que
+    // se envuelve al escribir y se rehace el llavero al abrir. Aquí había otra: «un aparato
+    // sin `cn` puede destapar cualquier cajón sin dueño». Para `@me` no es cierto —el
+    // perfil se envuelve a quien puede FIRMAR por ti—, así que un aparato sin `firma` salía
+    // con todos los datos del perfil «sin llave todavía», y abrir la bóveda, que es lo que
+    // el aviso pedía, no podía apagarlo: el llavero ya estaba como decía el acta. Dos
+    // listas para la misma pregunta acaban siempre así.
+    const out = new Map()
+    for (const owner of secrets.owners()) {
+      // Por VISIBILIDAD: a quien administra se le envuelve la pública de un cajón con dueño
+      // y no la privada. La lista de las públicas contiene siempre a la de las privadas.
+      const privados = new Set((await recipientsOf(owner)).map((m) => m.pub))
+      for (const m of await recipientsOf(owner, { public: true })) {
+        if (!m.encPub || m.pub === master) continue
+        const missing = secrets.missingFor(owner, m.pub, { only: (esPublica) => esPublica || privados.has(m.pub) })
+        if (!missing.length) continue
+        const row = out.get(m.pub) || { pub: m.pub, cn: m.cn || null, owners: {} }
+        row.owners[owner] = missing
+        out.set(m.pub, row)
       }
-      if (Object.keys(owners).length) out.push({ pub: m.pub, cn: m.cn || null, owners })
     }
-    return out
+    return [...out.values()]
   }
 
   /**

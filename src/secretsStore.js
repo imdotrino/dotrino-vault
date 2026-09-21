@@ -254,6 +254,20 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
   }
 
   /**
+   * LA GENERACIÓN QUE TOCA ESTRENAR. Se mira el llavero Y las entradas, no solo el llavero:
+   * un dato PÚBLICO del perfil lleva generación pero no sobre, así que no deja nada en el
+   * llavero. Contando solo el llavero, dos escrituras públicas seguidas salían con la MISMA
+   * generación — y la generación es lo que ordena un dato entre réplicas (`mergeBundle`):
+   * con empate gana el de hash menor, que puede ser el valor viejo.
+   */
+  const nextGen = (bag, k, owner) => {
+    let top = topGen(bag, k)?.gen || 0
+    for (const e of Object.values(bag[k]?.vars || {})) if ((e.gen || 0) > top) top = e.gen
+    for (const h of data.history) if (h.owner === owner && (h.gen || 0) > top) top = h.gen
+    return top + 1
+  }
+
+  /**
    * UN CAMBIO A LA VEZ.
    *
    * Todo lo que toca el llavero es leer-modificar-escribir con un `await` en medio, así
@@ -445,14 +459,22 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      *
      * @param {string} owner `ns:<scope>` o `dev:<pub>`
      * @param {string} memberPub la llave de FIRMA del miembro (así se indexan las envolturas)
+     * @param {{ only?: (isPublic: boolean) => boolean }} [opts] qué variables le TOCAN, según
+     *   su visibilidad: a quien administra se le envuelven las públicas de un cajón con dueño
+     *   y no las privadas, así que la falta de una privada no es deuda suya.
      * @returns {string[]} nombres de variables, vacío si puede con todas
      */
-    missingFor (owner, memberPub) {
+    missingFor (owner, memberPub, { only = null } = {}) {
       if (isLegacy()) return []
       const [kind, k] = splitOwner(owner)
       const bag = kind === 'ns' ? data.ns : data.dev
       const out = []
       for (const [key, e] of Object.entries(varsOf(bag, k))) {
+        // Lo PÚBLICO DEL PERFIL no lleva sobre: va en claro y firmado, porque quien lo lee
+        // desde fuera no tiene ninguna llave tuya. No hay envoltura que pueda faltarle a
+        // nadie, y contarla como deuda era un aviso que ningún reparto podía apagar.
+        if (e.cls === 'public') continue
+        if (only && !only(!!e.pub)) continue
         // También las públicas: desde 2026-09-02 van en sobre, así que a quien no tenga su
         // envoltura le falta igual que con una privada.
         const g = (bag[k]?.keyring || []).find((x) => x.gen === e.gen)
@@ -580,7 +602,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
 
       // CEK NUEVA, siempre: no se puede reutilizar la de antes sin poder abrirla.
       const cek = await sealer.newKey()
-      const gen = (topGen(bag, k)?.gen || 0) + 1
+      const gen = nextGen(bag, k, owner)
       const { wraps, sinLlave } = await wrapAll(cek, owner, pub)
       const e = await sealer.encrypt(cek, value, gen)
       // La FIRMA dice que este sobre salió de esta bóveda, y con qué acta (§8.8). Si no
@@ -644,7 +666,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
 
       // LA GENERACIÓN LA PONE EL ALMACÉN, no quien escribe: es la que ordena el llavero, y
       // dejar que la eligiera el que llega permitiría pisar una anterior.
-      const gen = (topGen(bag, k)?.gen || 0) + 1
+      const gen = nextGen(bag, k, owner)
       // La FIRMA sigue siendo de la bóveda —dice que este sobre salió de aquí y con qué
       // acta (§8.8)— y se hace con la llave de SELLADO, que funciona con el perfil cerrado.
       const seal = signer ? await signer({ owner, key, gen, iv: e.iv, ct: e.ct }) : null
@@ -917,7 +939,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
         }
         const vars = ensureBag(data.ns, PROFILE_NS)
         const before = vars[key]
-        const gen = (topGen(data.ns, PROFILE_NS)?.gen || 0) + 1
+        const gen = nextGen(data.ns, PROFILE_NS, PROFILE_OWNER)
         const seal = signer ? await signer({ owner: PROFILE_OWNER, key, gen, iv: '', ct: value }) : null
         pushHistory(PROFILE_OWNER, key, before, by)
         vars[key] = { cls: 'public', pub: true, owner: PROFILE_OWNER, gen, pubv: value, seal, at: Date.now(), by: by || null }
@@ -963,7 +985,7 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
       for (const [key, e] of Object.entries(vars)) {
         if (typeof e.v !== 'string' || e.e) continue
         const cek = await sealer.newKey()
-        const gen = (topGen(bag, k)?.gen || 0) + 1
+        const gen = nextGen(bag, k, owner)
         const r = await sealer.wrapFor(cek, await paraVisibilidad(!!e.pub))
         r.wraps[RECOVERY] = await sealer.wrapForKey(cek, data.recovery.pub)
         const sobre = await sealer.encrypt(cek, e.v, gen)
