@@ -1143,6 +1143,11 @@ test('el cajón del perfil: la deuda la dice `recipientsOf`, y lo público no de
   assert.deepEqual(de(bot), ['email'], 'el servicio que firma sí lo lee, y le falta el privado')
   assert.ok(!debts.some((d) => d.owners['ns:@me']?.includes('nickname')),
     'lo público va en claro: no hay sobre que repartirle a nadie')
+
+  // Y EL PERFIL NO ES UN GRUPO DE VARIABLES: no sale en la lista ni en «variables sin
+  // entregar». Lo que el bot no puede abrir se sigue viendo, pero en SU fila (`incomplete`).
+  assert.equal(vault.listSecrets()['@me'], undefined, 'la lista de variables no enseña el perfil')
+  assert.equal((await vault.secretDebts())['ns:@me'], undefined, 'ni lo cuenta como variables sin entregar')
 })
 
 test('aparato con approval: pide en cada petición, el aparato con `approve` firma, denegar corta', async () => {

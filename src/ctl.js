@@ -612,7 +612,11 @@ async function cmdMembers () {
     // Un servicio SIN llave de cifrado no puede leer ninguna variable privada: van
     // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
     // se mira quién es quién — y en la lista de variables ya seria tarde.
-    if (m.cn && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
+    //
+    // Solo si LEE variables (`secrets`). La llave de comunicación de la bóveda entra con
+    // `cn: 'vault'` y solo `firma`, y no tiene llave de cifrado a propósito: salía marcada
+    // en rojo «NO puede leer sus variables» cuando no tiene ninguna que leer.
+    if (m.cn && !m.canSeal && m.caps.includes('secrets')) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
     // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
     // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
     // fallo más caro que ha tenido el ecosistema. No bloquea nada: se enseña.
