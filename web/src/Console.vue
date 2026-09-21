@@ -105,7 +105,7 @@ const T = {
     // la acción, sin explicar qué es una bóveda (§5.1).
     lock_t: 'La bóveda está cerrada',
     lock_b: 'Puedes abrirla desde aquí con su contraseña de administración. No es la tuya de siempre: es otra, aparte, que solo sirve por este camino.',
-    lock_no: 'Para abrirla desde aquí hace falta ponerle una contraseña de administración en su máquina: dotrino-vault profile admin-password',
+    lock_no: 'Si quieres abrirla desde aquí, ponle una contraseña de administración en su máquina:',
     lock_pwd: 'Contraseña de administración',
     lock_go: 'Abrir',
     lock_going: 'Abriendo…',
@@ -315,7 +315,7 @@ const T = {
     dev_since: (d) => 'connected on ' + d,
     lock_t: 'The vault is closed',
     lock_b: 'You can open it from here with its admin password. It is not your usual one: it is a separate password that only works this way.',
-    lock_no: 'To open it from here, set an admin password on its machine: dotrino-vault profile admin-password',
+    lock_no: 'If you want to open it from here, set an admin password on its machine:',
     lock_pwd: 'Admin password',
     lock_go: 'Open',
     lock_going: 'Opening…',
@@ -2012,7 +2012,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <div class="who">
             <strong>{{ t.lock_t }}</strong>
           </div>
-          <p class="muted svc-note">{{ canUnlock ? t.lock_b : t.lock_no }}</p>
+          <p v-if="canUnlock" class="muted svc-note">{{ t.lock_b }}</p>
+          <!-- Sin contraseña de administración no es un fallo: es la bóveda cerrada, que es
+               su estado normal, y abrirla desde aquí es algo que se enciende a propósito.
+               Se dice como sugerencia, con el comando aparte para poder copiarlo. -->
+          <p v-else class="cmd svc-note" data-testid="unlock-howto">{{ t.lock_no }} <code>dotrino-vault profile admin-password</code></p>
           <form v-if="canUnlock" class="unlockform" @submit.prevent="abrirBoveda">
             <input v-model="unlockPwd" type="password" :placeholder="t.lock_pwd"
                    data-testid="unlock-pwd" autocomplete="off" :disabled="busy === 'unlock'">
@@ -2440,7 +2444,9 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 /* Qué corre: es un DATO, así que va en gris como la fecha. El que no cuadra usa `.out`,
    que ya es el color de aviso — no hace falta un tercero. */
 .tag.runs { background: transparent; color: #6b7a90; padding-left: 0; }
-.lockcard { border-color: #5a2b2f; }
+/* Cerrada es el estado NORMAL de la bóveda, no una avería: se informa con el mismo tono
+   que los demás avisos (`.announce`), no con el rojo de un error. */
+.lockcard { background: #101826; border-color: #24344d; }
 .unlockform { display: flex; gap: .5rem; padding: 0 .75rem .75rem; flex-wrap: wrap; }
 .unlockform input { flex: 1 1 12rem; min-width: 0; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
