@@ -3540,6 +3540,19 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // el acta y lo respeta toda la cuenta. Si falla no se arrastra: abrir el perfil no
       // puede depender de esto, y lo pendiente sigue surtiendo efecto igual.
       if (r?.locked === false) { try { await absorberSubacta('unlock') } catch (_) {} }
+      // Y LOS APARATOS MUERTOS FUERA DEL ACTA, en una sola (dueño, 2026-09-22). Es el mismo
+      // momento: la maestra está en memoria y cambiar el acta es uno de sus dos trabajos.
+      // Si falla no se arrastra —abrir no depende de esto—, pero se dice.
+      if (r?.locked === false) {
+        try {
+          const { removed = [], seq } = await identity.pruneExpiredDevices?.() || {}
+          for (const d of removed) {
+            const id = await deviceIdOf(d.pub).catch(() => null)
+            audit('pruned', { device: id, label: d.label || '', reason: 'expired', seq })
+            log(`[vault] unlock: removed ${id || '????-????'} ${d.label ? `(${d.label}) ` : ''}from the record: its certificate expired and cannot be renewed · record #${seq}`)
+          }
+        } catch (e) { log(`[vault] unlock: could not remove expired devices: ${e.message}`) }
+      }
       return { locked: r?.locked !== false }
     },
     // Forzar un empujón: lo usa `replica push` de la CLI y el smoke, para no depender
