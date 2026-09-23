@@ -439,3 +439,20 @@ test('el autor del sobre saca su llave de donde la hay', async () => {
   assert.equal(metodo, 'getMe', 'la pública del aparato la da getMe, no la pertenencia')
   assert.equal(campo, 'publickey', 'y el campo se llama publickey')
 })
+
+test('una escritura EN ESPERA de aprobación no avisa a nadie: todavía no cambió nada', async () => {
+  const vars = {
+    list: async () => ({}),
+    set: async (a) => ({ ok: true, key: a.key, pending: 'P1' }),
+    setMany: async () => ({ ok: true, keys: [], pending: 'P2' })
+  }
+  const { admin, notices, audits } = mount({ vars })
+  const sealed = { e: { iv: 'IV', ct: 'CT' }, wraps: { '#recovery': 'w' }, author: { pub: 'A', sig: 's', ts: 1 } }
+  const uno = await admin.handle({ op: 'var.set', ns: 'aws', key: 'K', sealed, nonce: nonce('p') })
+  assert.equal(uno.result.pending, 'P1', 'quien llama se entera de que queda pendiente')
+  const varios = await admin.handle({ op: 'var.setMany', ns: 'aws', items: [{ key: 'K', sealed }], nonce: nonce('q') })
+  assert.equal(varios.result.pending, 'P2')
+  assert.deepEqual(notices, [], 'el aviso sale al aprobar, no al pedir')
+  assert.ok(!audits.some(([op]) => op === 'admin.var.set'), 'ni se anota como guardada')
+  assert.equal(audits.filter(([op]) => op === 'admin.var.pending').length, 2)
+})

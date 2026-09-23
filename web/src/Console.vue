@@ -220,6 +220,8 @@ const T = {
     apv_none: 'Nadie está pidiendo nada.',
     apv_error: 'No se pudieron consultar los pedidos:',
     apv_asks: 'pide tus claves de',
+    apv_writes: 'quiere guardar variables en',
+    apv_keys: 'Variables:',
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
@@ -241,6 +243,7 @@ const T = {
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
+    var_awaiting: 'Falta tu aprobación: la variable se guarda cuando la apruebes en el teléfono (tienes 5 minutos).',
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Todas se guardan cifradas. Las públicas puedes verlas aquí; las privadas no enseñan su valor —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual. Marcarla «privada» también es pedir que te avise antes de entregarla.',
     var_shared: 'la usan todas las máquinas',
     pend_t: 'Hay variables sin entregar',
@@ -414,6 +417,8 @@ const T = {
     apv_none: 'Nobody is asking for anything.',
     apv_error: 'Could not check for requests:',
     apv_asks: 'asks for your keys of',
+    apv_writes: 'wants to save variables in',
+    apv_keys: 'Variables:',
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
@@ -433,6 +438,7 @@ const T = {
     apv_error: 'could not ask this account:',
     apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
     var_t: 'Your apps\u2019 variables',
+    var_awaiting: 'Your approval is needed: the variable is saved once you approve it on your phone (you have 5 minutes).',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. They are all stored encrypted. You can see the public ones here; a private one does not show its value \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one. Marking one private also asks to be told before it is handed over.',
     var_shared: 'used by every machine',
     pend_t: 'Some variables are not being delivered',
@@ -1735,7 +1741,10 @@ function saveVars ({ target, items }) {
         sealed: await buildSealedVar({ recipients: await paraQuien(esPublica), owner, key: it.key, value: it.value, author })
       })
     }
-    await id.value.vaultAdmin('var.setMany', { ...dest, items: sealados })
+    const r = await id.value.vaultAdmin('var.setMany', { ...dest, items: sealados })
+    // UN APARATO SIN `unattended` NO ESCRIBE SOLO: la bóveda deja la escritura esperando a
+    // que la apruebes en el teléfono. No es un error, y tampoco está guardada todavía.
+    if (r?.pending) msg.value = { kind: 'info', text: t.value.var_awaiting }
     await loadVars()
   })
 }
@@ -1879,12 +1888,17 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending apv" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
-            <b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_asks }} <code>{{ p.ns }}</code>
+            <b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
                decidir. Sin esto solo se sabía qué aparato pide qué cajón, que no distingue
                el arranque que acabas de lanzar de cualquier otra cosa de esa máquina. -->
-          <div v-if="p.ctx" class="apvcmd" data-testid="apv-cmd">
+          <!-- UNA ESCRITURA no ejecuta nada: lo que hay que ver para decidir es QUÉ variables
+               quiere guardar. Los nombres llegan sellados, igual que el comando. -->
+          <div v-if="p.kind === 'write' && p.ctx" class="apvcmd" data-testid="apv-keys">
+            <div class="apvline">{{ t.apv_keys }} <code class="cmd">{{ (p.ctx.keys || []).join(', ') }}</code></div>
+          </div>
+          <div v-else-if="p.ctx" class="apvcmd" data-testid="apv-cmd">
             <div class="apvline">{{ t.apv_cmd }} <code class="cmd">{{ apvCmd(p) }}</code></div>
             <div class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ p.ctx.cwd || '?' }}</code></div>
             <div class="apvline muted small" :class="{ warn: p.ctx.verified !== 'proc' }">
@@ -1905,7 +1919,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         </div>
         <!-- QUÉ PASA AL APROBAR. Aprobar dejó de ser «esta vez»: es este comando durante una
              hora que se renueva con cada uso. Decirlo aquí, antes de pulsar. -->
-        <p v-if="approvals.length" class="muted small">{{ t.apv_grant_hint }}</p>
+        <p v-if="approvals.some((p) => p.kind !== 'write')" class="muted small">{{ t.apv_grant_hint }}</p>
         <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
              preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
         <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">

@@ -73,7 +73,9 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
    * de un sobre (`handleApproval`). Si mañana aparece otro sitio que publique esta lista,
    * esto es lo que hay que recordar.
    */
-  const publicOf = (p) => ({ id: p.id, ns: p.ns, deviceId: p.deviceId, label: p.label, ts: p.ts, exp: p.exp, ctx: p.ctx || null })
+  // `kind` dice QUÉ se pide: `read` (llevarse las claves, lo de siempre) o `write` (guardar
+  // variables). La pantalla del teléfono no puede decir «pide tus claves» a una escritura.
+  const publicOf = (p) => ({ id: p.id, ns: p.ns, kind: p.kind, deviceId: p.deviceId, label: p.label, ts: p.ts, exp: p.exp, ctx: p.ctx || null })
 
   return {
     /** Apunta un pedido. Uno por cajón y aparato: pedir otra vez reemplaza al anterior. */
@@ -82,12 +84,15 @@ export function createApprovals ({ now = Date.now, pendingTtlMs = PENDING_TTL_MS
      * apruebe— y tiene que volver por el mismo sitio: desde que la bóveda atiende también
      * por un socket local, mandarla siempre por el proxio la dejaba en el vacío.
      */
-    request ({ ns, device, deviceId, label = '', ek, ctx = null, from = null, ttlMs = null }) {
-      for (const [id, p] of pending) if (p.ns === ns && p.device === device) pending.delete(id)
+    request ({ ns, device, deviceId, label = '', ek, ctx = null, from = null, ttlMs = null, kind = 'read' }) {
+      // Pedir las claves otra vez reemplaza al pedido anterior: es la misma pregunta. Una
+      // ESCRITURA no: cada una lleva su propio valor, y reemplazarla tiraría la anterior
+      // sin que nadie dijera que no.
+      if (kind !== 'write') for (const [id, p] of pending) if (p.kind !== 'write' && p.ns === ns && p.device === device) pending.delete(id)
       const ts = now()
       // `ttlMs` lo pone quien pide: una actualización aguanta un día y un comando cinco
       // minutos, y la mesa no tiene por qué saber cuál es cuál (ver `PENDING_TTL_MS`).
-      const p = { id: rnd(), ns, device, deviceId, label, ek, ctx, ts, exp: ts + (ttlMs || pendingTtlMs), from }
+      const p = { id: rnd(), ns, kind, device, deviceId, label, ek, ctx, ts, exp: ts + (ttlMs || pendingTtlMs), from }
       pending.set(p.id, p)
       return publicOf(p)
     },

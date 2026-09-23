@@ -156,6 +156,31 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
 
   /**
+   * APUNTA UN PEDIDO QUE NO ENTREGA UN CAJÓN, avisa a quien aprueba y deja la respuesta en
+   * `onAnswer(sí|no)`. Lo usan la bóveda de contraseñas (un aparato espera su sí) y guardar
+   * variables (la escritura se aplica al aprobar). Si nadie contesta, vence solo con un no:
+   * nada se queda colgado para siempre.
+   */
+  async function awaitApproval ({ device, ns, kind, what, op = null, ctx = null, onAnswer }) {
+    const deviceId = await deviceIdOf(device).catch(() => null)
+    const record = await refreshActa()
+    const label = (record?.members || []).find((m) => m.pub === device)?.label || ''
+    const pend = approvals.request({ ns, device, deviceId, label, ek: '', ctx, kind })
+    audit(`${what}.pending`, { device: deviceId, ns, id: pend.id, op })
+    log(`[vault] ${what}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
+    waiters.set(pend.id, onAnswer)
+    const t = setTimeout(() => {
+      if (waiters.delete(pend.id)) {
+        audit(`${what}.expired`, { device: deviceId, ns, id: pend.id })
+        onAnswer(false)
+      }
+    }, PENDING_TTL_MS)
+    t.unref?.()
+    await notifyApprovers(pend, record)
+    return pend
+  }
+
+  /**
    * QUÉ COMANDO ESTÁ PIDIENDO LAS CLAVES, Y DESDE QUÉ CARPETA — medido, no creído.
    *
    * Quien aprueba no puede decidir con «el aparato 904C-1002 pide el cajón proxy»: necesita
@@ -1595,16 +1620,23 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
     const pend = approvals.take(id)
     if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
-    // PEDIDOS QUE NO SON DE UN CAJÓN (hoy: la bóveda de contraseñas). Se resuelve ANTES
-    // de tocar `resultFor`, que asume un cajón y una `ek`: aquí no hay nada que sellar,
-    // solo una promesa esperando un sí o un no.
+    // PEDIDOS QUE NO ENTREGAN UN CAJÓN (la bóveda de contraseñas, guardar variables). Se
+    // resuelven ANTES de tocar `resultFor`, que asume un cajón y una `ek`: aquí no hay nada
+    // que sellar, solo una promesa esperando un sí o un no.
     if (waiters.has(id)) {
       const resolver = waiters.get(id)
       waiters.delete(id)
       const ok = op === 'approve'
-      audit(ok ? 'passwords.approved' : 'passwords.denied', { device: pend.deviceId, id, by })
-      log(`[vault] passwords: request of ${pend.deviceId} ${ok ? 'approved' : 'DENIED'} by ${by}`)
-      resolver(ok)
+      const what = pend.kind === 'write' ? 'vars' : 'passwords'
+      audit(ok ? `${what}.approved` : `${what}.denied`, { device: pend.deviceId, ns: pend.ns, id, by })
+      log(`[vault] ${what}: request ${pend.id} of ${pend.deviceId} ${ok ? 'approved' : 'DENIED'} by ${by}`)
+      // Lo aprobado SE HACE AQUÍ (una escritura se aplica ahora), y si falla quien aprobó
+      // tiene que enterarse: decirle «hecho» a algo que no se guardó es el peor resultado.
+      try { await resolver(ok) } catch (e) {
+        log(`[vault] ${what}: ${pend.id} was approved but could not be applied: ${e.message}`)
+        audit(`${what}.apply-failed`, { id, reason: e.message })
+        return reply(from, { type: MSG.ERROR, error: `approval: approved, but it could not be applied: ${e.message}` })
+      }
       return answer({ op: `${op}.result`, id, ok: true })
     }
     if (op === 'deny') {
@@ -1917,24 +1949,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
       // Es el mismo camino que ya recorren los cajones de secretos.
       approve: async ({ pubkey, op }) => {
-        const deviceId = await deviceIdOf(pubkey).catch(() => null)
-        const label = (actaCache?.members || []).find((m) => m.pub === pubkey)?.label || ''
-        const pend = approvals.request({ ns: 'passwords', device: pubkey, deviceId, label, ek: '' })
-        audit('passwords.pending', { device: deviceId, id: pend.id, op })
-        log(`[vault] passwords: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
-        const espera = new Promise((resolve) => {
-          waiters.set(pend.id, resolve)
-          // Si nadie contesta, vence solo: la promesa no se queda colgada para siempre
-          // y el aparato recibe un no en vez de esperar sin fin.
-          const t = setTimeout(() => {
-            if (waiters.delete(pend.id)) {
-              audit('passwords.expired', { device: deviceId, id: pend.id })
-              resolve(false)
-            }
-          }, PENDING_TTL_MS)
-          t.unref?.()
-        })
-        await notifyApprovers(pend, actaCache)
+        let resolve
+        const espera = new Promise((r) => { resolve = r })
+        await awaitApproval({ device: pubkey, ns: 'passwords', kind: 'read', what: 'passwords', op, onAnswer: resolve })
         return espera
       },
       audit,
@@ -2111,7 +2128,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // El fallo NO se traga. Que un aviso no salga es exactamente lo que deja a dos
         // bóvedas con actas distintas sin que nadie se entere, y encontrarlo sin una línea
         // de log cuesta días (la última vez, tres).
-        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature, acta }) }
+        // CALLADO (`quiet`): se encola igual, pero no toca el timbre push. Un aviso de que
+        // el perfil cambió puede esperar a que el aparato abra solo; timbrar por él hacía
+        // sonar el teléfono con «alguien pide tus claves» sin ningún pedido detrás.
+        // El timbre es para los pedidos (`notifyApprovers`), que sí esperan una mano.
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature, acta }, { quiet: true }) }
         catch (e) { log(`[vault] could not notify ${pub.slice(0, 24)}… of "${ev}": ${e.message}`) }
       }
       for (const m of miembros) avisar(m.pub)
@@ -2300,11 +2321,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // PÚBLICA Y PRIVADA VAN IGUAL (dueño, 2026-09-02: «la única diferencia es si se
         // despachan o no, son políticas; dales el mismo tratamiento de seguridad»). La
         // marca solo decide si se entrega sin aprobación.
+        const apply = async () => {
+          await checkAuthor(owner, key, sealed, caller)
+          await checkRecipients(owner, sealed.wraps, !!isPublic)
+          await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
+          audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
+          await settleDebts(owner)
+        }
+        // Comprobado ANTES de dejarlo en espera: un sobre malo falla al guardarlo, no cinco
+        // minutos después en la pantalla de quien aprueba. `apply` lo repite al aprobar.
         await checkAuthor(owner, key, sealed, caller)
         await checkRecipients(owner, sealed.wraps, !!isPublic)
-        await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
-        audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
-        await settleDebts(owner)
+        const pending = await holdWrite({ caller, ns, pub, keys: [key], apply })
+        if (pending) return { ok: true, key, pending }
+        await apply()
         return { ok: true, key }
       }
       // NO HAY OTRO CAMINO (dueño, 2026-09-02: «no dejes caminos viejos ni fallbacks; no hay
@@ -2345,14 +2375,56 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
       // Se comprueban TODAS antes de escribir NINGUNA: media carga aplicada es una
       // configuración que nadie quiso, y el servicio se reinicia con ella.
-      for (const it of items) {
-        await secrets.putSealed(owner, it.key, it.sealed, { by: who, public: !!it.public })
-        keys.push(it.key)
+      const apply = async () => {
+        for (const it of items) {
+          await checkAuthor(owner, it.key, it.sealed, caller)
+          await checkRecipients(owner, it.sealed.wraps, !!it.public)
+        }
+        for (const it of items) {
+          await secrets.putSealed(owner, it.key, it.sealed, { by: who, public: !!it.public })
+          keys.push(it.key)
+        }
+        audit('secret.setMany', { ns: ns || null, keys }); scheduleNotice(ns)
+        await settleDebts(owner)
       }
-      audit('secret.setMany', { ns: ns || null, keys }); scheduleNotice(ns)
-      await settleDebts(owner)
+      const pending = await holdWrite({ caller, ns, pub, keys: items.map((it) => it.key), apply })
+      if (pending) return { ok: true, keys: [], pending }
+      await apply()
       return { ok: true, keys }
     }
+  }
+
+  /**
+   * GUARDAR VARIABLES TAMBIÉN PIDE PERMISO (dueño, 2026-09-23: «si el admin no es
+   * unattended, sí debería pedir permiso para almacenar variables»).
+   *
+   * Es el mismo permiso que ya decide si un aparato se lleva las claves solo: quien tiene
+   * `unattended` escribe sin preguntar; quien no, deja la escritura en espera y el teléfono
+   * decide. Un permiso, una regla, para leer y para escribir.
+   *
+   * No se espera DENTRO de la llamada: la consola corta a los 20 s y aprobar puede tardar
+   * cinco minutos. Se contesta «pendiente» en el acto, el sobre se queda en memoria (va
+   * sellado, la bóveda no lo abre) y se escribe al aprobar. Denegado o vencido, se tira.
+   *
+   * Devuelve el id del pedido si la escritura quedó en espera, o `null` si se puede hacer ya.
+   */
+  async function holdWrite ({ caller, ns, pub, keys, apply }) {
+    if (!needsApproval(caller, await refreshActa())) return null
+    // Quien llama ya comprobó el sobre; `apply` lo vuelve a comprobar al aprobar, porque el
+    // acta pudo cambiar en medio.
+    const target = ns || await deviceIdOf(pub).catch(() => null) || '?'
+    const pend = await awaitApproval({
+      device: caller, ns: target, kind: 'write', what: 'vars',
+      // LOS NOMBRES van en el contexto, que viaja SELLADO al que aprueba: el proxio no
+      // tiene por qué aprender cómo se llama la configuración de un servicio.
+      ctx: { keys },
+      onAnswer: async (ok) => {
+        if (!ok) return
+        await apply()
+        await notifyMembers('vars', { by: await deviceIdOf(caller).catch(() => null), keys, ns: ns || null })
+      }
+    })
+    return pend.id
   }
 
   const admin = createAdminDesk({

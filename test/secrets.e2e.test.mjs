@@ -628,7 +628,7 @@ test('la consola remota CREA variables (scope nuevo o aparato) y rota las privad
 
   // Quien administra: un aparato del acta, que es quien FIRMA cada sobre.
   const consola = await makeDeviceKey()
-  await vault.identity.admitMember({ pub: consola.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read'] })
+  await vault.identity.admitMember({ pub: consola.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read', 'unattended'] })
   /**
    * El sobre ya hecho, como lo manda la consola: la bóveda no lo abre.
    *
@@ -812,7 +812,7 @@ test('la consola remota escribe SIN contrasena (§8.1)', async () => {
   const { buildSealedVar, authorFromDeviceKey } = await import('../lib/src/admin.js')
   const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
   const quien = await makeDeviceKey()
-  await vault.identity.admitMember({ pub: quien.publickey, label: 'consola-many', caps: ['sign', 'admin'] })
+  await vault.identity.admitMember({ pub: quien.publickey, label: 'consola-many', caps: ['sign', 'admin', 'unattended'] })
   // CADA VARIABLE EN SU SOBRE, ya hecho (2026-09-02): la bóveda no abre ninguno.
   const recipients = await vault.vars.recipients({ ns })
   const r = await vault.vars.setMany({
@@ -1295,6 +1295,91 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
 })
 
 /**
+ * GUARDAR VARIABLES TAMBIÉN PIDE PERMISO (dueño, 2026-09-23: «si el admin no es unattended,
+ * sí debería pedir permiso para almacenar variables»).
+ *
+ * El mismo permiso que decide si un aparato se lleva las claves solo decide si escribe solo.
+ * Sin él, la escritura se queda en espera —la llamada contesta «pendiente» en el acto, porque
+ * la consola no puede esperar cinco minutos— y se aplica cuando el teléfono aprueba.
+ */
+test('una consola sin `unattended` deja la escritura en espera: denegar la tira, aprobar la guarda', async () => {
+  const { enrollWithVault } = await import('../lib/src/service.js')
+  const { signWithDevice, makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const { requestRenew } = await import('@dotrino/identity/vault/remote.js')
+  const { buildSealedVar, authorFromDeviceKey } = await import('../lib/src/admin.js')
+  const { MSG } = await import('../src/protocol.js')
+  const ns = 'espera'
+
+  const consola = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: consola.publickey, label: 'consola-espera', caps: ['sign', 'admin'] })
+  assert.equal(await vault.needsApproval(consola.publickey), true)
+
+  // El teléfono que aprueba.
+  const inv = await vault.startPairing({ scope: ['vault:sign'], label: 'phone-espera', ttlMs: 60_000 })
+  let perm = null
+  const phone = await enrollWithVault({ qr: inv.qr, label: 'phone-espera', onCode: ({ code }) => { perm = aprobarYPermitir(code) } })
+  await perm
+  await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const rpc = async (data) => {
+    const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+    await c.connect()
+    try {
+      const signed = { ...data, publickey: phone.device.publickey, ts: Date.now() }
+      const { signature } = await signWithDevice({ privateJwk: phone.device.privateJwk, data: signed })
+      const res = new Promise((resolve, reject) => {
+        c.on('message', (_f, p) => { if (p?.type === MSG.SECRETS_RESULT) resolve(p); else if (p?.type === MSG.ERROR) reject(new Error(p.error)) })
+        setTimeout(() => reject(new Error('timeout')), 8000)
+      })
+      c.sendByPubkey(vault.master, { type: MSG.SECRETS, data: signed, signature, cert: phoneCert })
+      return (await res).body
+    } finally { c.close() }
+  }
+
+  const escribir = async (key, value) => {
+    const recipients = await vault.vars.recipients({ ns })
+    const sealed = await buildSealedVar({ recipients, owner: `ns:${ns}`, key, value, author: authorFromDeviceKey(consola) })
+    return vault.vars.setMany({ ns, items: [{ key, sealed }], caller: consola.publickey, by: 'test' })
+  }
+  const guardadas = () => (vault.listSecrets()[ns] || []).map((k) => k.key)
+
+  // 1) Queda EN ESPERA, y no se escribe nada.
+  const r1 = await escribir('DENEGADA', 'x')
+  assert.ok(r1.pending, 'contesta con el id del pedido')
+  assert.deepEqual(guardadas(), [], 'todavía no se guardó')
+  const [p1] = vault.listApprovals().filter((p) => p.id === r1.pending)
+  assert.equal(p1.kind, 'write', 'el pedido dice que es una escritura, no «pide tus claves»')
+  assert.equal(p1.ns, ns)
+
+  // Al teléfono los NOMBRES le llegan sellados, igual que el comando de un pedido de claves.
+  const listado = (await rpc({ op: 'approvals' })).items.find((p) => p.id === r1.pending)
+  assert.equal(listado.kind, 'write')
+  assert.equal(listado.ctx, null, 'los nombres no viajan en claro')
+  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
+  const encPriv = await crypto.subtle.importKey('jwk', phone.enc.privateJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits'])
+  const cek = await openWrap({ wrap: listado.ctxWrap, myEncPrivateKey: encPriv })
+  assert.deepEqual(JSON.parse(await decryptWithCek({ cek, envelope: listado.ctxEnvelope })), { keys: ['DENEGADA'] })
+
+  // 2) Dos escrituras seguidas NO se pisan: cada una lleva su valor.
+  const r2 = await escribir('APROBADA', 'y')
+  assert.ok(vault.listApprovals().some((p) => p.id === r1.pending), 'la primera sigue ahí')
+
+  // 3) Denegar la tira; aprobar la guarda.
+  assert.equal((await rpc({ op: 'deny', id: r1.pending })).ok, true)
+  assert.equal((await rpc({ op: 'approve', id: r2.pending })).ok, true)
+  assert.deepEqual(guardadas(), ['APROBADA'])
+  assert.equal(vault.listApprovals().filter((p) => p.kind === 'write').length, 0)
+  assert.equal(vault.listGrants().length, 0, 'aprobar una escritura no deja ninguna concesión abierta')
+
+  // 4) Con `unattended`, escribe sin preguntar.
+  await vault.setCaps(consola.publickey, ['sign', 'admin', 'unattended'])
+  const r3 = await escribir('DIRECTA', 'z')
+  assert.equal(r3.pending, undefined)
+  assert.deepEqual(guardadas().sort(), ['APROBADA', 'DIRECTA'])
+})
+
+/**
  * QUITARLE EL PERMISO SURTE EFECTO YA — TAMBIÉN EN `enckey`.
  *
  * `handleEncKey` no le preguntaba al acta, solo al certificado. Y no es un mostrador
@@ -1606,7 +1691,7 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
 
   // El autor: un aparato del acta que administra.
   const yo = await makeDeviceKey()
-  await vault.identity.admitMember({ pub: yo.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read'] })
+  await vault.identity.admitMember({ pub: yo.publickey, label: 'consola', caps: ['sign', 'admin', 'store', 'read', 'unattended'] })
   const owner = `ns:${ns}`
 
   // 1. La BÓVEDA dice a quién hay que envolver (la lista sale del acta, la sabe ella).
@@ -1647,7 +1732,7 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
   // Misma regla que `putWrap`, y por lo mismo: reemplazar un sobre con uno basura dejaría
   // sin leer a otro miembro — denegación de servicio disfrazada de escritura.
   const servicio = await makeDeviceKey()
-  await vault.identity.admitMember({ pub: servicio.publickey, label: 'svc', cn: ns, caps: ['secrets'] })
+  await vault.identity.admitMember({ pub: servicio.publickey, label: 'svc', cn: ns, caps: ['secrets', 'unattended'] })
   const rec2 = await vault.vars.recipients({ ns })
   const suyo = await buildSealedVar({ recipients: rec2, owner, key: 'TOKEN', value: 'pisado', author: authorFromDeviceKey(servicio) })
   await assert.rejects(vault.vars.set({ ns, key: 'TOKEN', sealed: suyo, caller: servicio.publickey }),
