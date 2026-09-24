@@ -55,6 +55,8 @@ const T = {
     pwTitle: 'Elige la contraseña de tus contraseñas',
     pwWhy: 'Desde ahora esta bóveda guarda tus contraseñas cerradas para tus aparatos, y ella no puede abrirlas. Esta contraseña es la única forma de volver a abrirlas el día que no te quede ningún aparato.',
     pwWarn: 'No se puede recuperar. Si la pierdes, pierdes lo que haya aquí dentro.',
+    pwNeeded: 'Mientras no la pongas, esta bóveda no responde a tus aparatos.',
+    needsPw: 'Activar el aviso e importar necesitan la contraseña de recuperación.',
     pw1: 'Contraseña',
     pw2: 'Otra vez',
     pwGo: 'Crear',
@@ -97,6 +99,8 @@ const T = {
     pwTitle: 'Choose the password for your passwords',
     pwWhy: 'From now on this vault keeps your passwords sealed for your devices, and it cannot open them. This password is the only way to open them again the day you have no device left.',
     pwWarn: 'It cannot be recovered. If you lose it, you lose whatever is in here.',
+    pwNeeded: 'Until you set it, this vault does not answer your devices.',
+    needsPw: 'Turning on alerts and importing need the recovery password.',
     pw1: 'Password',
     pw2: 'Again',
     pwGo: 'Create',
@@ -477,10 +481,16 @@ async function arrancar () {
     })
 
     // ¿HAY QUE CONVERTIR? Si no hay copia de recuperación, esta bóveda todavía es la de
-    // antes —una llave suya abriendo todo— y no se atiende hasta arreglarlo. Nada de
-    // servir con la llave vieja «mientras tanto»: eso es el agujero con otro nombre.
+    // antes —una llave suya abriendo todo— y no ATIENDE hasta arreglarlo. Nada de servir
+    // con la llave vieja «mientras tanto»: eso es el agujero con otro nombre. Y aquí la
+    // contraseña no es un respaldo, como en la extensión: esta bóveda no está entre los
+    // destinatarios, así que la copia de recuperación es su única llave.
+    //
+    // Pero la PÁGINA no se bloquea (dueño, 2026-09-24): se ve entera, con el aviso y el
+    // formulario arriba, y lo que necesita la contraseña sale deshabilitado con la razón.
     if (!hasRecovery(await store.get('recovery')) || !(await sealed.sealed())) {
       pidiendoClave.value = true
+      await refresh()
       ready.value = true
       return
     }
@@ -573,25 +583,30 @@ onBeforeUnmount(() => { responder?.stop(); if (sweeper) clearInterval(sweeper) }
       <p class="hint">{{ t('noIdentity') }}</p>
     </template>
 
-    <!-- CONVERTIR. Mientras esto esté, la bóveda NO atiende: servir con la llave vieja
-         «mientras tanto» sería el mismo agujero con otro nombre. -->
-    <template v-if="ready && pidiendoClave">
-      <h2>{{ t('pwTitle') }}</h2>
-      <p class="hint">{{ t('pwWhy') }}</p>
-      <p class="warn">{{ t('pwWarn') }}</p>
-      <form class="pw" @submit.prevent="crearYConvertir">
-        <input v-model="clave1" type="password" :placeholder="t('pw1')" autocomplete="new-password" data-testid="pw1">
-        <input v-model="clave2" type="password" :placeholder="t('pw2')" autocomplete="new-password" data-testid="pw2">
-        <button type="submit" :disabled="convirtiendo" data-testid="pw-go">
-          {{ convirtiendo ? t('pwWorking') : t('pwGo') }}
-        </button>
-      </form>
-      <p v-if="claveError" class="err" data-testid="pw-error">{{ claveError }}</p>
-    </template>
+    <template v-if="ready">
+      <div class="state">
+        <span class="dot" :class="{ on: !pidiendoClave }"></span>
+        <span>{{ pidiendoClave ? t('inactive') : t('active') }}</span>
+      </div>
 
-    <template v-if="ready && !pidiendoClave">
-      <div class="state"><span class="dot on"></span><span>{{ t('active') }}</span></div>
-      <p class="warn">{{ t('warning') }}</p>
+      <!-- LA CONTRASEÑA DE RECUPERACIÓN. Es un aviso con su formulario, no una puerta: la
+           página se ve entera. La bóveda no atiende hasta tenerla —aquí es su única llave—
+           y eso se dice en el propio aviso. -->
+      <div v-if="pidiendoClave" class="warn" data-testid="recovery-notice">
+        <strong>{{ t('pwTitle') }}</strong>
+        <p>{{ t('pwNeeded') }}</p>
+        <p class="hint">{{ t('pwWhy') }}</p>
+        <p>{{ t('pwWarn') }}</p>
+        <form class="pw" @submit.prevent="crearYConvertir">
+          <input v-model="clave1" type="password" :placeholder="t('pw1')" autocomplete="new-password" data-testid="pw1">
+          <input v-model="clave2" type="password" :placeholder="t('pw2')" autocomplete="new-password" data-testid="pw2">
+          <button type="submit" :disabled="convirtiendo" data-testid="pw-go">
+            {{ convirtiendo ? t('pwWorking') : t('pwGo') }}
+          </button>
+        </form>
+        <p v-if="claveError" class="err" data-testid="pw-error">{{ claveError }}</p>
+      </div>
+      <p v-else class="warn">{{ t('warning') }}</p>
 
       <h2>{{ t('devices') }}</h2>
       <ul v-if="devices.length" class="rows">
@@ -620,14 +635,15 @@ onBeforeUnmount(() => { responder?.stop(); if (sweeper) clearInterval(sweeper) }
       <h2>{{ t('ring_t') }}</h2>
       <p class="hint">{{ t('ring_b') }}</p>
       <p v-if="pushListo && !pushError" class="hint" data-testid="ring-on">{{ t('ring_ok') }}</p>
-      <button v-else-if="!pushListo" class="import" data-testid="ring-enable" @click="encender && encender()">
+      <button v-else-if="!pushListo" class="import" data-testid="ring-enable" :disabled="pidiendoClave" @click="encender && encender()">
         {{ t('ring_on') }}
       </button>
       <p v-if="pushError" class="hint" data-testid="ring-error">{{ t('ring_bad') }} {{ pushError }}</p>
-      <label class="import">
+      <label class="import" :class="{ disabled: pidiendoClave }">
         {{ t('importBtn') }}
-        <input type="file" accept=".csv,.json,.txt" hidden @change="importFile">
+        <input type="file" accept=".csv,.json,.txt" hidden :disabled="pidiendoClave" @change="importFile">
       </label>
+      <p v-if="pidiendoClave" class="hint" data-testid="needs-pw">{{ t('needsPw') }}</p>
     </template>
 
     <!-- Pedir la contraseña para UNA operación (importar). Sin `prompt()`: bloquea, no se
@@ -675,6 +691,7 @@ button, .import { cursor: pointer; padding: .55rem .9rem; border-radius: .5rem; 
                   background: #2f6df6; color: #fff; font: inherit; }
 button.danger { background: transparent; color: #ff8a8a; border: 1px solid rgba(255,138,138,.4); }
 .import { display: inline-block; margin-top: .8rem; }
+button:disabled, .import.disabled { opacity: .45; cursor: not-allowed; }
 .ask-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid;
                 place-items: center; padding: 1rem; z-index: 50; }
 .ask { max-width: 26rem; background: #14161c; padding: 1.4rem; border-radius: .8rem;
