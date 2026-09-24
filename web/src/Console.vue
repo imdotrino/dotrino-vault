@@ -150,6 +150,14 @@ const T = {
     pair_code_t: 'Escribe este código en tu bóveda',
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
+    // ALTA NATIVA (app de Dotrino): la llave vive en el chip del teléfono y solo aprueba.
+    native_t: 'Aprobar desde este teléfono',
+    native_h: (n) => n ? `Este teléfono podrá aprobar los pedidos de «${n}» desde la pantalla Pedidos, sin abrir la web.` : 'Este teléfono podrá aprobar los pedidos de tu bóveda desde la pantalla Pedidos, sin abrir la web.',
+    native_c: 'Se crea una llave nueva en el chip del teléfono, que no sale de él. No crea ninguna cuenta aquí.',
+    native_label: 'teléfono (nativo)',
+    native_done: 'Listo, la llave del teléfono quedó conectada.',
+    native_step: 'Falta un paso, y se hace en tu bóveda: darle permiso para aprobar.',
+    native_adopt: 'Esta invitación es para mover una cuenta, y el teléfono en nativo solo se une. Pide en tu bóveda una invitación normal.',
     adopt_done: 'Listo, tu cuenta ya vive en tu bóveda.',
     adopt_done_b: 'Sigue siendo la misma cuenta de siempre: los mismos contactos, lo mismo firmado, nada que volver a hacer. Lo que cambió es que ahora la guarda tu bóveda, que pasa a ser el Master, y este aparato es uno más de los que la usan.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
@@ -357,6 +365,13 @@ const T = {
     pair_code_t: 'Type this code in your vault',
     pair_code_b: 'Open it and type these six digits to approve the connection. Nobody else knows them.',
     pair_done: 'Done, this device is connected.',
+    native_t: 'Approve from this phone',
+    native_h: (n) => n ? `This phone will be able to approve “${n}” requests from the Requests screen, without opening the web.` : 'This phone will be able to approve your vault\'s requests from the Requests screen, without opening the web.',
+    native_c: 'A new key is created in the phone\'s chip, and it never leaves it. No account is created here.',
+    native_label: 'phone (native)',
+    native_done: 'Done, the phone\'s key is connected.',
+    native_step: 'One step left, and it is done in your vault: let it approve.',
+    native_adopt: 'This invitation is for moving an account, and the phone in native mode only joins. Ask your vault for a regular invitation.',
     adopt_done: 'Done, your account now lives in your vault.',
     adopt_done_b: 'It is the same account as always: same contacts, same signed history, nothing to redo. What changed is that your vault now keeps it and is the Master, and this device is one more that uses it.',
     pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
@@ -975,8 +990,75 @@ const flowAccount = ref('')
 /** Qué camino se está haciendo: `join` (camino B) o `adopt` (camino A). */
 const flowMode = ref('join')
 
+/**
+ * ALTA NATIVA: dentro de la app de Dotrino, `?native=1` empareja la llave del CHIP del
+ * teléfono (Android Keystore) en vez de crear una cuenta en esta pestaña. La llave no pasa
+ * por aquí: el puente `DotrinoNativeKeys` —que la app solo enseña a esta página— la crea,
+ * firma el `enroll` y guarda la cuenta. Después, aprobar es nativo y no pasa por la web.
+ */
+const nativeMode = computed(() => pairOnly.value && typeof window !== 'undefined' && !!window.DotrinoNativeKeys &&
+  new URLSearchParams(location.search).get('native') === '1')
+/** El `deviceId` de la llave del teléfono, al terminar: es lo que hay que teclear en `caps`. */
+const nativeDone = ref('')
+let nativeSeq = 0
+const nativeWaiting = new Map()
+function nativeCall (method, params = {}) {
+  const bridge = window.DotrinoNativeKeys
+  if (!bridge) return Promise.reject(new Error('this is not the Dotrino app'))
+  if (!bridge.onmessage) {
+    bridge.onmessage = (ev) => {
+      let m = null
+      try { m = JSON.parse(ev.data) } catch (_) { return }
+      const w = nativeWaiting.get(m?.id)
+      if (!w) return
+      nativeWaiting.delete(m.id)
+      if (m.error) w.reject(new Error(m.error)); else w.resolve(m.result)
+    }
+  }
+  const id = 'n' + (++nativeSeq)
+  return new Promise((resolve, reject) => {
+    nativeWaiting.set(id, { resolve, reject })
+    bridge.postMessage(JSON.stringify({ id, method, params }))
+  })
+}
+
+async function connectNative (qr) {
+  if (qr.m === 'adopt') { pairError.value = t.value.native_adopt; return }
+  pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
+  let kid = null
+  try {
+    const k = await nativeCall('begin')
+    kid = k.id
+    // El pilar de siempre, firmando con la llave de fuera (identity ≥ 0.102.0).
+    const { enrollDevice } = await import('@dotrino/identity/vault/remote.js')
+    const res = await enrollDevice({
+      qr: { ...qr },
+      device: { publickey: k.publickey, sign: (text) => nativeCall('sign', { id: kid, text }).then((r) => r.signature) },
+      encPub: k.encPub,
+      label: t.value.native_label,
+      onChallenge: ({ code }) => { pairCode.value = code },
+    })
+    const saved = await nativeCall('save', {
+      id: kid, name: flowAccount.value || '', profileId: res.acta?.profileId || null,
+      vault: res.master, proxy: res.proxy || qr.proxy || 'wss://proxy.dotrino.com', cert: res.cert,
+    })
+    kid = null
+    nativeDone.value = saved.deviceId
+    justPaired.value = true
+  } catch (e) {
+    console.error('[pair] native enrolment failed:', e?.code || '', e?.message || e)
+    pairError.value = t.value.pair_fail + (e?.message || e)
+    // Una llave a medio enrolar no se queda en el chip.
+    if (kid) nativeCall('discard', { id: kid }).catch(() => {})
+  } finally {
+    pairing.value = false; pairCode.value = ''
+    if (location.hash) { try { history.replaceState(null, '', location.pathname + location.search) } catch (_) {} }
+  }
+}
+
 async function connect (qr, mode = 'join') {
   if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
+  if (nativeMode.value) return connectNative(qr)
   pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
   const off = id.value.onVault((e) => { if (e?.phase === 'challenge') pairCode.value = e.code })
   try {
@@ -1814,12 +1896,23 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <p class="waiting">{{ t.flow_waiting }}</p>
         <div class="what" data-testid="announce-what">
           <strong>{{ t.ann_t }}</strong>
-          <p>{{ flowMode === 'adopt' ? t.ann_adopt_h(flowAccount) : t.ann_join_h(flowAccount) }}</p>
-          <p class="muted">{{ flowMode === 'adopt' ? t.ann_adopt_c : t.ann_join_c }}</p>
+          <template v-if="nativeMode">
+            <p>{{ t.native_h(flowAccount) }}</p>
+            <p class="muted">{{ t.native_c }}</p>
+          </template>
+          <template v-else>
+            <p>{{ flowMode === 'adopt' ? t.ann_adopt_h(flowAccount) : t.ann_join_h(flowAccount) }}</p>
+            <p class="muted">{{ flowMode === 'adopt' ? t.ann_adopt_c : t.ann_join_c }}</p>
+          </template>
         </div>
       </div>
 
       <!-- Listo, y qué quedó en el aparato -->
+      <div v-else-if="pairFlow === 'done' && nativeMode" class="card done" data-testid="native-done">
+        <strong>{{ t.native_done }}</strong>
+        <p>{{ t.native_step }}</p>
+        <p class="cmd"><code>dotrino-vault caps {{ nativeDone }} +aprueba</code></p>
+      </div>
       <div v-else-if="pairFlow === 'done'" class="card done" data-testid="two-accounts">
         <strong>{{ flowMode === 'adopt' ? t.adopt_done : t.pair_done }}</strong>
         <p v-if="flowMode === 'adopt'">{{ t.adopt_done_b }}</p>
@@ -1854,8 +1947,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
          proceso (escanear / abrir / pegar). -->
     <template v-else-if="pairOnly">
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
-      <h2>{{ t.pair_t }}</h2>
-      <p class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
+      <h2>{{ nativeMode ? t.native_t : t.pair_t }}</h2>
+      <p v-if="nativeMode" class="muted" data-testid="pair-native">{{ t.native_c }}</p>
+      <p v-else class="muted" data-testid="pair-new-account">{{ t.pair_new_account }}</p>
       <div class="row">
         <button class="btn" data-testid="scan" :disabled="pairing" @click="scan">{{ t.pair_scan }}</button>
         <button class="btn ghost" :disabled="pairing" @click="fileInput.click()">{{ t.pair_file }}</button>
