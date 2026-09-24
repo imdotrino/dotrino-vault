@@ -1086,7 +1086,17 @@ export async function runDaemon () {
         console.log(`[vault] update to ${r.version} NOT installed: ${res.reason}${res.file ? ` (file left at ${res.file})` : ''}`)
         return
       }
-      console.log(`[vault] update: ${r.version} installed · the service restarts on its own`)
+      // SE REINICIA YA, no cuando lo note el vigilante: este proceso sabe que acaba de cambiar
+      // el binario. Esperar al vigilante (mira cada minuto y exige verlo dos veces) dejaba ~2
+      // minutos con el CLI y la TUI nuevos hablando con el daemon viejo; el dueño abrió la
+      // TUI justo ahí y no arrancó (2026-09-24). Solo bajo systemd, que es quien nos levanta:
+      // sin él, irnos sería quedarnos apagados.
+      if (vigia) {
+        console.log(`[vault] update: ${r.version} installed · restarting now to run it`)
+        shutdown(`updated to ${r.version}`)
+      } else {
+        console.log(`[vault] update: ${r.version} installed · restart the vault to run it`)
+      }
     } catch (e) {
       console.log(`[vault] update to ${r.version} failed: ${e.message}`)
     } finally { actualizando = false }
