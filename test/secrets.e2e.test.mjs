@@ -60,6 +60,20 @@ async function aprobarYPermitir (code) {
 
 let proxy, proxyUrl, vault, svcDir
 
+/**
+ * Que haya ALGUIEN que pueda aprobar. Desde 2026-09-24 una cuenta sin aprobadores no pide
+ * aprobación (regla del dueño), así que las pruebas que comprueban que se pide la
+ * necesitan uno en el acta. Es un miembro con `approve` y nada más: nadie firma con él.
+ */
+let aprobadorDePrueba = null
+async function conAprobador () {
+  if (aprobadorDePrueba) return aprobadorDePrueba
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  aprobadorDePrueba = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: aprobadorDePrueba.publickey, label: 'aprobador de prueba', caps: ['sign', 'approve'] })
+  return aprobadorDePrueba
+}
+
 before(async () => {
   process.env.NODE_ENV = 'test'
   process.env.PROXY_DB_FILE = ':memory:'
@@ -1174,6 +1188,8 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   // quita como cualquier otro y lo respeta cualquier bóveda de la cuenta.
   const suyas = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === agent.device.publickey).caps
   await vault.setCaps(agent.device.publickey, suyas.filter((c) => c !== 'unattended'))
+  assert.equal(await vault.needsApproval(agent.device.publickey), false, 'sin nadie que apruebe, no se pide (2026-09-24)')
+  await conAprobador()
   assert.equal(await vault.needsApproval(agent.device.publickey), true)
 
   // El teléfono: un aparato normal al que el dueño le concede `approve` a mano.
@@ -1312,6 +1328,7 @@ test('una consola sin `unattended` deja la escritura en espera: denegar la tira,
 
   const consola = await makeDeviceKey()
   await vault.identity.admitMember({ pub: consola.publickey, label: 'consola-espera', caps: ['sign', 'admin'] })
+  await conAprobador()
   assert.equal(await vault.needsApproval(consola.publickey), true)
 
   // El teléfono que aprueba.
@@ -1539,6 +1556,7 @@ test('una respuesta demasiado grande se cambia por un error, no revienta el sock
  * Ahora se concede a propósito (`+desatendido`) y, si falta, se pide permiso.
  */
 test('un servicio SIN el permiso espera aprobación; con él, se sirve solo', async () => {
+  await conAprobador()
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:vigilado'], label: 'service:vigilado', ttlMs: 60_000 })
   const dir = tmp('svc-vigilado-')
   const { enrollService, fetchSecrets } = await import('../lib/src/service.js')
@@ -1644,7 +1662,9 @@ test('--public: llega sin aprobación, y NO trae ninguna privada', async () => {
   await vault.setSecret(ns, 'PUBLIC_URL', 'https://ejemplo', true)
   await vault.setSecret(ns, 'API_TOKEN', 'secreto', false)
 
-  // Nadie va a aprobar nada: si esto pidiera aprobación, se quedaría colgado.
+  // Hay quien aprueba (si no, no se pediría nunca), pero no va a contestar: si esto pidiera
+  // aprobación, se quedaría colgado.
+  await conAprobador()
   let pidioAprobacion = false
   const solo = await fetchSecrets({ dir, ns, publicOnly: true, onPending: () => { pidioAprobacion = true } })
 
@@ -1759,41 +1779,32 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
 })
 
 /**
- * SI NADIE PUEDE APROBAR, SE DICE — no se deja esperando cinco minutos.
+ * SI NADIE PUEDE APROBAR, NO HACE FALTA APROBACIÓN (dueño, 2026-09-24: «la regla es, si no
+ * hay aprobador no se necesita aprobación»).
  *
- * Un servicio recién enrolado nace pidiendo aprobación (2026-09-01), y la bóveda busca en
- * el acta a quién timbrar. Cuando no encuentra a nadie lo apuntaba en su log —«rang 0
- * approver(s)»— y aun así contestaba «pendiente», así que el que preguntaba se quedaba
- * aguardando a algo que no podía pasar hasta agotar el plazo del pedido. Desde fuera eso es
- * un cuelgue, y de los caros: el mensaje que explica el problema existía, pero solo lo veía
- * quien supiera mirar el journal de la bóveda.
- *
- * La bóveda es la ÚNICA que puede enterar al otro (CONVENCIONES §14): el que pide no tiene
- * el acta, así que jamás puede averiguar por su cuenta que no hay aprobadores.
+ * Antes la bóveda rechazaba con `no-approver`, y el servicio se quedaba sin sus claves hasta
+ * que alguien le diera `+aprueba` a un aparato o `+desatendido` a él. La regla ahora es la
+ * misma que sigue la actualización automática: esperar un sí que nadie puede dar solo deja
+ * al servicio colgado. Se entrega en el acto, y queda escrito en la bitácora por qué no sonó
+ * nada (`secrets.no-approver`).
  */
-test('nadie puede aprobar: la bóveda lo dice EN EL ACTO, no deja esperando', { timeout: 60000 }, async () => {
-  // BÓVEDA PROPIA, y hace falta: lo que se prueba es un acta en la que NADIE puede aprobar,
-  // y la que comparte el resto del fichero tiene un teléfono con `approve` desde el test de
-  // la aprobación por uso. Con ella, el caso no llegaba a darse nunca y este test se
-  // agotaba esperando — aprobado a solas y colgado en la suite, que es lo peor de los dos.
+test('nadie puede aprobar: se entrega sin aprobación, en el acto, y se anota', { timeout: 60000 }, async () => {
+  // BÓVEDA PROPIA: la que comparte el resto del fichero tiene un teléfono con `approve`.
   const { startVault } = await import('../src/vault.js')
   const sola = await startVault({ dir: tmp('vault-huerfano-'), proxyUrl, log: process.env.VAULT_LOG ? console.error : () => {} })
   try {
     await sola.setSecret('huerfano', 'API_KEY', 'k-000')
     const { qr } = await sola.startPairing({ scope: ['vault:secrets:huerfano'], label: 'service:huerfano', ttlMs: 60000 })
 
-    const { enrollService, fetchSecrets } = await import('../lib/src/service.js')
+    const { enrollService, fetchSecrets, readServiceIdentity } = await import('../lib/src/service.js')
     const dir = tmp('svc-huerfano-')
-    // Se aprueba el EMPAREJAMIENTO y nada más: sin `unattended`, y sin que ningún miembro
-    // del acta tenga `approve`. Es el estado en que queda cualquier servicio recién enrolado
-    // en una bóveda sin teléfono dado de alta.
+    // Sin `unattended`, y sin que ningún miembro del acta tenga `approve`.
     await enrollService({ qr, ns: 'huerfano', dir, onCode: ({ code }) => { sola.approveDevice(code).catch(() => {}) } })
+    assert.equal(await sola.needsApproval(readServiceIdentity(dir).device.publickey), false)
 
     const t0 = Date.now()
-    await assert.rejects(() => fetchSecrets({ dir }), /nobody in the record can approve/,
-      'contesta por qué, en vez de callar')
-    // Y RÁPIDO. Es la mitad que importa: el mensaje correcto después de cinco minutos sigue
-    // siendo un cuelgue. Sin el arreglo esto tardaba `APPROVAL_TIMEOUT_MS` (5 min y 10 s).
+    assert.deepEqual(await fetchSecrets({ dir }), { API_KEY: 'k-000' })
     assert.ok(Date.now() - t0 < 30000, `tardó ${Date.now() - t0} ms: se está esperando al plazo de la aprobación`)
+    assert.equal(sola.listApprovals().length, 0, 'y no se apuntó ningún pedido')
   } finally { try { sola.close() } catch (_) {} }
 })

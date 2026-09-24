@@ -152,6 +152,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   function needsApproval (pub, record) {
     if (!record) return true          // sin acta no se decide que sí: se pide permiso
+    // SIN NADIE QUE APRUEBE, NO SE NECESITA APROBACIÓN (dueño, 2026-09-24: «la regla es, si
+    // no hay aprobador no se necesita aprobación»). Es la misma que ya seguía la
+    // actualización automática: esperar un sí que nadie puede dar solo deja al servicio
+    // colgado. Aquí se decide para las tres puertas —entregar claves, contraseñas y guardar
+    // variables— y por eso no hay un «nadie aprueba» aparte en ninguna de ellas.
+    if (!record.members?.some((m) => Acta.memberCan(record, m.pub, 'approve'))) return false
     return !Acta.memberCan(record, pub, 'unattended')
   }
 
@@ -1460,6 +1466,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // hace la BÓVEDA (`bundleFor({ publicOnly })`), no el que pide: si mandáramos todo y el
     // cliente eligiera, pedir «solo públicas» sería la manera de saltarse la aprobación.
     const publicOnly = p.data?.publicOnly === true
+    // Entregar SIN aprobación porque no hay quien apruebe es la regla (ver `needsApproval`),
+    // pero se deja dicho: quien mire el log tiene que poder ver por qué no sonó el teléfono.
+    if (!publicOnly && record && !Acta.memberCan(record, chk.device, 'unattended') &&
+        !record.members?.some((m) => Acta.memberCan(record, m.pub, 'approve'))) {
+      audit('secrets.no-approver', { device: await deviceIdOf(chk.device).catch(() => null), ns })
+      log(`[vault] ${ns}: served ${await deviceIdOf(chk.device).catch(() => '????-????')} without approval — nobody in the record can approve`)
+    }
     if (!publicOnly && needsApproval(chk.device, record)) {
       const deviceId = await deviceIdOf(chk.device).catch(() => null)
       const label = (record?.members || []).find((m) => m.pub === chk.device)?.label || ''
@@ -1484,27 +1497,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           return reply(from, { type: MSG.ERROR, error: 'secrets: invalid ek' })
         }
       }
-      // NADIE PUEDE APROBAR = SE DICE AHORA, no se deja esperando cinco minutos.
-      //
-      // La bóveda ya lo sabía —lo escribía en su propio log, «rang 0 approver(s)»— y aun
-      // así contestaba «pendiente» y dejaba al otro aguardando a algo que no podía pasar.
-      // Eso es un fallo ruidoso convertido en uno mudo, que es exactamente lo que la norma
-      // prohíbe (CLAUDE.md, «nada de repliegues»), y encima el que sabe es el ÚNICO que
-      // puede enterar al otro (CONVENCIONES §14): el que pide no tiene el acta, así que no
-      // hay forma de que lo averigüe por su cuenta.
-      //
-      // Lo pidió el dueño el 2026-09-05, después de mirar un `dotrino-env check` que parecía
-      // colgado y era esto.
-      const quienAprueba = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve'))
-      if (!quienAprueba.length) {
-        audit('rejected', { what: 'secrets', ns, reason: 'sin-aprobador' })
-        log(`[vault] ${ns}: refused ${deviceId || '????-????'} — nobody in the record can approve`)
-        return reply(from, {
-          type: MSG.ERROR,
-          code: 'no-approver',
-          error: `approval: nobody in the record can approve — grant it with \`dotrino-vault caps <ID> +aprueba\`, or let this service run unattended with \`dotrino-vault caps ${deviceId || '<ID>'} +desatendido\``
-        })
-      }
+      // (Aquí se rechazaba con `no-approver` cuando nadie podía aprobar. Desde 2026-09-24 ese
+      // caso ya no llega: sin aprobadores, `needsApproval` dice que no hace falta aprobación.)
       // `from` SE GUARDA: la respuesta llega más tarde —cuando alguien apruebe— y tiene que
       // volver POR DONDE VINO. Si la pregunta entró por el mostrador local, mandarla por el
       // proxio la deja en el vacío: quien preguntó está escuchando en el socket, no ahí.
@@ -3636,7 +3630,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           if (idos.length) {
             const quienes = (await Promise.all(idos.map(async (d) => `${await deviceIdOf(d.pub).catch(() => '????-????')}${d.label ? ` (${d.label})` : ''}`))).join(', ')
             audit('no-approver', { removed: idos.length, seq })
-            log(`[vault] WARNING: nobody in the record can approve any more — ${quienes} was the last. Requests from devices without \`unattended\` will be refused until you enrol a device and grant it \`dotrino-vault caps <ID> +aprueba\``)
+            log(`[vault] WARNING: nobody in the record can approve any more — ${quienes} was the last. From now on every device gets its keys WITHOUT approval, until you enrol one and grant it \`dotrino-vault caps <ID> +aprueba\``)
           }
         } catch (e) { log(`[vault] unlock: could not remove expired devices: ${e.message}`) }
       }
