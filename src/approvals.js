@@ -185,4 +185,20 @@ export function createGrants ({ now = Date.now, ttlMs = GRANT_TTL_MS } = {}) {
   return api
 }
 
-export default { createApprovals, createGrants, PENDING_TTL_MS, UPDATE_TTL_MS, GRANT_TTL_MS }
+/**
+ * ¿SE LLEVÓ UNA LIMPIEZA AL ÚLTIMO QUE APROBABA? Devuelve los aprobadores que se fueron si
+ * antes había alguno y ahora no queda ninguno; si no, una lista vacía.
+ *
+ * Una cuenta SIN aprobadores puede ser legítima (todo desatendido, se actualiza sola), así
+ * que el aviso no es «no hay aprobadores»: es «LOS HABÍA y acabas de perder el último».
+ *
+ * @param {string[]} before  llaves con `approve` antes
+ * @param {string[]} after   llaves con `approve` después
+ * @param {string[]} removed llaves que salieron del acta
+ */
+export function lastApproverGone (before, after, removed) {
+  if (!before.length || after.length) return []
+  return removed.filter((pub) => before.includes(pub))
+}
+
+export default { createApprovals, createGrants, lastApproverGone, PENDING_TTL_MS, UPDATE_TTL_MS, GRANT_TTL_MS }

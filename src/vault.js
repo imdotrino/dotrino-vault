@@ -37,7 +37,7 @@ import { loadManifest, brokenOf } from '@dotrino/roadmap'
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
 // que lo recorriera hasta que la hubo (dotrino-test, smoke:demonio, 2026-08-30).
-import { createApprovals, createGrants, PENDING_TTL_MS, GRANT_TTL_MS } from './approvals.js'
+import { createApprovals, createGrants, lastApproverGone, PENDING_TTL_MS, GRANT_TTL_MS } from './approvals.js'
 import { readProcContext, sanitizeContext, commandFingerprint, commandLine } from '../lib/src/proc.js'
 import { makeContentKey, encryptWithCek, wrapForMember } from '@dotrino/identity/content'
 import { makeSealer } from './sealer.js'
@@ -3617,11 +3617,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // Si falla no se arrastra —abrir no depende de esto—, pero se dice.
       if (r?.locked === false) {
         try {
+          const antes = await refreshActa()
+          const aprobaban = (antes?.members || []).filter((m) => Acta.memberCan(antes, m.pub, 'approve')).map((m) => m.pub)
           const { removed = [], seq } = await identity.pruneExpiredDevices?.() || {}
           for (const d of removed) {
             const id = await deviceIdOf(d.pub).catch(() => null)
             audit('pruned', { device: id, label: d.label || '', reason: 'expired', seq })
             log(`[vault] unlock: removed ${id || '????-????'} ${d.label ? `(${d.label}) ` : ''}from the record: its certificate expired and cannot be renewed · record #${seq}`)
+          }
+          // ¿SE LLEVÓ AL ÚLTIMO QUE APROBABA? Entonces se dice ALTO. Quitarlo es correcto —con
+          // el papel muerto no podía firmar ninguna aprobación, estuviera o no en el acta—,
+          // pero desde ese momento todo pedido de un aparato sin `unattended` se rechaza, y
+          // el 2026-09-22 eso pasó en silencio: el teléfono se fue y nadie lo supo en dos días.
+          const despues = await refreshActa()
+          const quedan = (despues?.members || []).filter((m) => Acta.memberCan(despues, m.pub, 'approve')).map((m) => m.pub)
+          const idosPub = lastApproverGone(aprobaban, quedan, removed.map((d) => d.pub))
+          const idos = removed.filter((d) => idosPub.includes(d.pub))
+          if (idos.length) {
+            const quienes = (await Promise.all(idos.map(async (d) => `${await deviceIdOf(d.pub).catch(() => '????-????')}${d.label ? ` (${d.label})` : ''}`))).join(', ')
+            audit('no-approver', { removed: idos.length, seq })
+            log(`[vault] WARNING: nobody in the record can approve any more — ${quienes} was the last. Requests from devices without \`unattended\` will be refused until you enrol a device and grant it \`dotrino-vault caps <ID> +aprueba\``)
           }
         } catch (e) { log(`[vault] unlock: could not remove expired devices: ${e.message}`) }
       }

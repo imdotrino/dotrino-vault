@@ -47,3 +47,22 @@ test('un valor en claro NO se reintenta: se corta', () => {
   assert.equal(isFinal({ code: 'plaintext-var', message: 'cualquier cosa' }), true)
   assert.equal(isFinal({ code: 'plaintext-var', message: '' }), true)
 })
+
+/**
+ * NADIE PUEDE APROBAR: TAMPOCO SE ARREGLA REINTENTANDO (2026-09-24).
+ *
+ * La limpieza de aparatos muertos se llevó al único teléfono con `aprueba` de la cuenta, y
+ * `dotrino-env` se quedó reintentando cada minuto sin decir nada. La bóveda contestaba con
+ * `code: 'no-approver'` y el mensaje de qué hacer, pero el cliente perdía el `code` al
+ * convertir la respuesta en Error.
+ */
+test('sin nadie que apruebe se corta, y se decide por el code', () => {
+  assert.equal(isFinal({ code: 'no-approver', message: 'approval: nobody in the record can approve' }), true)
+  assert.equal(isFinal({ code: 'no-approver', message: '' }), true)
+})
+
+test('el code de la bóveda llega hasta arriba (fetchSecrets no lo pierde)', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../lib/src/service.js', import.meta.url), 'utf8')
+  assert.equal((src.match(/throw new Error\(res\.error\)|reject\(new Error\(p\.error\)\)/g) || []).length, 0,
+    'un vault.error se convierte con vaultError(), que conserva el code')
+})
