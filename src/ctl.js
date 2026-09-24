@@ -1715,9 +1715,10 @@ async function cmdLogins (rest) {
 /**
  * `dotrino-vault update` — TRAER LA VERSIÓN NUEVA, cuando lo escribe una persona.
  *
- * La mitad automática es MIRAR, y la hace el daemon una vez al día (`src/update.js`
- * explica por qué la otra mitad no se automatiza: sería un canal para meter código en la
- * máquina que guarda la maestra sin que nadie diga que sí).
+ * Con la INSTALACIÓN DE USUARIO (`~/.local/share/dotrino/bin`) el daemon ya se actualiza
+ * solo: pide permiso al teléfono si hay aprobadores y, si no los hay, no hace falta
+ * (dueño, 2026-09-24). Esto es lo mismo a mano, sin esperar al aviso del día. Con el
+ * `.deb` del sistema el binario es de root y aquí solo se verifica y se dice el `sudo`.
  *
  * Lo que se baja SE VERIFICA contra la atestación de sigstore antes de tocar el disco, y
  * si no se puede verificar NO SE INSTALA. Que la URL sea la correcta no prueba nada.
@@ -1726,7 +1727,7 @@ async function cmdLogins (rest) {
  * va para que systemd lo levante con el nuevo (`src/selfupdate.js`).
  */
 async function cmdUpdate (args = []) {
-  const { latestRelease, assetFor, download, verifyArtifact, isNewer } = await import('./update.js')
+  const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease } = await import('./update.js')
   const soloMirar = args.includes('--check')
 
   process.stdout.write('Mirando qué hay publicado… ')
@@ -1744,6 +1745,21 @@ async function cmdUpdate (args = []) {
   }
   console.log('%sHay %s y esta es la %s.%s', B, r.version, VERSION, Z)
   if (soloMirar) { console.log('Tráela con:  dotrino-vault update'); return }
+
+  // Instalación de usuario: se verifica y se instala aquí mismo, sin sudo.
+  if (isUserInstall()) {
+    process.stdout.write('Bajando y comprobando la firma… ')
+    const res = await installUserRelease(r)
+    if (!res.ok) {
+      console.log('')
+      console.error('%sNO se instala nada.%s %s', R, Z, res.reason)
+      if (res.file) console.error('El archivo quedó en %s, sin tocar nada.', res.file)
+      process.exit(1)
+    }
+    console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
+    console.log('Instalada la %s. El servicio se reinicia solo; compruébalo con:  dotrino-vault status', res.version)
+    return
+  }
 
   const pick = assetFor(r.assets)
   if (!pick.ok) { console.error('%s', pick.reason); process.exit(1) }

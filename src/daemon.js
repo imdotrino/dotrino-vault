@@ -23,7 +23,7 @@ import { dataDir } from './paths.js'
 import { ipcRead, ipcWrite, migrateIpcDir } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
 import { watchBinary } from './selfupdate.js'
-import { latestRelease, isNewer, CHECK_EVERY_MS } from './update.js'
+import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
 import { VERSION } from './version.js'
 import crypto from 'node:crypto'
 
@@ -1025,11 +1025,37 @@ export async function runDaemon () {
      */
     let quienAprueba = []
     try { quienAprueba = (await mgr.current()?.approvers?.()) || [] } catch (_) {}
-    const comoLoDice = quienAprueba.length
-      ? `waiting for one of ${quienAprueba.length} approver(s) to say yes`
-      : 'no approver in the record, so this vault may update itself'
-    console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · ${comoLoDice} · dotrino-vault update`)
+
+    // INSTALADA COMO PAQUETE DEL SISTEMA (.deb en /usr/bin): el binario es de root y este
+    // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
+    if (!isUserInstall()) {
+      console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · installed as a system package, so it cannot update itself: \`dotrino-vault update\` (needs sudo), or move to a user install with the tarball's install.sh`)
+      return
+    }
+    if (actualizando) return
+    actualizando = true
+    try {
+      // PIDE PERMISO SOLO SI HAY A QUIÉN PEDÍRSELO (dueño, 2026-09-20); sin aprobadores
+      // no se necesita aprobación (dueño, 2026-09-24).
+      if (quienAprueba.length) {
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking one of ${quienAprueba.length} approver(s)`)
+        const si = await mgr.current().askUpdateApproval({ version: r.version })
+        if (!si) { console.log(`[vault] update to ${r.version}: not approved (denied or expired) · it will ask again`); return }
+      } else {
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · no approver in the record: updating on its own`)
+      }
+      const res = await installUserRelease(r, { log: (m) => console.log(m) })
+      if (!res.ok) {
+        // Lo que NO cuadra no se instala, y se dice por qué: el archivo queda a mano.
+        console.log(`[vault] update to ${r.version} NOT installed: ${res.reason}${res.file ? ` (file left at ${res.file})` : ''}`)
+        return
+      }
+      console.log(`[vault] update: ${r.version} installed · the service restarts on its own`)
+    } catch (e) {
+      console.log(`[vault] update to ${r.version} failed: ${e.message}`)
+    } finally { actualizando = false }
   }
+  let actualizando = false
   mirarRelease()
   const relojRelease = setInterval(mirarRelease, CHECK_EVERY_MS)
   relojRelease.unref?.()

@@ -19,6 +19,10 @@ set -eu
 
 # --- rutas XDG (con defaults) -------------------------------------------------
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+# Los binarios de verdad: la carpeta que la unidad deja escribir, para que la bóveda se
+# actualice sola sin sudo. En BIN_DIR quedan ENLACES, así un binario nuevo vale también
+# para el CLI sin tocar nada más.
+APP_DIR="$HOME/.local/share/dotrino/bin"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 # Literal (no $XDG_DATA_HOME): debe coincidir con la unit (%h/.local/share) y con
 # el default de paths.js (dataDir), o el CLI no halla al daemon. Para mover los
@@ -36,11 +40,19 @@ if ! command -v systemctl >/dev/null 2>&1; then
 fi
 
 # --- 1. binario + CLI ---------------------------------------------------------
-mkdir -p "$BIN_DIR"
-install -m 0755 "$SRC/dotrino-vaultd" "$BIN_DIR/dotrino-vaultd"
-install -m 0755 "$SRC/dotrino-vault"  "$BIN_DIR/dotrino-vault"
-echo "  binary    → $BIN_DIR/dotrino-vaultd"
-echo "  cli       → $BIN_DIR/dotrino-vault"
+mkdir -p "$BIN_DIR" "$APP_DIR"
+install -m 0755 "$SRC/dotrino-vaultd" "$APP_DIR/dotrino-vaultd"
+install -m 0755 "$SRC/dotrino-vault"  "$APP_DIR/dotrino-vault"
+# `ln -sfn` reemplaza también un archivo de verdad de una instalación anterior.
+ln -sfn "$APP_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vaultd"
+ln -sfn "$APP_DIR/dotrino-vault"  "$BIN_DIR/dotrino-vault"
+echo "  binary    → $APP_DIR/dotrino-vaultd"
+echo "  cli       → $APP_DIR/dotrino-vault (linked from $BIN_DIR)"
+echo "  updates   → on its own, no sudo (it asks your phone first if the account has approvers)"
+if [ -x /usr/bin/dotrino-vaultd ]; then
+  echo "  NOTE: the system package (.deb) is still installed. This user install takes over the"
+  echo "        service; you can remove the package with:  sudo apt remove dotrino-vault"
+fi
 
 # Aviso si ~/.local/bin no está en el PATH (no es fatal: el CLI es opcional).
 case ":$PATH:" in

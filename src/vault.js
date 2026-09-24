@@ -37,7 +37,7 @@ import { loadManifest, brokenOf } from '@dotrino/roadmap'
 // espera reventaba con un ReferenceError y la aprobación del mostrador de contraseñas no
 // llegaba a existir. Solo se veía por ese camino —el único que lo usa—, y no había prueba
 // que lo recorriera hasta que la hubo (dotrino-test, smoke:demonio, 2026-08-30).
-import { createApprovals, createGrants, lastApproverGone, PENDING_TTL_MS, GRANT_TTL_MS } from './approvals.js'
+import { createApprovals, createGrants, lastApproverGone, PENDING_TTL_MS, GRANT_TTL_MS, UPDATE_TTL_MS } from './approvals.js'
 import { readProcContext, sanitizeContext, commandFingerprint, commandLine } from '../lib/src/proc.js'
 import { makeContentKey, encryptWithCek, wrapForMember } from '@dotrino/identity/content'
 import { makeSealer } from './sealer.js'
@@ -167,11 +167,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * variables (la escritura se aplica al aprobar). Si nadie contesta, vence solo con un no:
    * nada se queda colgado para siempre.
    */
-  async function awaitApproval ({ device, ns, kind, what, op = null, ctx = null, onAnswer }) {
+  async function awaitApproval ({ device, ns, kind, what, op = null, ctx = null, onAnswer, ttlMs = PENDING_TTL_MS }) {
     const deviceId = await deviceIdOf(device).catch(() => null)
     const record = await refreshActa()
     const label = (record?.members || []).find((m) => m.pub === device)?.label || ''
-    const pend = approvals.request({ ns, device, deviceId, label, ek: '', ctx, kind })
+    const pend = approvals.request({ ns, device, deviceId, label, ek: '', ctx, kind, ttlMs })
     audit(`${what}.pending`, { device: deviceId, ns, id: pend.id, op })
     log(`[vault] ${what}: ${deviceId || '????-????'} is waiting for approval (${pend.id})`)
     waiters.set(pend.id, onAnswer)
@@ -180,7 +180,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         audit(`${what}.expired`, { device: deviceId, ns, id: pend.id })
         onAnswer(false)
       }
-    }, PENDING_TTL_MS)
+    }, ttlMs)
     t.unref?.()
     await notifyApprovers(pend, record)
     return pend
@@ -1621,7 +1621,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const resolver = waiters.get(id)
       waiters.delete(id)
       const ok = op === 'approve'
-      const what = pend.kind === 'write' ? 'vars' : 'passwords'
+      const what = pend.kind === 'write' ? 'vars' : pend.kind === 'update' ? 'update' : 'passwords'
       audit(ok ? `${what}.approved` : `${what}.denied`, { device: pend.deviceId, ns: pend.ns, id, by })
       log(`[vault] ${what}: request ${pend.id} of ${pend.deviceId} ${ok ? 'approved' : 'DENIED'} by ${by}`)
       // Lo aprobado SE HACE AQUÍ (una escritura se aplica ahora), y si falla quien aprobó
@@ -3655,6 +3655,21 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * aprobadores que se quedaría sin poder actualizarse nunca, esperando un sí que nadie
      * puede dar. Mismo sitio del que ya sale el «rang N approver(s)» de los secretos.
      */
+    /**
+     * PEDIR PERMISO PARA ACTUALIZARSE a `version` (la instala el daemon si se aprueba). Es
+     * un pedido como los demás —sale en Pedidos del teléfono, `kind: 'update'`—, pero dura
+     * un día (`UPDATE_TTL_MS`): no hay nadie esperando delante de una terminal.
+     * @returns {Promise<boolean>} sí o no; vencido es no.
+     */
+    askUpdateApproval: async ({ version }) => {
+      const yo = identity.me?.publickey || null
+      return new Promise((resolve) => {
+        awaitApproval({
+          device: yo, ns: 'vault', kind: 'update', what: 'update',
+          ctx: { version, from: VERSION }, ttlMs: UPDATE_TTL_MS, onAnswer: resolve
+        }).catch((e) => { log(`[vault] update: could not ask for approval: ${e.message}`); resolve(false) })
+      })
+    },
     approvers: async () => {
       const record = await refreshActa()
       if (!record) return []

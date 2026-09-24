@@ -14,7 +14,10 @@ StartLimitBurst=10
 [Service]
 Type=simple
 # %h = home del usuario. El binario autosuficiente lleva Node embebido dentro.
-ExecStart=%h/.local/bin/dotrino-vaultd
+# Vive en ~/.local/share/dotrino/bin y no en ~/.local/bin: es la única carpeta del home que
+# esta unidad deja escribir (ReadWritePaths), y así la bóveda se actualiza sola sin sudo.
+# En ~/.local/bin quedan enlaces para el PATH.
+ExecStart=%h/.local/share/dotrino/bin/dotrino-vaultd
 # Datos en el dir XDG del ecosistema (override con DOTRINO_VAULT_DIR si hace falta).
 Environment=DOTRINO_VAULT_DIR=%h/.local/share/dotrino/vault
 # Reinicio resiliente: un certificador debe estar siempre disponible.

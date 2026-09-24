@@ -27,7 +27,8 @@ fi
 
 # --- 2. binarios --------------------------------------------------------------
 rm -f "$BIN_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vault"
-echo "  binaries  → removed from $BIN_DIR"
+rm -f "$HOME/.local/share/dotrino/bin/dotrino-vaultd" "$HOME/.local/share/dotrino/bin/dotrino-vault"
+echo "  binaries  → removed from $BIN_DIR and ~/.local/share/dotrino/bin"
 
 # --- 3. datos (solo con --purge) ---------------------------------------------
 if [ "$PURGE" -eq 1 ]; then

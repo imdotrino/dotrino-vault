@@ -229,6 +229,7 @@ const T = {
     apv_error: 'No se pudieron consultar los pedidos:',
     apv_asks: 'pide tus claves de',
     apv_writes: 'quiere guardar variables en',
+    apv_update: (v, de) => `La bóveda quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '. Se verifica antes de instalar.',
     apv_keys: 'Variables:',
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
@@ -433,6 +434,7 @@ const T = {
     apv_error: 'Could not check for requests:',
     apv_asks: 'asks for your keys of',
     apv_writes: 'wants to save variables in',
+    apv_update: (v, from) => `The vault wants to update to ${v}` + (from ? ` (now ${from})` : '') + '. It is verified before installing.',
     apv_keys: 'Variables:',
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
@@ -1987,14 +1989,17 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending apv" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
-            <b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code>
+            <template v-if="p.kind === 'update'">{{ t.apv_update(p.ctx?.version || '?', p.ctx?.from || '') }}</template>
+            <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
                decidir. Sin esto solo se sabía qué aparato pide qué cajón, que no distingue
                el arranque que acabas de lanzar de cualquier otra cosa de esa máquina. -->
           <!-- UNA ESCRITURA no ejecuta nada: lo que hay que ver para decidir es QUÉ variables
                quiere guardar. Los nombres llegan sellados, igual que el comando. -->
-          <div v-if="p.kind === 'write' && p.ctx" class="apvcmd" data-testid="apv-keys">
+          <!-- Un pedido de actualización no ejecuta nada: la versión ya va en la línea de arriba. -->
+          <template v-if="p.kind === 'update'"></template>
+          <div v-else-if="p.kind === 'write' && p.ctx" class="apvcmd" data-testid="apv-keys">
             <div class="apvline">{{ t.apv_keys }} <code class="cmd">{{ (p.ctx.keys || []).join(', ') }}</code></div>
           </div>
           <div v-else-if="p.ctx" class="apvcmd" data-testid="apv-cmd">
@@ -2018,7 +2023,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         </div>
         <!-- QUÉ PASA AL APROBAR. Aprobar dejó de ser «esta vez»: es este comando durante una
              hora que se renueva con cada uso. Decirlo aquí, antes de pulsar. -->
-        <p v-if="approvals.some((p) => p.kind !== 'write')" class="muted small">{{ t.apv_grant_hint }}</p>
+        <p v-if="approvals.some((p) => p.kind === 'read' || !p.kind)" class="muted small">{{ t.apv_grant_hint }}</p>
         <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
              preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
         <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">
