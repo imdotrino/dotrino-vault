@@ -252,7 +252,7 @@ const T = {
     // VARIABLES DE ENTORNO. Lenguaje llano (CONVENCIONES §9.1): no se dice «secreto de
     // servicio» ni «namespace», se dice qué es y quién lo puede ver.
     var_t: 'Variables de tus aplicaciones',
-    var_awaiting: 'Falta tu aprobación: la variable se guarda cuando la apruebes en el teléfono (tienes 5 minutos).',
+    var_awaiting: 'Falta tu aprobación: la variable se guarda cuando la apruebes desde un aparato que aprueba —el teléfono o un navegador— (tienes 5 minutos).',
     var_b: 'Son los datos de configuración que tus aplicaciones necesitan para funcionar (una clave, una dirección, un número). Los guarda tu bóveda. Un grupo lo usan todas las máquinas; las de un servicio están en su fila, arriba, y solo las ve él. Todas se guardan cifradas. Las públicas puedes verlas aquí; las privadas no enseñan su valor —no sale de la computadora de tu bóveda— pero le puedes dar uno nuevo igual. Marcarla «privada» también es pedir que te avise antes de entregarla.',
     var_shared: 'la usan todas las máquinas',
     pend_t: 'Hay variables sin entregar',
@@ -455,7 +455,7 @@ const T = {
     apv_error: 'could not ask this account:',
     apv_nocap: 'This device does not approve requests. Grant it from the vault, on your computer:',
     var_t: 'Your apps\u2019 variables',
-    var_awaiting: 'Your approval is needed: the variable is saved once you approve it on your phone (you have 5 minutes).',
+    var_awaiting: 'Your approval is needed: the variable is saved once you approve it from a device that approves —your phone or a browser— (you have 5 minutes).',
     var_b: 'These are the settings your apps need to run (a key, an address, a number). Your vault keeps them. A group is used by every machine; a service\u2019s own ones live in its row above and only it can see them. They are all stored encrypted. You can see the public ones here; a private one does not show its value \u2014it never leaves your vault\u2019s computer\u2014 but you can still give it a new one. Marking one private also asks to be told before it is handed over.',
     var_shared: 'used by every machine',
     pend_t: 'Some variables are not being delivered',

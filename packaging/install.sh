@@ -48,7 +48,7 @@ ln -sfn "$APP_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vaultd"
 ln -sfn "$APP_DIR/dotrino-vault"  "$BIN_DIR/dotrino-vault"
 echo "  binary    → $APP_DIR/dotrino-vaultd"
 echo "  cli       → $APP_DIR/dotrino-vault (linked from $BIN_DIR)"
-echo "  updates   → on its own, no sudo (it asks your phone first if the account has approvers)"
+echo "  updates   → on its own, no sudo (first it asks a device that approves — a phone or a browser — if the account has one)"
 if [ -x /usr/bin/dotrino-vaultd ]; then
   echo "  NOTE: the system package (.deb) is still installed. This user install takes over the"
   echo "        service; you can remove the package with:  sudo apt remove dotrino-vault"

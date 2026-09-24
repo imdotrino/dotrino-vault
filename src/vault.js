@@ -1137,7 +1137,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   async function denyChain (from, chk, p, what) {
     await notifyIfRevoked(p.data?.publickey, p.cert?.nonce || null, p.cert?.iss || null, chk.reason)
     if (what) audit('rejected', { what, reason: chk.reason })
-    return reply(from, { type: MSG.ERROR, error: 'unauthorized: ' + chk.reason })
+    // `code` + `reason` como campos: quien llama decide por ellos, no por la frase.
+    return reply(from, { type: MSG.ERROR, code: 'unauthorized', reason: chk.reason, error: 'unauthorized: ' + chk.reason })
   }
 
   /**

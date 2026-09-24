@@ -1723,7 +1723,8 @@ async function cmdLogins (rest) {
  * `dotrino-vault update` — TRAER LA VERSIÓN NUEVA, cuando lo escribe una persona.
  *
  * Con la INSTALACIÓN DE USUARIO (`~/.local/share/dotrino/bin`) el daemon ya se actualiza
- * solo: pide permiso al teléfono si hay aprobadores y, si no los hay, no hace falta
+ * solo: pide permiso a un aparato con `aprueba` (el teléfono, un navegador…) si lo hay y,
+ * si no hay ninguno, no hace falta
  * (dueño, 2026-09-24). Esto es lo mismo a mano, sin esperar al aviso del día. Con el
  * `.deb` del sistema el binario es de root y aquí solo se verifica y se dice el `sudo`.
  *
