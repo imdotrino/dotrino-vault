@@ -1025,12 +1025,24 @@ export async function runDaemon () {
    * Lo que arregla es lo que de verdad dolió el 2026-09-19: el replicador llevaba quince
    * días atrás y las bóvedas dos versiones, y NADA lo decía en ninguna pantalla.
    *
-   * Si no se puede mirar, no se dice nada y ya está: no saber si hay versión nueva no es un
-   * problema del usuario, y llenarle el log de fallos de red tampoco ayuda.
+   * SI NO SE PUEDE MIRAR, SE DICE — una vez por motivo, no en cada intento. Antes se callaba
+   * («no saber si hay versión nueva no es un problema del usuario»), y eso choca con §15:
+   * «no se pudo mirar» NUNCA es «estás al día». El 2026-09-24 una bóveda se quedó en la
+   * 0.130.0 con la 0.131.0 publicada y el log no decía nada: no había forma de saber si
+   * estaba al día o si no había podido preguntar.
    */
+  let ultimoFallo = null
   const mirarRelease = async () => {
-    const r = await latestRelease()
-    if (!r.ok) return
+    let r
+    try { r = await latestRelease() } catch (e) { r = { ok: false, reason: e?.message || String(e) } }
+    if (!r.ok) {
+      if (r.reason !== ultimoFallo) console.log(`[vault] could not check for a new version: ${r.reason} · trying again in an hour`)
+      ultimoFallo = r.reason
+      // Un fallo al arrancar (la red todavía no está) no puede costar un día entero.
+      setTimeout(mirarRelease, 60 * 60_000).unref?.()
+      return
+    }
+    ultimoFallo = null
     ultimaPublicada = { version: r.version, checkedAt: Date.now() }
     writeState()
     if (!isNewer(r.version, daemonVersion)) return
