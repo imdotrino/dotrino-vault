@@ -769,3 +769,24 @@ test('el histórico se muda con la variable, o quedaría inalcanzable', async ()
   assert.equal(s.history('ns:proxy', 'TURN_KEY').length, 0, 'ya no está bajo el nombre viejo')
   assert.equal(s.history('ns:proxy', 'TURN_SECRET').length, 1, 'sino bajo el nuevo: es la misma variable')
 })
+
+/**
+ * EL PERFIL QUE ENSEÑA LA BÓVEDA SALE DEL CAJÓN `@me` (dueño, 2026-09-24).
+ *
+ * `dotrino-vault me` y la TUI leían el almacén viejo (`profileGet`), al que el aparato ya no
+ * escribe: un perfil nuevo salía vacío aunque el aparato lo hubiera mandado. `profileView`
+ * es lo que leen ahora: lo público en claro, de lo privado solo el nombre.
+ */
+test('profileView: lo público con su valor, lo privado solo nombrado', async () => {
+  const dir = tmp()
+  const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
+  assert.deepEqual(s.profileView(), { public: {}, private: [], updatedAt: null }, 'un perfil vacío es vacío, no un error')
+  await s.profilePutPublic('nickname', 'Crifa')
+  await s.profilePutPublic('avatar', 'data:image/png;base64,AAAA')
+  await s.putSealed('ns:@me', 'telefono', { e: { iv: 'iv', ct: 'opaco' }, wraps: { A: 'W(A)', [RECOVERY]: 'W(rec)' } })
+  const v = s.profileView()
+  assert.deepEqual(v.public, { nickname: 'Crifa', avatar: 'data:image/png;base64,AAAA' })
+  assert.deepEqual(v.private, ['telefono'])
+  assert.ok(!JSON.stringify(v).includes('opaco'), 'de lo privado no sale ni el sobre')
+  assert.ok(v.updatedAt > 0)
+})

@@ -342,6 +342,26 @@ export async function runDaemon () {
   const meReqFile = path.join(dir, 'me-request.json')
   const meFile = path.join(dir, 'me.json')
 
+  /**
+   * EL PERFIL PARA `dotrino-vault me` Y LA TUI, desde el cajón `@me` (donde escribe el aparato,
+   * dato a dato). Leía el `profileGet` del almacén viejo, al que ya no escribe nadie: un perfil
+   * nuevo salía SIEMPRE vacío aunque el aparato lo hubiera mandado (dueño, 2026-09-24).
+   *
+   * `conPrivados`: con el perfil CERRADO no se dicen ni los nombres de los datos privados —el
+   * candado esconde nombres igual que con las variables—. Lo público sí: la bóveda ya se lo
+   * da a cualquiera por el proxio (`profilePublic`), así que no revela nada.
+   */
+  function perfilParaMostrar (vault, { conPrivados }) {
+    const v = vault.profileView()
+    const lista = (s) => { if (typeof s !== 'string') return undefined; try { const a = JSON.parse(s); return Array.isArray(a) ? a : undefined } catch (_) { return undefined } }
+    const { avatar, links, fields, ...rest } = v.public
+    if (!Object.keys(v.public).length && !(conPrivados && v.private.length)) return null
+    return {
+      ...rest, avatar: avatarInfo(avatar), links: lista(links), fields: lista(fields),
+      ...(conPrivados ? { privateKeys: v.private } : {}), updatedAt: v.updatedAt
+    }
+  }
+
   /** Resumen de la foto de perfil: qué es y cuánto pesa, nunca los bytes. */
   function avatarInfo (avatar) {
     if (typeof avatar !== 'string' || !avatar) return null
@@ -366,7 +386,8 @@ export async function runDaemon () {
     const v = mgr.get(id)
     if (!v?.rekeySecrets) return
     const r = await v.rekeySecrets(vieja, nueva)
-    if (r?.rekeyed) console.log('[vault] secrets master re-sealed (%d drawer(s))', r.drawers)
+    // Se re-sella UNA copia (la de recuperación, que abre el llavero), no cajón por cajón.
+    if (r?.rekeyed) console.log('[vault] secrets recovery copy re-sealed under the new key')
   }
 
   /**
@@ -808,7 +829,11 @@ export async function runDaemon () {
           ipcWrite(path.join(dir, 'acta.json'), { ...closed, members: [] })
         }
         rm(meReqFile)
-        if (meReq) ipcWrite(meFile, { ...closed, req: meReq.id || null, me: null })
+        if (meReq) {
+          let me = null
+          try { me = perfilParaMostrar(t.vault, { conPrivados: false }) } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
+          ipcWrite(meFile, { ...closed, req: meReq.id || null, me })
+        }
         return
       }
       if (dumpReq) {
@@ -852,9 +877,8 @@ export async function runDaemon () {
         rm(meReqFile)
         try {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
-          const { me } = tm.vault.threads.methods.profileGet()
-          const { avatar, ...rest } = me || {}
-          ipcWrite(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me: me ? { ...rest, avatar: avatarInfo(avatar) } : null })
+          const me = perfilParaMostrar(tm.vault, { conPrivados: true })
+          ipcWrite(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
     } catch (e) {

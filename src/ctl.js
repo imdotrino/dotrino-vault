@@ -520,7 +520,9 @@ async function cmdMe () {
   // El volcado es contenido del usuario: se lee y se BORRA, no se queda ahí suelto.
   try { fs.rmSync(meFile, { force: true }) } catch (_) {}
   if (!dump) { console.error('La bóveda no respondió. ¿Está corriendo?  dotrino-vault status'); process.exit(1) }
-  assertOpen(dump)
+  // Con el perfil CERRADO se enseña igual lo público (la bóveda ya se lo da a cualquiera);
+  // lo que no sale son ni los nombres de los datos privados. Se dice.
+  if (dump.locked && !dump.me) assertOpen(dump)
 
   const me = dump.me
   if (!me) {
@@ -530,6 +532,7 @@ async function cmdMe () {
   }
 
   const when = me.updatedAt ? new Date(me.updatedAt).toLocaleString() : '—'
+  if (dump.locked) console.log('\n(perfil bloqueado: solo lo público; ábrelo con  dotrino-vault unlock  para ver qué datos privados hay)')
   console.log('\n%sPerfil%s · actualizado %s\n', B, Z, when)
   console.log('  nombre      : %s', me.nickname || '(sin nombre)')
   console.log('  foto        : %s', me.avatar
@@ -545,6 +548,10 @@ async function cmdMe () {
     for (const [k, label] of filled) {
       console.log('  %s: %s%s', label.padEnd(12), me[k], me[k + 'Visible'] === false ? '   (oculto)' : '')
     }
+  }
+  // Lo PRIVADO viaja sellado y la bóveda no lo abre para enseñarlo: se dice qué hay.
+  if (Array.isArray(me.privateKeys) && me.privateKeys.length) {
+    console.log('\n  privados   : %s  (sellados: se ven en tus aparatos, no aquí)', me.privateKeys.join(', '))
   }
   for (const [title, list] of [['Enlaces', me.links], ['Otros datos', me.fields]]) {
     if (!Array.isArray(list) || !list.length) continue

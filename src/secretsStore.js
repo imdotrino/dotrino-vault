@@ -909,6 +909,24 @@ export function openSecretsStore (dir, { sealer = null, recipients = null, signe
      * Va firmado igual que lo demás: un dato público sin firma es un dato que cualquiera
      * puede inventar en tu nombre, que es peor que no tenerlo.
      */
+    profileView () {
+      // EL PERFIL TAL COMO LO TIENE LA BÓVEDA, para enseñárselo al dueño (`dotrino-vault me`,
+      // la TUI). Sale del cajón `@me`, que es donde escribe el aparato dato a dato. Lo
+      // público va en claro; de lo privado solo el NOMBRE del dato: viaja sellado y la
+      // bóveda no lo abre para enseñarlo (§8.1), igual que una variable privada.
+      const vars = data.ns[PROFILE_NS]?.vars || {}
+      const pub = {}
+      const priv = []
+      let at = 0
+      for (const [key, e] of Object.entries(vars)) {
+        if (!e) continue
+        at = Math.max(at, e.at || 0)
+        if (e.cls === 'public' && typeof e.pubv === 'string') pub[key] = e.pubv
+        else priv.push(key)
+      }
+      return { public: pub, private: priv.sort(), updatedAt: at || null }
+    },
+
     profilePublic () {
       const bag = data.ns[PROFILE_NS]
       if (!bag?.vars) return {}

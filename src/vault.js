@@ -3718,6 +3718,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return { ok: true, pub: found.pub, deviceId: found.deviceId }
     },
     listApprovals: () => approvals.list(),
+    // El perfil desde el cajón `@me` (lo que empujan los aparatos): ver `profileView`.
+    profileView: () => secrets.profileView(),
     // LAS CONCESIONES VIVAS, para verlas y para cortarlas. Se enseñan en la máquina del
     // dueño (TUI/CLI), donde el contexto ya es suyo y no hay nada que sellar.
     listGrants: () => grants.list(),

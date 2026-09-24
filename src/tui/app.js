@@ -620,6 +620,11 @@ function meRows (st, t) {
   if (filled.length) rows.push({ text: '', sel: false })
   for (const [k, label] of filled) field(label, me[k], me[k + 'Visible'] === false)
 
+  // Lo PRIVADO viaja sellado y la bóveda no lo abre: se dice qué hay, no qué dice.
+  if (Array.isArray(me.privateKeys) && me.privateKeys.length) {
+    rows.push({ text: '', sel: false })
+    field(i.privateData, me.privateKeys.join(', ') + t.muted(i.privateDataHint))
+  }
   for (const [title, list] of [[i.links, me.links], [i.otherData, me.fields]]) {
     if (!Array.isArray(list) || !list.length) continue
     rows.push({ text: '', sel: false })

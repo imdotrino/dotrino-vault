@@ -500,7 +500,8 @@ export async function getMe (profile) {
   const d = await waitFor(F.me, { req: id, since })
   rm(F.me)
   if (!d) throw coded('the daemon did not reply', 'NO_REPLY')
-  assertOpen(d)
+  // Con el perfil cerrado llega igual lo público (ver `perfilParaMostrar` en daemon.js).
+  if (d.locked && !d.me) assertOpen(d)
   return d.me || null
 }
 
