@@ -996,7 +996,10 @@ const flowMode = ref('join')
  * por aquí: el puente `DotrinoNativeKeys` —que la app solo enseña a esta página— la crea,
  * firma el `enroll` y guarda la cuenta. Después, aprobar es nativo y no pasa por la web.
  */
-const nativeMode = computed(() => pairOnly.value && typeof window !== 'undefined' && !!window.DotrinoNativeKeys &&
+// SE DECIDE UNA VEZ, al montar. Leerlo de `location` en cada pintado lo cambiaba a mitad del
+// proceso: navegar a otra ruta de la consola quitaba el `?native=1` y el final del alta
+// nativa se pintaba como el de una cuenta web («ahora tienes dos cuentas»), que es falso.
+const nativeMode = ref(pairOnly.value && typeof window !== 'undefined' && !!window.DotrinoNativeKeys &&
   new URLSearchParams(location.search).get('native') === '1')
 /** El `deviceId` de la llave del teléfono, al terminar: es lo que hay que teclear en `caps`. */
 const nativeDone = ref('')
@@ -1038,8 +1041,10 @@ async function connectNative (qr) {
       label: t.value.native_label,
       onChallenge: ({ code }) => { pairCode.value = code },
     })
+    // El NOMBRE de la cuenta: con la invitación corta solo lo trae el `hello`, y lo devuelve
+    // `enrollDevice` (identity ≥ 0.102.1). Es lo que distingue una cuenta de otra en Pedidos.
     const saved = await nativeCall('save', {
-      id: kid, name: flowAccount.value || '', profileId: res.acta?.profileId || null,
+      id: kid, name: res.account || flowAccount.value || '', profileId: res.acta?.profileId || null,
       vault: res.master, proxy: res.proxy || qr.proxy || 'wss://proxy.dotrino.com', cert: res.cert,
     })
     kid = null
