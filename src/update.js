@@ -75,11 +75,28 @@ export function isUserInstall (execPath = process.execPath, home = os.homedir())
 export async function installUserRelease (release, { binDir = userBinDir(), log = () => {}, fetchVerifiedImpl = fetchVerified } = {}) {
   const pick = pickAsset(release.assets, [{ kind: 'tar', re: /-linux-x64\.tar\.gz$/ }])
   if (!pick.ok) return pick
-  const got = await fetchVerifiedImpl(pick.asset, { repo: REPO, product: 'dotrino-vault', version: VERSION })
+  // SE TRABAJA EN DISCO, al lado de los binarios, y no en /tmp: en un VPS /tmp es un tmpfs
+  // (memoria) de unos cientos de MB, y el tarball (41 MB) más el binario (125 MB) no cabían
+  // — tar falló con «Disk quota exceeded» en la bóveda de Dotrino (2026-09-24). Además es la
+  // única carpeta que la unidad deja escribir. La carpeta se borra al acabar, salga como salga.
+  const work = path.join(path.dirname(binDir), 'update')
+  fs.rmSync(work, { recursive: true, force: true })
+  fs.mkdirSync(work, { recursive: true, mode: 0o700 })
+  try {
+    return await instalarDesde(work, pick, release, { binDir, log, fetchVerifiedImpl })
+  } finally {
+    try { fs.rmSync(work, { recursive: true, force: true }) } catch (_) {}
+  }
+}
+
+async function instalarDesde (work, pick, release, { binDir, log, fetchVerifiedImpl }) {
+  const got = await fetchVerifiedImpl(pick.asset, { repo: REPO, product: 'dotrino-vault', version: VERSION, dir: work })
   if (!got.ok) return got
   log(`[vault] update: ${pick.asset.name} verified against its attestation`)
-  const work = path.dirname(got.file)
-  execFileSync('tar', ['xzf', got.file, '-C', work])
+  try { execFileSync('tar', ['xzf', got.file, '-C', work], { stdio: ['ignore', 'ignore', 'pipe'] }) } catch (e) {
+    // El motivo de tar es lo que sirve («Disk quota exceeded», …): se dice, no solo «falló».
+    return { ok: false, code: 'UNPACK_FAILED', reason: `could not unpack the release: ${String(e.stderr || e.message).trim().split('\n').slice(-2).join(' · ')}` }
+  }
   const src = fs.readdirSync(work).map((d) => path.join(work, d)).find((d) => fs.existsSync(path.join(d, 'dotrino-vaultd')))
   if (!src) return { ok: false, code: 'BAD_TARBALL', reason: 'the tarball has no dotrino-vaultd inside' }
   fs.mkdirSync(binDir, { recursive: true })
@@ -90,6 +107,5 @@ export async function installUserRelease (release, { binDir = userBinDir(), log 
     fs.chmodSync(tmp, 0o755)
     fs.renameSync(tmp, path.join(binDir, name))
   }
-  try { fs.rmSync(work, { recursive: true, force: true }) } catch (_) {}
   return { ok: true, version: release.version }
 }

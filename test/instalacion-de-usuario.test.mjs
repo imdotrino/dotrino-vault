@@ -14,6 +14,9 @@ import { execFileSync } from 'node:child_process'
 import { isUserInstall, userBinDir, installUserRelease } from '../src/update.js'
 
 const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), n))
+/** Un «~/.local/share/dotrino» propio: la carpeta de trabajo (`update/`) va al lado de `bin/`. */
+const binDirNuevo = () => { const d = path.join(tmp('home-'), 'bin'); fs.mkdirSync(d); return d }
+const quedaTrabajo = (binDir) => fs.existsSync(path.join(path.dirname(binDir), 'update'))
 
 test('solo es instalación de usuario si el binario corre desde ~/.local/share/dotrino/bin', () => {
   const home = '/home/x'
@@ -41,7 +44,7 @@ const release = (v) => ({ version: v, assets: [
 ] })
 
 test('verificado: reemplaza los dos binarios, con el tarball y no el .deb', async () => {
-  const binDir = tmp('bin-')
+  const binDir = binDirNuevo()
   fs.writeFileSync(path.join(binDir, 'dotrino-vaultd'), 'viejo daemon')
   let pedido = null
   const res = await installUserRelease(release('9.9.9'), {
@@ -54,10 +57,11 @@ test('verificado: reemplaza los dos binarios, con el tarball y no el .deb', asyn
   assert.equal(fs.readFileSync(path.join(binDir, 'dotrino-vault'), 'utf8'), 'nuevo cli')
   assert.equal(fs.statSync(path.join(binDir, 'dotrino-vaultd')).mode & 0o777, 0o755)
   assert.deepEqual(fs.readdirSync(binDir).filter((f) => f.endsWith('.new')), [], 'no quedan temporales')
+  assert.equal(quedaTrabajo(binDir), false, 'la carpeta de trabajo se borra al acabar')
 })
 
 test('lo que no verifica NO toca nada, y se dice por qué', async () => {
-  const binDir = tmp('bin-')
+  const binDir = binDirNuevo()
   fs.writeFileSync(path.join(binDir, 'dotrino-vaultd'), 'viejo daemon')
   const res = await installUserRelease(release('9.9.9'), {
     binDir,
@@ -66,11 +70,35 @@ test('lo que no verifica NO toca nada, y se dice por qué', async () => {
   assert.equal(res.ok, false)
   assert.equal(res.code, 'NO_ATTESTATION')
   assert.equal(fs.readFileSync(path.join(binDir, 'dotrino-vaultd'), 'utf8'), 'viejo daemon')
+  assert.equal(quedaTrabajo(binDir), false, 'y también cuando falla')
+})
+
+test('se baja y descomprime en DISCO, junto a los binarios, no en /tmp', async () => {
+  const binDir = binDirNuevo()
+  let dirPedido = null
+  await installUserRelease(release('9.9.9'), {
+    binDir,
+    fetchVerifiedImpl: async (asset, opts) => { dirPedido = opts.dir; return { ok: true, file: tarball('9.9.9', 'nuevo') } }
+  })
+  assert.equal(dirPedido, path.join(path.dirname(binDir), 'update'),
+    'en un VPS /tmp es memoria (tmpfs) y el binario no cabía: «Disk quota exceeded»')
+})
+
+test('un tarball que no se puede descomprimir se dice con el motivo de tar, y no toca nada', async () => {
+  const binDir = binDirNuevo()
+  fs.writeFileSync(path.join(binDir, 'dotrino-vaultd'), 'viejo daemon')
+  const roto = path.join(tmp('dl-'), 'roto.tar.gz'); fs.writeFileSync(roto, 'esto no es un tar')
+  const res = await installUserRelease(release('9.9.9'), { binDir, fetchVerifiedImpl: async () => ({ ok: true, file: roto }) })
+  assert.equal(res.ok, false)
+  assert.equal(res.code, 'UNPACK_FAILED')
+  assert.match(res.reason, /could not unpack/)
+  assert.equal(fs.readFileSync(path.join(binDir, 'dotrino-vaultd'), 'utf8'), 'viejo daemon')
+  assert.equal(quedaTrabajo(binDir), false)
 })
 
 test('un release sin tarball se dice, no se inventa', async () => {
   const res = await installUserRelease({ version: '9.9.9', assets: [{ name: 'dotrino-vault_9.9.9_amd64.deb', url: 'u' }] }, {
-    binDir: tmp('bin-'), fetchVerifiedImpl: async () => { throw new Error('no debería bajar nada') }
+    binDir: binDirNuevo(), fetchVerifiedImpl: async () => { throw new Error('no debería bajar nada') }
   })
   assert.equal(res.ok, false)
 })
