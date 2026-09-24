@@ -1754,7 +1754,7 @@ async function cmdUpdate (args = []) {
   console.log('listo')
 
   process.stdout.write('Comprobando la firma… ')
-  const v = verifyArtifact(file)
+  const v = await verifyArtifact(file)
   if (!v.ok) {
     console.log('')
     console.error('%sNO se instala nada.%s %s', R, Z, v.reason)
