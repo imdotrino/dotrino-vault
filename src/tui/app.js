@@ -307,6 +307,13 @@ function deviceRows (st, t) {
   if (!devices.length) {
     rows.push({ text: t.muted(i.noDevices), sel: false })
   }
+  // PERMISOS SIN GUARDAR en uno o varios aparatos: se dice ARRIBA y se marca cada uno con
+  // `*`, porque G los firma todos juntos y hay que ver qué entra antes de pulsarlo.
+  const borrador = draftChanges(st)
+  const conCambios = new Set(borrador.map((c) => c.pub))
+  if (borrador.length) {
+    rows.unshift({ text: t.bold(' ' + i.devicesDraft(borrador.length)), sel: false }, { text: '', sel: false })
+  }
   for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
     const vars = devVarsOf(st, d.sub).length
@@ -339,7 +346,8 @@ function deviceRows (st, t) {
       : d.isMaster
         ? t.muted(i.thisVault)
         : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp))
-    rows.push({ text: ` ${t.bold(d.deviceId)}  ${label}${desde}  ${status}${extra}`, sel: true, meta: d })
+    const marca = conCambios.has(d.sub) ? t.bold('*') : ' '
+    rows.push({ text: `${marca}${t.bold(d.deviceId)}  ${label}${desde}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -462,6 +470,99 @@ const CAPS_ORDER = [...ORDEN.filter((c) => DEVICE_CAPS.includes(c)),
  */
 const capsForMember = (member) => (member?.cn ? ['secrets', ...CAPS_ORDER] : CAPS_ORDER)
 
+/** Con lo que entra un aparato si no eliges otra cosa: lo mismo que `pair` sin `--scope`. */
+const PAIR_DEFAULT_CAPS = ['sign', 'read', 'store']
+
+/**
+ * La lista de casillas de permisos, la MISMA para editar un aparato y para elegir con qué
+ * entra uno nuevo: una pantalla que dice lo mismo de dos maneras acaba diciendo dos cosas.
+ * `real` es contra qué se marca el `*` (lo que hay en el acta); al emparejar no hay acta
+ * todavía y se pasa `has`, así que no sale ninguna marca.
+ */
+function capChecklist (i, t, { cn = null, has, real = has }) {
+  const rows = []
+  let tocados = 0
+  for (const cap of capsForMember({ cn })) {
+    const mark = has.has(cap) ? '[x]' : '[ ]'
+    // El nombre de `secrets` lleva el cajón dentro: «las claves de proxy» dice qué abre,
+    // «lee sus claves» te deja preguntándote cuáles.
+    const name = typeof i.capName[cap] === 'function' ? i.capName[cap](cn) : i.capName[cap]
+    // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
+    // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
+    const cambia = has.has(cap) !== real.has(cap)
+    if (cambia) tocados++
+    // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +administra`—
+    // así que no hay que repetirlo al lado. Lo que hace va debajo.
+    const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
+    rows.push({ text: line, sel: true, meta: { cap } })
+    const hint = typeof i.capHint[cap] === 'function' ? i.capHint[cap](cn) : i.capHint[cap]
+    rows.push({ text: t.muted('      ' + hint), sel: false })
+  }
+  return { rows, tocados }
+}
+
+/**
+ * EL BORRADOR ES DE TODA LA BÓVEDA, no de un aparato (dueño, 2026-09-26: «hay que
+ * extenderlo a guardar después de cambiar permisos de varios dispositivos, con esto me
+ * evito más actas inútiles»). `st.capsDrafts` guarda, por llave, la lista que QUEDARÍA;
+ * un aparato que vuelve a coincidir con el acta sale del borrador.
+ */
+const sameCaps = (a, b) => { const x = new Set(a || []); const y = new Set(b || []); return x.size === y.size && [...x].every((c) => y.has(c)) }
+const draftCapsOf = (st, member) => st.capsDrafts?.[member.pub] || member.caps || []
+function setCapsDraft (st, member, caps) {
+  const drafts = { ...(st.capsDrafts || {}) }
+  if (sameCaps(caps, member.caps)) delete drafts[member.pub]
+  else drafts[member.pub] = [...caps]
+  st.capsDrafts = drafts
+}
+/** Lo que se firmaría ahora: un cambio por aparato que sigue en el acta y difiere de ella. */
+function draftChanges (st) {
+  const out = []
+  for (const [pub, caps] of Object.entries(st.capsDrafts || {})) {
+    const member = (st.members || []).find((m) => m.pub === pub)
+    if (!member || sameCaps(caps, member.caps)) continue
+    const real = new Set(member.caps || []); const has = new Set(caps)
+    const n = [...new Set([...has, ...real])].filter((c) => has.has(c) !== real.has(c)).length
+    out.push({ pub, caps: [...caps], member, n })
+  }
+  return out
+}
+
+/**
+ * CON CAMBIOS SIN GUARDAR, IRSE SE PREGUNTA. Tirarlos callando es perder trabajo sin
+ * decirlo, y es justo lo que un borrador no debe hacer. Sin cambios, se va sin preguntar:
+ * confirmar por nada es ruido.
+ */
+function unlessDrafts (st, fn) {
+  const n = draftChanges(st).length
+  if (!n) return fn()
+  setConfirm(st, { text: L(st).capsDiscardAll(n), onYes: async () => { st.capsDrafts = {}; await fn() } })
+}
+
+/**
+ * GUARDAR: UNA sola acta con todo lo que hayas tocado, en uno o en varios aparatos.
+ * Administrar se PREGUNTA, y se pregunta AL GUARDAR: es cuando pasa a ser verdad.
+ */
+async function saveCapsDrafts (term, st) {
+  const i = L(st)
+  const changes = draftChanges(st)
+  if (!changes.length) { flash(st, i.capsNothing); return }
+  const guardar = async () => {
+    const r = await guard(term, st, i.applyingCaps, () => vc.setDevicesCaps(changes.map(({ pub, caps }) => ({ pub, caps })), activeId(st)))
+    if (!r.ok) return
+    applyDump(st, r.v)
+    st.capsDrafts = {}
+    await refreshMembers(term, st)
+    flash(st, i.capsSavedMany(changes.reduce((a, c) => a + c.n, 0), changes.length))
+  }
+  const nuevosAdmin = changes.filter((c) => c.caps.includes('admin') && !(c.member.caps || []).includes('admin'))
+  if (nuevosAdmin.length) {
+    setConfirm(st, { text: i.confirmAdmin(nuevosAdmin.map((c) => c.member.id || deviceIdOf(st, c.pub)).join(', ')), onYes: guardar })
+    return
+  }
+  await guardar()
+}
+
 function capsRows (st, t) {
   const i = L(st)
   const target = st.capsFor
@@ -471,35 +572,40 @@ function capsRows (st, t) {
 
   // EL BORRADOR manda sobre lo que hay en el acta: es lo que estás a punto de dejar.
   const real = new Set(member.caps || [])
-  const has = st.capsDraft?.pub === member.pub ? new Set(st.capsDraft.caps) : real
-
+  const has = new Set(draftCapsOf(st, member))
+  const { rows: lista, tocados } = capChecklist(i, t, { cn: member.cn, has, real })
   const rows = [
     { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
+    { text: '', sel: false },
+    ...lista,
     { text: '', sel: false }
   ]
-  let tocados = 0
-  for (const cap of capsForMember(member)) {
-    const mark = has.has(cap) ? '[x]' : '[ ]'
-    // El nombre de `secrets` lleva el cajón dentro: «las claves de proxy» dice qué abre,
-    // «lee sus claves» te deja preguntándote cuáles.
-    const name = typeof i.capName[cap] === 'function' ? i.capName[cap](member.cn) : i.capName[cap]
-    // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
-    // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
-    const cambia = has.has(cap) !== real.has(cap)
-    if (cambia) tocados++
-    // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +administra`—
-    // así que no hay que repetirlo al lado. Lo que hace va debajo.
-    const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
-    rows.push({ text: line, sel: true, meta: { cap } })
-    const hint = typeof i.capHint[cap] === 'function' ? i.capHint[cap](member.cn) : i.capHint[cap]
-    rows.push({ text: t.muted('      ' + hint), sel: false })
-  }
-  rows.push({ text: '', sel: false })
-  rows.push({
-    text: tocados ? ' ' + t.bold(i.capsPending(tocados)) : t.muted(' ' + i.capsApplyHint),
-    sel: false
-  })
+  // Lo que hay pendiente en OTROS aparatos también se dice aquí: G los guarda juntos.
+  const otros = draftChanges(st).filter((c) => c.pub !== member.pub)
+  if (tocados) rows.push({ text: ' ' + t.bold(i.capsPending(tocados)), sel: false })
+  if (otros.length) rows.push({ text: ' ' + t.bold(i.capsPendingOthers(otros.length)), sel: false })
+  if (!tocados && !otros.length) rows.push({ text: t.muted(' ' + i.capsApplyHint), sel: false })
   return rows
+}
+
+/**
+ * PERMISOS CON LOS QUE ENTRA el aparato que se va a emparejar (dueño, 2026-09-26: «al
+ * emparejar debería escoger los permisos, caso contrario estoy obligado a hacer dos
+ * actas»). Se eligen ANTES del QR y viajan a la bóveda, no al QR: el aparato entra al acta
+ * ya con ellos, en la misma que lo admite.
+ */
+function pairCapsRows (st, t) {
+  const i = L(st)
+  const pc = st.pairCaps
+  if (!pc) return [{ text: t.muted(i.loading), sel: false }]
+  const { rows: lista } = capChecklist(i, t, { cn: pc.service || null, has: new Set(pc.caps) })
+  return [
+    { text: ' ' + t.bold(pc.service ? i.pairCapsService(pc.service) : i.pairCapsFor(pc.label || '')), sel: false },
+    { text: '', sel: false },
+    ...lista,
+    { text: '', sel: false },
+    { text: t.muted(' ' + i.pairCapsHint), sel: false }
+  ]
 }
 
 /** Las variables por SCOPE: las que comparten todos los aparatos que sirven ese ns. */
@@ -756,7 +862,7 @@ async function refreshAll (term, st, api = vc) {
   // Cerrada: no se pide su contenido, y tampoco se enseña un error por mirarla desde
   // fuera. Lo que hubiera cargado se suelta, para no dejar en pantalla lo de antes.
   if (activeLocked(st)) {
-    st.devices = null; st.secrets = null; st.members = []; st.me = undefined
+    st.devices = null; st.secrets = null; st.members = []; st.me = undefined; st.capsDrafts = {}
     return
   }
   const r = await guard(term, st, L(st).loading, () => api.snapshot(activeId(st)))
@@ -1085,10 +1191,10 @@ async function onKeyDevices (term, st, key) {
     })
   } else if (ch === 'c' && cur?.sub) {
     st.capsFor = { pub: cur.sub, deviceId: cur.deviceId }
-    // Borrador limpio al entrar: arrastrar el de otro aparato sería firmar lo que no viste.
-    st.capsDraft = null
     st.sel.caps = 0
-    await refreshMembers(term, st)
+    // Con cambios a medias NO se recarga el acta: el borrador se compara contra ella y
+    // traer otra por debajo cambiaría qué marca el `*` sin que lo vieras.
+    if (!draftChanges(st).length) await refreshMembers(term, st)
     st.screen = 'caps'
   } else if (ch === 'e' && cur?.sub) {
     // Variables de ESTE aparato. Solo un servicio las lee (es el único que pide su
@@ -1099,8 +1205,11 @@ async function onKeyDevices (term, st, key) {
     st.sel.devvars = 0
     await refreshSecrets(term, st)
     st.screen = 'devvars'
+  } else if (ch === 'g') {
+    // Guarda los permisos que dejaste a medias en uno o varios aparatos, en UNA acta.
+    await saveCapsDrafts(term, st)
   } else if (key.name === 'f5') {
-    await refreshDevices(term, st)
+    unlessDrafts(st, () => refreshDevices(term, st))
   }
   return true
 }
@@ -1235,13 +1344,12 @@ function beginPairingNamed (term, st, profile, service = null, after = null) {
     hint: i.nameDeviceHint,
     onSubmit: async (nombre) => {
       st.input = null
-      const ok = await beginPairing(term, st, profile, service, (nombre || '').trim().slice(0, 60) || null)
-      // `after` es para quien tenga que limpiar si el emparejamiento no llega a abrirse
-      // (la cuenta que nació para él). Va aquí porque con el nombre de por medio ya no se
-      // puede mirar el valor de retorno desde fuera.
-      if (after) await after(ok)
+      // Después del nombre, LOS PERMISOS: el aparato entra al acta ya con ellos. `after` es
+      // para quien tenga que limpiar si el emparejamiento no llega a abrirse (la cuenta
+      // que nació para él); lo llama la pantalla de permisos, al generar o al cancelar.
+      choosePairCaps(st, { profile, service, label: (nombre || '').trim().slice(0, 60) || null, after })
     },
-    onCancel: () => { st.input = null }
+    onCancel: async () => { st.input = null; if (after) await after(false) }
   })
   return true
 }
@@ -1250,8 +1358,8 @@ function beginPairingNamed (term, st, profile, service = null, after = null) {
  * Abre el emparejamiento contra `profile` y salta a la pantalla del QR. Con `service`,
  * el QR es el de un SERVICIO de ese namespace (cert limitado a sus variables).
  */
-async function beginPairing (term, st, profile, service = null, label = null) {
-  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile, ...(service ? { service } : {}), ...(label ? { label } : {}) }))
+async function beginPairing (term, st, profile, service = null, label = null, caps = null) {
+  const r = await guard(term, st, L(st).startingPairing, () => vc.startPairing({ profile, ...(service ? { service } : {}), ...(label ? { label } : {}), ...(caps ? { caps } : {}) }))
   // `service` se pega al estado porque el daemon no lo devuelve: la pantalla del QR
   // tiene que poder decir qué se está entregando, que no es lo mismo un aparato tuyo
   // que una máquina que solo va a leer la configuración del proxy.
@@ -1260,81 +1368,96 @@ async function beginPairing (term, st, profile, service = null, label = null) {
 }
 
 /**
- * UN BORRADOR QUE SE GUARDA O SE DESCARTA (dueño, 2026-09-01).
+ * UN BORRADOR QUE SE GUARDA O SE DESCARTA (dueño, 2026-09-01), y que abarca VARIOS
+ * APARATOS (dueño, 2026-09-26).
  *
  * Antes cada Enter sellaba un acta. Cambiar cuatro permisos eran cuatro actas, cuatro
  * avisos a todos los aparatos y cuatro renovaciones de certificado — absurdo, y encima
  * dejaba la cuenta pasando por estados intermedios que nadie quiso (un aparato con
- * `admin` pero todavía sin `read`, por ejemplo).
+ * `admin` pero todavía sin `read`, por ejemplo). Y lo mismo pasaba entre aparatos: cada
+ * uno que tocabas era otra acta.
  *
- * Ahora Enter mueve un borrador LOCAL —nada firmado, nada avisado— y `G` lo aplica de
- * golpe. `applyChanges` ya tomaba una LISTA de cambios y producía UNA acta: el borrador es
- * esa lista, sin firmar, hasta que confirmas.
- *
- * Lo que se cambia va marcado con `*` y contado abajo: un borrador que no se distingue del
- * acta es peor que no tenerlo, porque firmas sin saber qué.
+ * Ahora Enter mueve un borrador LOCAL —nada firmado, nada avisado—, Esc vuelve a la lista
+ * SIN tirarlo (para seguir con otro aparato) y `G` lo aplica de golpe, todos los aparatos
+ * en UNA acta. Lo que se cambia va marcado con `*` y contado: un borrador que no se
+ * distingue del acta es peor que no tenerlo, porque firmas sin saber qué.
  */
 async function onKeyCaps (term, st, key) {
-  const i = L(st)
   const rows = capsRows(st, term.t)
   const sels = rows.filter((r) => r.sel).map((r) => r.meta)
   moveSel(st, key, 'caps', sels.length)
   const cur = sels[Math.min(st.sel.caps || 0, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
+  const volver = () => { st.screen = 'devices'; st.capsFor = null }
   const member = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
   if (!member) {
-    if (key.name === 'escape' || ch === 'b') { st.screen = 'devices'; st.capsFor = null }
+    if (key.name === 'escape' || ch === 'b') volver()
     return true
   }
-  const real = new Set(member.caps || [])
-  if (st.capsDraft?.pub !== member.pub) st.capsDraft = { pub: member.pub, caps: [...real] }
-  const draft = new Set(st.capsDraft.caps)
-  const sucio = [...new Set([...draft, ...real])].some((c) => draft.has(c) !== real.has(c))
-
-  const salir = () => { st.screen = 'devices'; st.capsFor = null; st.capsDraft = null }
-  if (key.name === 'escape' || ch === 'b') {
-    // SALIR CON CAMBIOS SIN GUARDAR SE PREGUNTA. Tirarlos callando es perder trabajo sin
-    // decirlo, y es justo lo que un borrador no debe hacer.
-    if (sucio) setConfirm(st, { text: i.capsDiscard, onYes: async () => { salir() } })
-    else salir()
-    return true
-  }
+  // Volver a la lista NO tira el borrador: es como se pasa al siguiente aparato.
+  if (key.name === 'escape' || ch === 'b') { volver(); return true }
   if (key.name === 'f5') {
-    // F5 PREGUNTA IGUAL QUE ESC. Refrescar trae el acta de nuevo y el borrador deja de
-    // tener con qué compararse, así que hay que tirarlo — pero tirarlo callando es perder
-    // trabajo sin decirlo, que es lo mismo que Esc ya no hace.
-    const refrescar = async () => { st.capsDraft = null; await refreshMembers(term, st) }
-    if (sucio) setConfirm(st, { text: i.capsDiscard, onYes: refrescar })
-    else await refrescar()
+    // F5 trae el acta de nuevo y el borrador deja de tener con qué compararse: se pregunta
+    // antes de tirarlo, igual que al salir de la bóveda.
+    unlessDrafts(st, async () => { st.capsDrafts = {}; await refreshMembers(term, st) })
     return true
   }
-
-  // GUARDAR: UNA sola acta con todo lo que hayas tocado.
-  if (ch === 'g') {
-    if (!sucio) { flash(st, i.capsNothing); return true }
-    const cuantos = [...new Set([...draft, ...real])].filter((c) => draft.has(c) !== real.has(c)).length
-    const guardar = async () => {
-      const r = await guard(term, st, i.applyingCaps, () => vc.setDeviceCaps(member.pub, [...draft], activeId(st)))
-      if (!r.ok) return
-      applyDump(st, r.v)
-      st.capsDraft = null
-      await refreshMembers(term, st)
-      flash(st, i.capsSaved(cuantos))
-    }
-    // Administrar se PREGUNTA, y se pregunta AL GUARDAR: es cuando pasa a ser verdad.
-    if (draft.has('admin') && !real.has('admin')) {
-      setConfirm(st, { text: i.confirmAdmin(st.capsFor.deviceId), onYes: guardar })
-      return true
-    }
-    await guardar()
-    return true
-  }
+  if (ch === 'g') { await saveCapsDrafts(term, st); return true }
 
   if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
   // Enter solo mueve el BORRADOR: no firma, no avisa, no se puede equivocar caro.
+  const draft = new Set(draftCapsOf(st, member))
   if (draft.has(cur.cap)) draft.delete(cur.cap); else draft.add(cur.cap)
-  st.capsDraft = { pub: member.pub, caps: [...draft] }
+  setCapsDraft(st, member, [...draft])
+  return true
+}
+
+/**
+ * Elegir los permisos del aparato que se va a emparejar. Enter marca, G genera el QR con
+ * ellos, Esc cancela (y quien abrió esto limpia lo suyo con `after(false)`).
+ */
+async function onKeyPairCaps (term, st, key) {
+  const i = L(st)
+  const pc = st.pairCaps
+  const rows = pairCapsRows(st, term.t)
+  const sels = rows.filter((r) => r.sel).map((r) => r.meta)
+  moveSel(st, key, 'paircaps', sels.length)
+  const cur = sels[Math.min(st.sel.paircaps || 0, sels.length - 1)]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (!pc) { st.screen = 'devices'; return true }
+
+  if (key.name === 'escape' || ch === 'b') {
+    st.pairCaps = null; st.screen = 'devices'
+    if (pc.after) await pc.after(false)
+    return true
+  }
+  if (ch === 'g') {
+    if (!pc.caps.length) { flash(st, i.pairCapsNone, 'warn'); return true }
+    const go = async () => {
+      st.pairCaps = null
+      const ok = await beginPairing(term, st, pc.profile, pc.service, pc.label, pc.caps)
+      if (!ok) st.screen = 'devices'
+      if (pc.after) await pc.after(ok)
+    }
+    // Administrar se pregunta también aquí: es el mismo permiso, dado de otra manera.
+    if (pc.caps.includes('admin')) { setConfirm(st, { text: i.confirmAdmin(i.pairCapsNewDevice), onYes: go }); return true }
+    await go()
+    return true
+  }
+  if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
+  const set = new Set(pc.caps)
+  if (set.has(cur.cap)) set.delete(cur.cap); else set.add(cur.cap)
+  st.pairCaps = { ...pc, caps: [...set] }
+  return true
+}
+
+/** Abre la pantalla de permisos del emparejamiento; el QR sale al pulsar G. */
+function choosePairCaps (st, { profile, service = null, label = null, after = null }) {
+  st.pairCaps = { profile, service, label, after, caps: service ? ['secrets'] : [...PAIR_DEFAULT_CAPS] }
+  st.sel.paircaps = 0
+  st.scroll.paircaps = { value: 0 }
+  st.screen = 'paircaps'
   return true
 }
 
@@ -1363,7 +1486,7 @@ async function onKeyPairMode (term, st, key) {
         st.input = null
         const ns = String(raw || '').trim().toLowerCase()
         if (!/^[a-z0-9-]{1,32}$/.test(ns)) { flash(st, i.serviceNsBad, 'danger'); return }
-        await beginPairing(term, st, activeId(st), ns)
+        choosePairCaps(st, { profile: activeId(st), service: ns })
       },
       onCancel: () => { st.input = null }
     })
@@ -1967,6 +2090,7 @@ const helpSegs = (i, screen, st = {}) => {
     logins: i.helpLogins,
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
+    paircaps: i.helpPairCaps,
     join: i.helpJoin,
     me: i.helpMe,
     caps: i.helpCaps,
@@ -1982,6 +2106,7 @@ const helpSegs = (i, screen, st = {}) => {
   const lg = (st.logins || [])[Math.min(st.sel?.logins || 0, Math.max(0, (st.logins || []).length - 1))]
   return segs({
     pending: !!st.pending,
+    drafts: draftChanges(st).length > 0,
     hasDevices: (st.devices?.issued || []).length > 0,
     isService: !!cur?.cn,
     hasSecrets: Object.keys(st.secrets?.ns || {}).length > 0,
@@ -1996,6 +2121,7 @@ const title = (i, screen) => ({
   profiles: i.titleProfiles,
   pairing: i.titlePairing,
   pairmode: i.titlePairMode,
+  paircaps: i.titlePairCaps,
   join: i.titleJoin,
   caps: i.titleCaps,
   devvars: i.titleDevVars
@@ -2114,6 +2240,7 @@ function render (term, st) {
   else if (st.screen === 'caps') body = renderList(capsRows(st, t), st.sel.caps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'devvars') body = renderList(devVarRows(st, t), st.sel.devvars || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
+  else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = scrollBody(pb, contentH, scrollRef)
@@ -2196,7 +2323,9 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, devvars: 0, logins: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0 },
+    // Permisos tocados y sin guardar, por llave del aparato (ver `setCapsDraft`).
+    capsDrafts: {},
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
     unlockedHere: new Set(),
     // Su contraseña, SOLO en memoria y SOLO mientras la TUI esté abierta: sirve para
@@ -2254,7 +2383,7 @@ export async function runTui () {
       // input/confirm se AWAITan: serializa las ops contra el daemon (ver onInputKey).
       // Ctrl-C dentro de un modal lo CANCELA (no sale); fuera de un modal, sale.
       if (st.input) { await onInputKey(st, key); continue }
-      if (st.confirm) { await onConfirmKey(st, key); continue }
+      if (st.confirm) { await onConfirmKey(st, key); if (st.quit) running = false; continue }
       if (key.name === 'ctrl-c') { running = false; continue }
 
       // TECLEAR ES USO. El candado se cierra a los 5 min de no usarse, y hasta ahora
@@ -2265,8 +2394,12 @@ export async function runTui () {
       seguirAqui(st)
 
       const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-      // 'q' global sale.
-      if (ch === 'q') { running = false; continue }
+      // 'q' global sale — preguntando antes si hay permisos sin guardar.
+      if (ch === 'q') {
+        if (draftChanges(st).length) unlessDrafts(st, () => { st.quit = true })
+        else running = false
+        continue
+      }
       // 'l' global: idioma es⇄en en cualquier pantalla (por eso el candado es 'c').
       if (ch === 'l') { toggleLang(st); continue }
       // ←→ cambia entre las pestañas de la bóveda entrada (Dispositivos/Scopes).
@@ -2282,7 +2415,9 @@ export async function runTui () {
       // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
       // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
       if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
-        st.screen = 'profiles'; continue
+        // El borrador es de ESTA bóveda: al salir de ella se guarda o se tira.
+        unlessDrafts(st, () => { st.capsDrafts = {}; st.screen = 'profiles' })
+        continue
       }
 
       if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
@@ -2293,6 +2428,7 @@ export async function runTui () {
       else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
       else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
+      else if (st.screen === 'paircaps') running = await onKeyPairCaps(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
       else if (st.screen === 'join') running = await onKeyJoin(term, st, key)
     }
@@ -2309,4 +2445,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

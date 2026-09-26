@@ -209,16 +209,6 @@ async function cmdPair (args = []) {
       console.error('uso: dotrino-vault pair --service <ns>   (ns en minúsculas, p.ej. proxy)'); process.exit(2)
     }
   }
-  // --scope <lista>: los PERMISOS del cert, y nada más. No hay tipos de aparato
-  // (2026-08-22, dueño): un aparato es un aparato y lo que puede hacer. Sin --scope,
-  // el juego de siempre (sign,read,store); `--service <ns>` es el atajo de
-  // `secrets:<ns>`, y los dos se combinan (`--service eco --scope sign` = un bot que
-  // firma como aparato del acta y lee solo su cajón). `admin` no se empareja: se
-  // concede desde el PC (`caps <ID> +administra`).
-  // (Aquí vivía `--approval`. Ya no hace falta: PEDIR APROBACIÓN ES EL DEFECTO, y lo
-  // contrario —`unattended`— no se empareja, por el mismo motivo que `admin`: un QR que
-  // circula no puede conceder «llévate mis claves privadas sin preguntar». Se concede
-  // después y a mano con `caps <ID> +desatendido`.)
   // --name <n>: CÓMO SE VA A LLAMAR el aparato que entre, decidido aquí y antes de nada.
   // Sin esto el nombre lo ponía el propio aparato, que por defecto usa el apodo del
   // PERFIL: acababas con varios dispositivos llamados igual que tú, y para distinguirlos
@@ -267,32 +257,28 @@ async function cmdPair (args = []) {
       console.error('No se creó ninguna cuenta.'); process.exit(1)
     }
   }
+  // --scope <lista>: LOS PERMISOS con los que entra, cualquiera del acta (dueño,
+  // 2026-09-26: al emparejar se eligen, para no tener que sellar otra acta después). Van
+  // a la bóveda, no al QR: los concede quien teclea el código aquí. `secrets:<ns>` es el
+  // cajón (lo mismo que `--service <ns>`).
   const scIdx = args.indexOf('--scope')
   let scope = null
+  let pairCaps = null
   if (scIdx >= 0) {
     const raw = args[scIdx + 1]
-    if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope sign,read,store,secrets:<ns>'); process.exit(2) }
-    const ALIAS = { firma: 'sign', lee: 'read', guarda: 'store', contrasenas: 'passwords', 'contraseñas': 'passwords' }
+    if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope firma,lee,guarda,administra,aprueba,contrasenas,secrets:<ns>'); process.exit(2) }
     scope = []
+    pairCaps = []
     for (const tok of raw.split(',').map((t) => t.trim()).filter(Boolean)) {
-      const t = ALIAS[tok] || tok
-      if (t === 'admin' || t === 'administra') { console.error('`admin` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +administra'); process.exit(2) }
-      if (t === 'approve' || t === 'aprueba') { console.error('`approve` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +aprueba'); process.exit(2) }
-      if (t === 'sealer' || t === 'sella') { console.error('`sella` no se empareja: concédelo desde el PC con  dotrino-vault caps <ID> +sella'); process.exit(2) }
-      if (t === 'sign' || t === 'read' || t === 'store') { scope.push('vault:' + t); continue }
-      // Un REPLICADOR nace acotado: solo esto, ni firma ni lee ni guarda. Se empareja
-      // —al contrario que `sella`— porque se despliega en una máquina sin teclado y el
-      // permiso no concede nada que haya que pensarse dos veces: reparte sobres cerrados.
-      if (t === 'replica' || t === 'replicador') { scope.push('vault:replica'); continue }
-      // El gestor de contraseñas SÍ se empareja con su permiso puesto: es lo único que
-      // va a hacer ese aparato, y pedirlo en dos pasos era el paso que nadie daba.
-      if (t === 'passwords') { scope.push('vault:passwords'); continue }
-      const m = /^secrets:([a-z0-9-]{1,32})$/.exec(t)
+      const m = /^secrets:([a-z0-9-]{1,32})$/.exec(tok)
       if (m) { scope.push('vault:secrets:' + m[1]); continue }
-      console.error('permiso desconocido: %s  (sign | read | store | contrasenas | secrets:<ns>)', tok); process.exit(2)
+      const cap = CAP_BY_WORD[tok.toLowerCase()]
+      if (!cap) { console.error('permiso desconocido: %s  (%s | secrets:<ns>)', tok, Object.keys(CAP_BY_WORD).join(' | ')); process.exit(2) }
+      pairCaps.push(cap)
     }
     if (service) scope.push('vault:secrets:' + service)
     scope = [...new Set(scope)]
+    pairCaps = [...new Set(pairCaps)]
   }
   // `--new-account [nombre]`: la otra respuesta a «¿a qué cuenta entra?». En vez de
   // meter el dispositivo en una cuenta que ya vive aquí, se ESTRENA una (vacía) y
@@ -340,7 +326,7 @@ async function cmdPair (args = []) {
 
   // La petición se escribe SIEMPRE (aunque no haya --service): lleva a qué perfil
   // se empareja el dispositivo.
-  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(admin ? { admin: true } : {}), ...(label ? { label } : {}) })
+  writeReq('pair-request.json', { ...(service ? { service } : {}), ...(scope?.length ? { scope } : {}), ...(pairCaps?.length ? { caps: pairCaps } : {}), ...(adopt ? { mode: 'adopt' } : {}), ...(admin ? { admin: true } : {}), ...(label ? { label } : {}) })
   sendSignal(s.pid, 'SIGUSR1')
 
   let pair = null
@@ -348,6 +334,7 @@ async function cmdPair (args = []) {
     await sleep(100)
     const p = ipcRead(pairFile, null)
     assertOpen(p) // el candado se contesta por el mismo archivo, para no dejar esperando
+    if (p?.error) { console.error('No se abrió el emparejamiento: %s', p.error); process.exit(1) }
     if (p?.expiresAt > Date.now()) { pair = p; break }
   }
   if (!pair) { console.error('No se recibió respuesta del daemon para el emparejamiento.'); process.exit(1) }
@@ -2001,8 +1988,9 @@ function help () {
                       El QR no lleva nada: el permiso se aplica al aprobar el código aquí
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
-  pair --scope <lista>  los PERMISOS del cert: sign,read,store,contrasenas,replica,secrets:<ns> (sin esto: sign,read,store;
-                      se combina con --service: --service eco --scope sign = bot que firma y lee su cajón)
+  pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (firma,lee,guarda,administra,
+                      aprueba,contrasenas,passkeys,sella,desatendido,replica) y secrets:<ns>. Sin esto: firma,lee,guarda.
+                      Entra al acta ya con ellos. Se combina con --service: --service eco --scope firma
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
   secret set <ns> CLAVE=valor CLAVE2=valor2 …

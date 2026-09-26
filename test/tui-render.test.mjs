@@ -774,7 +774,7 @@ test('Permisos: Enter mueve un BORRADOR y no firma nada', async () => {
   st.sel.caps = 0                                    // sign
   await V.onKeyCaps({ t }, st, enter)
 
-  assert.deepEqual([...st.capsDraft.caps].sort(), ['read', 'store'], 'el borrador se movió')
+  assert.deepEqual([...st.capsDrafts.PUB1].sort(), ['read', 'store'], 'el borrador se movió')
   assert.deepEqual(st.members[0].caps, ['sign', 'read'], 'y el acta NO: no se firmó nada')
 
   const text = V.capsRows(st, t).map((r) => r.text).join('\n')
@@ -782,7 +782,44 @@ test('Permisos: Enter mueve un BORRADOR y no firma nada', async () => {
   assert.match(text, /2 cambio\(s\) sin guardar/, 'y se dice cuántos, para no firmar a ciegas')
 })
 
-test('Permisos: salir con cambios sin guardar PREGUNTA antes de tirarlos', async () => {
+/**
+ * EL BORRADOR ABARCA VARIOS APARATOS (dueño, 2026-09-26). Esc vuelve a la lista SIN tirar
+ * lo marcado —así se pasa al siguiente aparato—, y G firma todos los aparatos en UNA acta.
+ */
+test('Permisos: Esc vuelve a la lista y el borrador se QUEDA; G guarda varios aparatos en una sola llamada', async () => {
+  const t = makeTheme()
+  const members = [
+    { pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign'] },
+    { pub: 'PUB2', id: 'EF56-7890', label: 'portátil', caps: ['sign'] }
+  ]
+  const st = baseState({ screen: 'caps', capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' }, members })
+  st.sel.caps = 1                                    // store en el primero
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  await V.onKeyCaps({ t }, st, { name: 'escape' })
+  assert.equal(st.screen, 'devices', 'vuelve a la lista')
+  assert.equal(st.confirm, null, 'sin preguntar: no se tira nada')
+  assert.deepEqual(st.capsDrafts.PUB1.sort(), ['sign', 'store'], 'y lo marcado sigue ahí')
+
+  // Segundo aparato.
+  st.screen = 'caps'; st.capsFor = { pub: 'PUB2', deviceId: 'EF56-7890' }
+  st.sel.caps = 2                                    // read en el segundo
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  const texto = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(texto, /1 aparato\(s\) más/, 'se dice que hay cambios en otro aparato')
+  assert.equal(V.draftChanges(st).length, 2, 'dos aparatos en el borrador')
+
+  // Volver a dejar un aparato como estaba lo saca del borrador.
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  assert.equal(V.draftChanges(st).length, 1)
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+
+  // La lista marca los dos y anuncia G.
+  st.screen = 'devices'
+  const lista = V.deviceRows(st, t).map((r) => r.text).join('\n')
+  assert.match(lista, /2 aparato\(s\) con permisos sin guardar/)
+})
+
+test('Permisos: salir de la bóveda con cambios sin guardar PREGUNTA antes de tirarlos', async () => {
   const t = makeTheme()
   const st = baseState({
     screen: 'caps',
@@ -792,19 +829,10 @@ test('Permisos: salir con cambios sin guardar PREGUNTA antes de tirarlos', async
   st.sel.caps = 1
   await V.onKeyCaps({ t }, st, { name: 'enter' })
   await V.onKeyCaps({ t }, st, { name: 'escape' })
-  assert.equal(st.screen, 'caps', 'no se sale de golpe')
+  // F5 en la lista con borrador: se pregunta.
+  await V.onKeyDevices({ t }, st, { name: 'f5' })
   assert.ok(st.confirm, 'se pregunta')
   assert.match(st.confirm.text, /Descartar/i)
-
-  // Y sin cambios se sale sin preguntar: confirmar por nada es ruido.
-  const limpio = baseState({
-    screen: 'caps',
-    capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
-    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'móvil', caps: ['sign'] }]
-  })
-  await V.onKeyCaps({ t }, limpio, { name: 'escape' })
-  assert.equal(limpio.screen, 'devices')
-  assert.equal(limpio.confirm, null)
 })
 
 /**
@@ -856,11 +884,11 @@ test('Permisos: F5 con cambios sin guardar PREGUNTA, igual que Esc', async () =>
   })
   st.sel.caps = 1
   await V.onKeyCaps({ t }, st, { name: 'enter' })
-  const antes = [...st.capsDraft.caps]
+  const antes = [...st.capsDrafts.PUB1]
   await V.onKeyCaps({ t }, st, { name: 'f5' })
   assert.ok(st.confirm, 'se pregunta antes de refrescar')
   assert.match(st.confirm.text, /Descartar/i)
-  assert.deepEqual([...st.capsDraft.caps], antes, 'y el borrador sigue ahí hasta que contestes')
+  assert.deepEqual([...st.capsDrafts.PUB1], antes, 'y el borrador sigue ahí hasta que contestes')
 })
 
 /**
@@ -1006,4 +1034,30 @@ test('j en Bóvedas abre el cuadro de la invitación', async () => {
   await V.onKeyProfiles(term, st, { name: 'char', ch: 'j' })
   assert.ok(st.input)
   assert.match(st.input.label, /Invitación de la otra bóveda/)
+})
+
+/**
+ * AL EMPAREJAR SE ELIGEN LOS PERMISOS (dueño, 2026-09-26: «caso contrario estoy obligado
+ * a hacer dos actas»). La pantalla sale con los de siempre marcados, ofrece TODOS —
+ * `administra` y `aprueba` incluidos— y Esc cancela avisando a quien la abrió.
+ */
+test('Emparejar: se eligen los permisos antes del código, y Esc cancela limpiando', async () => {
+  const t = makeTheme()
+  let limpio = null
+  const st = baseState({ screen: 'paircaps', pairCaps: { profile: 'p1', service: null, label: 'tablet', caps: ['sign', 'read', 'store'], after: async (ok) => { limpio = ok } } })
+  const filas = V.pairCapsRows(st, t)
+  const texto = filas.map((r) => r.text).join('\n')
+  assert.match(texto, /«tablet»/)
+  const caps = filas.filter((r) => r.sel).map((r) => r.meta.cap)
+  assert.ok(caps.includes('admin') && caps.includes('approve'), 'se ofrecen todos los permisos')
+  assert.ok(!caps.includes('secrets'), 'sin cajón para un aparato que no es servicio')
+
+  st.sel.paircaps = caps.indexOf('admin')
+  await V.onKeyPairCaps({ t }, st, { name: 'enter' })
+  assert.ok(st.pairCaps.caps.includes('admin'), 'Enter marca')
+
+  await V.onKeyPairCaps({ t }, st, { name: 'escape' })
+  assert.equal(st.screen, 'devices')
+  assert.equal(st.pairCaps, null)
+  assert.equal(limpio, false, 'quien la abrió se entera de que no hubo emparejamiento')
 })

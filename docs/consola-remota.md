@@ -148,6 +148,13 @@ reconozcas el `deviceId`, y el aviso a todos los dispositivos (§5).
   dispositivo entra normal y después, **en el PC**, `dotrino-vault caps <ID> +admin`. Así
   el QR que circula nunca puede otorgar administración, y conceder es un gesto deliberado
   del dueño que queda escrito en el acta.
+
+  > **Superado el 2026-09-26** (dueño: «al emparejar debería escoger los permisos, caso
+  > contrario estoy obligado a hacer dos actas»). Los permisos del acta —`admin` incluido—
+  > se eligen al emparejar (TUI, `pair --scope`, consola) y entran en la misma acta que
+  > admite al aparato. Lo que se conserva es el fondo: **el QR no lleva nada**; los
+  > permisos viven en la sesión de la bóveda y los concede quien teclea el código. El
+  > certificado sigue llevando solo lo que `ALLOWED` deja firmar: decide el acta.
 - La TUI y `dotrino-vault members` muestran `admin` con su etiqueta propia
   («Administra el perfil»), destacada: es la capacidad más fuerte que se delega.
 

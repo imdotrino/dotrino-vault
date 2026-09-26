@@ -72,6 +72,8 @@ const T = {
     debt_t: 'Este aparato todavía no puede abrir:',
     debt_b: 'se le entregan solas cuando abras la bóveda en su máquina, o en cuanto otro aparato del mismo servicio esté encendido.',
     caps_none: 'sin permisos',
+    caps_draft: (n) => `Permisos sin guardar en ${n} dispositivo(s). Se guardan todos juntos.`,
+    caps_save: 'Guardar', caps_discard: 'Descartar',
     info_label: 'Qué es esto',
     sync_err_t: 'No se pudo hablar con tu bóveda',
     // El reintento es AUTOMÁTICO: nadie tiene que pulsar nada para que una lista se ponga
@@ -185,7 +187,8 @@ const T = {
     self_add: 'Conectar otro aparato a esta bóveda',
     self_pair: 'Generar el código',
     self_caps: 'Qué podrá hacer',
-    self_caps_b: 'Lo mismo que elige el PC al conectar un aparato (`pair --scope`). Se puede cambiar después, aparato por aparato, en la lista de arriba.',
+    self_caps_b: 'Entra ya con estos. Se pueden cambiar después en la lista de arriba.',
+    self_caps_scope: 'Marca también firma, lee, guarda, contraseñas o réplica.',
     self_pending: 'Un dispositivo quiere conectarse',
     pass_t: 'Contraseñas que guarda esta bóveda',
     // ENTRAR CON USUARIO Y CONTRASEÑA. Pantalla administrativa (§5.1): lista, datos y
@@ -300,6 +303,8 @@ const T = {
     debt_t: 'This device cannot open yet:',
     debt_b: 'it gets them on its own when you open the vault on its machine, or as soon as another device of the same service is up.',
     caps_none: 'no permissions',
+    caps_draft: (n) => `Unsaved permissions on ${n} device(s). They are saved together.`,
+    caps_save: 'Save', caps_discard: 'Discard',
     info_label: 'What is this',
     sync_err_t: 'Could not reach your vault',
     sync_checking: 'checking with your vault…',
@@ -392,7 +397,8 @@ const T = {
     self_add: 'Connect another device to this vault',
     self_pair: 'Create the code',
     self_caps: 'What it will be able to do',
-    self_caps_b: 'The same choice the PC makes when connecting a device (`pair --scope`). It can be changed later, device by device, in the list above.',
+    self_caps_b: 'It joins with these. They can be changed later in the list above.',
+    self_caps_scope: 'Also tick sign, read, store, passwords or replica.',
     self_pending: 'A device wants to connect',
     pass_t: 'Passwords kept in this vault',
     lg_t: 'Sign in with a username and password',
@@ -863,10 +869,34 @@ async function run (key, fn) {
   finally { busy.value = ''; confirming.value = null }
 }
 
-const toggleCap = (m, cap) => run('caps-' + m.pub, () => {
-  const caps = m.caps.includes(cap) ? m.caps.filter((c) => c !== cap) : [...m.caps, cap]
-  return id.value.setCaps(m.pub, caps)
+/**
+ * UN BORRADOR DE PERMISOS PARA TODA LA LISTA (dueño, 2026-09-26). Antes cada clic sellaba un
+ * acta —y un aviso a todos los aparatos—; ahora los clics mueven el borrador, en uno o en
+ * varios aparatos, y «Guardar» los firma todos en UNA acta.
+ */
+const capsDraft = ref({})                     // { [pub]: caps[] } — solo lo que difiere del acta
+const sameCaps = (a, b) => { const x = new Set(a || []); const y = new Set(b || []); return x.size === y.size && [...x].every((c) => y.has(c)) }
+const capsOf = (m) => capsDraft.value[m.pub] || m.caps
+const capChanged = (m, c) => capsOf(m).includes(c) !== m.caps.includes(c)
+const toggleCap = (m, cap) => {
+  const cur = capsOf(m)
+  const caps = cur.includes(cap) ? cur.filter((c) => c !== cap) : [...cur, cap]
+  const next = { ...capsDraft.value }
+  if (sameCaps(caps, m.caps)) delete next[m.pub]; else next[m.pub] = caps
+  capsDraft.value = next
+}
+const draftList = computed(() => members.value
+  .filter((m) => capsDraft.value[m.pub] && !sameCaps(capsDraft.value[m.pub], m.caps))
+  .map((m) => ({ pub: m.pub, caps: capsDraft.value[m.pub], m })))
+const discardCaps = () => { capsDraft.value = {}; confirming.value = null }
+const saveCaps = () => run('caps-save', async () => {
+  const changes = draftList.value.map(({ pub, caps }) => ({ pub, caps }))
+  if (!changes.length) return
+  await id.value.setCapsMany(changes)
+  capsDraft.value = {}
 })
+/** Los permisos que se ofrecen a un miembro: todos los del acta, y el cajón si es un servicio. */
+const capsFor = (m) => (m.cn ? ['secrets', ...DEVICE_CAPS] : DEVICE_CAPS)
 /**
  * QUITAR UN DISPOSITIVO — una sola operación, se sea el master o se administre a distancia.
  *
@@ -1188,10 +1218,12 @@ async function refreshSelf () {
  * capacidad `passwords` no se podía conceder al conectar, y la pestaña solo atiende a
  * quien la tiene. Desde fuera se veía como «nadie respondió».
  *
- * `admin`, `approve` y `sealer` no están aquí a propósito: se conceden a mano después
- * (docs/consola-remota.md §2), y emparejar no es el momento de regalar el mando.
+ * Se ofrecen TODOS los permisos del acta (dueño, 2026-09-26: al emparejar se eligen, para
+ * no tener que sellar otra acta después). El aparato entra al acta ya con ellos; el
+ * certificado lleva solo los que se pueden firmar al emparejar (`PAIRABLE_SCOPES`).
  */
-const PAIRABLE_CAPS = ['sign', 'read', 'store', 'passwords']
+const PAIRABLE_CAPS = DEVICE_CAPS
+const PAIRABLE_SCOPES = new Set(['vault:sign', 'vault:read', 'vault:store', 'vault:passwords', 'vault:replica'])
 const selfCaps = ref(['sign', 'read', 'store'])
 const toggleSelfCap = (cap) => {
   selfCaps.value = selfCaps.value.includes(cap)
@@ -1201,7 +1233,9 @@ const toggleSelfCap = (cap) => {
 
 const selfPair = () => run('selfpair', async () => {
   // Los permisos del acta viajan como scopes del cert: `passwords` ⇒ `vault:passwords`.
-  const r = await id.value.selfVaultPairing({ scope: selfCaps.value.map((c) => capScope(c)) })
+  const scope = selfCaps.value.map((c) => capScope(c)).filter((x) => PAIRABLE_SCOPES.has(x))
+  if (!scope.length) throw new Error(t.value.self_caps_scope)
+  const r = await id.value.selfVaultPairing({ scope, caps: [...selfCaps.value] })
   // El QR lleva el ENLACE compacto, no el JSON: así el otro aparato lo escanea con
   // la cámara y se le abre esta misma consola, en vez de quedarse con un texto que
   // hay que pegar a mano. Y de paso cabe: el JSON daba un QR de 69 módulos.
@@ -2040,6 +2074,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
            Lo que se pueda hacer con cada fila sale de lo que puede ESTE aparato: el
            master lo puede todo; uno con «administra» puede conectar y quitar. -->
       <h2>{{ t.members }}</h2>
+      <!-- PERMISOS SIN GUARDAR: arriba de la lista y a la vista, con cuántos aparatos
+           cambian, porque «Guardar» los firma todos juntos en una sola acta. -->
+      <div v-if="draftList.length" class="capsbar" data-testid="caps-draft">
+        <span>{{ t.caps_draft(draftList.length) }}</span>
+        <button class="btn sm" data-testid="caps-save" :disabled="busy === 'caps-save'" @click="saveCaps">{{ t.caps_save }}</button>
+        <button class="btn ghost sm" data-testid="caps-discard" :disabled="busy === 'caps-save'" @click="discardCaps">{{ t.caps_discard }}</button>
+      </div>
       <ul class="members" data-testid="members">
         <!-- CERRADA. Va arriba del todo porque cambia lo que se puede hacer en el resto de
              la pantalla: sin esto, quitar un aparato fallaba con un error y nadie sabía
@@ -2092,12 +2133,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <template v-if="openMembers.has(m.pub)">
           <p v-if="m.noAccess" class="muted svc-note">{{ t.dev_nocert_b }}</p>
           <div class="caps">
-            <button v-for="c in (m.cn ? ['secrets','sign','approve'] : ['sign','store','read','admin','approve','passwords'])" :key="c"
-                    class="cap" :class="{ on: m.caps.includes(c) }"
-                    :disabled="!isMaster || busy === 'caps-' + m.pub"
+            <button v-for="c in capsFor(m)" :key="c"
+                    class="cap" :class="{ on: capsOf(m).includes(c), changed: capChanged(m, c) }"
+                    :disabled="!isMaster || busy === 'caps-save'"
                     :data-testid="'cap-' + c + '-' + m.id"
                     @click="toggleCap(m, c)">{{ t.caps[c] }}</button>
-            <span v-if="!m.caps.length" class="muted">{{ t.caps_none }}</span>
+            <span v-if="!capsOf(m).length" class="muted">{{ t.caps_none }}</span>
           </div>
           <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
           <!-- APARATO EN DEUDA: está en el acta pero no puede abrir lo suyo. Pasa siempre
@@ -2489,6 +2530,8 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }
 .cap.on { background: #14304a; color: #bfe0ff; border-color: #2f5f8f; }
+.cap.changed { border-style: dashed; border-color: #e0b04a; }
+.capsbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px; border: 1px dashed #e0b04a; border-radius: 10px; }
 .cap:disabled { cursor: default; opacity: .75; }
 .acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: #ffd98a; }

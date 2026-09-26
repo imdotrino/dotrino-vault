@@ -78,11 +78,21 @@ const es = {
   titleCaps: 'Permisos del dispositivo',
   capsFor: (id, name) => `Permisos de ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (este dispositivo ya no está en el perfil)',
-  capsApplyHint: 'Enter marca o desmarca · G guarda los cambios · Esc sale',
-  capsPending: (n) => `${n} cambio(s) sin guardar (*) · G para guardarlos todos de una vez · Esc para descartarlos`,
-  capsSaved: (n) => `${n} cambio(s) guardados de una vez`,
+  capsApplyHint: 'Enter marca o desmarca · G guarda · Esc vuelve a la lista sin perder lo marcado',
+  capsPending: (n) => `${n} cambio(s) sin guardar en este aparato (*) · G guarda todo en una sola acta`,
+  capsPendingOthers: (n) => `Y hay cambios en ${n} aparato(s) más: G los guarda juntos`,
+  capsSavedMany: (n, d) => `${n} cambio(s) en ${d} aparato(s), guardados en una sola acta`,
   capsNothing: 'No has cambiado nada',
-  capsDiscard: '¿Descartar los cambios sin guardar?',
+  capsDiscardAll: (n) => `¿Descartar los permisos sin guardar de ${n} aparato(s)?`,
+  devicesDraft: (n) => `${n} aparato(s) con permisos sin guardar (*) · G los guarda en una sola acta`,
+  // PERMISOS AL EMPAREJAR: se eligen antes del código y el aparato entra ya con ellos.
+  titlePairCaps: 'Qué podrá hacer',
+  pairCapsFor: (name) => `Permisos con los que entra ${name ? '«' + name + '»' : 'el aparato nuevo'}`,
+  pairCapsService: (ns) => `Permisos con los que entra el servicio «${ns}»`,
+  pairCapsHint: 'Enter marca o desmarca · G genera el código · Esc cancela. Entra ya con estos: no hace falta cambiarlos después.',
+  pairCapsNone: 'Marca al menos un permiso',
+  pairCapsNewDevice: 'el aparato nuevo',
+  helpPairCaps: ['↑↓', 'Enter marcar', 'G generar código', 'Esc cancelar', 'l English', 'q salir'],
   // EL NOMBRE DICE EL ACTO, NO LA CONSECUENCIA (dueño, 2026-09-02: «que digan exactamente
   // lo que hacen y no lo que implican»). «Sellar el acta» y «Administrar el perfil» eran
   // lo segundo: hay que saberse el modelo para traducirlos. Lo que hacen es admitir
@@ -361,8 +371,9 @@ const es = {
   // Anunciar teclas muertas confunde y además las quema para otros usos.
   // `e variables` solo en un SERVICIO: es el único que las lee, así que en un teléfono
   // era una tecla que solo sabía decir que no.
-  helpDevices: ({ pending, hasDevices, isService } = {}) => [
+  helpDevices: ({ pending, hasDevices, isService, drafts } = {}) => [
     '←→ pestaña', '↑↓', 'p emparejar',
+    ...(drafts ? ['g guardar permisos'] : []),
     ...(pending ? ['a aprobar', 'x rechazar'] : []),
     ...(hasDevices ? ['r renombrar', 'c permisos'] : []),
     ...(isService ? ['e variables'] : []),
@@ -486,11 +497,21 @@ const en = {
   titleCaps: 'Device permissions',
   capsFor: (id, name) => `Permissions for ${id}${name ? ' · ' + name : ''}`,
   capsNoMember: '  (this device is no longer in the record)',
-  capsApplyHint: 'Enter ticks or unticks · G saves · Esc leaves',
-  capsPending: (n) => `${n} unsaved change(s) (*) · G to save them in ONE record · Esc to discard`,
-  capsSaved: (n) => `${n} change(s) saved in one go`,
+  capsApplyHint: 'Enter ticks or unticks · G saves · Esc goes back to the list keeping your ticks',
+  capsPending: (n) => `${n} unsaved change(s) on this device (*) · G saves everything in ONE record`,
+  capsPendingOthers: (n) => `And ${n} more device(s) have changes: G saves them together`,
+  capsSavedMany: (n, d) => `${n} change(s) on ${d} device(s), saved in one record`,
   capsNothing: 'You have not changed anything',
-  capsDiscard: 'Discard the unsaved changes?',
+  capsDiscardAll: (n) => `Discard the unsaved permissions of ${n} device(s)?`,
+  devicesDraft: (n) => `${n} device(s) with unsaved permissions (*) · G saves them in one record`,
+  // PERMISSIONS WHEN PAIRING: chosen before the code; the device joins already with them.
+  titlePairCaps: 'What it will be able to do',
+  pairCapsFor: (name) => `Permissions ${name ? '“' + name + '”' : 'the new device'} joins with`,
+  pairCapsService: (ns) => `Permissions the “${ns}” service joins with`,
+  pairCapsHint: 'Enter ticks or unticks · G creates the code · Esc cancels. It joins with these: no need to change them afterwards.',
+  pairCapsNone: 'Tick at least one permission',
+  pairCapsNewDevice: 'the new device',
+  helpPairCaps: ['↑↓', 'Enter tick', 'G create code', 'Esc cancel', 'l Español', 'q quit'],
   // El título es el NOMBRE del permiso, el mismo que se teclea. Ver la nota en el bloque
   // español: describirlo dejaba una lista donde no se sabía qué permiso era cuál.
   capName: {
@@ -725,8 +746,9 @@ const en = {
   helpConfirm: 'y confirm · n/Esc cancel',
 
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'u unlock', 'k lock', 'l Español', 'q quit'],
-  helpDevices: ({ pending, hasDevices, isService } = {}) => [
+  helpDevices: ({ pending, hasDevices, isService, drafts } = {}) => [
     '←→ tab', '↑↓', 'p pair',
+    ...(drafts ? ['g save permissions'] : []),
     ...(pending ? ['a approve', 'x reject'] : []),
     ...(hasDevices ? ['r rename', 'c permissions'] : []),
     ...(isService ? ['e variables'] : []),

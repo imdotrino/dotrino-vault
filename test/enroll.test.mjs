@@ -296,6 +296,32 @@ test('la lista de scopes emparejables incluye lo que el CLI ofrece, y NADA de lo
     assert.ok(texto.includes(s), `${s} lo ofrece el CLI y el daemon tiene que aceptarlo`)
   }
   for (const s of ['vault:admin', 'vault:approve', 'vault:sealer']) {
-    assert.ok(!texto.includes(s), `${s} NO se empareja: se concede a mano con caps`)
+    assert.ok(!texto.includes(s), `${s} no va en el certificado: lo dice el acta (se elige con los permisos al emparejar)`)
   }
+})
+
+/**
+ * LOS PERMISOS ELEGIDOS AL EMPAREJAR ENTRAN EN LA MISMA ACTA (dueño, 2026-09-26: «caso
+ * contrario estoy obligado a hacer dos actas»). Viven en la sesión de la bóveda, no en el QR.
+ */
+test('permisos al emparejar: entran al acta en la admisión, y el QR no los lleva', async () => {
+  const admitidos = []
+  const { desk, identity } = await mount()
+  identity.admitMember = async (m) => { admitidos.push(m); return { ok: true } }
+  const { qr } = await desk.startPairing({ scope: ['vault:sign', 'vault:read'], caps: ['sign', 'read', 'admin', 'approve'], ttlMs: 60000, label: 'cel' })
+  assert.ok(!JSON.stringify(qr).includes('admin'), 'la invitación no concede nada')
+  const dev = await deviceEnroll(qr, { label: 'cel' })
+  await desk.handleEnroll('FROM', dev.payload)
+  const [pend] = desk.listPending()
+  await desk.approve(dev.code, { deviceId: pend.deviceId })
+
+  assert.equal(admitidos.length, 1)
+  assert.deepEqual([...admitidos[0].caps].sort(), ['admin', 'approve', 'read', 'sign'])
+})
+
+test('permisos al emparejar: uno que no existe se rechaza al abrir, no al aprobar', async () => {
+  const { desk } = await mount()
+  await assert.rejects(() => desk.startPairing({ caps: ['sign', 'volar'] }), (e) => e.code === 'bad-caps')
+  await assert.rejects(() => desk.startPairing({ caps: ['secrets'] }), (e) => e.code === 'bad-caps', 'secrets sin cajón no significa nada')
+  await assert.rejects(() => desk.startPairing({ caps: [] }), (e) => e.code === 'empty-scope')
 })

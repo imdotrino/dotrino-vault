@@ -22,6 +22,8 @@ import { dataDir } from './paths.js'
 // EL CANAL LOCAL VA CIFRADO: por aquí pasan la contraseña, los valores y las invitaciones.
 import { ipcRead, ipcWrite, migrateIpcDir } from './ipc.js'
 import { parseInvite } from '../lib/src/invite.js'
+import { scopeToCaps, scopeToCn } from '../lib/src/enroll.js'
+import { capScope } from '@dotrino/identity/acta'
 import { watchBinary } from './selfupdate.js'
 import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
 import { VERSION } from './version.js'
@@ -156,19 +158,6 @@ export async function runDaemon () {
 
   // --- SIGUSR1: iniciar emparejamiento ---
   const pairFile = path.join(dir, 'pair.json')
-  /**
-   * Lo pidió `pair --admin`: el aparato que entre por ESTA invitación podrá administrar.
-   *
-   * Sigue en pie la regla de que **ningún QR concede administración**: el QR no lleva
-   * nada. Lo que hay es una nota LOCAL de esta bóveda, y el permiso se aplica en el
-   * mismo gesto que ya era la puerta —aprobar con el código tecleado aquí—, exactamente
-   * igual que `--approval`. Es el mismo `caps <ID> +administra` que harías a mano un
-   * segundo después, sin tener que ir a buscar el ID.
-   *
-   * Existe por el contenedor: allí cada paso cuesta un `docker exec`, y el primer aparato
-   * de una bóveda recién desplegada es SIEMPRE la consola.
-   */
-  let pendingAdmin = false
   const pairReqFile = path.join(dir, 'pair-request.json')
   async function handlePairingRequest () {
     try {
@@ -217,13 +206,34 @@ export async function runDaemon () {
         ipcWrite(pairFile, { v: 2, at: Date.now(), error: 'scope not allowed: ' + asked.filter((x) => !ALLOWED(x)).join(',') })
         return console.error('[vault] pairing refused: scope not allowed (%s)', asked.join(','))
       }
-      const scope = asked?.length
+      const base = asked?.length
         ? [...new Set(asked)]
         : isService ? ['vault:secrets:' + pairReq.service] : ['vault:sign', 'vault:read', 'vault:store']
+      // LOS PERMISOS DEL ACTA se eligen al emparejar (dueño, 2026-09-26: «caso contrario
+      // estoy obligado a hacer dos actas»). Entran TODOS en el acta con la que el aparato
+      // entra —`admin` y `approve` incluidos: los concede quien teclea el código, igual
+      // que `caps` después, y el QR no lleva nada—, y el certificado lleva solo los que
+      // `ALLOWED` deja firmar. Decide el acta, no el papel (0.131.6).
+      //
+      // `pair --admin` es el mismo gesto: antes emparejaba y sellaba OTRA acta para sumar
+      // `admin`; ahora se suma aquí.
+      let caps = Array.isArray(pairReq?.caps) ? pairReq.caps.filter((x) => typeof x === 'string') : null
+      if (pairReq?.admin) caps = [...(caps || scopeToCaps(base)), 'admin']
+      let scope = base
+      if (caps) {
+        caps = [...new Set(caps)]
+        const cn = scopeToCn(base)
+        const fromCaps = caps.map((c) => capScope(c, cn)).filter((x) => x && ALLOWED(x))
+        // Sin `--scope` el papel sale de los permisos; con él, se suman.
+        scope = [...new Set([...(asked?.length || isService ? base : []), ...fromCaps])]
+        if (!scope.length) {
+          ipcWrite(pairFile, { v: 2, at: Date.now(), error: 'pick at least one of: sign, read, store, passwords, replica', code: 'empty-scope' })
+          return console.error('[vault] pairing refused: no permission the certificate can carry (%s)', caps.join(','))
+        }
+      }
       // La etiqueta por defecto de un servicio es su ns a secas: la lista ya marca [servicio «ns»],
       // y el prefijo «service:» confundía (el cajón se llama claude, no service:claude).
       const label = pairReq?.label || (isService ? pairReq.service : 'cli')
-      pendingAdmin = !!pairReq?.admin
       // `profile`/`profileName`: la CUENTA del vault a la que entra el dispositivo.
       // Con varias bóvedas en el mismo daemon, el QR sale de UNA y quien empareja
       // tiene que verlo (lo muestran la TUI y `dotrino-vault pair`). El nombre viaja
@@ -237,7 +247,7 @@ export async function runDaemon () {
       //               perfil de esta bóveda tiene que haber nacido para eso (`--adopt`
       //               crea uno vacío), o no habría dónde meterla.
       const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
-      const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName })
+      const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName, ...(caps ? { caps } : {}) })
       ipcWrite(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
@@ -248,6 +258,9 @@ export async function runDaemon () {
       }, expiresInMs + 1000).unref?.()
       console.log('[vault] pairing started (valid for %d min)', expiresInMs / 60000)
     } catch (e) {
+      // Se contesta por el archivo que espera quien lo pidió: si no, se queda mirando una
+      // pantalla vacía hasta que se agota el tiempo (p. ej. un permiso que no existe).
+      ipcWrite(pairFile, { v: 2, at: Date.now(), error: e.message, code: e.code || 'PAIR_FAILED' })
       console.error('[vault] could not start pairing:', e.message)
     }
   }
@@ -592,18 +605,6 @@ export async function runDaemon () {
           const vault = targetOf(appr)
           if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
           const r = await vault.approveDevice(appr.code); rm(pendingEnrollFile); rm(pairFile)
-          // `pair --admin`: se le SUMA `admin` a lo que ya tiene, no se le reescriben los
-          // permisos — el aparato acaba de entrar con el scope que pidió la invitación.
-          if (pendingAdmin && r?.deviceId) {
-            try {
-              const rec = await vault.profileMembers()
-              const m = (rec?.members || []).find((x) => x.id === r.deviceId)
-              if (!m?.pub) throw new Error('the device is not in the record yet')
-              await vault.setCaps(m.pub, [...new Set([...(m.caps || []), 'admin'])])
-              console.log('[vault] the new device can ADMINISTER this account (console)')
-            } catch (e) { console.error('[vault] could not grant admin: %s', e.message) }
-          }
-          pendingAdmin = false
           console.log('[vault] approved %s', r.deviceId)
           answer({ ok: true, deviceId: r.deviceId || null })
         } catch (e) {
@@ -627,7 +628,24 @@ export async function runDaemon () {
         } catch (e) { console.error('[vault] could not rename the device:', e.message) }
       }
       const capsReq = readJsonSafe(path.join(dir, 'caps-request.json'))
-      if (capsReq?.pub && Array.isArray(capsReq.caps)) {
+      // VARIOS APARATOS, UNA ACTA (el borrador de la TUI). Se contesta con el `id` de la
+      // petición, para que quien espera sepa si se firmó de verdad.
+      if (Array.isArray(capsReq?.changes)) {
+        rm(path.join(dir, 'caps-request.json'))
+        const answer = (extra) => ipcWrite(path.join(dir, 'caps.json'), { v: 1, at: Date.now(), req: capsReq.id || null, ...extra })
+        try {
+          const vault = targetOf(capsReq)
+          if (!vault) throw Object.assign(new Error('profile locked'), { code: 'PROFILE_LOCKED' })
+          const changes = capsReq.changes.filter((c) => typeof c?.pub === 'string' && Array.isArray(c.caps))
+          if (changes.length !== capsReq.changes.length) throw Object.assign(new Error('malformed change list'), { code: 'BAD_CHANGES' })
+          await vault.setCapsMany(changes)
+          console.log('[vault] permissions updated for %d device(s) in one record', changes.length)
+          answer({ ok: true, count: changes.length })
+        } catch (e) {
+          console.error('[vault] could not change permissions:', e.message)
+          answer({ ok: false, error: e.message, code: e.code || 'CAPS_FAILED' })
+        }
+      } else if (capsReq?.pub && Array.isArray(capsReq.caps)) {
         rm(path.join(dir, 'caps-request.json'))
         try {
           await targetOf(capsReq)?.setCaps(capsReq.pub, capsReq.caps)

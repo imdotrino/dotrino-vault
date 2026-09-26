@@ -46,6 +46,7 @@ const F = {
   revokeReq: 'revoke-request.json',
   labelReq: 'label-request.json',
   capsReq: 'caps-request.json',
+  capsRes: 'caps.json',
   secretReq: 'secret-request.json',
   profileReq: 'profile-request.json',
   meReq: 'me-request.json',
@@ -463,6 +464,26 @@ export async function setDeviceCaps (pub, caps, profile) {
 }
 
 /**
+ * Cambia los permisos de VARIOS dispositivos en UNA sola acta: `[{ pub, caps }]`, cada
+ * `caps` la lista completa de ese aparato. Es lo que guarda el borrador de la TUI cuando
+ * tocaste más de uno (dueño, 2026-09-26: «con esto me evito más actas inútiles»).
+ */
+export async function setDevicesCaps (changes, profile) {
+  requireAlive()
+  if (!Array.isArray(changes) || !changes.length) throw coded('no changes to save', 'NO_CHANGES')
+  const since = Date.now()
+  const id = await writeReq(F.capsReq, { changes }, profile)
+  signalOrCleanup('SIGUSR2', [F.capsReq])
+  // SE ESPERA LA RESPUESTA: con varios aparatos a la vez, un «Guardado» que no lo era
+  // deja creer que se firmó lo que no.
+  const r = await waitFor(F.capsRes, { req: id, since, tries: 40 })
+  if (!r) throw coded('the daemon did not reply', 'NO_REPLY')
+  assertOpen(r)
+  if (r.ok === false) throw coded(r.error || 'could not change the permissions', r.code || 'CAPS_FAILED')
+  return listDevices(profile)
+}
+
+/**
  * Quita un dispositivo por su llave `sub` (le ordena autoborrarse) y revuelca.
  * Se acepta un `nonce` suelto por compatibilidad, pero eso retira UN certificado:
  * un aparato puede tener varios y seguiría entrando con el otro.
@@ -731,15 +752,18 @@ export function pairUrl (qr) {
   return { url: inviteUrl(qr), code, payload: JSON.stringify(qr), b64: code }
 }
 
-export async function startPairing ({ profile, service, label } = {}) {
+export async function startPairing ({ profile, service, label, caps } = {}) {
   requireAlive()
   rm(F.pair); rm(F.pending)
-  await writeReq(F.pairReq, { ...(service ? { service } : {}), ...(label ? { label } : {}) }, profile)
+  // `caps`: los permisos con los que el aparato entra al acta. Van en la MISMA acta que lo
+  // admite, así que no hace falta otra para dárselos después.
+  await writeReq(F.pairReq, { ...(service ? { service } : {}), ...(label ? { label } : {}), ...(Array.isArray(caps) ? { caps } : {}) }, profile)
   signalOrCleanup('SIGUSR1', [F.pairReq])
   for (let i = 0; i < 50; i++) {
     await sleep(100)
     const pr = read(F.pair, null)
     assertOpen(pr)
+    if (pr?.error) throw coded(pr.error, pr.code || 'PAIR_FAILED')
     if (pr?.expiresAt > Date.now()) {
       const { url, payload, code } = pairUrl(pr.qr)
       // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault

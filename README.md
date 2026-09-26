@@ -239,10 +239,11 @@ dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
-dotrino-vault pair --scope <lista>  # los PERMISOS del cert: sign,read,store,secrets:<ns>. Sin esto, sign,read,store.
+dotrino-vault pair --scope <lista>  # los PERMISOS con los que entra (cualquiera de caps: firma,lee,guarda,administra,aprueba…
+                                    # y secrets:<ns>). Entra al acta ya con ellos, sin otra acta. Sin esto, firma,lee,guarda.
 dotrino-vault caps <ID> +permiso     # ese aparato pide tu aprobación (teléfono) al recibir claves; pair --approval al enrolar
                                     # Se combina con --service: `--service eco --scope sign` = un bot que firma
-                                    # como aparato del acta y lee SOLO su cajón. `admin` no se empareja (caps).
+                                    # como aparato del acta y lee SOLO su cajón.
 dotrino-vault secret set <ns> <CLAVE> <valor>   # variable del SCOPE: la comparten todos los
                                                 # aparatos que sirven ese namespace
 dotrino-vault secret set <ns> CLAVE=valor CLAVE2=valor2 …   # VARIAS de una vez (un solo aviso)

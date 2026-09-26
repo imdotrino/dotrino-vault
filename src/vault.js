@@ -3501,6 +3501,41 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return secrets.openBundle(ns, devicePub, adminKey)
   }
 
+  /**
+   * CAMBIA LOS PERMISOS DE UNO O VARIOS APARATOS EN UNA SOLA ACTA. `changes`: `[{ pub, caps }]`,
+   * cada `caps` la lista COMPLETA de ese aparato.
+   */
+  async function setCapsMany (changes) {
+    if (!Array.isArray(changes) || !changes.length) throw Object.assign(new Error('no changes to save'), { code: 'NO_CHANGES' })
+    if (typeof identity.setCapsMany !== 'function') {
+      throw Object.assign(new Error('this build\'s @dotrino/identity cannot change several devices at once (needs setCapsMany)'), { code: 'caps-many-unavailable' })
+    }
+    const r = await identity.setCapsMany(changes)
+    // ¿SE QUEDÓ ALGUNO POR EL CAMINO? El acta tiene una lista CERRADA de permisos y
+    // `cleanCaps` descarta los que no conoce — correcto al recibir un acta ajena, y
+    // pésimo aquí: conceder `+sella` con una versión del pilar que no sabe qué es
+    // devolvía «Listo», resellaba el acta y no concedía nada. Costó una tarde en un
+    // contenedor, porque la imagen traía la versión de npm y el árbol local otra.
+    try {
+      const members = (await identity.profileMembers()).members
+      for (const { pub, caps } of changes) {
+        const quedaron = new Set(members.find((m) => m.pub === pub)?.caps || [])
+        const perdidos = caps.filter((c) => !quedaron.has(c))
+        if (perdidos.length) {
+          log(`[vault] WARNING these permissions were DROPPED: ${perdidos.join(', ')} — this build's @dotrino/identity does not know them (record unchanged for those)`)
+        }
+      }
+    } catch (_) { /* comprobar es un extra: si falla, no rompe el cambio */ }
+    const devices = await Promise.all(changes.map(async ({ pub, caps }) => ({ deviceId: await deviceIdOf(pub).catch(() => null), caps })))
+    for (const d of devices) audit('caps', { device: d.deviceId, caps: d.caps })
+    // El acta acaba de cambiar QUIÉN debe tener envoltura de qué: se repasa antes de
+    // avisar, para que el aviso salga con el llavero ya al día.
+    await refreshWraps('caps')
+    // UN aviso: un aparato solo (la forma de siempre) o la lista, si fueron varios.
+    await notifyMembers('caps', devices.length === 1 ? devices[0] : { devices })
+    return r
+  }
+
   /** El miembro del acta con esa llave, o `null` (también si la bóveda todavía no tiene acta). */
   async function memberOf (pub) {
     const record = (await identity.profileActa?.().catch(() => null))?.acta
@@ -3842,27 +3877,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     secretRecipients: (owner) => secrets.recipientsIn(owner),
     // ¿Es ESTA bóveda la que sella el acta? Lo usa el freno de borrado (D12).
     isMaster: () => identity.isMaster(),
-    setCaps: async (pub, caps) => {
-      const r = await identity.setCaps(pub, caps)
-      // ¿SE QUEDÓ ALGUNO POR EL CAMINO? El acta tiene una lista CERRADA de permisos y
-      // `cleanCaps` descarta los que no conoce — correcto al recibir un acta ajena, y
-      // pésimo aquí: conceder `+sella` con una versión del pilar que no sabe qué es
-      // devolvía «Listo», resellaba el acta y no concedía nada. Costó una tarde en un
-      // contenedor, porque la imagen traía la versión de npm y el árbol local otra.
-      try {
-        const quedaron = new Set((await identity.profileMembers()).members.find((m) => m.pub === pub)?.caps || [])
-        const perdidos = caps.filter((c) => !quedaron.has(c))
-        if (perdidos.length) {
-          log(`[vault] WARNING these permissions were DROPPED: ${perdidos.join(', ')} — this build's @dotrino/identity does not know them (record unchanged for those)`)
-        }
-      } catch (_) { /* comprobar es un extra: si falla, no rompe el cambio */ }
-      audit('caps', { device: await deviceIdOf(pub).catch(() => null), caps })
-      // El acta acaba de cambiar QUIÉN debe tener envoltura de qué: se repasa antes de
-      // avisar, para que el aviso salga con el llavero ya al día.
-      await refreshWraps('caps')
-      await notifyMembers('caps', { deviceId: await deviceIdOf(pub).catch(() => null), caps })
-      return r
-    },
+    setCaps: async (pub, caps) => setCapsMany([{ pub, caps }]),
+    // VARIOS APARATOS EN UNA SOLA ACTA (dueño, 2026-09-26): el borrador de la TUI se sella
+    // de golpe, con UN repaso del llavero y UN aviso, en vez de uno por aparato.
+    setCapsMany,
     // Renombrar un dispositivo: es un nombre para el humano (no toca permisos ni llaves),
     // pero pasa por el acta y se avisa, para que el cambio no sea invisible en el resto.
     setLabel: async (pub, label) => {
