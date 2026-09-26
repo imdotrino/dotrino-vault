@@ -1577,15 +1577,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   /**
    * PEDIDOS DE APROBACIÓN (aparatos marcados con `approval on`). Entran por `vault.secrets` con
-   * `op: approvals | approve | deny`, firmados por un aparato con `vault:approve` — que,
-   * como `admin`, no se empareja: se concede a mano (`caps <ID> +aprueba`). El acta tiene
-   * que decirlo también, para que quitar el permiso surta efecto en el acto.
+   * `op: approvals | approve | deny`, firmados por un aparato al que el ACTA le da `approve`
+   * — que, como `admin`, no se empareja: se concede a mano (`caps <ID> +aprueba`).
+   *
+   * DECIDE EL ACTA, NO EL PAPEL (dueño, 2026-09-26). El papel solo prueba que el aparato es
+   * de esta bóveda y no está revocado; por eso no se le pide `vault:approve`. Pedírselo
+   * contestaba `unauthorized: scope` a un teléfono SIN el permiso, el teléfono lo tomaba por
+   * un papel atrasado, pedía renovarlo, y renovar firma con la maestra: con la bóveda
+   * cerrada le llegaba «vault locked», que no era la causa. Ahora le llega `acta`, que sí lo
+   * es. Y a uno CON el permiso ya no le hace falta renovar para aprobar: funciona con la
+   * bóveda cerrada, como todos los aparatos.
    */
   async function handleApproval (from, p) {
     const op = p.data?.op
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
-      expectedScope: SCOPE.APPROVE, ...(await contextoActa()), revoked: await revocationSet()
+      ...(await contextoActa()), revoked: await revocationSet()
     })
     if (!chk.ok) return denyChain(from, chk, p, 'approval')
     const record = (await identity.profileActa?.().catch(() => null))?.acta

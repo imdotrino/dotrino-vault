@@ -20,7 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { enrollDevice, requestStore, requestSign } from '@dotrino/identity/vault/remote.js'
+import { enrollDevice, requestStore, requestSign, requestApproval } from '@dotrino/identity/vault/remote.js'
 import { makeDeviceEncKey } from '@dotrino/identity/capabilities'
 // El almacén de la bóveda solo entra CIFRADO: se le pide con el cliente de referencia, que
 // sella con la clave de contenido que la bóveda le envolvió al aparato al admitirlo.
@@ -331,4 +331,38 @@ test('estrenar la llave de comunicación al abrir deja la bóveda alcanzable EN 
     // vuelve a romperse, aquí se ve como un plantón de 15 s (el timeout de `vaultRpc`).
     assert.ok(await store(dev, 'getStats'), 'contesta ya, sin reiniciar el servicio')
   } finally { try { m2.close() } catch (_) {} }
+})
+
+/**
+ * PEDIDOS: DECIDE EL ACTA, NO EL PAPEL, Y CON LA BÓVEDA CERRADA (dueño, 2026-09-26).
+ *
+ * Un teléfono sin `approve` recibía `unauthorized: scope`, lo tomaba por un papel atrasado,
+ * pedía renovarlo, y renovar firma con la maestra: con la bóveda cerrada enseñaba «vault
+ * locked», que no era la causa. Todos los aparatos funcionan con la bóveda cerrada; lo que
+ * pasaba es que ese no tenía el permiso, y eso es lo que tiene que llegarle.
+ */
+test('pedidos con la bóveda cerrada: sin `approve` en el acta se dice ESO; con él, se listan sin renovar', async () => {
+  const p = await mgr.add('Pedidos')
+  const vault = mgr.get(p.id)
+  const sin = await pair(vault)
+  const con = await pair(vault)
+  const subCon = con.cert.sub
+  const m = (await vault.identity.profileActa()).acta.members.find((x) => x.pub === subCon)
+  await vault.setCaps(subCon, [...new Set([...(m?.caps || []), 'approve'])])
+  assert.ok(!(con.cert.scope || []).includes('vault:approve'), 'su papel NO lleva approve: se le dio después')
+
+  await mgr.profiles.setPassword(p.id, 'frase-de-prueba-larga')
+  await mgr.unlock(p.id, 'frase-de-prueba-larga')
+  await mgr.lock(p.id)
+  assert.equal(vault.identity.masterLocked, true)
+
+  const ask = (dev) => requestApproval({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, op: 'approvals' })
+  await assert.rejects(() => ask(sin), (e) => {
+    assert.match(e.message, /unauthorized: acta/)
+    assert.doesNotMatch(e.message, /locked|scope/)
+    return true
+  })
+  const body = await ask(con)
+  assert.equal(body.op, 'approvals')
+  assert.ok(Array.isArray(body.items))
 })
