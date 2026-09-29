@@ -150,6 +150,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * permisos como los demás, y se quita quitándolo — sin acordarse de un registro escondido
    * en una máquina.
    */
+  /** ¿Hay en el acta alguien que pueda aprobar? Sin nadie, no se pide aprobación. */
+  function hasApprover (record) {
+    return !!record?.members?.some((m) => Acta.memberCan(record, m.pub, 'approve'))
+  }
+
   function needsApproval (pub, record) {
     if (!record) return true          // sin acta no se decide que sí: se pide permiso
     // SIN NADIE QUE APRUEBE, NO SE NECESITA APROBACIÓN (dueño, 2026-09-24: «la regla es, si
@@ -1423,6 +1428,80 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     }
   }
 
+  /**
+   * UN SERVICIO GUARDA VARIABLES EN SU PROPIO CAJÓN (dueño, 2026-09-29: «para facilitar la
+   * migración de ENVs a Dotrino»). Es lo que usa `dotrino-env import`: el `.env` que ya
+   * existe en la máquina del servicio sube tal cual, sin copiarlo a mano en la consola.
+   *
+   * Va por el canal del servicio —el mismo que lee el cajón— y con SUS fronteras: el cert
+   * con `vault:secrets:<ns>` y el CN del acta. Así un servicio solo escribe en su cajón y
+   * nunca en el de otro. La guarda la hace la MISMA pieza que la consola (`varsDesk`): la
+   * firma del autor, las envolturas, la espera de aprobación. Aquí no hay otra puerta.
+   *
+   * Los límites (dueño, 2026-09-29):
+   *   · si hay alguien que aprueba, SIEMPRE se pide aprobación —`unattended` no exime— y con
+   *     el sí puede también EDITAR lo que ya existe;
+   *   · si nadie puede aprobar, no se pide y solo puede AÑADIR lo que falta;
+   *   · BORRAR, nunca: eso es de la consola y del CLI de la bóveda.
+   *
+   * Dos operaciones: `store.recipients` (para quién se sella: solo públicas, nada que ocultar)
+   * y `store` (los sobres ya hechos; la bóveda no los abre).
+   */
+  const storeNonces = new Map()
+  async function handleVarStore (from, p) {
+    const ns = p.data?.ns
+    const op = p.data?.op
+    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: `${op}: invalid namespace` })
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, op)
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: op, ns, reason: record ? 'cn' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
+    }
+    const deviceId = await deviceIdOf(chk.device).catch(() => null)
+    // FIRMADA COMO TODO LO QUE SIRVE LA BÓVEDA (con la llave de sellado que nombra el acta, y
+    // el acta al lado): `store.recipients` dice PARA QUIÉN se sellan los valores, y si el
+    // proxio pudiera cambiar esa lista por sus llaves, abriría las privadas al pasar.
+    const answer = async (body) => reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
+    try {
+      if (op === 'store.recipients') {
+        return await answer({
+          op: 'store.recipients', ns, ts: Date.now(),
+          recipients: { public: await varsDesk.recipients({ ns, public: true }), private: await varsDesk.recipients({ ns, public: false }) },
+          // Para que quien importa sepa de antemano qué va a pasar con lo que ya existe.
+          approval: hasApprover(record)
+        })
+      }
+      // CAMBIA ESTADO: un solo uso. La frescura (±5 min) no basta — repetir el mismo sobre
+      // dentro de esa ventana volvería a timbrar el teléfono de quien aprueba.
+      const nonce = p.data?.nonce
+      if (typeof nonce !== 'string' || nonce.length < 16) return reply(from, { type: MSG.ERROR, code: 'no-nonce', error: 'store: missing single-use nonce' })
+      const now = Date.now()
+      for (const [n, exp] of storeNonces) if (exp <= now) storeNonces.delete(n)
+      if (storeNonces.has(nonce)) { audit('rejected', { what: 'store', ns, reason: 'replay' }); return reply(from, { type: MSG.ERROR, code: 'replay', error: 'store: nonce already used' }) }
+      storeNonces.set(nonce, now + 10 * 60 * 1000)
+
+      const items = p.data?.items
+      if (!Array.isArray(items) || !items.length) return reply(from, { type: MSG.ERROR, error: 'store: needs `items`, each with its key and its sealed envelope' })
+      const result = await varsDesk.setMany({ ns, items, caller: chk.device, by: deviceId, fromService: true })
+      if (result?.pending) {
+        audit('store.pending', { device: deviceId, ns, id: result.pending, count: items.length })
+        log(`[vault] ${ns}: ${deviceId || '????-????'} wants to store ${items.length} variable(s) — waiting for approval (${result.pending})`)
+      } else {
+        audit('store', { device: deviceId, ns, keys: result?.keys || [] })
+        log(`[vault] ${ns}: ${deviceId || '????-????'} stored ${(result?.keys || []).length} variable(s) (nobody can approve: add only)`)
+        await notifyMembers('vars', { by: deviceId, keys: result?.keys || [], ns })
+      }
+      return await answer({ op: 'store.result', ns, ts: Date.now(), keys: result?.keys || [], pending: result?.pending || null })
+    } catch (e) {
+      return reply(from, { type: MSG.ERROR, ...(e.code ? { code: e.code } : {}), error: `${op}: ${e.message}` })
+    }
+  }
+
   async function handleSecrets (from, p) {
     if (!isFresh(p.data)) { audit('rejected', { what: 'secrets', reason: 'stale' }); return staleReply(from) }
     // REGISTRAR LA LLAVE DE CIFRADO de un servicio ya enrolado. Va por aquí, y no por
@@ -1433,6 +1512,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // da acceso a nada por sí solo. Quien firma esta petición ya tiene la llave de firma
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
+    if (p.data?.op === 'store.recipients' || p.data?.op === 'store') return handleVarStore(from, p)
     if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
@@ -2323,8 +2403,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // PÚBLICA Y PRIVADA VAN IGUAL (dueño, 2026-09-02: «la única diferencia es si se
         // despachan o no, son políticas; dales el mismo tratamiento de seguridad»). La
         // marca solo decide si se entrega sin aprobación.
+        // Si esto va a pedir aprobación, al aprobarse puede EDITAR; si no, solo añadir.
+        const ask = needsApproval(caller, await refreshActa())
         const apply = async () => {
-          await checkAuthor(owner, key, sealed, caller)
+          await checkAuthor(owner, key, sealed, caller, { allowOverwrite: ask })
           await checkRecipients(owner, sealed.wraps, !!isPublic)
           await secrets.putSealed(owner, key, sealed, { by: who, public: isPublic })
           audit('secret.set', { ns: ns || null, key, sealed: true }); scheduleNotice(ns)
@@ -2332,9 +2414,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         }
         // Comprobado ANTES de dejarlo en espera: un sobre malo falla al guardarlo, no cinco
         // minutos después en la pantalla de quien aprueba. `apply` lo repite al aprobar.
-        await checkAuthor(owner, key, sealed, caller)
+        await checkAuthor(owner, key, sealed, caller, { allowOverwrite: ask })
         await checkRecipients(owner, sealed.wraps, !!isPublic)
-        const pending = await holdWrite({ caller, ns, pub, keys: [key], apply })
+        const pending = await holdWrite({ caller, ns, pub, keys: [key], apply, ask })
         if (pending) return { ok: true, key, pending }
         await apply()
         return { ok: true, key }
@@ -2362,7 +2444,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * Los NOMBRES también viajan dentro del sobre —no solo los valores—: el proxy
      * transporta y no tiene por qué aprender cómo se llama la configuración de un servicio.
      */
-    async setMany ({ ns, pub, items, caller = null, by: who = null }) {
+    async setMany ({ ns, pub, items, caller = null, by: who = null, fromService = false }) {
       // CADA VARIABLE VIENE EN SU PROPIO SOBRE, ya hecho. La bóveda no abre ninguno: solo
       // comprueba quién los firma y a quién envuelven, igual que en `set`. Aquí estaba el
       // `enc` que las traía todas juntas selladas AL PERFIL, y abrirlo era lo que obligaba
@@ -2370,16 +2452,24 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (!Array.isArray(items) || !items.length) throw new Error('var.setMany: no variables came')
       const owner = ns ? `ns:${ns}` : `dev:${pub}`
       const keys = []
+      // ¿SE PIDE APROBACIÓN? Desde la mesa del admin, lo de siempre (`needsApproval`: quien
+      // tiene `unattended` escribe solo). Desde el propio SERVICIO que guarda en su cajón, se
+      // pide SIEMPRE que haya quien apruebe, tenga o no `unattended` (dueño, 2026-09-29:
+      // «el unattended también pediría aprobación»): `unattended` es para llevarse claves al
+      // arrancar, no para reescribir su propia configuración. Sin nadie que apruebe no se
+      // pide —la regla de siempre— y entonces solo puede añadir.
+      const record = await refreshActa()
+      const ask = fromService ? hasApprover(record) : needsApproval(caller, record)
       for (const it of items) {
         if (!it?.key || !it?.sealed) throw new Error('var.setMany: each variable needs its key and its sealed envelope')
-        await checkAuthor(owner, it.key, it.sealed, caller)
+        await checkAuthor(owner, it.key, it.sealed, caller, { allowOverwrite: ask })
         await checkRecipients(owner, it.sealed.wraps, !!it.public)
       }
       // Se comprueban TODAS antes de escribir NINGUNA: media carga aplicada es una
       // configuración que nadie quiso, y el servicio se reinicia con ella.
       const apply = async () => {
         for (const it of items) {
-          await checkAuthor(owner, it.key, it.sealed, caller)
+          await checkAuthor(owner, it.key, it.sealed, caller, { allowOverwrite: ask })
           await checkRecipients(owner, it.sealed.wraps, !!it.public)
         }
         for (const it of items) {
@@ -2389,7 +2479,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         audit('secret.setMany', { ns: ns || null, keys }); scheduleNotice(ns)
         await settleDebts(owner)
       }
-      const pending = await holdWrite({ caller, ns, pub, keys: items.map((it) => it.key), apply })
+      const pending = await holdWrite({ caller, ns, pub, keys: items.map((it) => it.key), apply, ask })
       if (pending) return { ok: true, keys: [], pending }
       await apply()
       return { ok: true, keys }
@@ -2410,8 +2500,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    *
    * Devuelve el id del pedido si la escritura quedó en espera, o `null` si se puede hacer ya.
    */
-  async function holdWrite ({ caller, ns, pub, keys, apply }) {
-    if (!needsApproval(caller, await refreshActa())) return null
+  async function holdWrite ({ caller, ns, pub, keys, apply, ask }) {
+    if (!(ask ?? needsApproval(caller, await refreshActa()))) return null
     // Quien llama ya comprobó el sobre; `apply` lo vuelve a comprobar al aprobar, porque el
     // acta pudo cambiar en medio.
     const target = ns || await deviceIdOf(pub).catch(() => null) || '?'
@@ -3062,7 +3152,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * relevo: alguien con `admin` colando un sobre que fabricó un tercero, sin que ninguna de
    * las dos comprobaciones lo note.
    */
-  async function checkAuthor (owner, key, sealed, caller) {
+  async function checkAuthor (owner, key, sealed, caller, { allowOverwrite = false } = {}) {
     const a = sealed?.author
     if (!a || typeof a.pub !== 'string' || typeof a.sig !== 'string' || typeof a.ts !== 'number') {
       throw new Error('var.set: the envelope must say WHO made it (`author: { pub, sig, ts }`)')
@@ -3088,12 +3178,17 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // un sobre existente; solamente el admin y el vault editan sobres, los otros pueden
     // crear los que faltan nomás»).
     //
+    // SALVO QUE ALGUIEN LO APRUEBE (dueño, 2026-09-29: «si requiere aprobación hagamos que
+    // pueda también editar; si no hay approval, solamente agregar — la aprobación nos da el
+    // nivel de seguridad aceptable»). Un sí de quien aprueba es justo la decisión humana que
+    // faltaba para reemplazar; sin él, sigue siendo solo rellenar.
+    //
     // Es la misma regla que `putWrap` («solo añade, nunca pisa») y por el mismo motivo: un
     // servicio que pudiera reemplazar un sobre podría dejar sin leer a otro miembro con uno
     // basura — denegación de servicio disfrazada de escritura. Rellenar lo que falta no
     // quita nada a nadie; reemplazar sí, y eso es de quien administra.
-    if (m.cn && secrets.has?.(owner, key)) {
-      throw new Error(`var.set: "${m.cn}" cannot overwrite "${key}" — a service only fills in what is missing; replacing is for who administers`)
+    if (m.cn && !allowOverwrite && secrets.has?.(owner, key)) {
+      throw Object.assign(new Error(`var.set: "${m.cn}" cannot overwrite "${key}" — without an approval a service only fills in what is missing; replacing is for who administers`), { code: 'exists' })
     }
     const cuerpo = authorBody(owner, key, sealed.e, a.ts)
     if (!(await verifyDeviceSig({ publickey: a.pub, data: cuerpo, signature: a.sig }))) {
