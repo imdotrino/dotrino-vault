@@ -1971,7 +1971,7 @@ function help () {
   console.log(`dotrino-vault — control del certificador personal
 
   tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
-  status              estado del servicio + fingerprint
+  status | info       estado del servicio + fingerprint + el id de cada perfil
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --kms <config.json>
                       el sitio que se cree (--adopt o --new-account) NACE con su clave
@@ -2178,7 +2178,10 @@ export async function runCtl (argv) {
     case 'profile': return cmdProfile(rest)
     case 'unlock': return cmdUnlock()
     case 'lock': return cmdLock()
-    case 'status': return cmdStatus()
+    // `info` es el comando común de todo el ecosistema para «qué aparato soy» (regla del
+    // dueño, 2026-09-29); en la bóveda eso es su estado, que ya enseña el id de cada perfil.
+    case 'status':
+    case 'info': return cmdStatus()
     case 'pair': return cmdPair(rest)
     case 'join': return cmdJoin(rest)
     case 'pending': return cmdPending()
