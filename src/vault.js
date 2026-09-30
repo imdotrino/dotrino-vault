@@ -1873,7 +1873,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       // desde fuera se ve igual que «nadie ha aprobado todavía»: se espera para siempre
       // sin nada que mirar. Es el mismo cuidado que en `notifyMembers`.
       for (const pub of who) {
-        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, seal }) }
+        // A la app que APRUEBA (`vault`): en un teléfono la llave es de todas sus apps, y sin
+        // decirlo el pedido timbraba a messenger (websocket-proxy ≥ 1.4.0).
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, seal }, { app: 'vault' }) }
         catch (e) { log(`[vault] could not ring ${pub.slice(0, 24)}… about ${pend.ns}: ${e.message}`) }
       }
       log(`[vault] ${pend.ns}: rang ${who.length} approver(s) for ${pend.id}`)
@@ -2283,7 +2285,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // el perfil cambió puede esperar a que el aparato abra solo; timbrar por él hacía
         // sonar el teléfono con «alguien pide tus claves» sin ningún pedido detrás.
         // El timbre es para los pedidos (`notifyApprovers`), que sí esperan una mano.
-        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, acta }, { quiet: true }) }
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, acta }, { quiet: true, app: 'vault' }) }
         catch (e) { log(`[vault] could not notify ${pub.slice(0, 24)}… of "${ev}": ${e.message}`) }
       }
       for (const m of miembros) avisar(m.pub)

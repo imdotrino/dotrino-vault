@@ -1607,7 +1607,7 @@ async function suscribirAvisos () {
   try {
     const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
     const st = await id.value.vaultStatus().catch(() => null)
-    const client = new WebSocketProxyClient({ url: st?.proxy || 'wss://proxy.dotrino.com', enableWebRTC: false, autoReconnect: false })
+    const client = new WebSocketProxyClient({ url: st?.proxy || 'wss://proxy.dotrino.com', enableWebRTC: false, autoReconnect: false, app: 'vault' })
     await client.connect()
     try {
       // CON TOPE: sin él, un navegador que no llega a suscribirse (un service worker que no
