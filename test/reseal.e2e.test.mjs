@@ -101,6 +101,10 @@ test('4. the removed device cannot open what is served now', async () => {
   assert.equal(await abre(viejo, firma().envelope), null)
   assert.ok(!JSON.stringify(vault.threads.methods.exportThreads()).includes(sobreAntes.ct), 'the old envelope is not served')
   assert.equal(vault.threads.raw().resealed.at(-1).before.envelope.ct, sobreAntes.ct, 'but it is kept, not served')
+  // Las generaciones viejas siguen en el llavero y la bóveda las tiene: el respaldo abre.
+  const { acta } = await vault.identity.profileActa()
+  assert.ok(acta.keyring.some((g) => g.gen === genAntes), 'the old generation stays in the keyring')
+  assert.equal(await vault.identity.openContent(vault.threads.raw().resealed.at(-1).before.envelope), 'el-p12', 'the vault can open the kept backup')
 })
 
 test('5. an old envelope that shows up later is resealed when the vault opens', async () => {
