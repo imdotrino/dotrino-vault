@@ -116,6 +116,26 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
   const store = openStore(dir)
   const threads = openThreadStore(dir)
+  /**
+   * LO QUE SIRVE LA BÓVEDA VA CON LA LLAVE VIGENTE (dueño, 2026-09-30). Tras una rotación
+   * de la llave de la cuenta, los sobres (`t: 'dotrino-cek'`) de generaciones anteriores
+   * que haya en el almacén se vuelven a cerrar con la vigente. Se llama al abrir y después
+   * de quitar un aparato. Si la bóveda no tiene la llave de contenido, no hay nada que
+   * hacer y se dice; si un sobre no abre, se para y se dice — no se deja a medias.
+   */
+  async function resealStaleThreads (why) {
+    const mine = await identity.contentKey?.()
+    if (!mine) { log(`[vault] ${why}: no content key on this vault, envelopes not resealed`); return null }
+    const r = await threads.resealStaleEnvelopes({
+      gen: mine.gen,
+      reseal: async (env) => identity.sealContent(await identity.openContent(env))
+    })
+    if (r.changed) {
+      audit('resealed', { envelopes: r.changed, entries: r.entries, gen: mine.gen })
+      log(`[vault] ${why}: resealed ${r.changed} envelope(s) in ${r.entries} entr${r.entries === 1 ? 'y' : 'ies'} with content key generation ${mine.gen}`)
+    }
+    return r
+  }
   const approvals = createApprovals()
   /**
    * LO QUE YA SE APROBÓ: comando + carpeta, por una hora desde el último uso.
@@ -3845,6 +3865,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
           }
         } catch (e) { log(`[vault] unlock: could not remove expired devices: ${e.message}`) }
       }
+      // Y DESPUÉS, LOS SOBRES A LA LLAVE VIGENTE: la poda de arriba pudo rotarla.
+      if (r?.locked === false) {
+        try { await resealStaleThreads('unlock') } catch (e) { log(`[vault] unlock: could not reseal old envelopes: ${e.message}`) }
+      }
       return { locked: r?.locked !== false }
     },
     // Forzar un empujón: lo usa `replica push` de la CLI y el smoke, para no depender
@@ -4077,6 +4101,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const r = await desk.revokeDevice(sub)
       audit('revoke-device', { device: await deviceIdOf(sub).catch(() => null), certs: r?.nonces?.length ?? null })
       await refreshWraps('revoked')
+      // Quitar un aparato rota la llave de la cuenta: lo guardado pasa a la nueva.
+      try { await resealStaleThreads('revoke') } catch (e) { log(`[vault] revoke: could not reseal old envelopes: ${e.message}`) }
       await notifyMembers('revoked', { deviceId: await deviceIdOf(sub).catch(() => null), by: 'pc' })
       return r
     },

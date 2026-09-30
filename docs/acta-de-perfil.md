@@ -565,6 +565,30 @@ firmar por su cuenta.
 **Hecho cuando:** admitir un dispositivo le da acceso al contenido ya existente, y expulsarlo
 le corta el acceso al contenido futuro.
 
+#### Al rotar, la bóveda vuelve a cerrar lo que guarda (dueño, 2026-09-30)
+
+El caso que lo decidió: la firma de facturero, cerrada con una generación, no la podía abrir
+un navegador emparejado **después** de una rotación, porque al admitir solo se envuelve la
+generación vigente. En vez de envolverle todas las viejas al que entra:
+
+- **Todo sobre de la cuenta lleva su marca:** `{ t: 'dotrino-cek', gen, iv, ct }`
+  (`@dotrino/identity` ≥ 0.107.0, `CEK_ENVELOPE`). Así la bóveda lo reconoce dentro de los
+  datos de cualquier app sin adivinar por la forma.
+- **La bóveda sirve siempre la generación vigente.** Al abrirse y después de quitar un
+  aparato (que es cuando rota), recorre el almacén de hilos y vuelve a cerrar con la vigente
+  cada sobre de una generación anterior (`resealStale`; vaultd ≥ 0.139.0). Cada entrada que
+  cambia estrena `ts` y los aparatos la bajan en su siguiente sincronización.
+- **La llave vieja deja de abrir nada** porque ya no se le sirve nada cerrado con ella.
+- **Política: ningún sobre se borra al rotar.** La versión anterior se guarda como respaldo
+  **al menos un año** (`RESEALED_KEEP_MS`), y no se sirve por ningún método. Las
+  generaciones viejas tampoco salen del llavero, así que la bóveda puede abrir ese respaldo.
+- Los blobs de `dotrino-content` **no** entran aquí: cada uno lleva su propia llave al azar
+  (no la de la cuenta), así que rotar no los toca y su `cid` no cambia.
+
+Pruebas: `test/reseal-envelopes.test.mjs` y `test/reseal.e2e.test.mjs` (bóveda y proxio
+reales: sale un aparato, rota, entra otro después y abre lo viejo; el que salió no abre lo
+que se sirve; un sobre viejo que aparece más tarde se arregla al abrir; sobrevive a reiniciar).
+
 ---
 
 ### 4.5 · F5 — Consumidores y endurecimiento del vault (PENDIENTE)

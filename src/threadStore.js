@@ -15,6 +15,7 @@
  */
 import path from 'node:path'
 import * as core from '@dotrino/store/core'
+import { resealStale } from '@dotrino/identity/content'
 import { readJson, writeJson } from './paths.js'
 import { atRestFor } from './atrest.js'
 
@@ -26,6 +27,11 @@ const MAX_PER_THREAD = core.MAX_PER_THREAD_LIMIT
 // DATOS SENSIBLES (F4): topes para que un dispositivo con `vault:store` no pueda
 // llenar el disco de la bóveda. Son generosos para el uso real (unas contraseñas,
 // notas, un documento corto) y ridículos para un abuso.
+// LO QUE SE VUELVE A CERRAR AL ROTAR NO SE BORRA: la versión anterior de cada sobre se
+// guarda como respaldo AL MENOS UN AÑO (política del dueño, 2026-09-30). No se sirve por
+// ningún método; solo está por si volver a cerrar sale mal.
+export const RESEALED_KEEP_MS = 366 * 24 * 60 * 60 * 1000
+
 const MAX_SECURE_ITEMS = 2000
 const MAX_SECURE_BLOB = 64 * 1024   // por campo sellado (meta y valor)
 
@@ -203,7 +209,46 @@ export function openThreadStore (dir) {
       return { threadCount: Object.keys(data.threads).length, threads, opensCount: Object.keys(data.opens).length, secureCount: Object.keys(data.secure).length }
     }
   }
-  return { methods, raw: () => data }
+  /**
+   * VUELVE A CERRAR CON LA LLAVE VIGENTE todo sobre de la cuenta (`t: 'dotrino-cek'`) de
+   * una generación anterior que haya en lo guardado. Lo llama la BÓVEDA al abrirse y
+   * después de quitar un aparato —que es cuando la llave rota—; NO está en `methods`, así
+   * que ningún aparato puede dispararlo.
+   *
+   * Lo que sirve la bóveda va así siempre con la generación vigente: un aparato que entra
+   * después, que solo recibe esa, abre todo; y la vieja deja de abrir nada porque ya no se
+   * sirve nada cerrado con ella (dueño, 2026-09-30). Cada entrada que cambia estrena `ts`,
+   * para que los aparatos la bajen en su siguiente sincronización.
+   *
+   * La versión anterior NO se tira: queda en `resealed` con la fecha, por si algo sale mal
+   * (lo pidió el dueño: «podría retenerlos… pero no los envía»), y se guarda AL MENOS un
+   * año (`RESEALED_KEEP_MS`). No se sirve por ningún método.
+   *
+   * @param {{ gen: number, reseal: (env: object) => Promise<object> }} o
+   * @returns {Promise<{ changed: number, entries: number }>}
+   */
+  async function resealStaleEnvelopes ({ gen, reseal }) {
+    let changed = 0; let entries = 0
+    const now = Date.now()
+    if (!data.resealed) data.resealed = []
+    // Solo sale lo que ya cumplió su año de respaldo.
+    const antes = data.resealed.length
+    data.resealed = data.resealed.filter((x) => now - (x.at || 0) < RESEALED_KEEP_MS)
+    const podados = antes - data.resealed.length
+    for (const [key, arr] of Object.entries(data.threads)) {
+      for (let i = 0; i < arr.length; i++) {
+        const r = await resealStale(arr[i], { gen, reseal })
+        if (!r.changed) continue
+        data.resealed.push({ threadKey: key, at: now, gen, before: arr[i] })
+        arr[i] = { ...r.value, ts: Math.max(now, (arr[i].ts || 0) + 1) }
+        changed += r.changed; entries++
+      }
+    }
+    if (entries || podados) save()
+    return { changed, entries }
+  }
+
+  return { methods, raw: () => data, resealStaleEnvelopes }
 }
 
 /**
