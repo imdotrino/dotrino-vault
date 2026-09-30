@@ -8,7 +8,7 @@
  * (`@dotrino/identity`), que es quien custodia la llave y sella el acta.
  * Diseño: dotrino-vault/docs/acta-de-perfil.md
  */
-import { ref, computed, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, markRaw, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 /**
  * Del PAQUETE, no de `../../lib/src`. Es tentador —el `lib/` está aquí al lado, y
  * `invite.js` sí se importa así—, pero `admin.js` importa `@dotrino/identity/content`
@@ -235,6 +235,10 @@ const T = {
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
+    apv_push_ask: 'Avisarme de pedidos en este navegador',
+    apv_push_on: 'Este navegador te avisa de los pedidos, también con la pestaña cerrada.',
+    apv_push_denied: 'El navegador tiene bloqueados los avisos de esta página: sin ellos solo verás los pedidos con esta pestaña abierta.',
+    apv_push_err: 'No se pudieron activar los avisos:',
     apv_cmd: 'Está ejecutando',
     apv_cwd: 'desde',
     apv_nocmd: 'No dice qué está ejecutando.',
@@ -441,6 +445,10 @@ const T = {
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
+    apv_push_ask: 'Notify me about requests in this browser',
+    apv_push_on: 'This browser notifies you about requests, even with the tab closed.',
+    apv_push_denied: 'The browser blocks notifications from this page: without them you only see requests with this tab open.',
+    apv_push_err: 'Could not turn notifications on:',
     apv_cmd: 'Running',
     apv_cwd: 'from',
     apv_nocmd: 'It does not say what it is running.',
@@ -1582,6 +1590,49 @@ async function registerNativePush (detail) {
     try { localStorage.setItem(key, token) } catch (_) {}
   } catch (_) {}
 }
+/**
+ * AVISOS EN ESTE NAVEGADOR, para quien aprueba (dueño, 2026-09-30: «la aprobación no debe ser
+ * exclusiva del teléfono»). La bóveda avisa a cada aparato con `aprueba`; si no está conectado,
+ * el proxio lo encola y TIMBRA por Web Push, y el service worker enseña qué se pide y quién
+ * (`push-sw.js`). Para eso el navegador se suscribe bajo SU llave —la del acta— firmando con la
+ * identidad, igual que la bóveda en una pestaña (`Vault.vue`). Solo si puede aprobar: a quien no
+ * aprueba no le llega nada que avisar.
+ */
+const apvPush = ref(typeof Notification === 'undefined' || !('serviceWorker' in navigator) ? 'unsupported' : Notification.permission)
+const apvPushError = ref('')
+let apvPushHecho = false
+async function suscribirAvisos () {
+  if (apvPushHecho) return
+  apvPushHecho = true
+  try {
+    const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+    const st = await id.value.vaultStatus().catch(() => null)
+    const client = new WebSocketProxyClient({ url: st?.proxy || 'wss://proxy.dotrino.com', enableWebRTC: false, autoReconnect: false })
+    await client.connect()
+    try {
+      // CON TOPE: sin él, un navegador que no llega a suscribirse (un service worker que no
+      // arranca, un servicio de push que no contesta) dejaba esto colgado y la pantalla muda.
+      await Promise.race([
+        client.enablePush({ publicKey: id.value.me.publickey, sign: (d) => id.value.signData(d) }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('the browser did not finish subscribing in 20 s')), 20000))
+      ])
+    } finally { try { client.close() } catch (_) {} }
+    apvPush.value = 'on'
+    apvPushError.value = ''
+  } catch (e) {
+    apvPushHecho = false
+    apvPushError.value = e?.message || String(e)
+  }
+}
+async function activarAvisos () {
+  const r = await Notification.requestPermission()
+  apvPush.value = r
+  if (r === 'granted') await suscribirAvisos()
+}
+/** ¿Aprueba este navegador en alguna cuenta? Lo dice que la bóveda le conteste la lista. */
+const apruebaAqui = computed(() => apvPorCuenta.value.some((c) => !c.error))
+watch(apruebaAqui, (si) => { if (si && apvPush.value === 'granted') suscribirAvisos() }, { immediate: true })
+
 const onNativeToken = (e) => { registerNativePush(e.detail) }
 onMounted(() => { window.addEventListener('dotrino-native-push-token', onNativeToken) })
 onBeforeUnmount(() => { window.removeEventListener('dotrino-native-push-token', onNativeToken) })
@@ -1998,6 +2049,13 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           {{ g.name || g.profile }} — {{ t.apv_error }} <code class="mid">{{ g.error }}</code>
         </p>
         <p v-if="approvals.length" class="muted warn">{{ t.apv_warn }}</p>
+        <!-- AVISOS EN ESTE NAVEGADOR: sin ellos, un pedido solo se ve con la pestaña abierta. -->
+        <template v-if="apruebaAqui">
+          <p v-if="apvPush === 'on'" class="muted small" data-testid="apv-push-on">{{ t.apv_push_on }}</p>
+          <p v-else-if="apvPush === 'denied'" class="muted small warn" data-testid="apv-push-denied">{{ t.apv_push_denied }}</p>
+          <p v-else-if="apvPush === 'default'"><button class="btn sm" data-testid="apv-push" @click="activarAvisos">{{ t.apv_push_ask }}</button></p>
+          <p v-if="apvPushError" class="muted small warn" data-testid="apv-push-err">{{ t.apv_push_err }} <code class="mid">{{ apvPushError }}</code></p>
+        </template>
 
         <!-- LO QUE YA DIJISTE QUE SÍ. Se renueva con cada uso, así que puede durar mientras
              el servicio viva: se ve y se corta desde el mismo sitio donde se aprobó. -->
