@@ -1420,9 +1420,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         await spreadKey(owner, (esPublica) => recipientsOf(owner, { public: esPublica }))
           .catch((e) => log(`[vault] ${owner}: could not hand it the key: ${e.message}`))
       }
+      // Con la llave de sellado, como todo lo que sirve la bóveda: la maestra no firma con la
+      // bóveda cerrada, y esto tiene que funcionar cerrada.
       const body = { op: 'secrets.result', ns, enc: null, ok: true, ts: Date.now() }
-      const { signature } = await identity.signData(body)
-      reply(from, { type: MSG.SECRETS_RESULT, body, signature })
+      reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
     } catch (e) {
       reply(from, { type: MSG.ERROR, error: 'enckey: ' + e.message })
     }
@@ -2157,10 +2158,14 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     } catch (e) { return log('[vault] could not list who to notify:', e.message) }
     if (!targets.length) return
 
+    // FIRMA LA LLAVE DE SELLADO, con el acta al lado (el servicio lo comprueba con
+    // `verifyResponder`). Firmaba la maestra, y con la bóveda cerrada —que es como vive— el
+    // aviso reventaba antes de salir: el servicio no se enteraba de ningún cambio.
     const body = { op: 'secrets.changed', ns, ts: Date.now() }
-    const { signature } = await identity.signData(body)
+    const acta = (await identity.profileActa?.().catch(() => null))?.acta || null
+    const seal = await sealOrFail(body)
     for (const d of targets) {
-      try { client.sendByPubkey(d.sub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
+      try { client.sendByPubkey(d.sub, { type: MSG.SECRETS_CHANGED, body, seal, acta }) } catch (_) {}
     }
     audit('secrets.changed', { ns, notified: targets.length })
     log(`[vault] config for "${ns}" changed: notified ${targets.length} agent(s)`)
@@ -2174,14 +2179,15 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function notifyDeviceChange (pub) {
     let cn = null
+    let record = null
     try {
-      const record = (await identity.profileActa?.().catch(() => null))?.acta
+      record = (await identity.profileActa?.().catch(() => null))?.acta
       cn = (record?.members || []).find((m) => m.pub === pub)?.cn || null
     } catch (e) { return log('[vault] could not look up who to notify:', e.message) }
     if (!cn) return
     const body = { op: 'secrets.changed', ns: cn, ts: Date.now() }
-    const { signature } = await identity.signData(body)
-    try { client.sendByPubkey(pub, { type: MSG.SECRETS_CHANGED, body, signature }) } catch (_) {}
+    const seal = await sealOrFail(body)
+    try { client.sendByPubkey(pub, { type: MSG.SECRETS_CHANGED, body, seal, acta: record }) } catch (_) {}
     const device = await deviceIdOf(pub).catch(() => null)
     audit('secrets.changed', { ns: cn, device, notified: 1 })
     log(`[vault] config for device ${device} ("${cn}") changed: notified it`)
@@ -2235,8 +2241,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function notifyMembers (ev, info = {}) {
     try {
+      // SIN FIRMA, y no falta nada: quien lo usa es el ACTA que viaja al lado, que se
+      // autentica sola (otra bóveda la adopta por `canAdopt`; el teléfono solo refresca y
+      // pregunta). Lo firmaba la maestra, que no firma con la bóveda cerrada: el aviso
+      // reventaba antes de salir y el acta nueva no llegaba a nadie.
       const body = { ev, ...info, ts: Date.now() }
-      const { signature } = await identity.signData(body)
       // EL ACTA VIAJA CON EL AVISO. Sin esto, un miembro se enteraba de que «algo cambió»
       // pero no de QUÉ, y no veía el acta nueva hasta renovar su cert — hasta 30 días.
       // Para un aparato eso era lento; para OTRA BÓVEDA es fatal: se le concede `sella` y
@@ -2274,7 +2283,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         // el perfil cambió puede esperar a que el aparato abra solo; timbrar por él hacía
         // sonar el teléfono con «alguien pide tus claves» sin ningún pedido detrás.
         // El timbre es para los pedidos (`notifyApprovers`), que sí esperan una mano.
-        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, signature, acta }, { quiet: true }) }
+        try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, acta }, { quiet: true }) }
         catch (e) { log(`[vault] could not notify ${pub.slice(0, 24)}… of "${ev}": ${e.message}`) }
       }
       for (const m of miembros) avisar(m.pub)
@@ -3122,8 +3131,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
 
     let done = 0
     for (const gen of pending) {
+      // La llave de sellado firma (el servicio lo comprueba con `verifyResponder`): esto
+      // tiene que funcionar con la bóveda cerrada, y la maestra entonces no firma.
       const body = { op: 'rewrap', owner, gen: gen.gen, wrap: gen.mine, target: targetPub, acta: record, ts: Date.now() }
-      const { signature } = await identity.signData(body)
+      const seal = await sealOrFail(body)
       const answer = new Promise((resolve) => {
         const off = onRewrapOk((d) => {
           if (d.owner !== owner || d.gen !== gen.gen || d.target !== targetPub) return
@@ -3131,7 +3142,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         })
         setTimeout(() => { off(); resolve(null) }, timeoutMs).unref?.()
       })
-      try { client.sendByPubkey(helpers[0].pub, { type: MSG.REWRAP, body, signature }) } catch (e) {
+      try { client.sendByPubkey(helpers[0].pub, { type: MSG.REWRAP, body, seal }) } catch (e) {
         log(`[vault] ${owner}: could not ask for the key to be handed out (${e.message})`)
         continue
       }

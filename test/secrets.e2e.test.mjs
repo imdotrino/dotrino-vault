@@ -322,6 +322,27 @@ test('la bóveda AVISA al agente cuando su configuración cambia (agrupado)', as
   } finally { w.stop() }
 })
 
+test('con la bóveda CERRADA el aviso sale igual: no lo firma la maestra', async () => {
+  // La bóveda vive cerrada. El aviso lo firmaba la maestra, que cerrada no firma: reventaba
+  // con «vault locked» antes de salir, y el servicio no se enteraba de ningún cambio
+  // (2026-09-30, bóveda del VPS). La maestra solo firma el acta y regenera sobres.
+  const { watchSecretsChanges } = await import('../lib/src/service.js')
+  const notices = []
+  const w = await watchSecretsChanges({
+    dir: svcDir, ns: 'proxy', graceMs: 0, minIntervalMs: 0, jitterMs: 0,
+    onChange: (i) => notices.push(i)
+  })
+  const firmar = vault.identity.signData
+  try {
+    await new Promise((r) => setTimeout(r, 4000))
+    notices.length = 0
+    vault.identity.signData = async () => { throw new Error('vault locked: the master key is sealed; unlock the profile to sign') }
+    await vault.setSecret('proxy', 'CERRADA', 'si')
+    await waitFor(() => notices.length > 0, 'el aviso con la bóveda cerrada')
+    assert.equal(notices[0].ns, 'proxy')
+  } finally { vault.identity.signData = firmar; w.stop() }
+})
+
 test('el aviso de otro namespace no le llega a este agente', async () => {
   const { watchSecretsChanges } = await import('../lib/src/service.js')
   const notices = []
