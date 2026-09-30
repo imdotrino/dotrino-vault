@@ -20,7 +20,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey } from '@dotrino/identity/capabilities'
-import { decryptWithKeyring, isCekEnvelope } from '@dotrino/identity/content'
+import { decryptWithKeyring, isCekEnvelope, encryptWithCek, makeContentKey } from '@dotrino/identity/content'
 
 const require = createRequire(import.meta.url)
 const proxyServerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dotrino-proxy', 'server.js')
@@ -114,6 +114,32 @@ test('5. an old envelope that shows up later is resealed when the vault opens', 
   const k1 = vault.threads.methods.listThread({ threadKey: 'eco.keys' })[0]
   assert.equal(k1.key.gen, await genVigente())
   assert.equal(await abre(nuevo, k1.key), 'el-p12')
+})
+
+test('5b. MIGRATION: envelopes stored before the marker (identity < 0.107) are resealed and marked', async () => {
+  // Como salían antes: { gen, iv, ct } a secas, de la generación ACTUAL y de una vieja.
+  const { acta } = await vault.identity.profileActa()
+  const sinMarca = ({ t, ...resto }) => resto
+  const vigenteSinMarca = sinMarca(await vault.identity.sealContent('actual'))
+  const viejoSinMarca = sinMarca(sobreAntes)
+  // Y uno que NO es de la cuenta (otra llave, forma idéntica): no debe bloquear nada.
+  const ajeno = await encryptWithCek({ cek: await makeContentKey(), gen: 7, plaintext: 'ajeno' })
+  vault.threads.methods.importThreads({ threads: { 'app.legacy': [
+    { id: 'l1', ts: 20, a: vigenteSinMarca, b: viejoSinMarca, c: ajeno }
+  ] } })
+  assert.ok(!isCekEnvelope(vigenteSinMarca) && acta.keyring.length >= 2)
+
+  await vault.takeMasterKey()
+  const l1 = vault.threads.methods.listThread({ threadKey: 'app.legacy' })[0]
+  const g = await genVigente()
+  for (const k of ['a', 'b']) {
+    assert.ok(isCekEnvelope(l1[k]), `${k} now carries the marker`)
+    assert.equal(l1[k].gen, g)
+  }
+  assert.equal(await abre(nuevo, l1.a), 'actual')
+  assert.equal(await abre(nuevo, l1.b), 'el-p12', 'the old unmarked one opens on the device that joined later')
+  assert.deepEqual(l1.c, ajeno, 'the foreign envelope is left untouched')
+  assert.ok(l1.ts > 20)
 })
 
 test('6. it survives restarting the vault', async () => {

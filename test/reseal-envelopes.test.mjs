@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { makeGeneration, encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
+import { makeGeneration, sealAccount as encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
 import { openThreadStore } from '../src/threadStore.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'reseal-'))
@@ -37,7 +37,7 @@ test('the vault reseals old-generation envelopes, keeps the old copy and does no
     plaintext: await decryptWithKeyring({ envelope: env, keyring, myPub: boveda.pub, myEncPrivateKey: boveda.priv })
   })
   const r = await store.resealStaleEnvelopes({ gen: 2, reseal })
-  assert.deepEqual(r, { changed: 1, entries: 1 })
+  assert.deepEqual(r, { changed: 1, entries: 1, skipped: 0 })
 
   const [sig, issuer] = store.methods.listThread({ threadKey: 'facturero.settings' })
   assert.equal(sig.envelope.gen, 2)
@@ -55,7 +55,7 @@ test('the vault reseals old-generation envelopes, keeps the old copy and does no
   // Sobrevive a reabrir (va al disco) y no repite trabajo.
   const again = openThreadStore(d)
   assert.equal(again.methods.listThread({ threadKey: 'facturero.settings' })[0].envelope.gen, 2)
-  assert.deepEqual(await again.resealStaleEnvelopes({ gen: 2, reseal }), { changed: 0, entries: 0 })
+  assert.deepEqual(await again.resealStaleEnvelopes({ gen: 2, reseal }), { changed: 0, entries: 0, skipped: 0 })
   fs.rmSync(d, { recursive: true, force: true })
 })
 

@@ -220,15 +220,19 @@ export function openThreadStore (dir) {
    * sirve nada cerrado con ella (dueño, 2026-09-30). Cada entrada que cambia estrena `ts`,
    * para que los aparatos la bajen en su siguiente sincronización.
    *
+   * También MIGRA los sobres de la cuenta anteriores a la marca (`{ gen, iv, ct }` a secas,
+   * identity < 0.107): si abren con la llave de la cuenta se vuelven a cerrar marcados; si no,
+   * no eran de la cuenta y se cuentan en `skipped` sin tocarlos.
+   *
    * La versión anterior NO se tira: queda en `resealed` con la fecha, por si algo sale mal
    * (lo pidió el dueño: «podría retenerlos… pero no los envía»), y se guarda AL MENOS un
    * año (`RESEALED_KEEP_MS`). No se sirve por ningún método.
    *
    * @param {{ gen: number, reseal: (env: object) => Promise<object> }} o
-   * @returns {Promise<{ changed: number, entries: number }>}
+   * @returns {Promise<{ changed: number, entries: number, skipped: number }>}
    */
   async function resealStaleEnvelopes ({ gen, reseal }) {
-    let changed = 0; let entries = 0
+    let changed = 0; let entries = 0; let skipped = 0
     const now = Date.now()
     if (!data.resealed) data.resealed = []
     // Solo sale lo que ya cumplió su año de respaldo.
@@ -238,6 +242,7 @@ export function openThreadStore (dir) {
     for (const [key, arr] of Object.entries(data.threads)) {
       for (let i = 0; i < arr.length; i++) {
         const r = await resealStale(arr[i], { gen, reseal })
+        skipped += r.skipped || 0
         if (!r.changed) continue
         data.resealed.push({ threadKey: key, at: now, gen, before: arr[i] })
         arr[i] = { ...r.value, ts: Math.max(now, (arr[i].ts || 0) + 1) }
@@ -245,7 +250,7 @@ export function openThreadStore (dir) {
       }
     }
     if (entries || podados) save()
-    return { changed, entries }
+    return { changed, entries, skipped }
   }
 
   return { methods, raw: () => data, resealStaleEnvelopes }

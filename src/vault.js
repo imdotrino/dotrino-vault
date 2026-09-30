@@ -134,6 +134,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       audit('resealed', { envelopes: r.changed, entries: r.entries, gen: mine.gen })
       log(`[vault] ${why}: resealed ${r.changed} envelope(s) in ${r.entries} entr${r.entries === 1 ? 'y' : 'ies'} with content key generation ${mine.gen}`)
     }
+    if (r.skipped) log(`[vault] ${why}: ${r.skipped} unmarked envelope(s) that the account key does not open were left as they are`)
     return r
   }
   const approvals = createApprovals()
