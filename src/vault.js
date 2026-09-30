@@ -2080,10 +2080,20 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       needsApproval: async (pub) => needsApproval(pub, await refreshActa()),
       // El teléfono: se apunta el pedido, se le avisa y esta promesa espera su firma.
       // Es el mismo camino que ya recorren los cajones de secretos.
-      approve: async ({ pubkey, op }) => {
+      // EL PEDIDO DICE QUÉ SE QUIERE LEER (dueño, 2026-09-30: «es importante que se sepa el
+      // porqué»). Antes salía como `read` sin contexto, y el teléfono enseñaba «pide tus claves
+      // de passwords · no dice qué está ejecutando», que parece un servicio desconocido cuando
+      // es tu extensión pidiendo una contraseña. Ahora es `kind: 'passwords'` con la operación y
+      // los CAMPOS (`password`, `totp`…) — nunca la entrada ni el sitio, que no se ven aquí.
+      // Va sellado al que aprueba, como el comando de un pedido de claves.
+      approve: async ({ pubkey, op, payload }) => {
         let resolve
         const espera = new Promise((r) => { resolve = r })
-        await awaitApproval({ device: pubkey, ns: 'passwords', kind: 'read', what: 'passwords', op, onAnswer: resolve })
+        const fields = Array.isArray(payload?.keys) ? payload.keys.slice(0, 12).map((k) => String(k).slice(0, 40)) : null
+        await awaitApproval({
+          device: pubkey, ns: 'passwords', kind: 'passwords', what: 'passwords', op,
+          ctx: { op: String(op || '').replace(/^pm2\./, ''), fields }, onAnswer: resolve
+        })
         return espera
       },
       audit,

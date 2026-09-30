@@ -228,6 +228,10 @@ const T = {
     apv_writes: 'quiere guardar variables en',
     apv_update: (v, de) => `La bóveda quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '. Se verifica antes de instalar.',
     apv_keys: 'Variables:',
+    apv_passwords: 'quiere leer una contraseña guardada',
+    apv_fields: 'Campos:',
+    apv_field: { password: 'contraseña', totp: 'código de verificación (2FA)', passkey: 'llave de acceso (passkey)', webauthn: 'llave de acceso (passkey)', notes: 'notas' },
+    apv_passwords_hint: 'Al aprobar una contraseña, ese aparato puede leer contraseñas hasta que la bóveda se reinicie.',
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
@@ -430,6 +434,10 @@ const T = {
     apv_writes: 'wants to save variables in',
     apv_update: (v, from) => `The vault wants to update to ${v}` + (from ? ` (now ${from})` : '') + '. It is verified before installing.',
     apv_keys: 'Variables:',
+    apv_passwords: 'wants to read a saved password',
+    apv_fields: 'Fields:',
+    apv_field: { password: 'password', totp: 'verification code (2FA)', passkey: 'passkey', webauthn: 'passkey', notes: 'notes' },
+    apv_passwords_hint: 'Approving a password lets that device read passwords until the vault restarts.',
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
@@ -1943,6 +1951,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
             <template v-if="p.kind === 'update'">{{ t.apv_update(p.ctx?.version || '?', p.ctx?.from || '') }}</template>
+            <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_passwords }}</template>
             <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
@@ -1952,6 +1961,11 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                quiere guardar. Los nombres llegan sellados, igual que el comando. -->
           <!-- Un pedido de actualización no ejecuta nada: la versión ya va en la línea de arriba. -->
           <template v-if="p.kind === 'update'"></template>
+          <!-- UNA CONTRASEÑA: qué campos se quieren leer. La entrada y el sitio no se ven aquí:
+               van sellados en el almacén y la bóveda no los abre. -->
+          <div v-else-if="p.kind === 'passwords'" class="apvcmd" data-testid="apv-fields">
+            <div v-if="p.ctx?.fields?.length" class="apvline">{{ t.apv_fields }} {{ p.ctx.fields.map((f) => t.apv_field[f] || f).join(', ') }}</div>
+          </div>
           <div v-else-if="p.kind === 'write' && p.ctx" class="apvcmd" data-testid="apv-keys">
             <div class="apvline">{{ t.apv_keys }} <code class="cmd">{{ (p.ctx.keys || []).join(', ') }}</code></div>
           </div>
@@ -1977,6 +1991,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <!-- QUÉ PASA AL APROBAR. Aprobar dejó de ser «esta vez»: es este comando durante una
              hora que se renueva con cada uso. Decirlo aquí, antes de pulsar. -->
         <p v-if="approvals.some((p) => p.kind === 'read' || !p.kind)" class="muted small">{{ t.apv_grant_hint }}</p>
+        <p v-if="approvals.some((p) => p.kind === 'passwords')" class="muted small">{{ t.apv_passwords_hint }}</p>
         <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
              preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
         <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">
