@@ -1447,6 +1447,50 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * Dos operaciones: `store.recipients` (para quién se sella: solo públicas, nada que ocultar)
    * y `store` (los sobres ya hechos; la bóveda no los abre).
    */
+  /**
+   * LA HUELLA DE UN CAJÓN, tal como lo recibiría este aparato: nombres y GENERACIÓN de cada
+   * variable, sin un solo valor. La visibilidad NO entra: taparla no cambia lo que el servicio
+   * lee (y no sube la generación ni avisa). La generación la sube el almacén al
+   * escribir, así que la huella cambia cuando cambia la configuración y no cuando la
+   * bóveda solo rehace envolturas al abrirse. (Una rotación de llaves —al quitar un
+   * aparato— sí la sube: el servicio se reinicia una vez, que es raro y no hace daño.)
+   */
+  function drawerDigest (ns, devicePub) {
+    const b = secrets.bundleFor(ns, devicePub)
+    const filas = Object.entries(b.entries || {})
+      .map(([k, e]) => [k, b.legacy ? nodeCrypto.createHash('sha256').update(String(e.v)).digest('hex') : (e.gen ?? null)])
+      .sort((a, c) => (a[0] < c[0] ? -1 : 1))
+    return nodeCrypto.createHash('sha256').update(JSON.stringify(filas)).digest('hex')
+  }
+
+  /**
+   * ¿CAMBIÓ MI CONFIGURACIÓN? Sin llevarse nada (dueño, 2026-09-30: «revisa que no se pidan
+   * aprobaciones sin motivo»).
+   *
+   * El servicio lo pregunta al reconectarse, por si se perdió un aviso. Antes lo preguntaba
+   * pidiendo el cajón ENTERO —privadas incluidas— para sacarle una huella, y eso es un
+   * pedido de claves: a un servicio que pide aprobación le sonaba el teléfono al dueño en
+   * cada despliegue del proxio, para aprobar algo que no entregaba nada que el servicio no
+   * tuviera ya. La huella no revela nada, así que no se aprueba: quien pregunta tiene que
+   * ser igualmente el servicio de ese cajón (cert + CN del acta).
+   */
+  async function handleDigest (from, p) {
+    const ns = p.data?.ns
+    if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'digest: invalid namespace' })
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      expectedScope: secretsScope(ns), ...(await contextoActa()), revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'digest')
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record || !Acta.memberCanReadSecrets(record, chk.device, ns)) {
+      audit('rejected', { what: 'digest', ns, reason: record ? 'cn' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: `unauthorized: cn — the record does not recognise this member as the "${ns}" service` })
+    }
+    const body = { op: 'secrets.digest', ns, digest: drawerDigest(ns, chk.device), ts: Date.now() }
+    reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
+  }
+
   const storeNonces = new Map()
   async function handleVarStore (from, p) {
     const ns = p.data?.ns
@@ -1513,6 +1557,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // del servicio y su cert, o sea que ya lee ese namespace. No hay escalada.
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
     if (p.data?.op === 'store.recipients' || p.data?.op === 'store') return handleVarStore(from, p)
+    if (p.data?.op === 'digest') return handleDigest(from, p)
     if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
@@ -1636,7 +1681,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
     }
     const enc = await seal({ ek, payload })
-    const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
+    // La huella va con cada entrega: es la referencia con la que el servicio compara después
+    // (`digest`) sin volver a pedir claves.
+    const body = { op: 'secrets.result', ns, enc, digest: drawerDigest(ns, devicePub), ts: Date.now() }
     // LA MAESTRA NO FIRMA ESTO. Su trabajo es sellar el acta y reenvolver sobres; servir
     // no es suyo. Quien firma es la LLAVE DE SELLADO que el acta nombra (`sealPub`), la
     // misma que ya firma cada sobre — y por eso esto se puede servir con el perfil
@@ -1814,7 +1861,10 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    */
   async function notifyApprovers (pend, record) {
     try {
-      const body = { ev: 'approval', id: pend.id, ns: pend.ns, deviceId: pend.deviceId, label: pend.label, exp: pend.exp, ts: Date.now() }
+      // `kind` dice QUÉ se pide (llevarse claves, guardar variables, actualizar…): es lo que la
+      // app necesita para que el aviso diga el porqué sin tener que abrir la lista. Los
+      // detalles (comando, carpeta, nombres) NO van aquí: van sellados en la lista.
+      const body = { ev: 'approval', id: pend.id, ns: pend.ns, kind: pend.kind || 'read', deviceId: pend.deviceId, label: pend.label, exp: pend.exp, ts: Date.now() }
       const seal = await sealOrFail(body)
       const who = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).map((m) => m.pub)
       if (!who.length) log(`[vault] ${pend.ns}: nobody can approve (grant it with: dotrino-vault caps <ID> +aprueba)`)

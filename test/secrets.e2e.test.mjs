@@ -453,17 +453,19 @@ test('el aviso que NO llegó no deja al agente con la configuración vieja: al c
   // mientras el log decía «ignorado» como si estuviera todo bien.
   //
   // Se reproduce sin tocar la red: se le dice al vigía qué configuración tiene en uso
-  // (`applied`) y se cambia el secreto ANTES de que exista — o sea, el aviso salió
+  // (`digest`) y se cambia el secreto ANTES de que exista — o sea, el aviso salió
   // cuando no había nadie escuchando, que es exactamente lo que pasa estando caído.
-  const { watchSecretsChanges } = await import('../lib/src/service.js')
-  const running = await fetchSecretsFrom(svcDir)
+  const { watchSecretsChanges, lastDigestOf, readServiceIdentity } = await import('../lib/src/service.js')
+  await fetchSecretsFrom(svcDir)
+  // La huella del cajón que el agente tiene en uso: es su referencia (antes, el bundle entero).
+  const running = lastDigestOf('proxy', readServiceIdentity(svcDir).device.publickey)
 
   await vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-mientras-no-miraba')
   await new Promise((r) => setTimeout(r, 600))   // el aviso sale y se pierde: no hay vigía
 
   const changes = []
   const w = await watchSecretsChanges({
-    dir: svcDir, ns: 'proxy', applied: running, reconcileMinMs: 0,
+    dir: svcDir, ns: 'proxy', digest: running, reconcileMinMs: 0,
     graceMs: 0, minIntervalMs: 999999, jitterMs: 0,
     onChange: (i) => changes.push(i)
   })
@@ -486,7 +488,7 @@ test('si la configuración es la misma, comparar no reinicia a nadie', async () 
   await new Promise((r) => setTimeout(r, 1500))   // que su aviso llegue ANTES de empezar a contar
   const changes = []
   const w = await watchSecretsChanges({
-    dir: svcDir, ns: 'proxy', applied: await fetchSecretsFrom(svcDir), reconcileMinMs: 0,
+    dir: svcDir, ns: 'proxy', digest: (await fetchSecretsFrom(svcDir), (await import('../lib/src/service.js')).lastDigestOf('proxy', me)), reconcileMinMs: 0,
     graceMs: 0, minIntervalMs: 999999, jitterMs: 0,
     onChange: (i) => changes.push(i)
   })
@@ -548,7 +550,7 @@ test('el proxio arranca SIN variables y las recibe después: eso no es un cambio
     await new Promise((r) => setTimeout(r, 1200))
     assert.deepEqual(changes, [], 'recibir la configuración por primera vez no reinicia a nadie')
     assert.equal(await w.reconcile(), false, 'ni a la segunda, ni a la tercera')
-    // Y `applied` no hace falta cablearlo: `watchEnv` toma como referencia lo último que
+    // Y la referencia no hace falta cablearla: `watchEnv` toma la huella de lo último que
     // pasó por `applyEnv`, así que cualquier agente queda cubierto sin tocar su código.
     await vault.setSecret(ns, 'RELAY_URL', 'wss://dos.example')
     assert.equal(await w.reconcile(), true, 'un cambio de verdad sí')
@@ -561,14 +563,16 @@ test('la comparación no puede volverse un ciclo de reinicios: durante la gracia
   // Con él, como mucho una vez por gracia de arranque — y lo importante: el aviso que
   // cae dentro de la gracia se APLAZA, no se descarta. Descartarlo era justo el defecto
   // que todo esto vino a cerrar.
-  const { watchSecretsChanges } = await import('../lib/src/service.js')
-  const running = await fetchSecretsFrom(svcDir)
+  const { watchSecretsChanges, lastDigestOf, readServiceIdentity } = await import('../lib/src/service.js')
+  await fetchSecretsFrom(svcDir)
+  // La huella del cajón que el agente tiene en uso: es su referencia (antes, el bundle entero).
+  const running = lastDigestOf('proxy', readServiceIdentity(svcDir).device.publickey)
   await vault.setSecret('proxy', 'TURN_KEY_ID', 'rotada-durante-la-gracia')
   await new Promise((r) => setTimeout(r, 600))
 
   const changes = []
   const w = await watchSecretsChanges({
-    dir: svcDir, ns: 'proxy', applied: running, reconcileMinMs: 0,
+    dir: svcDir, ns: 'proxy', digest: running, reconcileMinMs: 0,
     graceMs: 2500, minIntervalMs: 999999, jitterMs: 0,
     onChange: (i) => changes.push(i)
   })
@@ -1060,7 +1064,7 @@ test('un servicio le entrega la llave A LA BÓVEDA y ella se la reparte al que e
   // queda ESCUCHANDO: es lo que le permite atender la petición de reparto.
   const first = await join('service:first')
   await vault.secrets.set(ns, 'TOKEN', 'lo-que-hay-que-repartir')
-  const watcher = await watchSecretsChanges({ dir: first.dir, ns, applied: null, log: () => {} })
+  const watcher = await watchSecretsChanges({ dir: first.dir, ns, log: () => {} })
 
   // El segundo entra DESPUÉS: la generación ya existe y no lo incluía. La bóveda no
   // puede envolvérsela —no tiene la frase—, así que se la pide a su hermano.
@@ -1807,4 +1811,40 @@ test('nadie puede aprobar: se entrega sin aprobación, en el acto, y se anota', 
     assert.ok(Date.now() - t0 < 30000, `tardó ${Date.now() - t0} ms: se está esperando al plazo de la aprobación`)
     assert.equal(sola.listApprovals().length, 0, 'y no se apuntó ningún pedido')
   } finally { try { sola.close() } catch (_) {} }
+})
+
+/**
+ * PREGUNTAR SI CAMBIÓ NO ES PEDIR LAS CLAVES (dueño, 2026-09-30: «revisa que no se pidan
+ * aprobaciones sin motivo»). La comparación al reconectar pedía el cajón entero, y a un
+ * servicio con aprobación le sonaba el teléfono al dueño en cada despliegue del proxio.
+ */
+test('la huella del cajón se pregunta SIN abrir ningún pedido, aunque el servicio necesite aprobación', async () => {
+  const { fetchDigest, readServiceIdentity } = await import('../lib/src/service.js')
+  await conAprobador()
+  const pub = readServiceIdentity(svcDir).device.publickey
+  const m = (await vault.identity.profileActa()).acta.members.find((x) => x.pub === pub)
+  await vault.setCaps(pub, (m.caps || []).filter((c) => c !== 'unattended'))
+  try {
+    assert.equal(await vault.needsApproval(pub), true, 'este servicio pide aprobación para llevarse claves')
+    const antes = vault.listApprovals().length
+    const d1 = await fetchDigest({ dir: svcDir })
+    assert.match(d1, /^[0-9a-f]{64}$/)
+    assert.equal(vault.listApprovals().length, antes, 'ningún pedido nuevo: no suena ningún teléfono')
+    // Y la huella cambia cuando cambia la configuración.
+    await vault.setSecret('proxy', 'HUELLA', 'uno')
+    const d2 = await fetchDigest({ dir: svcDir })
+    assert.notEqual(d2, d1)
+    assert.equal(await fetchDigest({ dir: svcDir }), d2, 'y no cambia si nada cambió')
+    await vault.deleteSecret('proxy', 'HUELLA')
+  } finally {
+    await vault.setCaps(pub, [...new Set([...(m.caps || []), 'unattended'])])
+  }
+})
+
+test('un pedido que nadie contesta se vuelve a pedir cada vez más espaciado (no cada 5 min para siempre)', async () => {
+  const { unansweredDelay } = await import('../lib/src/service.js')
+  const min = 60 * 1000
+  assert.equal(unansweredDelay(0), 0)
+  assert.deepEqual([1, 2, 3, 4].map(unansweredDelay), [5 * min, 10 * min, 20 * min, 40 * min])
+  assert.equal(unansweredDelay(30), 6 * 60 * min, 'con tope de 6 h')
 })
