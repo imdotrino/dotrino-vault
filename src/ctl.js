@@ -140,7 +140,7 @@ function cmdStatus () {
   // corriendo es más viejo que el CLI, avisar (nos mordió 3 veces).
   if (s.version && s.version !== VERSION) {
     console.log('  ⚠ el servicio corre la versión %s (binario instalado: %s).', s.version, VERSION)
-    console.log('    Reinicia para actualizarlo:  %s', RESTART_HINT)
+    console.log('    Si acabas de actualizar, se pone al día solo en uno o dos minutos. Si no:  %s', RESTART_HINT)
   }
   console.log('  fingerprint : %s', s.fingerprint)
   console.log('  proxy       : %s', s.proxy)
@@ -1732,6 +1732,30 @@ async function cmdLogins (rest) {
  * Instalar no reinicia nada a mano: el daemon vigila su propio binario y, al cambiar, se
  * va para que systemd lo levante con el nuevo (`src/selfupdate.js`).
  */
+/**
+ * ESPERA A QUE EL SERVICIO CORRA LA VERSIÓN INSTALADA, y lo dice. El servicio se reinicia
+ * solo cuando ve el binario nuevo (`selfupdate.js`), pero espera a verlo quieto dos minutos
+ * seguidos: decir «se reinicia solo, compruébalo con status» y que `status` contestara un
+ * minuto después «reinicia para actualizarlo» era mandar a hacer a mano lo que ya iba a pasar.
+ */
+async function waitForService (version, { timeoutMs = 4 * 60_000 } = {}) {
+  const s0 = ipcRead(stateFile, null)
+  if (!s0 || !alive(s0.pid)) {
+    console.log('El servicio no está corriendo: arráncalo y ya será la %s.  %s', version, START_HINT)
+    return false
+  }
+  process.stdout.write('El servicio la arranca solo en uno o dos minutos. Esperando… ')
+  const t0 = Date.now()
+  while (Date.now() - t0 < timeoutMs) {
+    const s = ipcRead(stateFile, null)
+    if (s?.version === version && alive(s.pid)) { console.log('✓ ya corre la %s', version); return true }
+    await sleep(3000)
+  }
+  console.log('')
+  console.error('El servicio sigue sin correr la %s después de %d min. Reinícialo:  %s', version, Math.round(timeoutMs / 60000), RESTART_HINT)
+  return false
+}
+
 async function cmdUpdate (args = []) {
   const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease } = await import('./update.js')
   const soloMirar = args.includes('--check')
@@ -1763,7 +1787,8 @@ async function cmdUpdate (args = []) {
       process.exit(1)
     }
     console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
-    console.log('Instalada la %s. El servicio se reinicia solo; compruébalo con:  dotrino-vault status', res.version)
+    console.log('Instalada la %s.', res.version)
+    if (!args.includes('--no-wait')) await waitForService(res.version)
     return
   }
 
@@ -2110,6 +2135,8 @@ function help () {
 
   tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
   status | info       estado del servicio + fingerprint + el id de cada perfil
+  update [--check]   trae la versión nueva (verificando la firma) y espera a que el
+                     servicio la arranque · --check solo mira · --no-wait no espera
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --kms <config.json>
                       el sitio que se cree (--adopt o --new-account) NACE con su clave
@@ -2320,6 +2347,10 @@ async function cmdReplica (args) {
 
 export async function runCtl (argv) {
   const [cmd, ...rest] = takeProfileFlag(argv)
+  // `--help` EN CUALQUIER COMANDO ENSEÑA LA AYUDA Y NO HACE NADA. Ningún subcomando lo miraba,
+  // así que se ejecutaban igual: `pair --help` lanzaba una invitación real y `update --help`
+  // instalaba la versión nueva (2026-10-05). Mirar cómo se usa algo no puede cambiar nada.
+  if (rest.includes('--help') || rest.includes('-h')) return help()
   switch (cmd) {
     case 'tui': return cmdTui()
     case 'profile': return cmdProfile(rest)
