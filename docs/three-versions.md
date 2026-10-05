@@ -31,6 +31,7 @@
 | **Canales del proxio** | solo `list` (`src/sealers.js`), nunca publica | no | no |
 | **Pantalla de aparatos** | a medias: CLI y TUI con permisos, revocar y nombre; **sin lista de aprobaciones ni concesiones** | a medias: permisos solo si es la maestra, y **sin `sealer`, `unattended` ni `replica`** | **no** |
 | **Anunciar la versión (`@dotrino/compat`)** | sí | no (solo enseña la del demonio) | no |
+| **Abrir con llave de seguridad (YubiKey)** | sí (2026-10-05): puertas `fido2` (con toque), `chalresp` (sin toque) y con contraseña (`llaves-de-hardware.md` §2bis) | **no**: el candado no cifra; el camino sería WebAuthn PRF | **no** hay candado |
 | **Límite de intentos** | sí, solo al abrir el perfil: 5 y después espera que se duplica, tope 5 min, se olvida a los 15 | solo al abrir la identidad, sin olvido y sin código de error | no |
 
 ## Lo que importa para el aparato con contraseña

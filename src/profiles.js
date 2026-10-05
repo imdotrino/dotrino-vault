@@ -120,6 +120,99 @@ async function derivePwd (password, saltB64, iter) {
 }
 
 /**
+ * LAS PUERTAS: de qué se saca la llave que abre cada una.
+ *
+ *   · `password`  scrypt(contraseña, salt) — el mismo molino que antes daba `K` directamente.
+ *   · `fido2`     HKDF(hmac-secret de la llave), con toque.
+ *   · `chalresp`  HKDF(respuesta HMAC-SHA1 de la ranura 2), sin toque.
+ *   · las dos de hardware con `withPassword`: HKDF(scrypt(contraseña) ‖ secreto de la llave).
+ *     Hacen falta las DOS cosas.
+ *   · `machine`   la llave de esta máquina — la de un perfil sin candado.
+ *
+ * El `info` de HKDF lleva el tipo: los bytes de una llave no pueden abrir la puerta de otro tipo.
+ */
+const HW_INFO = { fido2: 'dotrino-vault/door/fido2/v1', chalresp: 'dotrino-vault/door/chalresp/v1' }
+const HW_KINDS = Object.keys(HW_INFO)
+
+const scryptKey = (password, saltB64) => crypto2.scryptSync(String(password), Buffer.from(saltB64, 'base64'), SCRYPT.len, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p })
+
+/** La llave de una puerta con lo que se trae, o `null` si falta algo para esa puerta. */
+function doorKey (door, { password = null, secret = null } = {}) {
+  if (door.kind === 'password') return password ? scryptKey(password, door.salt) : null
+  if (!HW_INFO[door.kind] || !secret?.length) return null
+  if (door.withPassword && !password) return null
+  const ikm = door.withPassword ? Buffer.concat([scryptKey(password, door.salt), Buffer.from(secret)]) : Buffer.from(secret)
+  const k = Buffer.from(crypto2.hkdfSync('sha256', ikm, Buffer.alloc(0), HW_INFO[door.kind] + (door.withPassword ? '+password' : ''), 32))
+  ikm.fill(0)
+  return k
+}
+
+const newDoorId = () => crypto2.randomBytes(4).toString('hex')
+const realDoors = (p) => (p.doors || []).filter((d) => d.kind !== 'machine')
+/** Tiene candado: alguna puerta de verdad, o la contraseña de antes de las puertas. */
+const isProtected = (p) => !!p.pwd || realDoors(p).length > 0
+/** Ya tiene llave de perfil (con o sin candado). */
+const hasKey = (p) => !!p.pwd || (p.doors || []).length > 0
+
+function checkPassword (password) {
+  if (!password || String(password).length < PWD_MIN) {
+    throw Object.assign(new Error(`password must be at least ${PWD_MIN} characters: use several random words`),
+      { code: 'PASSWORD_TOO_SHORT', min: PWD_MIN })
+  }
+}
+
+/** Fabrica una puerta: el sobre de `K` y lo que hace falta para volver a pedírselo a la llave. */
+function makeDoor (K, spec = {}, { checkMin = true } = {}) {
+  const kind = spec.kind
+  if (kind !== 'password' && !HW_INFO[kind]) throw Object.assign(new Error('unknown door kind: ' + kind), { code: 'BAD_DOOR' })
+  const withPassword = kind !== 'password' && !!spec.password
+  if ((kind === 'password' || withPassword) && checkMin) checkPassword(spec.password)
+  if ((kind === 'password' || withPassword) && !spec.password) throw Object.assign(new Error('a password is required'), { code: 'BAD_DOOR' })
+  const door = { id: newDoorId(), kind, createdAt: Date.now(), ...(spec.label ? { label: String(spec.label).slice(0, MAX_NAME) } : {}) }
+  if (kind === 'password' || withPassword) door.salt = b64(crypto2.randomBytes(32))
+  if (withPassword) door.withPassword = true
+  if (kind === 'fido2') {
+    if (!spec.credId || !spec.hsalt) throw Object.assign(new Error('a fido2 door needs credId and hsalt'), { code: 'BAD_DOOR' })
+    Object.assign(door, { credId: spec.credId, hsalt: spec.hsalt })
+  }
+  if (kind === 'chalresp') {
+    if (!/^[0-9a-f]{2,126}$/.test(spec.challenge || '')) throw Object.assign(new Error('a chalresp door needs a hex challenge'), { code: 'BAD_DOOR' })
+    Object.assign(door, { challenge: spec.challenge, ...(spec.serial ? { serial: String(spec.serial) } : {}) })
+  }
+  const secret = spec.secret ? Buffer.from(spec.secret) : null
+  if (HW_INFO[kind] && !secret?.length) throw Object.assign(new Error('the key gave nothing to seal the door with'), { code: 'BAD_DOOR' })
+  const k = doorKey(door, { password: spec.password, secret })
+  door.wrapped = encryptText(b64(K), k)
+  // Se comprueba ANTES de guardar: una puerta que no abre es peor que no tenerla.
+  const back = Buffer.from(decryptText(door.wrapped, k), 'base64')
+  k.fill(0)
+  if (!back.equals(Buffer.from(K))) throw Object.assign(new Error('the new door does not open: not saved'), { code: 'BAD_DOOR' })
+  return door
+}
+
+/** Lo que se enseña de una puerta: nada secreto. `credId`/`hsalt`/`challenge` no abren nada sin la llave. */
+const publicDoor = (d) => ({
+  id: d.id, kind: d.kind, createdAt: d.createdAt || null,
+  ...(d.label ? { label: d.label } : {}), ...(d.withPassword ? { withPassword: true } : {}),
+  ...(d.kind === 'fido2' ? { credId: d.credId, hsalt: d.hsalt } : {}),
+  ...(d.kind === 'chalresp' ? { challenge: d.challenge, ...(d.serial ? { serial: d.serial } : {}) } : {})
+})
+const publicDoors = (p) => [
+  ...(p.pwd ? [{ id: 'password', kind: 'password', legacy: true }] : []),
+  ...realDoors(p).map(publicDoor)
+]
+
+/** Las credenciales en su forma: la contraseña sola (texto) se acepta por compatibilidad. */
+function normCreds (c) {
+  if (typeof c === 'string' || c == null) return { password: c || null, door: null, secret: null }
+  return {
+    password: c.password || null,
+    door: c.door || null,
+    secret: c.secret ? (typeof c.secret === 'string' ? Buffer.from(c.secret, 'base64') : Buffer.from(c.secret)) : null
+  }
+}
+
+/**
  * El nombre de la carpeta DE PASO, la que existe solo mientras se acuña la llave.
  *
  * La llave se genera antes de escribirse (`crypto.subtle.generateKey` y luego el kv), pero
@@ -191,12 +284,17 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
    * estando abierta: lo que acota la exposición es el auto-candado, no el olvido.
    */
   const llaves = new Map() // id -> Uint8Array (la llave derivada, solo si está abierto)
+  // La `K` de los perfiles SIN candado que la guardan bajo la llave de la máquina (`openKey`).
+  const porMaquina = new Map()
 
   /** Borra el material de verdad antes de soltar la referencia. */
   const olvidar = (id) => {
     const k = llaves.get(id)
     if (k) { try { k.fill(0) } catch (_) {} }
     llaves.delete(id)
+    const m = porMaquina.get(id)
+    if (m) { try { m.fill(0) } catch (_) {} }
+    porMaquina.delete(id)
   }
 
   /** ¿Sigue abierto? Vence al MIRARLO, así que no hace falta ningún temporizador. */
@@ -222,11 +320,13 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     id: p.id,
     name: p.name || '',
     createdAt: p.createdAt || null,
-    protected: !!p.pwd,
-    locked: !!p.pwd && !isOpen(p.id),
+    protected: isProtected(p),
+    locked: isProtected(p) && !isOpen(p.id),
+    // Con qué se abre: contraseña, YubiKey… Es DATO, y la CLI lo necesita para saber qué pedir.
+    doors: publicDoors(p),
     // Hasta cuándo sigue abierto si nadie lo toca. Es DATO: la consola lo enseña para
     // que el cierre no llegue por sorpresa.
-    ...(p.pwd && isOpen(p.id) && autoLockMs > 0 ? { until: unlocked.get(p.id) } : {}),
+    ...(isProtected(p) && isOpen(p.id) && autoLockMs > 0 ? { until: unlocked.get(p.id) } : {}),
     current: p.id === data.current,
     // Nació para adoptar la cuenta de un aparato (camino A) y todavía no lo ha hecho.
     ...(p.adopt ? { adopt: true } : {})
@@ -265,6 +365,65 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
         { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
     }
     return tries
+  }
+
+  /**
+   * La `K` de un perfil con candado, a partir de lo que se trae. Prueba solo las puertas que
+   * encajan con eso. Cuando nada encaja (una contraseña para un perfil que solo abre con llave)
+   * se dice con su código y NO cuenta como intento: no es adivinar, es equivocarse de puerta.
+   *
+   * La contraseña de ANTES de las puertas (`p.pwd` + `p.kdf`, `K = scrypt(contraseña)`) se sigue
+   * aceptando, y al acertarla se pasa a puerta: es el único momento en que se tiene en la mano.
+   */
+  async function resolveK (p, { password, door, secret }) {
+    const real = realDoors(p)
+    let cands
+    if (door) {
+      const d = real.find((x) => x.id === door)
+      if (!d) throw Object.assign(new Error('that key is not a door of this profile'), { code: 'NO_SUCH_DOOR' })
+      if (d.withPassword && !password) throw Object.assign(new Error('this key also needs the password'), { code: 'NEEDS_PASSWORD' })
+      cands = [d]
+    } else if (password) {
+      cands = real.filter((d) => d.kind === 'password')
+      if (!cands.length && !p.pwd) {
+        throw Object.assign(new Error('this profile does not open with a password alone: use its security key'), { code: 'NEEDS_SECURITY_KEY' })
+      }
+    } else {
+      throw Object.assign(new Error('nothing to open the profile with'), { code: 'NO_CREDENTIALS' })
+    }
+    const tries = frenar(p)
+    let K = null
+    for (const d of cands) {
+      const k = doorKey(d, { password, secret })
+      if (!k) continue
+      try { K = Buffer.from(decryptText(d.wrapped, k), 'base64') } catch (_) { K = null }
+      k.fill(0)
+      if (K?.length === 32) break
+      K = null
+    }
+    let legacy = false
+    if (!K && password && p.pwd && !door) {
+      const proof = p.pwd.v === 2 ? deriveScryptPwd(password, p.pwd.salt) : await derivePwd(password, p.pwd.salt, p.pwd.iter)
+      if (proof === p.pwd.verifier) {
+        if (!p.kdf) p.kdf = { v: 1, salt: b64(crypto.getRandomValues(new Uint8Array(32))) }
+        K = scryptKey(password, p.kdf.salt)
+        legacy = true
+      }
+    }
+    if (!K) {
+      p.tries = { n: tries.n + 1, at: Date.now() }
+      save()
+      throw Object.assign(new Error(door ? 'the key did not open this profile' : 'wrong password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
+    }
+    delete p.tries
+    if (legacy) {
+      // A PUERTA: la misma `K`, ahora en un sobre de la contraseña. El verificador y el salt de
+      // derivación directa se van — de aquí en adelante la contraseña es una puerta más.
+      p.doors = [...real, makeDoor(K, { kind: 'password', password }, { checkMin: false })]
+      delete p.pwd; delete p.kdf
+    }
+    save()
+    return K
   }
 
   const api = {
@@ -500,8 +659,8 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
 
     // ----- candado -----
 
-    isProtected: (id) => !!find(id)?.pwd,
-    isLocked: (id) => { const p = find(id); return !!p?.pwd && !isOpen(id) },
+    isProtected: (id) => { const p = find(id); return !!p && isProtected(p) },
+    isLocked: (id) => { const p = find(id); return !!p && isProtected(p) && !isOpen(id) },
     /** Cuánto dura abierto el candado sin usarse (ms). 0 = no se cierra solo. */
     get autoLockMs () { return autoLockMs },
     /**
@@ -516,55 +675,151 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       return true
     },
     assertUnlocked (id) {
-      if (api.isLocked(id)) throw new Error('profile locked: unlock it with your password (dotrino-vault unlock)')
+      if (api.isLocked(id)) throw Object.assign(new Error('profile locked: unlock it first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
     },
+
+    // ----- LAS PUERTAS (`docs/llaves-de-hardware.md` §2bis) -----
+    //
+    // La llave del perfil (`K`) es UNA y NO CAMBIA: con ella van selladas la maestra, la copia
+    // de recuperación de los secretos y las contraseñas. Lo que cambia son las PUERTAS, y cada
+    // una es un sobre de `K`: contraseña, YubiKey con toque, YubiKey sin toque, o YubiKey MÁS
+    // contraseña. Abre cualquiera. Poner o quitar una puerta no vuelve a sellar nada.
+    //
+    // Antes `K` SALÍA de la contraseña, y cambiarla —o quitarla— cambiaba `K` sin volver a
+    // sellar la maestra: después de reiniciar quedaba cerrada con una llave que ya no existía
+    // (reproducido el 2026-10-05). Con puertas eso no puede pasar.
+
+    /** Las puertas, sin nada secreto: tipo, nombre y lo que hace falta para pedirle a la llave. */
+    doors (id) { return publicDoors(assertExists(id)) },
 
     /**
-     * La llave con la que se abre la copia MAESTRA de los secretos, derivada de la
-     * contraseña del perfil. Va por operación: quien la pide la usa y la suelta.
-     *
-     * Es scrypt (mismo coste que `machineKey`) y NO reusa el verificador del candado:
-     * ese es PBKDF2 y vive en claro en este mismo archivo, así que sería el camino
-     * barato para atacarla. Aquí la prueba de que es correcta es el tag AES-GCM del
-     * propio sobre — si no cuadra, la contraseña no era.
+     * La llave del perfil a partir de credenciales, SIN abrirlo. Abierto, una copia de la que
+     * está en memoria. Pasa por el mismo freno de intentos que abrir.
      */
-    async adminKey (id, password) {
-      const p = find(id)
-      if (!p) throw new Error('profile not found')
-      if (!p.kdf) {
-        p.kdf = { v: 1, salt: b64(crypto.getRandomValues(new Uint8Array(32))) }
-        save()
-      }
-      const salt = Buffer.from(p.kdf.salt, 'base64')
-      return new Uint8Array(crypto2.scryptSync(String(password || ''), salt, SCRYPT.len, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p }))
+    async keyWith (id, creds = {}) {
+      const p = assertExists(id)
+      if (isOpen(id) && llaves.get(id)) return new Uint8Array(llaves.get(id))
+      return new Uint8Array(await resolveK(p, normCreds(creds)))
     },
 
-    async unlock (id, password) {
+    /** Compatibilidad: la llave del perfil con la contraseña. Es `keyWith({ password })`. */
+    async adminKey (id, password) { return api.keyWith(id, { password }) },
+
+    /**
+     * ABRIR. `creds`: la contraseña (texto, por compatibilidad) o `{ password, door, secret }`,
+     * donde `secret` son los bytes que devolvió la llave de hardware para la puerta `door`.
+     */
+    async unlock (id, creds) {
       const p = assertExists(id)
-      if (!p.pwd) { open(id); return { ok: true, locked: false } }
-      const tries = frenar(p)
-      const proof = p.pwd.v === 2
-        ? deriveScryptPwd(password, p.pwd.salt)
-        : await derivePwd(password, p.pwd.salt, p.pwd.iter)
-      if (proof !== p.pwd.verifier) {
-        p.tries = { n: tries.n + 1, at: Date.now() }
-        save()
-        throw Object.assign(new Error('wrong password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
-      }
-      // ASCENSO v1 → v2. Aquí, y solo aquí, se tiene la contraseña correcta en la mano:
-      // es el momento de dejar de guardar el verificador barato. No cambia la
-      // contraseña ni toca los secretos — el `adminKey` sale de `p.kdf`, que es otro.
-      if (p.pwd.v !== 2) {
-        const salt = b64(crypto.getRandomValues(new Uint8Array(16)))
-        p.pwd = { v: 2, salt, verifier: deriveScryptPwd(password, salt) }
-      }
-      delete p.tries
-      save()
+      if (!isProtected(p)) { open(id); return { ok: true, locked: false } }
+      const K = await resolveK(p, normCreds(creds))
       open(id)
       // La llave se queda mientras el candado esté abierto: es lo que permite envolverle
       // su cajón a un servicio que se enrola AHORA, sin volver a pedir la frase.
-      llaves.set(id, await api.adminKey(id, password))
+      llaves.set(id, new Uint8Array(K))
+      K.fill(0)
       return { ok: true, locked: false }
+    },
+
+    /**
+     * La llave del perfil para PONERLE UNA PUERTA. Si el perfil todavía no tiene (nunca tuvo
+     * candado), se estrena una al azar y `fresh` lo dice: quien llama tiene que volver a
+     * sellar con ella lo que estaba bajo la llave de la máquina (`manager.addDoor`).
+     */
+    ensureKey (id, { password = null } = {}) {
+      const p = assertExists(id)
+      if (hasKey(p)) {
+        api.assertUnlocked(id)
+        const K = api.openKey(id)
+        if (!K) throw Object.assign(new Error('the profile key is not in memory: unlock the profile first'), { code: 'PROFILE_LOCKED' })
+        return { K, fresh: false }
+      }
+      // LA DE ANTES, SI QUEDÓ SU SALT. Un perfil al que se le quitó la contraseña antes de las
+      // puertas tiene la maestra sellada con `scrypt(aquella, kdf.salt)`: poniendo la MISMA
+      // contraseña se recupera. Si no era esa, `manager.addDoor` lo ve (la maestra no abre) y
+      // no guarda nada.
+      const K = p.kdf?.salt && password
+        ? new Uint8Array(scryptKey(password, p.kdf.salt))
+        : new Uint8Array(crypto2.randomBytes(32))
+      llaves.set(id, K)
+      open(id)
+      return { K, fresh: true }
+    },
+
+    /** Deshace un `ensureKey` fresco que no llegó a tener puerta. */
+    dropFreshKey (id) {
+      const p = find(id)
+      if (p && !hasKey(p)) { unlocked.delete(id); olvidar(id) }
+    },
+
+    /**
+     * Pone una puerta. `spec`:
+     *   { kind: 'password', password }                        — sustituye a la contraseña que hubiera
+     *   { kind: 'fido2', credId, hsalt, secret, label, password? }
+     *   { kind: 'chalresp', challenge, serial, secret, label, password? }
+     * Con `password` en una de hardware, hacen falta las DOS cosas para abrir por ella.
+     */
+    /**
+     * Fabrica la puerta SIN guardarla: así quien llama comprueba que es válida (contraseña con
+     * el mínimo, llave que devolvió algo) antes de sellar nada con esa llave.
+     */
+    prepareDoor (id, spec) {
+      assertExists(id)
+      const K = api.openKey(id)
+      if (!K) throw Object.assign(new Error('unlock the profile first'), { code: 'PROFILE_LOCKED' })
+      return makeDoor(K, spec)
+    },
+
+    addDoor (id, spec) {
+      const p = assertExists(id)
+      const K = api.openKey(id)
+      if (!K) throw Object.assign(new Error('unlock the profile first'), { code: 'PROFILE_LOCKED' })
+      const door = spec?.prepared || makeDoor(K, spec)
+      let doors = (p.doors || []).filter((d) => d.kind !== 'machine')
+      // UNA contraseña por perfil: poner otra la sustituye, también a la de antes de las puertas.
+      if (door.kind === 'password') { doors = doors.filter((d) => d.kind !== 'password'); delete p.pwd }
+      // El salt de derivación directa solo sirve para recuperar (ver `ensureKey`); con la llave
+      // ya en una puerta, sobra.
+      delete p.kdf
+      p.doors = [...doors, door]
+      delete p.tries
+      save()
+      // Si la llave venía de la de la máquina (perfil sin candado), ahora es la del perfil
+      // ABIERTO: tiene que estar donde la busca `openKey` con el candado puesto.
+      if (!llaves.get(id)) llaves.set(id, new Uint8Array(K))
+      open(id)
+      return publicDoor(door)
+    },
+
+    /**
+     * Quita una puerta (por id) o la contraseña (`'password'`). Si no queda ninguna, el perfil
+     * se queda SIN candado: `K` pasa a guardarse con la llave de esta máquina, igual que el
+     * resto del disco, y se abre sola. Lo sellado con `K` sigue abriendo — no se toca nada.
+     */
+    removeDoor (id, which) {
+      const p = assertExists(id)
+      api.assertUnlocked(id)
+      const K = api.openKey(id)
+      if (!K) throw Object.assign(new Error('unlock the profile first'), { code: 'PROFILE_LOCKED' })
+      const before = realDoors(p).length + (p.pwd ? 1 : 0)
+      if (which === 'password') {
+        p.doors = (p.doors || []).filter((d) => d.kind !== 'password')
+        delete p.pwd; delete p.kdf
+      } else {
+        if (!(p.doors || []).some((d) => d.id === which && d.kind !== 'machine')) {
+          throw Object.assign(new Error('that door does not exist: ' + which), { code: 'NO_SUCH_DOOR' })
+        }
+        p.doors = p.doors.filter((d) => d.id !== which)
+      }
+      const removed = before - realDoors(p).length
+      if (!realDoors(p).length) {
+        p.doors = [{ id: newDoorId(), kind: 'machine', createdAt: Date.now(), wrapped: encryptText(b64(K), Buffer.from(kekFor(dirOf(id)))) }]
+        // Sin candado no hay nada que abrir a distancia.
+        delete p.kdf2
+      }
+      save()
+      open(id)
+      return { removed, protected: isProtected(p) }
     },
 
     // ----- LA SEGUNDA CONTRASEÑA: la del admin (`docs/abrir-a-distancia.md`) -----
@@ -614,7 +869,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      */
     setSecondary (id, derivada) {
       const p = assertExists(id)
-      if (!p.pwd) throw Object.assign(new Error('this profile has no password: there is nothing to open remotely'), { code: 'NO_PASSWORD' })
+      if (!isProtected(p)) throw Object.assign(new Error('this profile has no lock: there is nothing to open remotely'), { code: 'NO_PASSWORD' })
       const llave = api.openKey(id)
       if (!llave) throw Object.assign(new Error('open the profile first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
       if (!(derivada instanceof Uint8Array) || derivada.length !== 32) throw new Error('the admin key must be 32 bytes')
@@ -668,32 +923,37 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * volver a pedir la frase. Cerrado —o nunca abierto— devuelve `null` y quien llame
      * tendrá que pedirla, que es exactamente el comportamiento de antes.
      */
-    openKey (id) { return isOpen(id) ? (llaves.get(id) || null) : null },
-
-    /** Pone o cambia la contraseña. Cambiarla exige haber desbloqueado antes. */
-    async setPassword (id, password) {
-      const p = assertExists(id)
-      api.assertUnlocked(id)
-      if (!password || String(password).length < PWD_MIN) {
-        throw Object.assign(new Error(`password must be at least ${PWD_MIN} characters: use several random words`),
-          { code: 'PASSWORD_TOO_SHORT', min: PWD_MIN })
+    openKey (id) {
+      if (isOpen(id)) return llaves.get(id) || null
+      // SIN CANDADO PERO CON LLAVE: un perfil al que se le quitó la última puerta. Su `K` vive
+      // bajo la llave de la máquina y se abre sola, como el resto del disco.
+      const p = find(id)
+      const m = p && !isProtected(p) ? (p.doors || []).find((d) => d.kind === 'machine') : null
+      if (!m) return null
+      if (!porMaquina.has(id)) {
+        const K = Buffer.from(decryptText(m.wrapped, Buffer.from(kekFor(dirOf(id)))), 'base64')
+        if (K.length !== 32) throw Object.assign(new Error('the profile key under this machine key is malformed'), { code: 'BAD_PROFILE_KEY' })
+        porMaquina.set(id, new Uint8Array(K))
       }
-      const salt = b64(crypto.getRandomValues(new Uint8Array(16)))
-      p.pwd = { v: 2, salt, verifier: deriveScryptPwd(password, salt) }
-      delete p.tries
-      save()
-      open(id)
-      return entry(p)
+      return porMaquina.get(id)
     },
 
+    /**
+     * Pone o cambia la contraseña (la puerta `password`). Atajo de `ensureKey` + `addDoor`: si
+     * el perfil no tenía llave se estrena una, y abrirlo después sella con ella la maestra y la
+     * copia de recuperación (`takeMasterKey`, `migrarRecuperacionALaFrase`). El camino completo,
+     * que vuelve a sellar en el acto, es `manager.addDoor`.
+     */
+    async setPassword (id, password) {
+      const { fresh } = api.ensureKey(id)
+      try { api.addDoor(id, { kind: 'password', password }) } catch (e) { if (fresh) api.dropFreshKey(id); throw e }
+      return entry(find(id))
+    },
+
+    /** Quita la contraseña. Exige el perfil abierto. */
     removePassword (id) {
-      const p = assertExists(id)
-      api.assertUnlocked(id)
-      delete p.pwd
-      delete p.tries
-      save()
-      open(id)
-      return entry(p)
+      api.removeDoor(id, 'password')
+      return entry(find(id))
     }
   }
 

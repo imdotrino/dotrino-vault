@@ -36,6 +36,7 @@ import { createTerm, widthOf } from './term.js'
 import { qrToString } from '../qr.js'
 import { dict, otherLang, loadLang, saveLang } from './i18n.js'
 import * as vc from '../vaultControl.js'
+import * as hw from '../hwkeys.js'
 import { VERSION } from '../version.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
 
@@ -77,8 +78,17 @@ function humanErr (e, st) {
     JOIN_BUSY: t.errJoinBusy,
     APPROVE_FAILED: t.errWrongCode,
     MASTER_WITH_MEMBERS: t.errMasterWithMembers,
-    PROFILE_LOCKED: t.errProfileLocked
+    PROFILE_LOCKED: t.errProfileLocked,
+    NEEDS_SECURITY_KEY: t.errNeedsKey,
+    NEEDS_PASSWORD: t.errNeedsPassword,
+    MASTER_SEALED_ELSEWHERE: t.errMasterSealedElsewhere,
+    HWKEY_NO_DEVICE: t.hwNoDevice,
+    HWKEY_NOT_TOUCHED: t.hwNotTouched,
+    HWKEY_WRONG_KEY: t.hwWrongKey,
+    HWKEY_WRONG_PIN: t.hwWrongPin,
+    HWKEY_PIN_BLOCKED: t.hwPinBlocked
   }
+  if (e?.code === 'HWKEY_TOOLS_MISSING') return t.hwToolsMissing(e.tool, e.pkg)
   return byCode[e?.code] || e?.message || String(e)
 }
 
@@ -957,7 +967,7 @@ async function reunlockSilently (term, st, p, api = vc) {
  * que dura la sesión, no hasta que alguien reinicie el servicio. Lo que ya estaba abierto
  * antes de entrar no se toca — no lo abrió esta pantalla, no le toca cerrarlo.
  */
-async function ensureUnlocked (term, st, p, thenFn, reason = null, api = vc) {
+async function ensureUnlocked (term, st, p, thenFn, reason = null, api = vc, key = undefined) {
   if (!p.protected || !p.locked) return thenFn()
   // Cerrada, pero la contraseña ya se tecleó en esta sesión: se reabre sin molestar.
   if (await reunlockSilently(term, st, p, api)) {
@@ -965,8 +975,34 @@ async function ensureUnlocked (term, st, p, thenFn, reason = null, api = vc) {
     return thenFn(fresh)
   }
   const i = L(st)
+  const fresh = () => (st.profiles?.profiles || []).find((x) => x.id === p.id) || p
+  const hasPassword = (p.doors || []).some((d) => d.kind === 'password')
+  // CON LA LLAVE DE SEGURIDAD, si la bóveda tiene una: se le pide antes que la contraseña.
+  // Una vez por intento (`key === undefined`); si no abre, se cae a la contraseña diciendo
+  // por qué, o se para si la bóveda no tiene contraseña.
+  const doors = hw.hardwareDoors(p)
+  if (key === undefined && doors.length) {
+    key = null
+    st.busy = i.lookingForKey
+    render(term, st)
+    try {
+      key = await hw.secretForDoors(doors, { onTouch: () => { st.busy = i.touchKey; render(term, st) } })
+    } catch (e) { reason = i.keyFailed(humanErr(e, st)) } finally { st.busy = null }
+    if (key && !key.withPassword) {
+      const r = await guard(term, st, i.unlocking, () => api.unlockProfile(p.id, null, { door: key.door, secret: Buffer.from(key.secret).toString('base64') }))
+      key.secret.fill(0)
+      if (r.ok) {
+        st.unlockedHere?.add(p.id)
+        await refreshProfiles(term, st, api)
+        return thenFn(fresh())
+      }
+      reason = humanErr(r.e, st)
+      key = null
+    }
+    if (!key && !hasPassword) { flash(st, reason || i.plugKey, 'danger'); render(term, st); return }
+  }
   setInput(st, {
-    label: i.passwordOf(p.name || p.id),
+    label: key ? i.passwordWithKey(p.name || p.id) : i.passwordOf(p.name || p.id),
     mask: true,
     // Si la anterior fue rechazada, el motivo se queda AQUÍ, pegado al campo, en vez de
     // irse en un aviso de cuatro segundos que se lleva el siguiente redibujado. Eso era lo
@@ -974,15 +1010,18 @@ async function ensureUnlocked (term, st, p, thenFn, reason = null, api = vc) {
     hint: reason || i.passwordToEdit,
     onSubmit: async (pwd) => {
       st.input = null
-      const r = await guard(term, st, i.unlocking, () => api.unlockProfile(p.id, pwd))
+      const extra = key ? { door: key.door, secret: Buffer.from(key.secret).toString('base64') } : null
+      const r = await guard(term, st, i.unlocking, () => api.unlockProfile(p.id, pwd, extra))
       // Rechazada: se vuelve a pedir en el acto, diciendo por qué. Cerrar el campo obligaba
       // a adivinar qué había pasado y a empezar de nuevo.
-      if (!r.ok) return ensureUnlocked(term, st, p, thenFn, humanErr(r.e, st), api)
+      if (!r.ok) return ensureUnlocked(term, st, p, thenFn, humanErr(r.e, st), api, key)
+      if (key) key.secret.fill(0)
       st.unlockedHere?.add(p.id)
-      st.sessionPwd?.set(p.id, pwd) // vale para toda la sesión (ver reunlockSilently)
+      // Solo la contraseña sola se recuerda para reabrir en silencio: la que va con llave
+      // necesita la llave otra vez, que es justo su gracia.
+      if (!key) st.sessionPwd?.set(p.id, pwd) // vale para toda la sesión (ver reunlockSilently)
       await refreshProfiles(term, st, api)
-      const fresh = (st.profiles.profiles || []).find((x) => x.id === p.id) || p
-      await thenFn(fresh)
+      await thenFn(fresh())
     },
     onCancel: () => { st.input = null }
   })

@@ -187,6 +187,60 @@ Por eso el orden es al revés de lo intuitivo:
 La primera fila se lleva casi todo el beneficio con cero riesgo nuevo. Es la que
 hay que construir. La segunda es para quien lo pida a sabiendas.
 
+## 2bis. Las PUERTAS del perfil — nivel 2 CONSTRUIDO en el binario (2026-10-05)
+
+> Pedido por el dueño el 2026-10-05, con una YubiKey enchufada: *«darle al vault
+> compatibilidad para crear perfiles con ella»*, y que un perfil pueda abrir con la
+> contraseña, con la llave, **con cualquiera de las dos o con ambas**. También pidió las dos
+> variantes de la llave: con toque y sin toque.
+
+**Lo que se protege no es la KEK del disco sino el candado del perfil.** La YubiKey abre la
+llave del perfil (`K`), y con `K` van selladas la maestra, la copia de recuperación de los
+secretos y las contraseñas. Por eso un perfil cerrado sigue sirviendo a sus aparatos
+(llave de comunicación) y la llave solo hace falta para **abrir**, que siempre hace una
+persona. Meterla en la KEK obligaría a tocarla en cada arranque del daemon.
+
+**El modelo** (`src/profiles.js`):
+
+- `K` es UNA, aleatoria, y **no cambia nunca**. Cada forma de abrir es una **puerta**: un
+  sobre AES-GCM de `K` en `profiles.json`. Abre cualquiera.
+- Tipos: `password` (scrypt), `fido2` (HKDF del `hmac-secret`, **con toque**: la llave
+  contesta `FIDO_ERR_UP_REQUIRED` sin él), `chalresp` (HKDF de la respuesta HMAC-SHA1 de la
+  ranura OTP 2, **sin toque**), y cualquiera de hardware con `withPassword`: HKDF(scrypt ‖
+  secreto), hacen falta las dos. El `info` del HKDF lleva el tipo.
+- `machine`: el perfil sin candado guarda `K` bajo la llave de la máquina. Es lo que queda
+  al quitar la última puerta, y por eso **quitar la contraseña ya no vuelve a sellar nada**.
+- Los perfiles de antes (`K = scrypt(contraseña, kdf.salt)`) se pasan a puerta al abrirlos
+  con la contraseña, con la misma `K`.
+
+**El fallo que esto cierra.** Antes `K` salía de la contraseña. `password-rm` y cambiar la
+contraseña volvían a sellar los secretos pero **no la maestra**: tras reiniciar quedaba
+sellada con una `K` que ya no existía y el perfil no podía volver a firmar el acta.
+Reproducido el 2026-10-05 y cubierto por `test/puertas.e2e.test.mjs`. Un perfil al que ya le
+pasó se recupera poniendo **la misma contraseña de antes** (`profile password`), porque
+`kdf.salt` sigue en el registro. Y la primera puerta de un perfil sin llave **comprueba antes
+de guardarse que la maestra abre** con esa llave: si no, se para con `MASTER_SEALED_ELSEWHERE`
+y no guarda nada, en vez de dejar un candado que no abre la maestra.
+
+**Quién habla con la llave: la CLI y la TUI, nunca el daemon** (`src/hwkeys.js`). La llave
+pide toque (y quizá PIN) a quien está en la terminal. Al daemon solo le llegan los bytes de
+la llave, por el mismo camino que la contraseña. Sin módulos nativos: se llama a
+`fido2-token`/`fido2-cred`/`fido2-assert` (libfido2) y a `ykinfo`/`ykchalresp`/`ykpersonalize`
+(yubikey-personalization). Dónde buscarlos: `DOTRINO_HWKEY_BIN`, y si no, el PATH.
+
+**Sin toque no es «se abre sola».** La puerta `chalresp` abre `unlock` sin tocar nada, pero
+el daemon **no** la usa por su cuenta al arrancar: eso dejaría la maestra disponible para
+algo desatendido, y la maestra cerrada no firma nada (regla dura del 2026-08-31).
+
+**Comprobado con una YubiKey 5 (firmware 5.7.4)**: alta con dos toques, abrir con uno,
+programar la ranura 2 y abrir sin tocar (1,2 s).
+
+**Pendiente:** la pestaña y la extensión. Hoy no tienen candado que cifre
+(`three-versions.md`), así que no hay dónde enchufar una puerta. Cuando lo tengan, la llave
+entra por la extensión **PRF** de WebAuthn, que es el mismo `hmac-secret`. Una credencial
+creada por el binario (`rpId = dotrino-vault`) **no** la puede usar un navegador, porque su
+`rpId` es un dominio. Habrá que registrar la llave una vez en cada sitio.
+
 ## 3. La escalera, por coste
 
 ### Nivel 0 — La contraseña del perfil (ya está el parámetro, nadie lo pasa)
@@ -361,7 +415,7 @@ el proveedor de KEK puesto, cada uno es un módulo de cien líneas que se enchuf
 1. ~~**La costura**: proveedor de KEK (`wrap`/`unwrap`).~~ **HECHO** (§0), con
    `machine` y `command` funcionando y 12 pruebas.
 2. **Nivel 5** (teléfono, StrongBox) — casi gratis, la app ya está.
-3. **Nivel 2** (FIDO2/PRF) para el PC del dueño — el salto grande.
+3. ~~**Nivel 2** (FIDO2/PRF) para el PC del dueño~~ **HECHO en el binario** (§2bis), como puerta del candado y no como KEK; falta la pestaña/extensión.
 4. **Nivel 3** (TPM sin PCR) **u OpenBao autohospedado** para el VPS del vault —
    cierra la instantánea del disco, que es el riesgo documentado y real.
 5. **Nivel 6 con el KMS del cliente**, cuando lo pida un comprador de Enterprise.

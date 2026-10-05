@@ -389,19 +389,6 @@ export async function runDaemon () {
    * 0700 del vault y se BORRA al consumirla — mismo camino que ya usan los
    * secretos, y así nunca pasa por `ps` ni por el historial de la shell.
    */
-  /**
-   * Vuelve a cerrar la copia maestra de los secretos con otra llave. Se llama al poner
-   * o quitar la contraseña del perfil: los sobres de las variables NO se tocan (siguen
-   * sellados a la llave de cada aparato), solo cambia con qué se abre el llavero de
-   * administración. Sin esto, cambiar la contraseña dejaría los secretos ilegibles.
-   */
-  async function rekey (id, vieja, nueva) {
-    const v = mgr.get(id)
-    if (!v?.rekeySecrets) return
-    const r = await v.rekeySecrets(vieja, nueva)
-    // Se re-sella UNA copia (la de recuperación, que abre el llavero), no cajón por cajón.
-    if (r?.rekeyed) console.log('[vault] secrets recovery copy re-sealed under the new key')
-  }
 
   /**
    * BORRA la llave derivada en cuanto se usó. Es lo único de la contraseña que se puede
@@ -484,11 +471,14 @@ export async function runDaemon () {
       // paga; el dueño no tiene que acordarse de un comando aparte.
       case 'unlock': {
         const id = ref()
-        await mgr.unlock(id, req.password)   // por el manager: mueve la maestra a memoria y la sella
+        // Con cualquier puerta: la contraseña, los bytes que dio la YubiKey (`door` + `secret`,
+        // en base64), o las dos cosas si la puerta pide ambas.
+        await mgr.unlock(id, { password: req.password || null, door: req.door || null, secret: req.secret || null })
         let note = ''
         let ak = null
         try {
-          ak = await mgr.profiles.adminKey(id, req.password)
+          // Una COPIA: `wipe` pisa lo que se le pase, y la de memoria tiene que quedarse.
+          ak = new Uint8Array(mgr.profiles.openKey(id))
           // REHACER el llavero, no solo saldar: con la frase delante se puede dejar cada
           // cajón envuelto para exactamente quien dice el acta — creando lo que falta,
           // reemplazando lo que alguien metiera mal y quitando lo que sobre.
@@ -536,26 +526,47 @@ export async function runDaemon () {
       // abrirse con la frase. Hay que volver a cerrar la copia maestra con la nueva, o
       // quedarían ilegibles. Si el perfil YA tenía contraseña, hace falta la vieja para
       // poder abrirla: por eso el camino normal para cambiarla es quitarla y ponerla.
+      // LA CONTRASEÑA ES UNA PUERTA (`profiles.js`). Ponerla o cambiarla no vuelve a sellar nada:
+      // la llave del perfil es la misma, solo cambia el sobre. Si el perfil no tenía candado,
+      // `addDoor` estrena la llave y sella con ella lo que estaba bajo la de la máquina.
       case 'password-set': {
         const id = ref()
-        const tenia = !!mgr.profiles.get(id)?.protected
-        if (tenia && !req.current) throw new Error('this profile already has a password: remove it first (`profile password --rm`) and then set the new one')
-        const vieja = tenia ? await mgr.profiles.adminKey(id, req.current) : null
-        await mgr.profiles.setPassword(id, req.password)
-        const nueva = await mgr.profiles.adminKey(id, req.password)
-        try { await rekey(id, vieja, nueva) } finally { wipe(vieja); wipe(nueva) }
+        if (mgr.profiles.isLocked(id)) {
+          if (!req.current) throw Object.assign(new Error('the profile is locked: unlock it first, or give the current password'), { code: 'PROFILE_LOCKED' })
+          await mgr.unlock(id, { password: req.current })
+        }
+        await mgr.addDoor(id, { kind: 'password', password: req.password })
         return { done: 'contraseña guardada' }
       }
-      // QUITARLA: al revés. Se abre la copia maestra con la frase y se vuelve a cerrar
-      // con la llave de la máquina, que es la protección de siempre — el disco sigue
-      // cifrado, pero su material vive en ese mismo disco.
+      // QUITARLA. Si era la última puerta, el perfil se queda sin candado: su llave pasa a
+      // guardarse con la de esta máquina y se abre sola — lo sellado con ella sigue abriendo.
       case 'password-rm': {
         const id = ref()
-        if (!req.password) throw new Error('removing the password needs the current one: the secrets must be re-sealed before it goes')
-        const vieja = await mgr.profiles.adminKey(id, req.password)
-        try { await rekey(id, vieja, null) } finally { wipe(vieja) }
-        mgr.profiles.removePassword(id)
-        return { done: 'contraseña quitada · los secretos ahora se abren con la llave de esta máquina' }
+        if (mgr.profiles.isLocked(id)) {
+          if (!req.password) throw Object.assign(new Error('the profile is locked: unlock it first, or give the current password'), { code: 'PROFILE_LOCKED' })
+          await mgr.unlock(id, { password: req.password })
+        }
+        const r = await mgr.removeDoor(id, 'password')
+        return { done: r.protected ? 'contraseña quitada · el perfil sigue cerrándose con su llave de seguridad' : 'contraseña quitada · el perfil ya no tiene candado: se abre con la llave de esta máquina' }
+      }
+      // LLAVES DE SEGURIDAD (YubiKey). Quien habla con la llave es la CLI; aquí llegan la
+      // credencial o el reto, y los bytes que devolvió — nunca un secreto que la abra sin ella.
+      case 'door-add': {
+        const id = ref()
+        const spec = req.spec || {}
+        if (spec.kind !== 'fido2' && spec.kind !== 'chalresp') throw Object.assign(new Error('door-add is for security keys; the password uses password-set'), { code: 'BAD_DOOR' })
+        const door = await mgr.addDoor(id, {
+          kind: spec.kind, label: spec.label || '', password: spec.password || null,
+          credId: spec.credId, hsalt: spec.hsalt, challenge: spec.challenge, serial: spec.serial,
+          secret: spec.secret ? Buffer.from(spec.secret, 'base64') : null
+        })
+        return { done: `llave de seguridad añadida (${door.id})`, door }
+      }
+      case 'door-rm': {
+        const id = ref()
+        if (!req.door) throw Object.assign(new Error('which door? (dotrino-vault profile key ls)'), { code: 'NO_SUCH_DOOR' })
+        const r = await mgr.removeDoor(id, req.door)
+        return { done: r.protected ? 'llave de seguridad quitada' : 'llave de seguridad quitada · el perfil ya no tiene candado: se abre con la llave de esta máquina' }
       }
       // ----- LA CONTRASEÑA DEL ADMIN (`docs/abrir-a-distancia.md`) -----
       //

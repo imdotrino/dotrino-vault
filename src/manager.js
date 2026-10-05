@@ -13,7 +13,7 @@ import { openProfiles } from './profiles.js'
 import { installNodeGlobals } from './node-globals.js'
 import { dataDir, ensureDir } from './paths.js'
 import { Identity } from '@dotrino/identity/node'
-import { atRestFor } from './atrest.js'
+import { atRestFor, kekFor } from './atrest.js'
 
 /**
  * D12 (`docs/acta-de-perfil.md`): la bóveda **no** borra una cuenta que ella manda si
@@ -169,8 +169,8 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
    * dice «abierto» sin estarlo es peor que uno cerrado, porque todo lo que venga detrás
    * falla en otro sitio y por otro motivo.
    */
-  async function unlock (id, password) {
-    const r = await profiles.unlock(id, password)
+  async function unlock (id, creds) {
+    const r = await profiles.unlock(id, creds)
     try {
       // El orden importa: `profiles.unlock` ya dejó la llave del perfil disponible
       // (`openKey`), así que ahora `startVault` sí puede abrir su maestra.
@@ -184,6 +184,52 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       throw new Error(`unlocked the profile but could not open it, so it stays closed: ${e.message}`)
     }
     return r
+  }
+
+  /**
+   * PONER UNA PUERTA (contraseña o llave de hardware), sellando en el acto.
+   *
+   * Si el perfil no tenía llave —nunca tuvo candado—, `ensureKey` estrena una, y lo que hasta
+   * ahora estaba bajo la llave de la máquina pasa a ella: la copia de recuperación de los
+   * secretos y la maestra. El orden importa: primero la puerta (guardada), después volver a
+   * sellar. Al revés, un fallo entre medias dejaría la maestra sellada con una llave sin
+   * ninguna puerta que la abra, que es justo el fallo que las puertas vienen a quitar.
+   */
+  async function addDoor (id, spec) {
+    const { K, fresh } = profiles.ensureKey(id, { password: spec.kind === 'password' ? spec.password : null })
+    // La puerta se fabrica (y se valida) ANTES de sellar nada con esta llave: si fallara
+    // después de sellar la maestra, quedaría sellada con una llave que se tira.
+    let prepared
+    try { prepared = profiles.prepareDoor(id, spec) } catch (e) { if (fresh) profiles.dropFreshKey(id); throw e }
+    let v = null
+    if (fresh) {
+      // ANTES DE GUARDAR NADA: la maestra tiene que abrir con esta llave. Si estaba sellada con
+      // otra (un perfil al que se le quitó la contraseña antes de las puertas), una puerta nueva
+      // daría un candado que no abre la maestra. Se para y se dice cómo recuperarla.
+      try {
+        v = running.get(id) || await open(id)
+        const r = await v.takeMasterKey()
+        if (r?.locked !== false) throw Object.assign(new Error('the master key is sealed with an earlier password: set that same password to recover it'), { code: 'MASTER_SEALED_ELSEWHERE' })
+      } catch (e) { profiles.dropFreshKey(id); throw e }
+    }
+    let door
+    try { door = profiles.addDoor(id, { prepared }) } catch (e) { if (fresh) profiles.dropFreshKey(id); throw e }
+    if (fresh) {
+      const maquina = new Uint8Array(kekFor(profiles.dirOf(id)))
+      try {
+        const r = await v.rekeySecrets?.(maquina, K)
+        if (r?.rekeyed) log('[vault] secrets recovery copy moved from the machine key to the profile key')
+      } catch (e) {
+        // No se arrastra: abrir el perfil vuelve a intentarlo (`migrarRecuperacionALaFrase`).
+        log('[vault] could not move the recovery copy to the profile key (it will be retried on unlock): %s', e.message)
+      } finally { maquina.fill(0) }
+    }
+    return door
+  }
+
+  /** Quitar una puerta (por id, o `'password'`). Sin la última, el perfil queda sin candado. */
+  async function removeDoor (id, which) {
+    return profiles.removeDoor(id, which)
   }
 
   async function lock (id) {
@@ -207,6 +253,8 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     // dentro y fuera de la memoria. Llamar a `profiles.lock` a secas deja la llave puesta.
     unlock,
     lock,
+    addDoor,
+    removeDoor,
     running,
     get,
     list: () => profiles.list(),

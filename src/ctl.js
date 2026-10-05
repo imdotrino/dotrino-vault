@@ -37,6 +37,7 @@ import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
 import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
 import { VERSION } from './version.js'
+import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
 
 const dir = dataDir()
@@ -163,7 +164,7 @@ function cmdStatus () {
 
 /** Una línea por perfil: nombre, id, huella y estado del candado. */
 function describeProfile (p) {
-  const lock = !p.protected ? 'sin contraseña' : (p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado')
+  const lock = !p.protected ? 'sin candado' : `${p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado'} · ${doorsSummary(p)}`
   // ALCANZABLE, Y SE DICE AQUÍ. Una bóveda puede estar corriendo y fuera de la red —si el
   // proxio le rechazó el `identify`, nadie la alcanza por su pubkey— y desde fuera eso se ve
   // igual que «no hay nada que aprobar»: el teléfono no timbra y no hay nada que mirar.
@@ -171,6 +172,16 @@ function describeProfile (p) {
   // dato está y dice que no.
   const red = p.online === false ? `  ${B}⚠ sin proxio (nadie puede alcanzarla)${Z}` : ''
   return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}${red}`
+}
+
+/** Con qué se abre un perfil, dicho corto: «contraseña o YubiKey (toque)». */
+function doorsSummary (p) {
+  const names = (p.doors || []).map(doorName)
+  return names.length ? names.join(' o ') : 'contraseña'
+}
+function doorName (d) {
+  const base = d.kind === 'password' ? 'contraseña' : d.kind === 'fido2' ? 'llave (toque)' : d.kind === 'chalresp' ? 'llave (sin toque)' : d.kind
+  return d.withPassword ? `${base} + contraseña` : base
 }
 
 function showChallenge (pe) {
@@ -1800,6 +1811,13 @@ function reportProfiles (d) {
     // resto se reenvía tal cual (son diagnósticos del servicio).
     if (d.code === 'WRONG_PASSWORD') console.error('Contraseña incorrecta%s.', d.tries ? ` — van ${d.tries} intentos fallidos` : '')
     else if (d.code === 'TOO_MANY_TRIES') console.error('Demasiados intentos: espera %s s antes de volver a probar.', d.waitSec || '?')
+    else if (d.code === 'NEEDS_SECURITY_KEY') console.error('Este perfil no se abre solo con contraseña: enchufa su llave de seguridad.')
+    else if (d.code === 'NEEDS_PASSWORD') console.error('Esa llave pide también la contraseña.')
+    else if (d.code === 'PASSWORD_TOO_SHORT') console.error('La contraseña necesita al menos %s caracteres: usa varias palabras al azar.', d.min || 12)
+    else if (d.code === 'MASTER_SEALED_ELSEWHERE') {
+      console.error('La llave maestra de este perfil quedó cerrada con una contraseña ANTERIOR (al quitarla, una versión vieja no la volvió a cerrar).')
+      console.error('Pon esa misma contraseña para recuperarla:  dotrino-vault profile password')
+    }
     else console.error('%s', d.error)
     process.exit(1)
   }
@@ -1815,7 +1833,9 @@ async function cmdProfile (rest) {
   const kmsAt = rawArgs.indexOf('--kms')
   const kmsFile = kmsAt !== -1 ? rawArgs[kmsAt + 1] : null
   const args = kmsAt !== -1 ? rawArgs.filter((_, i) => i !== kmsAt && i !== kmsAt + 1) : rawArgs
-  const name = args.join(' ').trim()
+  // Las banderas de la llave tampoco son parte del nombre (`profile add trabajo --key`).
+  const KEY_FLAGS = ['--key', '--no-touch', '--with-password']
+  const name = args.filter((a) => !KEY_FLAGS.includes(a)).join(' ').trim()
   switch (sub || 'ls') {
     case 'ls': {
       const d = await profileRequest('list')
@@ -1826,7 +1846,7 @@ async function cmdProfile (rest) {
       return
     }
     case 'add': {
-      if (!name) { console.error('uso: dotrino-vault profile add <nombre> [--kms <config.json>]'); process.exit(2) }
+      if (!name) { console.error('uso: dotrino-vault profile add <nombre> [--kms <config.json>] [--key [--no-touch] [--with-password]]'); process.exit(2) }
       // NACER con el KMS es la única forma de que la maestra no haya existido nunca bajo
       // la clave de esta máquina. Migrar después no da lo mismo y no se ofrece como si
       // lo diera (ver el freno de `atrest rekey`).
@@ -1843,7 +1863,14 @@ async function cmdProfile (rest) {
           console.error('No se creó ningún perfil.'); process.exit(1)
         }
       }
-      reportProfiles(await profileRequest('add', { name, ...(kek ? { kek } : {}) }))
+      const creado = reportProfiles(await profileRequest('add', { name, ...(kek ? { kek } : {}) }))
+      // CON LA LLAVE DESDE EL PRINCIPIO: el perfil nace sin candado y se le pone la puerta en
+      // el acto, así que su maestra solo pasa un instante bajo la llave de la máquina.
+      if (args.includes('--key')) {
+        PROFILE = creado.id
+        console.log('')
+        await cmdProfileKey(['add', ...args.filter((a) => a === '--no-touch' || a === '--with-password')])
+      }
       console.log('Conecta un dispositivo a este perfil:  dotrino-vault pair --profile "%s"', name)
       return
     }
@@ -1906,6 +1933,7 @@ async function cmdProfile (rest) {
       reportProfiles(await profileRequest('password-set', { password: pwd, current: actual || undefined }))
       return
     }
+    case 'key': return cmdProfileKey(args)
     // LA CONTRASEÑA DEL ADMIN. Otra, distinta, que solo sirve desde el admin remoto — aquí
     // no abre nada. Pantalla administrativa: dice qué hace y qué no, y ya (§5.1).
     case 'admin-password': {
@@ -1927,7 +1955,7 @@ async function cmdProfile (rest) {
       return
     }
     default:
-      console.error('uso: dotrino-vault profile {ls|add|rename|use|rm|password|admin-password}'); process.exit(2)
+      console.error('uso: dotrino-vault profile {ls|add|rename|use|rm|password|key|admin-password}'); process.exit(2)
   }
 }
 
@@ -1940,15 +1968,125 @@ function askText (prompt) {
   })
 }
 
-async function cmdUnlock () {
-  const pwd = await askPassword('Contraseña del perfil: ')
+/** La entrada del perfil al que apunta la orden: el de `--profile`, o el activo. */
+async function targetProfile () {
+  const d = await profileRequest('list')
+  const all = d.profiles || []
+  if (!PROFILE) return all.find((p) => p.current) || null
+  const n = String(PROFILE).toLowerCase()
+  return all.find((p) => p.id === PROFILE) || all.find((p) => (p.name || '').toLowerCase() === n) ||
+    all.find((p) => p.id.toLowerCase().startsWith(n)) || null
+}
+
+const hwDoors = hw.hardwareDoors
+const b64s = (u8) => Buffer.from(u8).toString('base64')
+
+/** Los fallos de la llave, en palabras de quien la tiene en la mano. */
+function hwReason (e) {
+  switch (e.code) {
+    case 'HWKEY_TOOLS_MISSING': return `falta ${e.tool} (instala el paquete ${e.pkg})`
+    case 'HWKEY_NO_DEVICE': return 'no hay ninguna llave enchufada'
+    case 'HWKEY_NOT_TOUCHED': return 'no se tocó la llave a tiempo'
+    case 'HWKEY_WRONG_KEY': return 'esta llave no es la de este perfil'
+    case 'HWKEY_WRONG_PIN': return 'el PIN de la llave no es ese'
+    case 'HWKEY_PIN_BLOCKED': return 'el PIN de la llave está bloqueado'
+    case 'HWKEY_SLOT_BUSY': return 'la ranura 2 de la llave ya está programada'
+    default: return e.message
+  }
+}
+
+async function cmdUnlock (args = []) {
+  const p = await targetProfile()
+  const doors = hwDoors(p)
+  const hasPassword = (p?.doors || []).some((d) => d.kind === 'password')
+  let creds = null
+  // CON LA LLAVE si el perfil tiene una y está enchufada; `--password` se la salta.
+  if (doors.length && !args.includes('--password')) {
+    try { creds = await hw.secretForDoors(doors, { onTouch: () => console.log('Toca la llave de seguridad…') }) } catch (e) { console.error('La llave de seguridad no abrió el perfil: %s.', hwReason(e)) }
+    if (!creds && !hasPassword) {
+      console.error('Este perfil se abre con su llave de seguridad. Enchúfala y vuelve a intentarlo.')
+      process.exit(1)
+    }
+  }
+  const password = !creds || creds.withPassword
+    ? await askPassword(creds ? 'Contraseña (esta llave pide también la contraseña): ' : 'Contraseña del perfil: ')
+    : null
   // El daemon devuelve cuánto aguanta abierto: se dice AQUÍ, al abrirlo, que es cuando
   // sirve de algo. Encontrárselo cerrado sin haberlo leído nunca parece una avería.
-  const out = await profileRequest('unlock', { password: pwd })
+  const out = await profileRequest('unlock', { password, ...(creds ? { door: creds.door, secret: b64s(creds.secret) } : {}) })
+  if (creds) creds.secret.fill(0)
   reportProfiles(out)
   const min = Math.max(1, Math.round((out?.autoLockMs || 5 * 60 * 1000) / 60000))
   console.log(`Ya puedes editar el perfil. Se vuelve a bloquear solo tras ${min} min sin usarse` +
     ' (o al reiniciar el servicio, o con: dotrino-vault lock).')
+}
+
+/**
+ * Da de alta la llave como puerta: la credencial FIDO2 (dos toques) o la ranura 2 programada
+ * para reto-respuesta sin toque. Devuelve lo que el daemon necesita para sellar la puerta.
+ */
+async function enrollHwKey ({ noTouch = false, label = '', overwrite = false } = {}) {
+  if (noTouch) {
+    const serial = await hw.ykSerial()
+    if (!serial) throw Object.assign(new Error('no key'), { code: 'HWKEY_NO_DEVICE' })
+    if (!overwrite && await hw.ykSlot2Busy()) {
+      console.error('La ranura 2 de la YubiKey %s ya está programada. Programarla otra vez BORRA lo que tenga.', serial)
+      console.error('Si estás seguro:  dotrino-vault profile key add --no-touch --overwrite-slot')
+      process.exit(1)
+    }
+    console.log('Programando la ranura 2 de la YubiKey %s: reto-respuesta, sin toque…', serial)
+    await hw.ykProgramSlot2({ overwrite })
+    const challenge = hw.newChallenge()
+    const secret = await hw.ykChallenge({ challenge })
+    return { kind: 'chalresp', challenge, serial, secret, label: label || `YubiKey ${serial}` }
+  }
+  console.log('Toca la llave de seguridad (1 de 2)…')
+  const { credId, device } = await hw.fido2MakeCredential({ label: label || 'dotrino-vault' })
+  const hsalt = hw.newHsalt()
+  console.log('Toca la llave otra vez (2 de 2)…')
+  const secret = await hw.fido2Secret({ credId, hsalt })
+  return { kind: 'fido2', credId, hsalt, secret, label: label || device || 'llave de seguridad' }
+}
+
+/** `profile key add|ls|rm`: las llaves de seguridad con que se abre el perfil. */
+async function cmdProfileKey (args) {
+  const [action = 'ls', ...rest] = args
+  const flag = (f) => rest.includes(f)
+  const at = rest.indexOf('--label')
+  const label = at !== -1 ? (rest[at + 1] || '') : ''
+  const p = await targetProfile()
+  if (!p) { console.error('el perfil no existe: %s', PROFILE); process.exit(1) }
+  if (action === 'ls') {
+    console.log('%s se abre con: %s', p.name || p.id, p.protected ? doorsSummary(p) : 'nada (sin candado)')
+    for (const d of hwDoors(p)) {
+      console.log('  %s  %s  %s%s', d.id, doorName(d), d.label || '', d.createdAt ? `  (${new Date(d.createdAt).toISOString().slice(0, 10)})` : '')
+    }
+    return
+  }
+  if (action === 'rm') {
+    if (!rest[0]) { console.error('uso: dotrino-vault profile key rm <id>   (los ids salen en: profile key ls)'); process.exit(2) }
+    reportProfiles(await profileRequest('door-rm', { door: rest[0] }))
+    return
+  }
+  if (action !== 'add') { console.error('uso: dotrino-vault profile key {ls|add|rm}'); process.exit(2) }
+  if (p.locked) { console.error('El perfil está bloqueado. Ábrelo primero:  dotrino-vault unlock'); process.exit(1) }
+  let spec
+  try { spec = await enrollHwKey({ noTouch: flag('--no-touch'), label, overwrite: flag('--overwrite-slot') }) } catch (e) {
+    console.error('No se pudo dar de alta la llave: %s.', hwReason(e)); process.exit(1)
+  }
+  if (flag('--with-password')) {
+    console.log('\nEsta llave abrirá el perfil SOLO junto con una contraseña (mínimo 12 caracteres).')
+    const pwd = await askPassword('Contraseña para esta llave: ')
+    if (pwd !== await askPassword('Repítela: ')) { console.error('Las contraseñas no coinciden.'); process.exit(1) }
+    spec.password = pwd
+  }
+  const out = await profileRequest('door-add', { spec: { ...spec, secret: b64s(spec.secret) } })
+  spec.secret.fill(0)
+  reportProfiles(out)
+  const tiene = (out.profiles || []).find((x) => x.id === p.id)
+  if (tiene) console.log('Ahora se abre con: %s', doorsSummary(tiene))
+  if (spec.kind === 'chalresp') console.log('Sin toque: con la llave enchufada, cualquier programa de esta máquina puede abrirlo. Desenchúfala cuando no la uses.')
+  console.log('Registra una segunda llave de repuesto, o deja también una contraseña: perder la única puerta es perder el perfil.')
 }
 
 async function cmdLock () {
@@ -2083,7 +2221,16 @@ Contraseña del perfil (opcional; solo se pide para EDITAR el perfil — tus
 dispositivos siguen firmando y leyendo aunque esté bloqueado):
   profile password [set]            pone o cambia la contraseña
   profile password rm               la quita
-  unlock                            desbloquea para poder editar
+  unlock [--password]               desbloquea para poder editar (con la llave de
+                                    seguridad si el perfil tiene una y está enchufada)
+
+Llaves de seguridad (YubiKey). Cada una es otra forma de abrir el perfil, como la
+contraseña; abre cualquiera. Necesitan fido2-tools y yubikey-personalization:
+  profile key add                   con toque (FIDO2): pide tocar la llave dos veces
+  profile key add --no-touch        sin toque: programa la ranura 2 de la YubiKey
+  profile key add --with-password   esa llave abre SOLO junto con una contraseña
+  profile key ls | rm <id>          las llaves del perfil
+  profile add <nombre> --key        crea el perfil ya con su llave
   lock                              vuelve a bloquear (también solo, a los 5 min sin
                                     usarse, y al reiniciar el servicio)
 
@@ -2176,7 +2323,7 @@ export async function runCtl (argv) {
   switch (cmd) {
     case 'tui': return cmdTui()
     case 'profile': return cmdProfile(rest)
-    case 'unlock': return cmdUnlock()
+    case 'unlock': return cmdUnlock(rest)
     case 'lock': return cmdLock()
     // `info` es el comando común de todo el ecosistema para «qué aparato soy» (regla del
     // dueño, 2026-09-29); en la bóveda eso es su estado, que ya enseña el id de cada perfil.

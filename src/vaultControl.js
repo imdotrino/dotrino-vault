@@ -229,7 +229,8 @@ export const addProfile = (name) => profileOp('add', { name })
 export const useProfile = (profile) => profileOp('use', { profile })
 export const renameProfile = (profile, name) => profileOp('rename', { profile, name })
 export const removeProfile = (profile) => profileOp('rm', { profile })
-export const unlockProfile = (profile, password) => profileOp('unlock', { profile, password })
+// `key`: lo que devolvió la llave de seguridad para una puerta, `{ door, secret }` (base64).
+export const unlockProfile = (profile, password, key = null) => profileOp('unlock', { profile, password, ...(key ? { door: key.door, secret: key.secret } : {}) })
 export const lockProfile = (profile) => profileOp('lock', { profile })
 /**
  * «Sigo aquí»: estira el plazo del bloqueo automático sin hacer nada más.

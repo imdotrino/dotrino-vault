@@ -77,6 +77,7 @@ Maintainer: Dotrino <hola@dotrino.com>
 Section: utils
 Priority: optional
 Depends: systemd, libatomic1
+Suggests: fido2-tools, yubikey-personalization
 Homepage: https://vault.dotrino.com
 Installed-Size: $INSTALLED_KB
 Description: Your personal vault: all your information in one safe place
