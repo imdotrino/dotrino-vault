@@ -37,6 +37,8 @@ const readRaw = (n) => { try { return JSON.parse(canal.decrypt(fs.readFileSync(P
 const rm = (n) => { try { fs.rmSync(P(n), { force: true }) } catch {} }
 
 let model, pcount, nonce, paircount
+/** La última orden de perfil tal como le llegó al daemon: para ver qué campos viajan. */
+let ultimaPeticion = null
 
 function resetModel () {
   model = {
@@ -143,6 +145,7 @@ function onUsr2 () {
   // La lista de bóvedas SOLO se vuelca contestando a una petición de perfil, igual que el
   // daemon de verdad: volcarla también por su cuenta se llevaba por delante las respuestas.
   if (preq?.op) {
+    ultimaPeticion = preq
     let extra = {}
     try { extra = handleProfile(preq) } catch (e) { extra = { error: e.message } }
     dumpProfiles({ ...extra, req: preq.id || null })
@@ -498,4 +501,27 @@ test('el volcado NO espera a la lista de bóvedas: contesta en cuanto llega lo s
   const slow = Date.now() - t0
   assert.ok(Array.isArray(r.issued), 'contesta con la lista')
   assert.ok(slow < 2000, `tiene que contestar en cuanto llega el volcado, no rendirse (tardó ${slow} ms)`)
+})
+
+test('las órdenes de perfil llevan TODOS sus campos al daemon (puerta, secreto de la llave, contraseña actual)', async () => {
+  // Con una lista fija de campos se perdían en silencio `door`/`secret` (abrir con la llave
+  // desde la TUI) y `current` (cambiar la contraseña con la bóveda cerrada).
+  const intenta = (fn) => fn().catch(() => null)
+  await intenta(() => vc.unlockProfile('p1', null, { door: 'd1', secret: 'QUJD' }))
+  assert.equal(ultimaPeticion.op, 'unlock')
+  assert.equal(ultimaPeticion.door, 'd1')
+  assert.equal(ultimaPeticion.secret, 'QUJD')
+  assert.equal('password' in ultimaPeticion, false, 'lo que no se pasa no viaja')
+
+  await intenta(() => vc.setProfilePassword('p1', 'frase-de-prueba-larga', 'la-de-antes'))
+  assert.equal(ultimaPeticion.current, 'la-de-antes')
+
+  const spec = { kind: 'fido2', credId: 'Y3JlZA==', hsalt: 'c2FsdA==', secret: 'c2VjcmV0', label: 'YubiKey' }
+  await intenta(() => vc.addProfileDoor('p1', spec))
+  assert.equal(ultimaPeticion.op, 'door-add')
+  assert.deepEqual(ultimaPeticion.spec, spec)
+
+  await intenta(() => vc.removeProfileDoor('p1', 'd1'))
+  assert.equal(ultimaPeticion.op, 'door-rm')
+  assert.equal(ultimaPeticion.door, 'd1')
 })

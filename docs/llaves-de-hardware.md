@@ -228,6 +228,12 @@ la llave, por el mismo camino que la contraseña. Sin módulos nativos: se llama
 `fido2-token`/`fido2-cred`/`fido2-assert` (libfido2) y a `ykinfo`/`ykchalresp`/`ykpersonalize`
 (yubikey-personalization). Dónde buscarlos: `DOTRINO_HWKEY_BIN`, y si no, el PATH.
 
+**En la TUI**, la tecla `y` sobre una bóveda abre «Con qué se abre la bóveda»: sus puertas,
+añadir llave (con toque, sin toque, con toque y contraseña) y quitar con confirmación —la
+última avisa de que se queda sin candado—. Al abrir, la TUI prueba primero la llave. Hasta
+0.140.0 eso no funcionaba: `vaultControl.profileOp` solo reenviaba `name` y `password`, y
+se perdían `door`/`secret` (y `current` al cambiar la contraseña, desde antes).
+
 **Sin toque no es «se abre sola».** La puerta `chalresp` abre `unlock` sin tocar nada, pero
 el daemon **no** la usa por su cuenta al arrancar: eso dejaría la maestra disponible para
 algo desatendido, y la maestra cerrada no firma nada (regla dura del 2026-08-31).

@@ -290,10 +290,47 @@ function profileRows (st, t) {
   const list = st.profiles?.profiles || []
   return list.map((p) => {
     const mark = p.current ? t.accent('●') : ' '
-    const lk = !p.protected ? t.muted(i.noPassword) : (p.locked ? t.warn(i.locked) : t.ok(i.unlocked))
+    const lk = !p.protected
+      ? t.muted(i.noPassword)
+      : `${p.locked ? t.warn(i.locked) : t.ok(i.unlocked)} ${t.muted('· ' + doorsSummary(i, p))}`
     const name = p.current ? t.bold(p.name || i.noName) : (p.name || i.noName)
     return { text: ` ${mark} ${name}   ${t.muted(p.id)}   ${t.muted(p.fingerprint || '—')}   ${lk}`, sel: true, meta: p }
   })
+}
+
+/** Una puerta dicha corta: «llave (toque) + contraseña». */
+function doorLabel (i, d) {
+  const base = d.kind === 'password' ? i.doorPassword : d.kind === 'fido2' ? i.doorTouch : d.kind === 'chalresp' ? i.doorNoTouch : d.kind
+  return d.withPassword ? base + i.doorPlusPassword : base
+}
+/** Con qué se abre un perfil: «contraseña o llave (toque)». */
+const doorsSummary = (i, p) => (p.doors || []).map((d) => doorLabel(i, d)).join(i.doorsOr) || i.doorPassword
+
+/**
+ * CON QUÉ SE ABRE LA BÓVEDA (`docs/llaves-de-hardware.md` §2bis). Las puertas que tiene y las
+ * que se le pueden añadir. La contraseña se sigue poniendo con `c` en Perfiles; aquí se ve y
+ * se puede quitar como cualquier otra puerta.
+ */
+function doorRows (st, t) {
+  const i = L(st)
+  const p = (st.profiles?.profiles || []).find((x) => x.id === st.doorsFor)
+  if (!p) return [{ text: t.muted(' —'), sel: false }]
+  const rows = [{ text: t.muted(' ' + i.doorsIntro(p.name || p.id)), sel: false }, { text: '', sel: false }]
+  if (!p.protected) rows.push({ text: ' ' + t.muted(i.doorsNone), sel: false })
+  for (const d of p.doors || []) {
+    const when = d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : ''
+    rows.push({ text: ` ${t.bold(doorLabel(i, d))}   ${t.muted(d.label || '')}   ${t.muted(when)}`, sel: true, meta: { door: d } })
+  }
+  rows.push({ text: '', sel: false })
+  for (const [add, label, hint] of [
+    ['touch', i.addTouchKey, i.addTouchKeyHint],
+    ['notouch', i.addNoTouchKey, i.addNoTouchKeyHint],
+    ['touchpwd', i.addKeyWithPassword, i.addKeyWithPasswordHint]
+  ]) {
+    rows.push({ text: ' ' + t.accent(label), sel: true, meta: { add } })
+    rows.push({ text: t.muted('     ' + hint), sel: false })
+  }
+  return rows
 }
 
 function deviceRows (st, t) {
@@ -1137,7 +1174,7 @@ async function onKeyProfiles (term, st, key) {
       mask: true,
       onSubmit: async (pwd) => {
         st.input = null
-        if (pwd.length < 4) { flash(st, i.passwordTooShort, 'danger'); return }
+        if (pwd.length < 12) { flash(st, i.passwordTooShort, 'danger'); return }
         setInput(st, {
           label: i.repeatPassword,
           mask: true,
@@ -1154,8 +1191,15 @@ async function onKeyProfiles (term, st, key) {
       },
       onCancel: () => { st.input = null }
     }))
+  } else if (ch === 'y' && cur) { // las llaves: con qué se abre la bóveda
+    await ensureUnlocked(term, st, cur, async (p = cur) => {
+      st.doorsFor = p.id
+      st.sel.doors = 0
+      st.scroll.doors = { value: 0 }
+      st.screen = 'doors'
+    })
   } else if (ch === 'x' && cur) { // quitar contraseña
-    if (!cur.protected) { flash(st, i.noPasswordSet, 'warn'); return true }
+    if (!(cur.doors || []).some((d) => d.kind === 'password')) { flash(st, i.noPasswordSet, 'warn'); return true }
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       const r = await guard(term, st, i.removingPassword, () => vc.removeProfilePassword(p.id, st.sessionPwd?.get(p.id)))
       if (r.ok) { st.sessionPwd?.delete(p.id); flash(st, i.passwordRemoved); await refreshProfiles(term, st) }
@@ -1498,6 +1542,113 @@ function choosePairCaps (st, { profile, service = null, label = null, after = nu
   st.scroll.paircaps = { value: 0 }
   st.screen = 'paircaps'
   return true
+}
+
+async function onKeyDoors (term, st, key) {
+  const i = L(st)
+  const rows = doorRows(st, term.t)
+  const sels = rows.filter((r) => r.sel).map((r) => r.meta)
+  moveSel(st, key, 'doors', sels.length)
+  const cur = sels[Math.min(st.sel.doors, sels.length - 1)]
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  const p = (st.profiles?.profiles || []).find((x) => x.id === st.doorsFor)
+  if (key.name === 'escape' || ch === 'b' || !p) { st.screen = 'profiles'; st.doorsFor = null; return true }
+
+  if ((key.name === 'delete' || ch === 'd') && cur?.door) {
+    const d = cur.door
+    const ultima = (p.doors || []).length <= 1
+    const what = d.label ? `${doorLabel(i, d)} · ${d.label}` : doorLabel(i, d)
+    setConfirm(st, {
+      text: ultima ? i.removeLastDoorConfirm(what) : i.removeDoorConfirm(what),
+      onYes: () => ensureUnlocked(term, st, p, async (q = p) => {
+        const r = await guard(term, st, i.removingDoor, () => vc.removeProfileDoor(q.id, d.kind === 'password' ? 'password' : d.id))
+        if (r.ok) {
+          if (d.kind === 'password') st.sessionPwd?.delete(q.id)
+          flash(st, i.doorRemoved)
+          st.sel.doors = 0
+          await refreshProfiles(term, st)
+        }
+      }),
+      onNo: () => { st.confirm = null }
+    })
+    return true
+  }
+  if (key.name === 'enter' && cur?.add) await ensureUnlocked(term, st, p, (q = p) => addKeyDoor(term, st, q, cur.add))
+  return true
+}
+
+/**
+ * Da de alta la llave como puerta, avisando en la barra de estado de cada toque ANTES de que
+ * la llave parpadee: si no se ve a tiempo, la llave rechaza la operación al medio minuto.
+ */
+async function addKeyDoor (term, st, p, mode) {
+  const i = L(st)
+  const busy = (msg) => { st.busy = msg; render(term, st) }
+  const fail = (e) => { st.busy = null; flash(st, i.keyFailed(humanErr(e, st)), 'danger') }
+  const send = async (spec) => {
+    const r = await guard(term, st, i.savingDoor, () => vc.addProfileDoor(p.id, { ...spec, secret: Buffer.from(spec.secret).toString('base64') }))
+    spec.secret.fill(0)
+    if (r.ok) { flash(st, spec.kind === 'chalresp' ? i.doorAddedNoTouch : i.doorAdded); await refreshProfiles(term, st) }
+  }
+  // Llave + contraseña: se pide dos veces, y con el mínimo dicho antes de mandar nada.
+  const withPassword = (spec) => setInput(st, {
+    label: i.keyPasswordLabel,
+    hint: i.keyPasswordHint,
+    mask: true,
+    onSubmit: (pwd) => {
+      st.input = null
+      if (pwd.length < 12) { spec.secret.fill(0); flash(st, i.passwordTooShort, 'danger'); return }
+      setInput(st, {
+        label: i.repeatPassword,
+        mask: true,
+        onSubmit: async (again) => {
+          st.input = null
+          if (again !== pwd) { spec.secret.fill(0); flash(st, i.passwordMismatch, 'danger'); return }
+          await send({ ...spec, password: pwd })
+        },
+        onCancel: () => { st.input = null; spec.secret.fill(0) }
+      })
+    },
+    onCancel: () => { st.input = null; spec.secret.fill(0) }
+  })
+
+  if (mode === 'notouch') {
+    let serial
+    try {
+      busy(i.lookingForKey)
+      serial = await hw.ykSerial()
+      if (!serial) throw Object.assign(new Error('no key'), { code: 'HWKEY_NO_DEVICE' })
+      const ocupada = await hw.ykSlot2Busy()
+      st.busy = null
+      const programar = async (overwrite) => {
+        try {
+          busy(i.programmingSlot)
+          await hw.ykProgramSlot2({ overwrite })
+          const challenge = hw.newChallenge()
+          const secret = await hw.ykChallenge({ challenge })
+          st.busy = null
+          await send({ kind: 'chalresp', challenge, serial, secret, label: `YubiKey ${serial}` })
+        } catch (e) { fail(e) }
+      }
+      // Sobrescribir la ranura borra lo que tenga: eso lo decide la persona, aquí y en voz alta.
+      if (ocupada) { setConfirm(st, { text: i.slotBusyConfirm(serial), onYes: () => programar(true), onNo: () => { st.confirm = null } }); return }
+      await programar(false)
+    } catch (e) { fail(e) }
+    return
+  }
+
+  let spec
+  try {
+    busy(i.touchKeyStep(1))
+    const { credId, device } = await hw.fido2MakeCredential({ label: 'dotrino-vault' })
+    const hsalt = hw.newHsalt()
+    busy(i.touchKeyStep(2))
+    const secret = await hw.fido2Secret({ credId, hsalt })
+    st.busy = null
+    spec = { kind: 'fido2', credId, hsalt, secret, label: device || 'YubiKey' }
+  } catch (e) { return fail(e) }
+  if (mode === 'touchpwd') return withPassword(spec)
+  await send(spec)
 }
 
 async function onKeyPairMode (term, st, key) {
@@ -2129,6 +2280,7 @@ const helpSegs = (i, screen, st = {}) => {
     logins: i.helpLogins,
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
+    doors: i.helpDoors,
     paircaps: i.helpPairCaps,
     join: i.helpJoin,
     me: i.helpMe,
@@ -2160,6 +2312,7 @@ const title = (i, screen) => ({
   profiles: i.titleProfiles,
   pairing: i.titlePairing,
   pairmode: i.titlePairMode,
+  doors: i.titleDoors,
   paircaps: i.titlePairCaps,
   join: i.titleJoin,
   caps: i.titleCaps,
@@ -2279,6 +2432,7 @@ function render (term, st) {
   else if (st.screen === 'caps') body = renderList(capsRows(st, t), st.sel.caps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'devvars') body = renderList(devVarRows(st, t), st.sel.devvars || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
+  else if (st.screen === 'doors') body = renderList(doorRows(st, t), st.sel.doors || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
@@ -2362,7 +2516,7 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0, doors: 0 },
     // Permisos tocados y sin guardar, por llave del aparato (ver `setCapsDraft`).
     capsDrafts: {},
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
@@ -2467,6 +2621,7 @@ export async function runTui () {
       else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
       else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
+      else if (st.screen === 'doors') running = await onKeyDoors(term, st, key)
       else if (st.screen === 'paircaps') running = await onKeyPairCaps(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
       else if (st.screen === 'join') running = await onKeyJoin(term, st, key)
@@ -2484,4 +2639,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

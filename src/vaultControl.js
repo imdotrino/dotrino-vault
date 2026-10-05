@@ -207,12 +207,12 @@ async function waitFor (name, { tries = 60, interval = 100, req = null, since = 
  * OPERANDO (para use/rm/rename) como el DESTINO (para unlock/lock/password). La
  * contraseña viaja en un archivo 0600 que el daemon borra al leerlo.
  */
-async function profileOp (op, { profile, name, password } = {}) {
+async function profileOp (op, { profile, ...fields } = {}) {
   requireAlive() // nunca escribir la contraseña si no hay quien la consuma
   rm(F.profilesList)
-  const extra = {}
-  if (name != null) extra.name = name
-  if (password != null) extra.password = password
+  // TODO lo que se pase viaja, no una lista fija: con la lista fija se perdían en silencio
+  // `current` (cambiar la contraseña) y `door`/`secret` (abrir con la llave de seguridad).
+  const extra = Object.fromEntries(Object.entries(fields).filter(([, v]) => v != null))
   const since = Date.now()
   const id = await writeReq(F.profileReq, { op, ...extra }, profile)
   signalOrCleanup('SIGUSR2', [F.profileReq])
@@ -247,6 +247,10 @@ export const touchProfile = (profile) => profileOp('touch', { profile })
 export const setProfilePassword = (profile, password, current) => profileOp('password-set', { profile, password, ...(current ? { current } : {}) })
 // Quitarla también la pide: se re-sella a la llave de la máquina antes de que se vaya.
 export const removeProfilePassword = (profile, password) => profileOp('password-rm', { profile, password })
+// LLAVES DE SEGURIDAD: `spec` lleva lo que devolvió la llave (`secret` en base64), nunca nada
+// que la abra sin ella. `door` es el id de la puerta, o 'password' para la contraseña.
+export const addProfileDoor = (profile, spec) => profileOp('door-add', { profile, spec })
+export const removeProfileDoor = (profile, door) => profileOp('door-rm', { profile, door })
 
 // ---------------------------------------------------------------------------
 // Inicios de sesión con contraseña (`docs/temporary-access.md`)
