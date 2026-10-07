@@ -160,6 +160,9 @@ function mergeMembersAndCerts (members, issued) {
   })
 }
 
+/** La entrada de bloqueo de un aparato (por su llave), o `null` si no está bloqueado. */
+const blockedOf = (st, pub) => (pub && (st.blocked || []).find((b) => b.pub === pub)) || null
+
 function activeProfile (st) {
   const list = st.profiles?.profiles || []
   return list.find((p) => p.current) || list[0] || null
@@ -388,11 +391,15 @@ function deviceRows (st, t) {
       (debt ? t.warn(`  ${i.deviceDebt(debt)}`) : '')
     // SIN ACCESO: está en el acta y no puede entrar. Es un aviso, no un adorno, así que va
     // en el color de aviso y en el sitio donde estaría su vencimiento.
-    const status = d.noAccess
+    // BLOQUEADO: sigue en el acta pero la bóveda y los agentes no le atienden. Es un
+    // aviso (lo decidió un aprobador o el dueño), así que va en el color de aviso y
+    // delante de todo lo demás: es lo primero que hay que ver de esa fila.
+    const bloq = blockedOf(st, d.sub)
+    const status = (bloq ? t.warn(i.deviceBlocked) + '  ' : '') + (d.noAccess
       ? t.warn(i.deviceNoAccess)
       : d.isMaster
         ? t.muted(i.thisVault)
-        : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp))
+        : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp)))
     const marca = conCambios.has(d.sub) ? t.bold('*') : ' '
     rows.push({ text: `${marca}${t.bold(d.deviceId)}  ${label}${desde}  ${status}${extra}`, sel: true, meta: d })
   }
@@ -909,7 +916,7 @@ async function refreshAll (term, st, api = vc) {
   // Cerrada: no se pide su contenido, y tampoco se enseña un error por mirarla desde
   // fuera. Lo que hubiera cargado se suelta, para no dejar en pantalla lo de antes.
   if (activeLocked(st)) {
-    st.devices = null; st.secrets = null; st.members = []; st.me = undefined; st.capsDrafts = {}
+    st.devices = null; st.secrets = null; st.members = []; st.blocked = []; st.me = undefined; st.capsDrafts = {}
     return
   }
   const r = await guard(term, st, L(st).loading, () => api.snapshot(activeId(st)))
@@ -920,7 +927,7 @@ async function refreshAll (term, st, api = vc) {
   if (secrets) st.secrets = { ns: secrets.ns || {}, dev: Array.isArray(secrets.dev) ? secrets.dev : [] }
   // El ACTA entra en el volcado normal: es de donde sale la lista de dispositivos (ver
   // `mergeMembersAndCerts`). Antes solo se pedía al abrir la pantalla de permisos.
-  if (record) st.members = record.members || []
+  if (record) { st.members = record.members || []; st.blocked = Array.isArray(record.blocked) ? record.blocked : [] }
   if (devices) {
     const issued = (devices.issued || devices.active || devices.delegations || [])
     st.devices = { issued: await Promise.all(issued.map(async (d) => ({ ...d, deviceId: d.sub ? await api.deviceIdOf(d.sub) : '????-????' }))), revoked: devices.revoked || [] }
@@ -939,6 +946,7 @@ async function refreshAll (term, st, api = vc) {
 function applyDump (st, v) {
   st.devices = v
   if (Array.isArray(v?.members)) st.members = v.members
+  if (Array.isArray(v?.blocked)) st.blocked = v.blocked
 }
 
 async function refreshDevices (term, st) {
@@ -1257,6 +1265,20 @@ async function onKeyDevices (term, st, key) {
       },
       onNo: () => { st.confirm = null }
     })
+  } else if (ch === 'b' && cur?.isMaster) {
+    flash(st, i.cantBlockMaster, 'warn')
+  } else if (ch === 'b' && cur?.sub) {
+    // BLOQUEAR / DESBLOQUEAR (dueño, 2026-10-07). No toca el acta: el aparato sigue siendo
+    // miembro, pero la bóveda y los agentes no le atienden hasta que se le quite. Lo normal
+    // es que bloquee el aprobador desde el teléfono al recibir un incidente; desbloquear
+    // SOLO se hace aquí o desde la consola de administración. `b` = bloquear en Bóvedas
+    // también (k bloquea el perfil; esto es otro candado y otra tecla, para no confundir).
+    const on = !blockedOf(st, cur.sub)
+    const r = await guard(term, st, on ? i.blocking : i.unblocking, () => vc.setDeviceBlocked(cur.sub, on, activeId(st)))
+    if (r.ok) {
+      flash(st, on ? i.deviceBlockedMsg(cur.deviceId) : (r.v.was ? i.deviceUnblockedMsg(cur.deviceId) : i.deviceNotBlocked(cur.deviceId)))
+      await refreshDevices(term, st)
+    }
   } else if (ch === 'r' && cur) {
     // Renombrar: el nombre lo trae el aparato al emparejarse (y si no le diste uno, entra
     // con TU apodo de ese momento), así que a la semana ya no dice nada. `r` es renombrar
@@ -2298,8 +2320,11 @@ const helpSegs = (i, screen, st = {}) => {
   return segs({
     pending: !!st.pending,
     drafts: draftChanges(st).length > 0,
-    hasDevices: (st.devices?.issued || []).length > 0,
+    // Las filas salen del ACTA (miembros con o sin certificado), así que la ayuda mira
+    // la lista fundida: un miembro sin papel también se renombra, bloquea o quita.
+    hasDevices: devs.length > 0,
     isService: !!cur?.cn,
+    curBlocked: !!blockedOf(st, cur?.sub),
     hasSecrets: Object.keys(st.secrets?.ns || {}).length > 0,
     hasVars: devVarsOf(st, st.varsFor?.pub).length > 0,
     hasLogins: (st.logins || []).length > 0,
@@ -2528,6 +2553,7 @@ export async function runTui () {
     scroll: {},
     profiles: null,
     devices: null,
+    blocked: [],
     secrets: null,
     // Los inicios de sesión se piden al ENTRAR en su pestaña, no al arrancar.
     logins: null,

@@ -44,6 +44,9 @@ const F = {
   approveReq: 'approve-request.json',
   rejectReq: 'reject-request.json',
   revokeReq: 'revoke-request.json',
+  // BLOQUEAR / DESBLOQUEAR un aparato (sin tocar el acta). Mismo par que usa la CLI.
+  blockReq: 'block-request.json',
+  blockRes: 'block.json',
   labelReq: 'label-request.json',
   capsReq: 'caps-request.json',
   capsRes: 'caps.json',
@@ -394,6 +397,8 @@ export async function listDevices (profile) {
     issued: groupCertsByDevice(withIds, revoked),
     revoked,
     members: record?.members || [],
+    // LOS BLOQUEADOS viajan con el acta: quien pinte la lista los marca en su fila.
+    blocked: Array.isArray(record?.blocked) ? record.blocked : [],
     profile: devices.profile || null
   }
 }
@@ -500,6 +505,25 @@ export async function revokeDevice (target, profile) {
   signalOrCleanup('SIGUSR2', [F.revokeReq])
   await sleep(300)
   return listDevices(profile)
+}
+
+/**
+ * BLOQUEA o DESBLOQUEA un aparato por su llave `pub`. No toca el acta: sigue siendo
+ * miembro, pero la bóveda y los agentes dejan de atenderle (dueño, 2026-10-07). Funciona
+ * con el perfil cerrado, igual que `dotrino-vault block|unblock`. Devuelve `{ on, was }`:
+ * `was` dice si al desbloquear había algo que quitar.
+ */
+export async function setDeviceBlocked (pub, on, profile) {
+  requireAlive()
+  if (typeof pub !== 'string' || !pub) throw coded('a device key is required', 'BAD_PUB')
+  rm(F.blockRes)
+  const since = Date.now()
+  const id = await writeReq(F.blockReq, { pub, on: !!on }, profile)
+  signalOrCleanup('SIGUSR2', [F.blockReq])
+  const r = await waitFor(F.blockRes, { req: id, since, tries: 40 })
+  if (!r) throw coded('the daemon did not reply', 'NO_REPLY')
+  if (r.ok === false) throw coded(r.error || `could not ${on ? 'block' : 'unblock'} the device`, r.code || 'BLOCK_FAILED')
+  return { on: !!on, was: !!r.was }
 }
 
 // ---------------------------------------------------------------------------

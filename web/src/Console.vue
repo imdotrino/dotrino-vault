@@ -237,7 +237,7 @@ const T = {
     apv_incident: (reporter) => `falló la clave de la terminal de ${reporter} tres veces seguidas`,
     apv_block: 'Bloquear', apv_ignore: 'Ignorar',
     apv_block_hint: 'Bloquear deja al aparato fuera de la bóveda y de tus máquinas sin quitarlo de la cuenta; se desbloquea en la bóveda (dotrino-vault unblock) o desde /vault.',
-    blocked_title: 'Bloqueados', blocked_since: 'desde', blocked_by: 'por', blocked_unblock: 'Desbloquear',
+    blocked_title: 'Bloqueados', blocked_since: 'desde', blocked_by: 'por', blocked_unblock: 'Desbloquear', blocked_block: 'Bloquear',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     apv_push_ask: 'Avisarme de pedidos en este navegador',
     apv_push_on: 'Este navegador te avisa de los pedidos, también con la pestaña cerrada.',
@@ -451,7 +451,7 @@ const T = {
     apv_incident: (reporter) => `failed the terminal code of ${reporter} three times in a row`,
     apv_block: 'Block', apv_ignore: 'Ignore',
     apv_block_hint: 'Blocking keeps the device out of the vault and of your machines without removing it from the account; it is unblocked on the vault (dotrino-vault unblock) or from /vault.',
-    blocked_title: 'Blocked', blocked_since: 'since', blocked_by: 'by', blocked_unblock: 'Unblock',
+    blocked_title: 'Blocked', blocked_since: 'since', blocked_by: 'by', blocked_unblock: 'Unblock', blocked_block: 'Block',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     apv_push_ask: 'Notify me about requests in this browser',
     apv_push_on: 'This browser notifies you about requests, even with the tab closed.',
@@ -1387,6 +1387,9 @@ async function loadBlocked () {
   try { blockedList.value = (await id.value.vaultAdmin('blocked'))?.items || [] } catch (_) { blockedList.value = [] }
 }
 const unblock = (m) => run('unblock-' + m.pub, async () => { await id.value.vaultAdmin('unblock', { sub: m.pub }); await loadBlocked() })
+// BLOQUEAR A MANO (dueño, 2026-10-07): no toca el acta, la bóveda simplemente deja de
+// atender a ese aparato y sus agentes le cierran la puerta. Se deshace con Desbloquear.
+const block = (m) => run('block-' + m.pub, async () => { await id.value.vaultAdmin('block', { sub: m.pub }); await loadBlocked() })
 
 // ---------- PEDIDOS DE APROBACIÓN ----------
 // Un cajón con `secret policy <ns> approval on` no se entrega solo: la bóveda apunta el
@@ -2220,6 +2223,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                  sin él, la fila parece un aparato normal y nadie la quita nunca. -->
             <span class="tag out" v-if="blockedOf(m.pub)" :data-testid="'blocked-' + m.id">{{ t.blocked_title }} · {{ t.blocked_since }} {{ shortDate(blockedOf(m.pub).since) }}<template v-if="blockedOf(m.pub).by"> · {{ t.blocked_by }} {{ blockedOf(m.pub).by }}</template></span>
             <button v-if="blockedOf(m.pub) && canAdmin" class="btn ghost sm" :data-testid="'unblock-' + m.id" :disabled="busy === 'unblock-' + m.pub" @click.stop="unblock(m)">{{ t.blocked_unblock }}</button>
+            <button v-else-if="canAdmin && !m.isMaster && !m.isMe" class="btn ghost sm" :data-testid="'block-' + m.id" :disabled="busy === 'block-' + m.pub" @click.stop="block(m)">{{ t.blocked_block }}</button>
             <span class="tag out" v-if="m.noAccess" :data-testid="'noaccess-' + m.id">{{ t.dev_nocert }}</span>
             <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
             <!-- CUÁNDO ENTRÓ. El nombre lo pone el propio aparato y muchas veces no

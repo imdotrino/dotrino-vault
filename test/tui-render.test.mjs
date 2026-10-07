@@ -1061,3 +1061,36 @@ test('Emparejar: se eligen los permisos antes del código, y Esc cancela limpian
   assert.equal(st.pairCaps, null)
   assert.equal(limpio, false, 'quien la abrió se entera de que no hubo emparejamiento')
 })
+
+/**
+ * BLOQUEAR SIN QUITAR (dueño, 2026-10-07). El bloqueo no toca el acta: es una lista de la
+ * bóveda, y la pantalla la enseña en la fila del aparato y ofrece la tecla contraria a su
+ * estado (`b bloquear` / `b desbloquear`). La bóveda misma no se bloquea.
+ */
+test('dispositivos: la fila marca BLOQUEADO y la ayuda ofrece la tecla contraria', () => {
+  const t = makeTheme()
+  const members = [
+    { pub: 'MASTER', id: 'AAAA-0000', label: 'bóveda', isMaster: true },
+    { pub: 'PUB-1', id: 'AB12-CD34', label: 'portátil' },
+    { pub: 'PUB-2', id: 'EF56-0011', label: 'teléfono' }
+  ]
+  const st = baseState({ screen: 'devices', members, blocked: [{ pub: 'PUB-2', since: 1, by: 'AB12-CD34' }] })
+  const rows = V.deviceRows(st, t).filter((r) => r.sel)
+  assert.equal(rows.length, 3)
+  assert.ok(!rows[1].text.includes('BLOQUEADO'), 'el no bloqueado no lleva la marca')
+  assert.ok(rows[2].text.includes('BLOQUEADO'), 'el bloqueado lleva la marca en su fila')
+
+  // La ayuda: con el portátil seleccionado, «b bloquear»; con el teléfono, «b desbloquear».
+  const term = fakeTerm(120, 24)
+  st.sel.devices = 1; V.render(term, st)
+  assert.ok(term.last.slice(-3).join(' ').includes('b bloquear'), 'ofrece bloquear al que no lo está')
+  st.sel.devices = 2; V.render(term, st)
+  assert.ok(term.last.slice(-3).join(' ').includes('b desbloquear'), 'ofrece desbloquear al bloqueado')
+})
+
+test('dispositivos: `b` sobre la propia bóveda avisa y no llama al daemon', async () => {
+  const t = makeTheme()
+  const st = baseState({ screen: 'devices', members: [{ pub: 'MASTER', id: 'AAAA-0000', label: 'bóveda', isMaster: true }] })
+  await V.onKeyDevices({ t }, st, { name: 'char', ch: 'b' })
+  assert.equal(st.flash?.text, dict('es').cantBlockMaster)
+})

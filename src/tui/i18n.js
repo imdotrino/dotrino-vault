@@ -280,6 +280,14 @@ const es = {
   revokeConfirm: (id) => `¿Quitar ${id} del perfil? Pierde el acceso ahora mismo. Lo que tenga guardado se le borra cuando se conecte: si está apagado, sigue ahí hasta entonces.`,
   revoking: 'Revocando…',
   deviceRevoked: (id) => `Revocado ${id}`,
+  // BLOQUEAR sin quitar: sigue en la cuenta, pero nadie le atiende hasta desbloquearlo.
+  deviceBlocked: 'BLOQUEADO',
+  blocking: 'Bloqueando…',
+  unblocking: 'Desbloqueando…',
+  deviceBlockedMsg: (id) => `Bloqueado ${id}: la bóveda y tus máquinas no le atienden hasta que lo desbloquees (b)`,
+  deviceUnblockedMsg: (id) => `Desbloqueado ${id}`,
+  deviceNotBlocked: (id) => `${id} no estaba bloqueado`,
+  cantBlockMaster: 'La bóveda no se bloquea a sí misma.',
   approveLabel: (id) => `Código que MUESTRA el dispositivo ${id}`,
   approveHint: 'el vault no lo conoce: compáralo en la otra pantalla',
   codeMissing: 'Falta el código',
@@ -411,13 +419,13 @@ const es = {
   // Anunciar teclas muertas confunde y además las quema para otros usos.
   // `e variables` solo en un SERVICIO: es el único que las lee, así que en un teléfono
   // era una tecla que solo sabía decir que no.
-  helpDevices: ({ pending, hasDevices, isService, drafts } = {}) => [
+  helpDevices: ({ pending, hasDevices, isService, drafts, curBlocked } = {}) => [
     '←→ pestaña', '↑↓', 'p emparejar',
     ...(drafts ? ['g guardar permisos'] : []),
     ...(pending ? ['a aprobar', 'x rechazar'] : []),
     ...(hasDevices ? ['r renombrar', 'c permisos'] : []),
     ...(isService ? ['e variables'] : []),
-    ...(hasDevices ? ['v revocar'] : []),
+    ...(hasDevices ? [curBlocked ? 'b desbloquear' : 'b bloquear', 'v revocar'] : []),
     'F5 refrescar', 'Esc bóvedas', 'l English', 'q salir'
   ],
   renameDeviceLabel: (id) => `¿Cómo quieres llamar a ${id}?`,
@@ -718,6 +726,13 @@ const en = {
   revokeConfirm: (id) => `Remove ${id} from the profile? It loses access right away. What it has stored is erased when it connects: if it is switched off, it stays there until then.`,
   revoking: 'Revoking…',
   deviceRevoked: (id) => `Revoked ${id}`,
+  deviceBlocked: 'BLOCKED',
+  blocking: 'Blocking…',
+  unblocking: 'Unblocking…',
+  deviceBlockedMsg: (id) => `Blocked ${id}: the vault and your machines ignore it until you unblock it (b)`,
+  deviceUnblockedMsg: (id) => `Unblocked ${id}`,
+  deviceNotBlocked: (id) => `${id} was not blocked`,
+  cantBlockMaster: 'The vault does not block itself.',
   approveLabel: (id) => `Code SHOWN by device ${id}`,
   approveHint: 'the vault does not know it: compare it on the other screen',
   codeMissing: 'The code is missing',
@@ -827,13 +842,13 @@ const en = {
   helpConfirm: 'y confirm · n/Esc cancel',
 
   helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'u unlock', 'k lock', 'l Español', 'q quit'],
-  helpDevices: ({ pending, hasDevices, isService, drafts } = {}) => [
+  helpDevices: ({ pending, hasDevices, isService, drafts, curBlocked } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(drafts ? ['g save permissions'] : []),
     ...(pending ? ['a approve', 'x reject'] : []),
     ...(hasDevices ? ['r rename', 'c permissions'] : []),
     ...(isService ? ['e variables'] : []),
-    ...(hasDevices ? ['v revoke'] : []),
+    ...(hasDevices ? [curBlocked ? 'b unblock' : 'b block', 'v revoke'] : []),
     'F5 refresh', 'Esc vaults', 'l Español', 'q quit'
   ],
   renameDeviceLabel: (id) => `What do you want to call ${id}?`,

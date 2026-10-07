@@ -106,6 +106,14 @@ function onUsr2 () {
   const rej = readReq('reject-request.json'); if (rej?.deviceId) rm('pending-enroll.json')
   const rv = readReq('revoke-request.json')
   if (rv?.nonce) { const t = resolveTarget(rv); const dv = model.devices[t]; const i = dv.issued.findIndex((d) => String(d.nonce) === String(rv.nonce)); if (i >= 0) { const [d] = dv.issued.splice(i, 1); dv.revoked.push({ nonce: d.nonce }) } }
+  // BLOQUEAR / DESBLOQUEAR: no toca el acta; se contesta en `block.json` con el id.
+  const blk = readReq('block-request.json')
+  if (blk?.pub && typeof blk.on === 'boolean') {
+    model.blocked ??= new Set()
+    const was = model.blocked.has(blk.pub)
+    if (blk.on) model.blocked.add(blk.pub); else model.blocked.delete(blk.pub)
+    writeAtomic('block.json', { req: blk.id || null, ok: true, on: blk.on, was })
+  }
   const sec = readReq('secret-request.json')
   // El store real valida ns/clave (secretsStore.js); si no valen, NO aplica (y
   // vaultControl detecta que la clave no quedó guardada → lanza).
@@ -175,7 +183,7 @@ function onUsr2 () {
     // quedaba esperándola los seis segundos de rendirse en cada llamada.
     writeAtomic('secrets-list.json', { req, profile: t, ns: listSecretsOf(t), dev: listDevSecretsOf(t) })
     writeAtomic('devices.json', { req, profile: t, issued: model.devices[t]?.issued || [], revoked: model.devices[t]?.revoked || [] })
-    writeAtomic('acta.json', { req, profile: t, members: model.members?.[t] || [] })
+    writeAtomic('acta.json', { req, profile: t, members: model.members?.[t] || [], blocked: [...(model.blocked || [])].map((pub) => ({ pub, since: 1 })) })
   }
   if (meReq) writeAtomic('me.json', { req: meReq.id || null, profile: t, me: model.me?.[t] ?? null })
 }
@@ -381,6 +389,19 @@ test('dispositivos: pair / pending / approve / revoke', async () => {
   const after2 = await vc.revokeDevice(nonceVal, 'p1')
   assert.equal(after2.issued.length, 0)
   assert.equal(after2.revoked.length, 1)
+})
+
+test('bloquear / desbloquear: viaja al daemon, no toca el acta y la lista sale con los aparatos', async () => {
+  const r1 = await vc.setDeviceBlocked('PUB-X', true, 'p1')
+  assert.deepEqual(r1, { on: true, was: false })
+  const l = await vc.listDevices('p1')
+  assert.deepEqual(l.blocked.map((b) => b.pub), ['PUB-X'])
+  const r2 = await vc.setDeviceBlocked('PUB-X', false, 'p1')
+  assert.deepEqual(r2, { on: false, was: true })
+  assert.deepEqual((await vc.listDevices('p1')).blocked, [])
+  const r3 = await vc.setDeviceBlocked('PUB-X', false, 'p1')
+  assert.equal(r3.was, false, 'desbloquear lo que no estaba dice que no estaba')
+  await assert.rejects(() => vc.setDeviceBlocked('', true, 'p1'), { code: 'BAD_PUB' })
 })
 
 test('join: la invitación viaja al daemon y cada respuesta se lee por su `id`', async () => {
