@@ -638,6 +638,25 @@ export async function runDaemon () {
           console.log('[vault] device renamed: %s', labelReq.label || '(no name)')
         } catch (e) { console.error('[vault] could not rename the device:', e.message) }
       }
+      // BLOQUEAR / DESBLOQUEAR un aparato (`dotrino-vault block|unblock <ID>`). No toca el
+      // acta, así que funciona con el perfil cerrado; se contesta en `block.json`.
+      const blockReq = readJsonSafe(path.join(dir, 'block-request.json'))
+      if (blockReq?.pub && typeof blockReq.on === 'boolean') {
+        rm(path.join(dir, 'block-request.json'))
+        const answer = (extra) => ipcWrite(path.join(dir, 'block.json'), { v: 1, at: Date.now(), req: blockReq.id || null, ...extra })
+        try {
+          // Con el perfil CERRADO también: bloquear no sella nada, y un aparato que está
+          // probando claves no espera a que el dueño abra la bóveda.
+          const vault = resolveTarget(blockReq)?.vault
+          if (!vault) throw Object.assign(new Error('no vault for that profile'), { code: 'NO_PROFILE' })
+          const r = await vault.setBlocked(blockReq.pub, blockReq.on, { by: 'vault' })
+          console.log('[vault] device %s', blockReq.on ? 'blocked' : (r ? 'unblocked' : 'was not blocked'))
+          answer({ ok: true, on: blockReq.on, was: r })
+        } catch (e) {
+          console.error('[vault] could not %s the device: %s', blockReq.on ? 'block' : 'unblock', e.message)
+          answer({ ok: false, error: e.message, code: e.code || 'BLOCK_FAILED' })
+        }
+      }
       const capsReq = readJsonSafe(path.join(dir, 'caps-request.json'))
       // VARIOS APARATOS, UNA ACTA (el borrador de la TUI). Se contesta con el `id` de la
       // petición, para que quien espera sepa si se firmó de verdad.
@@ -894,7 +913,7 @@ export async function runDaemon () {
         lastSecretHistory = null
         ipcWrite(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
         // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
-        try { ipcWrite(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()) }) } catch (_) {}
+        try { ipcWrite(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()), blocked: t.vault.listBlocked?.() || [] }) } catch (_) {}
       }
 
       // PERFIL del usuario (apodo, foto, datos) tal como lo tiene la bóveda: `dotrino-vault me`.

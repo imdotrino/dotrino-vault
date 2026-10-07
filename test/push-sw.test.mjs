@@ -24,6 +24,9 @@ test('un pedido de aprobación dice QUÉ se pide y QUIÉN, y abre Pedidos', () =
   assert.match(w.options.body, /^AB12-CD34 quiere guardar variables en miapp/)
   const p = avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'passwords', label: 'Chrome', deviceId: 'EE00-1111' } }, 'en')
   assert.match(p.options.body, /^Chrome \(EE00-1111\) wants to read a saved password/)
+  // Un INCIDENTE: quién falló la clave y en la terminal de quién. Se bloquea o se ignora.
+  const i = avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'incident', ns: 'CC00-2222', label: 'portátil', deviceId: 'AB12-CD34' } }, 'es')
+  assert.match(i.options.body, /^portátil \(AB12-CD34\) falló la clave de la terminal de CC00-2222 tres veces/)
 })
 
 test('el timbre de la bóveda en la pestaña sigue igual (sin contenido)', () => {

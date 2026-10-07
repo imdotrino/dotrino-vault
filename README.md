@@ -237,6 +237,7 @@ dotrino-vault devices              # lista dispositivos enrolados / revocados
 dotrino-vault members              # el acta del perfil: qué llaves son tuyas y qué puede cada una
 dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma -guarda +lee +administra +aprueba …)
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
+dotrino-vault block   <ID>         # lo deja fuera sin quitarlo del acta; unblock <ID> lo deshace (solo aquí o por el admin)
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
 dotrino-vault pair --service <ns>  # empareja un SERVICIO (proxy, geo…) con acceso SOLO a sus secretos
 dotrino-vault pair --scope <lista>  # los PERMISOS con los que entra (cualquiera de caps: firma,lee,guarda,administra,aprueba…

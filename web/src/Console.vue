@@ -234,6 +234,10 @@ const T = {
     apv_passwords_hint: 'Al aprobar una contraseña, ese aparato puede leer contraseñas hasta que la bóveda se reinicie.',
     apv_left: 'vence en',
     apv_approve: 'Aprobar', apv_deny: 'Denegar',
+    apv_incident: (reporter) => `falló la clave de la terminal de ${reporter} tres veces seguidas`,
+    apv_block: 'Bloquear', apv_ignore: 'Ignorar',
+    apv_block_hint: 'Bloquear deja al aparato fuera de la bóveda y de tus máquinas sin quitarlo de la cuenta; se desbloquea en la bóveda (dotrino-vault unblock) o desde /vault.',
+    blocked_title: 'Bloqueados', blocked_since: 'desde', blocked_by: 'por', blocked_unblock: 'Desbloquear',
     apv_warn: 'Aprueba solo si eres tú quien acaba de pedirlas desde ese aparato. Si no esperabas este pedido, deniégalo.',
     apv_push_ask: 'Avisarme de pedidos en este navegador',
     apv_push_on: 'Este navegador te avisa de los pedidos, también con la pestaña cerrada.',
@@ -444,6 +448,10 @@ const T = {
     apv_passwords_hint: 'Approving a password lets that device read passwords until the vault restarts.',
     apv_left: 'expires in',
     apv_approve: 'Approve', apv_deny: 'Deny',
+    apv_incident: (reporter) => `failed the terminal code of ${reporter} three times in a row`,
+    apv_block: 'Block', apv_ignore: 'Ignore',
+    apv_block_hint: 'Blocking keeps the device out of the vault and of your machines without removing it from the account; it is unblocked on the vault (dotrino-vault unblock) or from /vault.',
+    blocked_title: 'Blocked', blocked_since: 'since', blocked_by: 'by', blocked_unblock: 'Unblock',
     apv_warn: 'Approve only if it was you who just asked from that device. If you were not expecting this request, deny it.',
     apv_push_ask: 'Notify me about requests in this browser',
     apv_push_on: 'This browser notifies you about requests, even with the tab closed.',
@@ -1366,8 +1374,19 @@ async function refreshAdmin () {
     canAdmin.value = await id.value.canAdminVault()
     if (!canAdmin.value) return
     if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
+    await loadBlocked()
   } catch (_) { canAdmin.value = false }
 }
+
+// LOS BLOQUEADOS (dueño, 2026-10-07): los bloquea un aprobador tras un incidente, y se
+// desbloquean desde la bóveda o desde aquí, con `vault:admin`. Se ven en su fila, con su
+// botón, igual que quitar.
+const blockedList = ref([])
+const blockedOf = (pub) => blockedList.value.find((b) => b.pub === pub) || null
+async function loadBlocked () {
+  try { blockedList.value = (await id.value.vaultAdmin('blocked'))?.items || [] } catch (_) { blockedList.value = [] }
+}
+const unblock = (m) => run('unblock-' + m.pub, async () => { await id.value.vaultAdmin('unblock', { sub: m.pub }); await loadBlocked() })
 
 // ---------- PEDIDOS DE APROBACIÓN ----------
 // Un cajón con `secret policy <ns> approval on` no se entrega solo: la bóveda apunta el
@@ -1553,6 +1572,9 @@ const grantRevoke = (g) => run('grant-' + g.id, async () => {
 const apvApprove = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('approve', { id: p.id, profile: p.profile }); await refreshApprovals(); await refreshGrants() })
 
 const apvDeny = (p) => run('apvd-' + p.id, async () => { await id.value.vaultApprovals('deny', { id: p.id, profile: p.profile }); await refreshApprovals() })
+// BLOQUEAR tras un incidente (dueño, 2026-10-07). Desbloquear no se hace desde aquí: es de la
+// bóveda o del administrador (/vault, con `vault:admin`).
+const apvBlock = (p) => run('apv-' + p.id, async () => { await id.value.vaultApprovals('block', { id: p.id, profile: p.profile }); await refreshApprovals(); await refreshGrants() })
 /**
  * EL LATIDO ES PARA LOS PEDIDOS, no para las concesiones.
  *
@@ -2003,6 +2025,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
             <template v-if="p.kind === 'update'">{{ t.apv_update(p.ctx?.version || '?', p.ctx?.from || '') }}</template>
             <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_passwords }}</template>
+            <template v-else-if="p.kind === 'incident'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_incident(p.ctx?.reporterLabel ? `${p.ctx.reporterLabel} (${p.ns})` : p.ns) }}</template>
             <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
@@ -2011,7 +2034,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <!-- UNA ESCRITURA no ejecuta nada: lo que hay que ver para decidir es QUÉ variables
                quiere guardar. Los nombres llegan sellados, igual que el comando. -->
           <!-- Un pedido de actualización no ejecuta nada: la versión ya va en la línea de arriba. -->
-          <template v-if="p.kind === 'update'"></template>
+          <template v-if="p.kind === 'update' || p.kind === 'incident'"></template>
           <!-- UNA CONTRASEÑA: qué campos se quieren leer. La entrada y el sitio no se ven aquí:
                van sellados en el almacén y la bóveda no los abre. -->
           <div v-else-if="p.kind === 'passwords'" class="apvcmd" data-testid="apv-fields">
@@ -2034,7 +2057,12 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             {{ t.apv_cmderr }} <code class="mid">{{ p.ctxError || p.ctxReason || 'cannot-open' }}</code>
           </div>
           <div v-else class="apvcmd muted" data-testid="apv-nocmd">{{ t.apv_nocmd }}</div>
-          <div class="apvbtns">
+          <!-- UN INCIDENTE no se aprueba: se BLOQUEA al aparato o se IGNORA. -->
+          <div v-if="p.kind === 'incident'" class="apvbtns">
+            <button class="btn sm" data-testid="apv-block" :disabled="busy === 'apv-' + p.id" @click="apvBlock(p)">{{ t.apv_block }}</button>
+            <button class="btn ghost sm" data-testid="apv-ignore" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_ignore }}</button>
+          </div>
+          <div v-else class="apvbtns">
             <button class="btn sm" data-testid="apv-approve" :disabled="busy === 'apv-' + p.id" @click="apvApprove(p)">{{ t.apv_approve }}</button>
             <button class="btn ghost sm" data-testid="apv-deny" :disabled="busy === 'apvd-' + p.id" @click="apvDeny(p)">{{ t.apv_deny }}</button>
           </div>
@@ -2043,6 +2071,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
              hora que se renueva con cada uso. Decirlo aquí, antes de pulsar. -->
         <p v-if="approvals.some((p) => p.kind === 'read' || !p.kind)" class="muted small">{{ t.apv_grant_hint }}</p>
         <p v-if="approvals.some((p) => p.kind === 'passwords')" class="muted small">{{ t.apv_passwords_hint }}</p>
+        <p v-if="approvals.some((p) => p.kind === 'incident')" class="muted small">{{ t.apv_block_hint }}</p>
         <!-- UNA CUENTA MUDA NO ES UNA CUENTA SIN PEDIDOS. Si a alguna no se le pudo
              preguntar, se dice con su nombre: callarlo deja creyendo que no hay nada. -->
         <p v-for="g in apvFallos" :key="'err-' + g.profile" class="muted warn" data-testid="apv-error">
@@ -2189,6 +2218,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <span class="tag svc" v-if="m.cn">{{ t.service }} «{{ m.cn }}»</span>
             <!-- Está en el acta pero no puede entrar. Es un AVISO, no una explicación:
                  sin él, la fila parece un aparato normal y nadie la quita nunca. -->
+            <span class="tag out" v-if="blockedOf(m.pub)" :data-testid="'blocked-' + m.id">{{ t.blocked_title }} · {{ t.blocked_since }} {{ shortDate(blockedOf(m.pub).since) }}<template v-if="blockedOf(m.pub).by"> · {{ t.blocked_by }} {{ blockedOf(m.pub).by }}</template></span>
+            <button v-if="blockedOf(m.pub) && canAdmin" class="btn ghost sm" :data-testid="'unblock-' + m.id" :disabled="busy === 'unblock-' + m.pub" @click.stop="unblock(m)">{{ t.blocked_unblock }}</button>
             <span class="tag out" v-if="m.noAccess" :data-testid="'noaccess-' + m.id">{{ t.dev_nocert }}</span>
             <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
             <!-- CUÁNDO ENTRÓ. El nombre lo pone el propio aparato y muchas veces no

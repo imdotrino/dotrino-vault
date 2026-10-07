@@ -254,6 +254,10 @@ test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
     // encendida para eso — se apaga sola al cerrarla. El día que un dispositivo-bóveda
     // quiera replicadores, esto se quita de aquí y se implementa; no antes.
     'REPLICA_ACK',
+    // Un INCIDENTE (la terminal: tres claves mal seguidas) es un pedido más en la mesa de
+    // aprobación, y esa mesa vive en el mostrador `SECRETS`, que es del daemon. Sin mesa no
+    // hay a quién ponérselo; va con `SECRETS`, no aparte.
+    'INCIDENT',
   ])
 
   const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))

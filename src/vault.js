@@ -29,6 +29,7 @@ import { openStore } from './store.js'
 import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './threadStore.js'
 import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
 import { openSubacta } from './subacta.js'
+import { openBlocked } from './blocked.js'
 import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
 import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
@@ -259,6 +260,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   // además un emparejamiento paralelo al del ecosistema.
   const passwordsFile = path.join(dir, 'passwords.json')
   const passwordsAtRest = atRestFor(dir)
+  // Los aparatos BLOQUEADOS por un aprobador (`src/blocked.js`). Cifrado en reposo como lo demás.
+  const blocked = openBlocked({ dir, atRest: passwordsAtRest })
   const readPasswordsFile = () => {
     try { return JSON.parse(passwordsAtRest.decrypt(fs.readFileSync(passwordsFile, 'utf8'))) } catch (_) { return null }
   }
@@ -603,6 +606,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const verifyChain = async (args) => {
     const chk = await verifyChainRaw(args)
     if (chk.ok && args?.data?.v) apuntarVersion(chk.device, args.data.v)
+    // UN BLOQUEADO NO PASA POR NINGÚN MOSTRADOR. Sigue en el acta —bloquear no la toca,
+    // porque la bóveda vive cerrada y eso lo decide un aprobador desde el teléfono—, así que
+    // el papel verifica; la puerta se cierra aquí, que es por donde entra todo, y con su
+    // propio `reason` para que el otro lado sepa qué le pasa y no lo confunda con un papel
+    // viejo (que se arregla renovando) ni con una revocación (que se arregla emparejando).
+    if (chk.ok && blocked.has(chk.device)) return { ok: false, reason: 'blocked', device: chk.device }
     return chk
   }
 
@@ -1281,7 +1290,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         return reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
       }
       audit('devices', { device: await deviceIdOf(chk.device).catch(() => null), solo: 'revocaciones' })
-      return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, acta: record })
+      return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, blocked: blocked.pubs(), acta: record })
     }
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -1313,7 +1322,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // LA SUBACTA VIAJA CON EL ACTA. Es la mitad de «se comparte entre todos los
     // dispositivos»: sin esto, una renuncia sin sellar solo la respeta esta máquina.
     // Cada entrada va firmada por su sujeto, así que quien la recibe la verifica sola.
-    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, acta: record, chain, vault: MI_VERSION, subacta: subacta.entries() }))
+    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, blocked: blocked.pubs(), acta: record, chain, vault: MI_VERSION, subacta: subacta.entries() }))
   }
 
   /**
@@ -1580,7 +1589,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
     if (p.data?.op === 'store.recipients' || p.data?.op === 'store') return handleVarStore(from, p)
     if (p.data?.op === 'digest') return handleDigest(from, p)
-    if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke'].includes(p.data?.op)) return handleApproval(from, p)
+    if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke', 'block', 'blocked'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
     if (typeof p.data?.ek !== 'string') return reply(from, { type: MSG.ERROR, error: 'secrets: missing ek (requester ephemeral key)' })
@@ -1759,6 +1768,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // renueva con cada uso puede durar indefinidamente: si no se puede mirar ni quitar desde
     // el mismo sitio donde se dio, es un permiso invisible, y eso no lo damos por bueno.
     if (op === 'grants') return answer({ op: 'grants', items: await conContextoSellado(grants.list(), chk.device, record), ttlMs: GRANT_TTL_MS })
+    // LOS BLOQUEADOS SE VEN desde donde se bloquean. Desbloquear no: eso es de la bóveda
+    // (`dotrino-vault unblock <ID>`) o del administrador, que es lo que pidió el dueño.
+    if (op === 'blocked') return answer({ op: 'blocked', items: blocked.list() })
     if (op === 'grant-revoke') {
       const gid = typeof p.data?.id === 'string' ? p.data.id : ''
       const ok = gid ? grants.revoke(gid) : false
@@ -1771,6 +1783,31 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const id = typeof p.data?.id === 'string' ? p.data.id : ''
     const pend = approvals.take(id)
     if (!pend) return reply(from, { type: MSG.ERROR, error: 'approval: unknown or expired request' })
+    // UN INCIDENTE no entrega nada: se contesta BLOQUEAR (`block`) o IGNORAR (`deny`).
+    // `approve` no significa nada aquí y se rechaza en voz alta: el pedido vuelve a la mesa
+    // para que lo conteste con la palabra correcta.
+    if (pend.kind === 'incident') {
+      if (op !== 'block' && op !== 'deny') {
+        approvals.request({ ...pend, ttlMs: Math.max(1000, pend.exp - Date.now()) })
+        return reply(from, { type: MSG.ERROR, error: 'approval: an incident is answered with block or deny' })
+      }
+      if (op === 'deny') {
+        audit('incident.ignored', { device: pend.deviceId, kind: pend.ctx?.kind || null, id, by })
+        log(`[vault] incident ${id} about ${pend.deviceId} ignored by ${by}`)
+        return answer({ op: 'deny.result', id, ok: true })
+      }
+      const b = blocked.block({ pub: pend.device, deviceId: pend.deviceId, label: pend.label, by, reason: pend.ctx?.kind || 'incident' })
+      // Lo que ya tenía concedido se corta en el acto: bloquear y dejarle pasar la hora que
+      // le quedaba sería un bloqueo de mentira.
+      const cut = grants.revokeAll({ device: pend.device })
+      audit('blocked', { device: pend.deviceId, kind: pend.ctx?.kind || null, id, by, grants: cut })
+      log(`[vault] BLOCKED ${pend.deviceId}${pend.label ? ` (${pend.label})` : ''} by ${by} after incident ${id} · unblock with: dotrino-vault unblock ${pend.deviceId}`)
+      // Se avisa a todos: los agentes (la terminal) traen la lista con el acta al recibirlo
+      // y le cierran la sesión que tenga abierta. Sin esto el bloqueo esperaba al tic de 5 min.
+      await notifyMembers('blocked', { deviceId: pend.deviceId, by })
+      return answer({ op: 'block.result', id, ok: true, deviceId: pend.deviceId, since: b.since })
+    }
+    if (op === 'block') return reply(from, { type: MSG.ERROR, error: 'approval: only an incident can be blocked' })
     // PEDIDOS QUE NO ENTREGAN UN CAJÓN (la bóveda de contraseñas, guardar variables). Se
     // resuelven ANTES de tocar `resultFor`, que asume un cajón y una `ek`: aquí no hay nada
     // que sellar, solo una promesa esperando un sí o un no.
@@ -1903,6 +1940,57 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     } catch (e) { log('[vault] could not notify approvers:', e.message) }
   }
 
+  /**
+   * UN INCIDENTE: un agente de la cuenta dice que OTRO aparato de la cuenta se equivocó de
+   * clave tres veces seguidas (la terminal, `dotrino-terminal lock`). No se decide aquí
+   * nada: se apunta como un pedido más, de tipo `incident`, y se timbra a quien aprueba,
+   * que es quien bloquea o ignora desde el teléfono. Sin nadie que apruebe no hay a quién
+   * preguntar: se anota en la bitácora y se dice, y el agente se queda con su freno local.
+   *
+   * Quien reporta tiene que ser un miembro con `sign` (es lo que lo hace agente), y el
+   * señalado tiene que estar en el acta: un incidente sobre un desconocido no es un incidente.
+   * Y si el señalado ya está bloqueado no se vuelve a timbrar: se contesta que lo está.
+   */
+  async function handleIncident (from, p) {
+    if (!isFresh(p.data)) return staleReply(from)
+    const chk = await verifyChain({ data: p.data, signature: p.signature, cert: p.cert, ...(await contextoActa()), revoked: await revocationSet() })
+    if (!chk.ok) return denyChain(from, chk, p, 'incident')
+    const record = await refreshActa()
+    if (!record || !Acta.memberCan(record, chk.device, 'sign')) {
+      audit('rejected', { what: 'incident', reason: record ? 'acta' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this member cannot report incidents' })
+    }
+    const d = p.data || {}
+    const kind = typeof d.kind === 'string' ? d.kind.slice(0, 32) : ''
+    const about = typeof d.about === 'string' ? d.about : ''
+    const tries = Number.isInteger(d.tries) ? d.tries : null
+    if (d.op !== 'incident' || !kind || !about) return reply(from, { type: MSG.ERROR, error: 'incident: op, kind and about are required' })
+    const target = (record.members || []).find((m) => m.pub === about)
+    if (!target) return reply(from, { type: MSG.ERROR, code: 'unknown-device', error: 'incident: that device is not in the record' })
+    const by = await deviceIdOf(chk.device).catch(() => null)
+    const byLabel = (record.members || []).find((m) => m.pub === chk.device)?.label || ''
+    const deviceId = await deviceIdOf(about).catch(() => null)
+    audit('incident', { device: deviceId, by, kind, tries })
+    if (blocked.has(about)) {
+      log(`[vault] incident (${kind}) about ${deviceId} reported by ${by}: already blocked`)
+      return reply(from, { type: MSG.INCIDENT_RESULT, id: null, approvers: 0, blocked: true })
+    }
+    const approvers = (record.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).length
+    if (!approvers) {
+      log(`[vault] incident (${kind}) about ${deviceId} reported by ${by}: nobody can approve, so nobody is asked (grant it with: dotrino-vault caps <ID> +aprueba)`)
+      return reply(from, { type: MSG.INCIDENT_RESULT, id: null, approvers: 0, blocked: false })
+    }
+    // `ns` es el que reporta: la pantalla dice «X falló la clave de la terminal de Y». El
+    // contexto va sellado al aprobador como el de cualquier pedido.
+    const pend = approvals.request({
+      ns: by || 'incident', kind: 'incident', device: about, deviceId, label: target.label || '', ek: '',
+      ctx: { kind, tries, reporter: by, reporterLabel: byLabel }, from, ttlMs: UPDATE_TTL_MS
+    })
+    log(`[vault] incident (${kind}) about ${deviceId}${target.label ? ` (${target.label})` : ''} reported by ${by}: asking ${approvers} approver(s) (${pend.id})`)
+    await notifyApprovers(pend, record)
+    reply(from, { type: MSG.INCIDENT_RESULT, id: pend.id, approvers, blocked: false })
+  }
+
   client.on('message', (from, payload) => onMessage(from, payload))
 
   // EL MOSTRADOR LOCAL, siempre que se pueda. Si no se puede abrir (un sistema sin sockets
@@ -1933,6 +2021,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (payload.type === MSG.ADMIN) return await handleAdmin(from, payload)
       if (payload.type === MSG.RENOUNCE) return await handleRenounce(from, payload)
       if (payload.type === MSG.ADMIN_EVENT) return await handleAdminEvent(payload)
+      if (payload.type === MSG.INCIDENT) return await handleIncident(from, payload)
       if (payload.type === MSG.REPLICA_ACK) return await handleReplicaAck(from, payload)
       if (payload.type === MSG.LOGIN_START) return await handleLoginStart(from, payload)
       if (payload.type === MSG.LOGIN_FINISH) return await handleLoginFinish(from, payload)
@@ -2611,10 +2700,37 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     return pend.id
   }
 
+  /**
+   * BLOQUEAR O DESBLOQUEAR A MANO, desde la bóveda (CLI/TUI) o desde la consola de
+   * administración. El camino normal para bloquear es el aprobador (`handleApproval`,
+   * `block`); desbloquear solo pasa por aquí, que es lo que pidió el dueño.
+   */
+  async function setBlocked (pub, on, { by = 'vault' } = {}) {
+    const deviceId = await deviceIdOf(pub).catch(() => null)
+    if (on) {
+      const record = await refreshActa()
+      const label = (record?.members || []).find((m) => m.pub === pub)?.label || ''
+      const b = blocked.block({ pub, deviceId, label, by, reason: 'manual' })
+      grants.revokeAll({ device: pub })
+      audit('blocked', { device: deviceId, by, kind: 'manual' })
+      log(`[vault] BLOCKED ${deviceId} by ${by}`)
+      await notifyMembers('blocked', { deviceId, by })
+      return b
+    }
+    const was = blocked.unblock(pub)
+    if (was) {
+      audit('unblocked', { device: deviceId, by })
+      log(`[vault] unblocked ${deviceId} by ${by}`)
+      await notifyMembers('unblocked', { deviceId, by })
+    }
+    return was
+  }
+
   const admin = createAdminDesk({
     desk,
     deviceIdOf,
     audit,
+    blocked: { list: () => blocked.list(), set: setBlocked },
     // Abrir a distancia. Va inyectado porque `admin.js` es puro y esto necesita cripto y
     // disco; `null` si este perfil no lo soporta, y entonces la operación contesta que no.
     unlockDesk,
@@ -4058,6 +4174,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // rotar su llave). Lo enseñan `secret list` y la consola: si no se ve, no se salda.
     rotationsDue,
     secretDebts,
+    // LOS BLOQUEADOS, y quitarlos de la lista (`dotrino-vault block|unblock <ID>`).
+    listBlocked: () => blocked.list(),
+    setBlocked,
     /**
      * QUIÉN tiene envoltura de la generación vigente de un cajón (llaves de firma, más
      * `#recovery`). Es diagnóstico: saber a cuántos se les envolvió no ayuda a abrir nada,

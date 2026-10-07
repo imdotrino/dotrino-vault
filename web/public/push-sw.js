@@ -29,6 +29,7 @@ const TEXTO = {
     write: (who, ns) => `${who} quiere guardar variables en ${ns}`,
     passwords: (who) => `${who} quiere leer una contraseña guardada`,
     update: () => 'Tu bóveda quiere actualizarse',
+    incident: (who, ns) => `${who} falló la clave de la terminal de ${ns} tres veces`,
   },
   en: {
     vaultTitle: 'Something is asking your vault',
@@ -39,6 +40,7 @@ const TEXTO = {
     write: (who, ns) => `${who} wants to save variables in ${ns}`,
     passwords: (who) => `${who} wants to read a saved password`,
     update: () => 'Your vault wants to update',
+    incident: (who, ns) => `${who} failed the terminal code of ${ns} three times`,
   },
 }
 

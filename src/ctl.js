@@ -598,7 +598,11 @@ async function cmdMembers () {
   console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, profileId, record.seq)
   for (const m of record.members) {
     const who = m.label || m.id
+    const bloqueo = (record.blocked || []).find((b) => b.pub === m.pub)
     const marks = [
+      // BLOQUEADO va primero y resaltado: es lo que hay que ver antes que ningún permiso,
+      // porque mientras dure ningún permiso cuenta.
+      bloqueo ? `${B}BLOQUEADO${Z} desde el ${fechaCorta(bloqueo.since)} (dotrino-vault unblock ${m.id})` : null,
       // Ya no hay UN master: la marca dice quién puede sellar, y pueden ser varios. El
       // permiso también sale abajo en la lista, pero aquí se ve de un vistazo — que es
       // justo lo que se busca al mirar quién es quién.
@@ -665,6 +669,33 @@ async function cmdLabel (args = []) {
   writeReq('label-request.json', { pub: m.pub, label: name })
   sendSignal(requireDaemon().pid, 'SIGUSR2')
   console.log('Listo: %s ahora se llama «%s». Compruébalo con: dotrino-vault members', m.id, name.slice(0, 60))
+}
+
+/**
+ * BLOQUEAR / DESBLOQUEAR un aparato de la cuenta. Lo normal es que bloquee el aprobador desde
+ * el teléfono, al recibir el incidente de un agente (la terminal: tres claves mal seguidas);
+ * desbloquear SOLO se hace aquí o desde la consola de administración (dueño, 2026-10-07).
+ * No toca el acta: el aparato sigue siendo miembro, pero la bóveda y los agentes no le
+ * atienden hasta que se le quite el bloqueo.
+ */
+async function cmdBlock (on, args = []) {
+  const [id] = args
+  const verb = on ? 'block' : 'unblock'
+  if (!id) { console.error(`uso: dotrino-vault ${verb} <ID>`); process.exit(2) }
+  const s = requireDaemon()
+  const m = await findMember(id)
+  const resFile = path.join(dataDir(), 'block.json')
+  try { fs.rmSync(resFile, { force: true }) } catch (_) {}
+  const reqId = Math.random().toString(36).slice(2)
+  writeReq('block-request.json', { id: reqId, pub: m.pub, on })
+  sendSignal(s.pid, 'SIGUSR2')
+  let r = null
+  for (let i = 0; i < 50; i++) { await sleep(100); const a = ipcRead(resFile, null); if (a?.at && a.req === reqId) { r = a; break } }
+  if (!r) { console.error('El daemon no respondió.'); process.exit(1) }
+  if (!r.ok) { console.error('No se pudo %s: %s', on ? 'bloquear' : 'desbloquear', r.error); process.exit(1) }
+  if (on) console.log('Bloqueado %s. La bóveda y tus agentes no le atienden hasta: dotrino-vault unblock %s', m.id, m.id)
+  else if (r.was) console.log('Desbloqueado %s. Compruébalo con: dotrino-vault members', m.id)
+  else console.log('%s no estaba bloqueado.', m.id)
 }
 
 /** Busca un miembro del acta por su identificador (AB12-CD34) o se rinde con un mensaje claro. */
@@ -2209,6 +2240,10 @@ function help () {
                       +sella = OTRA BÓVEDA que puede sellar el acta de esta cuenta, para
                       que perder una máquina no se la lleve. No es un traspaso
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
+  block <ID>          bloquea un aparato sin quitarlo: la bóveda y tus agentes dejan de
+                      atenderle. Lo normal es bloquear desde el teléfono al recibir el
+                      incidente (la terminal: tres claves mal seguidas)
+  unblock <ID>        le quita el bloqueo (solo desde aquí o desde la consola de admin)
   logins              los aparatos que se abren con usuario y contraseña (para un equipo
                       prestado, donde no puedes emparejar nada)
   logins add <usuario> [nombre del equipo] [±permiso …]
@@ -2371,6 +2406,8 @@ export async function runCtl (argv) {
     case 'label': return cmdLabel(rest)
     case 'caps': return cmdCaps(rest)
     case 'revoke': return cmdRevoke(rest[0])
+    case 'block': return cmdBlock(true, rest)
+    case 'unblock': return cmdBlock(false, rest)
     case 'logins': return cmdLogins(rest)
     case 'update': return cmdUpdate(rest)
     case 'secret': return cmdSecret(rest)
