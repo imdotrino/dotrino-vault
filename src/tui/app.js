@@ -155,7 +155,9 @@ function mergeMembersAndCerts (members, issued) {
       noAccess: !cert && !m.isMaster && !m.cn,
       // QUÉ CORRE ESE APARATO (CONVENCIONES §14). Lo apunta la bóveda cuando le habla, así
       // que aquí solo hay que dejarlo pasar — que es justo lo que le faltaba a `addedAt`.
-      running: m.running || null
+      running: m.running || null,
+      // SI LE LLEGAN LOS AVISOS, solo en quien aprueba (`undefined` = no aprueba, no se pinta).
+      notifiedAt: (m.caps || []).includes('approve') && 'notifiedAt' in m ? m.notifiedAt : undefined
     }
   })
 }
@@ -386,6 +388,9 @@ function deviceRows (st, t) {
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
       (vars ? t.muted(`  vars:${vars}`) : '') +
       corre +
+      // En quien aprueba: si dijo que le llegan los avisos. No cambia a quién se le pide
+      // (a todos); deja ver a cuál no le suena el pedido. Es un dato, va en gris.
+      (d.notifiedAt === undefined ? '' : t.muted(`  ${d.notifiedAt ? i.notifyYes : i.notifyUnknown}`)) +
       // EN DEUDA: en el acta y sin poder abrir lo suyo. Va en color de aviso al lado de
       // sus variables, que es donde se mira cuando algo no arranca.
       (debt ? t.warn(`  ${i.deviceDebt(debt)}`) : '')

@@ -1271,8 +1271,8 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
 
   // Y HACIA EL TELÉFONO VA SELLADO: el comando y el path son del dueño y el camino hasta el
   // teléfono es el proxio, que no cifra. Lo abre la llave de cifrado de ESE aparato.
-  // AL PEDIR SU LISTA, EL TELÉFONO DICE SI LE LLEGAN LOS AVISOS, y la bóveda lo apunta: es lo
-  // que mira la actualización para saber si hay a quién pedirle permiso.
+  // AL PEDIR SU LISTA, EL TELÉFONO DICE SI LE LLEGAN LOS AVISOS, y la bóveda lo apunta para
+  // enseñarlo (no decide a quién se le pide: se le pide a todo el que aprueba).
   assert.equal((await vault.approvers()).every((a) => a.notifiedAt === null), true, 'nadie lo ha dicho todavía')
   const listado = (await rpc({ op: 'approvals', notify: true }, phoneCert, phone.device)).body
   assert.equal((await vault.approvers()).filter((a) => typeof a.notifiedAt === 'number').length, 1, 'el que lo dijo, cuenta')
@@ -1280,6 +1280,8 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.equal((await vault.approvers()).filter((a) => a.notifiedAt).length, 1, 'un cliente que no manda el campo no borra nada')
   await rpc({ op: 'approvals', notify: false }, phoneCert, phone.device)
   assert.equal((await vault.approvers()).filter((a) => a.notifiedAt).length, 0, 'y si apaga los avisos, deja de contar ya')
+  // …Y SIGUE SIENDO APROBADOR: lo dice el acta, no la señal.
+  assert.ok((await vault.approvers()).some((a) => a.pub === phone.device.publickey && a.notifiedAt === null), 'apagar los avisos no lo saca de quienes aprueban')
   assert.equal(listado.items.length, 1)
   assert.equal(listado.items[0].ctx, null, 'el comando NO viaja en claro')
   assert.equal(listado.items[0].ctxSealed, true)

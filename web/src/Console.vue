@@ -116,6 +116,7 @@ const T = {
     // Qué versión corre cada aparato (CONVENCIONES §14). El aviso no bloquea nada: existe
     // para que una incompatibilidad deje de parecer que ese aparato está apagado.
     dev_runs: (v) => 'corre ' + v,
+    dev_notify_yes: 'le llegan avisos', dev_notify_unknown: 'no ha dicho si le llegan avisos',
     dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' no cuadra',
     vault_runs: (p, v, n) => 'Esta bóveda corre ' + p + ' ' + v + ' (protocolo ' + n + ')',
     dev_nocert: 'sin acceso',
@@ -345,6 +346,7 @@ const T = {
     unlock_no: 'the vault gave nothing to encrypt to: it may be an older version',
     unlock_wait: (s) => `Too many tries. Wait ${s} s.`,
     dev_runs: (v) => 'runs ' + v,
+    dev_notify_yes: 'gets notifications', dev_notify_unknown: 'has not said if notifications reach it',
     dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' does not match',
     vault_runs: (p, v, n) => 'This vault runs ' + p + ' ' + v + ' (protocol ' + n + ')',
     dev_nocert: 'no access',
@@ -670,6 +672,9 @@ async function refresh () {
     // QUÉ CORRE CADA UNO (CONVENCIONES §14). Viene con la lista, no del acta: el acta dice
     // quién puede qué, no qué build es. Y la de la bóveda, para el pie.
     runningBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.running).map((d) => [d.sub, d.running]))
+    // SI A CADA UNO LE LLEGAN LOS AVISOS, según lo que le dijo a la bóveda. Es un dato para
+    // enseñar en quien aprueba; no cambia a quién se le pide.
+    notifiedBySub.value = new Map((r?.devices || []).filter((d) => d.sub && 'notifiedAt' in d).map((d) => [d.sub, d.notifiedAt]))
     vaultRunning.value = r?.vault || null
     syncError.value = ''
     notLinked.value = false
@@ -722,6 +727,7 @@ async function refresh () {
  * abajo desaparecía, la de arriba no.
  */
 const runningBySub = ref(new Map())
+const notifiedBySub = ref(new Map())
 const vaultRunning = ref(null)
 
 /**
@@ -749,7 +755,9 @@ const devices = computed(() => members.value.map((m) => {
     // Un servicio y el master no tienen (ni necesitan) certificado emitido por la bóveda:
     // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
     noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size,
-    running: runningBySub.value.get(m.pub) || null
+    running: runningBySub.value.get(m.pub) || null,
+    // `undefined` = no aprueba, o la bóveda no lo dice (anterior a 0.146): no se pinta.
+    notified: (m.caps || []).includes('approve') && notifiedBySub.value.has(m.pub) ? notifiedBySub.value.get(m.pub) : undefined
   }
 }))
 
@@ -2255,6 +2263,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                   :data-testid="'runs-' + m.id" :title="m.running.reason || ''">
               {{ m.running.compatible ? t.dev_runs(m.running.version) : t.dev_mismatch(m.running.product, m.running.version) }}
             </span>
+            <!-- En quien aprueba: si dijo que le llegan los avisos. Es un dato (gris): deja
+                 ver a cuál no le suena un pedido que lleva tiempo sin respuesta. -->
+            <span v-if="m.notified !== undefined" class="tag runs" :data-testid="'notify-' + m.id">{{ m.notified ? t.dev_notify_yes : t.dev_notify_unknown }}</span>
             <code class="mid">{{ m.id }}</code>
           </div>
           <template v-if="openMembers.has(m.pub)">

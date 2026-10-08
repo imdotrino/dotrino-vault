@@ -2,24 +2,25 @@
  * QUÉ APROBADORES PUEDEN RECIBIR UN AVISO: lo dice cada uno, y caduca.
  *
  * Un aparato con `approve` que no recibe avisos es un aprobador solo en el papel: el pedido
- * no le suena y solo lo ve si abre la app por su cuenta. Para la ACTUALIZACIÓN eso era un
- * bloqueo mudo — la bóveda pedía cada día, nadie se enteraba y se quedaba atrás para siempre
- * (dueño, 2026-10-07).
+ * no le suena y solo lo ve si abre la app por su cuenta.
  *
  * Así que el aprobador lo declara: al pedir su lista de pedidos (`op: 'approvals'`, que ya
  * manda firmado cada vez que se abre) dice `notify: true` si tiene los avisos encendidos.
  * Aquí se apunta CUÁNDO lo dijo por última vez, y vale `NOTIFIABLE_TTL_MS`: una app que se
- * desinstala deja de renovarlo y sale sola de la cuenta.
+ * desinstala deja de renovarlo.
  *
- * SOLO DECIDE LA ACTUALIZACIÓN. Las claves, las contraseñas y guardar variables siguen
- * pidiendo aprobación mientras haya un aparato con `approve` en el acta, pueda o no recibir
- * avisos: ahí «nadie se entera» se resuelve esperando, no entregando.
+ * NO DECIDE NADA: SE ENSEÑA (dueño, 2026-10-08). Un día decidió si la bóveda pedía permiso
+ * para actualizarse —sin nadie que lo hubiera dicho, se actualizaba sola— y se quitó: era
+ * una condición más, y el silencio de un aprobador abría la puerta. Quién aprueba lo dice
+ * el acta y nada más; los avisos salen a todos los que tienen `approve`, lo hayan dicho o
+ * no. Esto sirve para VER a cuál no le está sonando el pedido (`members`, `status`, la
+ * consola).
  *
  * Y NO SE LE PREGUNTA AL PROXIO, que es quien guarda las suscripciones: es la pieza de la
  * que el diseño no se fía, y creerle sería dejarle decidir cuándo no hace falta permiso.
  *
  * Cifrado en reposo como lo demás. Un archivo que existe y no se puede leer NO es «nadie
- * puede recibir avisos» (eso saltaría la aprobación): se lanza.
+ * puede recibir avisos»: se lanza.
  */
 import fs from 'node:fs'
 import path from 'node:path'

@@ -27,6 +27,7 @@ import { capScope } from '@dotrino/identity/acta'
 import { watchBinary } from './selfupdate.js'
 import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
 import { VERSION } from './version.js'
+import { readSettings } from './settings.js'
 import crypto from 'node:crypto'
 
 const readJsonSafe = (f) => ipcRead(f, null)
@@ -101,6 +102,7 @@ export async function runDaemon () {
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
   // instalador y la web, que son anteriores al multi-perfil. La lista completa va
   // en `profiles`.
+  const ajusteActualizar = () => { try { return readSettings(dir).updateApproval } catch (_) { return null } }
   const writeState = () => {
     const cur = mgr.summary().find((p) => p.current) || {}
     ipcWrite(stateFile, {
@@ -114,6 +116,9 @@ export async function runDaemon () {
       // también sin conexión.
       ...(ultimaPublicada ? { latest: ultimaPublicada } : {}),
       ...(pedidoSinRespuesta ? { updateAsk: pedidoSinRespuesta } : {}),
+      // Si para actualizarse pide permiso (`src/settings.js`). `null` = el ajuste no se
+      // pudo leer, que `status` dice distinto de «no».
+      updateApproval: ajusteActualizar(),
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -1103,35 +1108,39 @@ export async function runDaemon () {
     if (!isNewer(r.version, daemonVersion)) return
 
     /**
-     * PIDE PERMISO SOLO SI HAY A QUIÉN PEDÍRSELO (dueño, 2026-09-20).
+     * SE ACTUALIZA SOLA. PEDIR PERMISO ES UN AJUSTE (dueño, 2026-10-08).
      *
-     * La bóveda es la pieza sensible del ecosistema: quien le cuele una actualización se
-     * lleva la maestra, y eso no se rota — se pierde la cuenta. Por eso no se actualiza
-     * sola mientras haya un aparato con `aprueba` que pueda decidirlo, igual que ya pasa
-     * con las claves privadas.
+     * Por defecto no se le pregunta a nadie: lo que se baja se verifica contra la
+     * atestación del release antes de tocar el disco, y eso no depende de que alguien
+     * conteste. Antes se pedía permiso según quién hubiera en el acta y según si decía que
+     * le llegan los avisos; eran condiciones que explicar y que se desalineaban, y una
+     * bóveda podía quedarse atrás sin que nadie lo viera.
      *
-     * Y si NO hay aprobadores, esperar un sí que nadie puede dar sería condenarla a no
-     * actualizarse nunca. Entonces se actualiza sola, que es lo que hace el resto del
-     * ecosistema (§15).
+     * Quien quiera decidir cada actualización lo enciende: `dotrino-vault update --approval
+     * on` (`src/settings.js`). Entonces se le pide a TODO el que tenga `aprueba`, reciba
+     * avisos o no, y sin un sí no se instala. Si en el acta no aprueba nadie, se actualiza
+     * igual: esperar un sí que nadie puede dar sería no actualizarse nunca.
+     *
+     * Lo que cada aprobador dijo de sus avisos (`notifiedAt`, `src/notifiable.js`) no
+     * decide nada: se enseña junto al pedido sin respuesta, para ver a cuál no le suena.
      */
-    // SI NO SE PUEDE SABER QUIÉN APRUEBA, NO SE ACTUALIZA. Antes un fallo aquí dejaba la
-    // lista vacía, y lista vacía es «nadie aprueba, adelante»: el repliegue que abre la
-    // puerta justo cuando algo se rompió. Se dice y se vuelve a mirar en la próxima pasada.
-    let enElActa
-    try { enElActa = await mgr.current().approvers() } catch (e) {
-      console.log(`[vault] version ${r.version} is out, but the approvers could not be read (${e?.message || e}) · not updating`)
+    // SI EL AJUSTE NO SE PUEDE LEER, NO SE ACTUALIZA: el valor por defecto es no preguntar,
+    // así que suponerlo sería saltarse la aprobación que el dueño pidió.
+    let pedirPermiso
+    try { pedirPermiso = readSettings(dir).updateApproval } catch (e) {
+      console.log(`[vault] version ${r.version} is out, but the settings could not be read (${e?.message || e}) · not updating`)
       return
     }
-    /**
-     * Y SOLO CUENTA EL APROBADOR QUE PUEDE ENTERARSE (dueño, 2026-10-07). Uno que no recibe
-     * avisos no ve el pedido si no abre la app por su cuenta: la bóveda pedía cada día y se
-     * quedaba atrás para siempre, que es el mismo bloqueo de «sin aprobadores» un paso
-     * después. Lo dice el propio aparato, firmado, y caduca (`src/notifiable.js`).
-     *
-     * Esto vale SOLO para actualizarse. Lo que se instala se verifica igual contra la
-     * atestación del release, se haya pedido permiso o no.
-     */
-    const quienAprueba = enElActa.filter((a) => a.notifiedAt)
+    // Y si hay que pedir y no se puede saber a quién, tampoco: lista vacía sería «nadie
+    // aprueba, adelante», el repliegue que abre la puerta justo cuando algo se rompió.
+    let quienAprueba = []
+    if (pedirPermiso) {
+      try { quienAprueba = await mgr.current().approvers() } catch (e) {
+        console.log(`[vault] version ${r.version} is out, but the approvers could not be read (${e?.message || e}) · not updating`)
+        return
+      }
+    }
+    const conAvisos = quienAprueba.filter((a) => a.notifiedAt).length
 
     // INSTALADA COMO PAQUETE DEL SISTEMA (.deb en /usr/bin): el binario es de root y este
     // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
@@ -1142,22 +1151,25 @@ export async function runDaemon () {
     if (actualizando) return
     actualizando = true
     try {
-      // PIDE PERMISO SOLO SI HAY A QUIÉN PEDÍRSELO (dueño, 2026-09-20); sin aprobadores
-      // no se necesita aprobación (dueño, 2026-09-24).
       if (quienAprueba.length) {
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking one of ${quienAprueba.length} approver(s)`)
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking one of ${quienAprueba.length} approver(s) · ${conAvisos} of them said notifications reach it`)
         const si = await mgr.current().askUpdateApproval({ version: r.version })
         if (!si) {
           const antes = pedidoSinRespuesta?.version === r.version ? pedidoSinRespuesta : null
-          pedidoSinRespuesta = { version: r.version, since: antes?.since || Date.now(), asks: (antes?.asks || 0) + 1 }
+          pedidoSinRespuesta = {
+            version: r.version, since: antes?.since || Date.now(), asks: (antes?.asks || 0) + 1,
+            // A QUIÉN SE LE PIDIÓ, y si dijo que le llegan los avisos: es lo que hay que mirar
+            // cuando nadie contesta.
+            approvers: quienAprueba.map((a) => ({ id: a.id, label: a.label, notifiedAt: a.notifiedAt }))
+          }
           writeState()
           console.log(`[vault] update to ${r.version}: not approved (denied or expired) · asked ${pedidoSinRespuesta.asks} time(s) since ${new Date(pedidoSinRespuesta.since).toISOString()} · it will ask again`)
           return
         }
-      } else if (enElActa.length) {
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · ${enElActa.length} approver(s) in the record but none receives notifications: updating on its own`)
+      } else if (pedirPermiso) {
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval is on but no approver in the record: updating on its own`)
       } else {
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · no approver in the record: updating on its own`)
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · updating on its own`)
       }
       if (pedidoSinRespuesta) { pedidoSinRespuesta = null; writeState() }
       const res = await installUserRelease(r, { log: (m) => console.log(m) })

@@ -1,6 +1,6 @@
 /**
  * QUÉ APROBADORES PUEDEN RECIBIR AVISOS (`src/notifiable.js`): lo dice cada uno, caduca, y
- * un archivo que no se puede leer NO es «nadie puede» — eso saltaría la aprobación.
+ * un archivo que no se puede leer NO es «nadie puede». Es un dato que se enseña: no decide.
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'

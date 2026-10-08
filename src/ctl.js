@@ -131,6 +131,11 @@ function deviceIdOf (sub) {
   return pubkeyId(sub).then((id) => id.slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2'))
 }
 
+/** Lo que dijo un aprobador sobre sus avisos, para enseñarlo. No decide nada. */
+function avisosTxt (notifiedAt) {
+  return notifiedAt ? `dijo que le llegan los avisos (${fechaCorta(notifiedAt)})` : 'no ha dicho que le lleguen los avisos'
+}
+
 function cmdStatus () {
   const s = readState()
   const up = alive(s.pid)
@@ -158,6 +163,18 @@ function cmdStatus () {
   if (s.updateAsk?.version && isNewer(s.updateAsk.version, VERSION)) {
     console.log('    pidió permiso para instalarla %s (%d %s) y nadie lo ha aprobado · mira Pedidos en tu teléfono',
       hace(s.updateAsk.since), s.updateAsk.asks, s.updateAsk.asks === 1 ? 'vez' : 'veces')
+    // A QUIÉN SE LE PIDIÓ, y si dijo que le llegan los avisos: el que no lo ha dicho es el
+    // primer sitio donde mirar cuando nadie contesta.
+    for (const a of s.updateAsk.approvers || []) {
+      console.log('      %s  %s · %s', a.id, a.label || '(sin nombre)', avisosTxt(a.notifiedAt))
+    }
+  }
+  // CÓMO SE ACTUALIZA. Va siempre, también al día: es un ajuste y se mira aquí.
+  if (up && 'updateApproval' in s) {
+    console.log('  actualizar  : %s', s.updateApproval === null
+      ? `${R}no se pudo leer el ajuste: no se actualiza${Z} · ponlo de nuevo con:  dotrino-vault update --approval on|off`
+      : s.updateApproval ? 'pide aprobación (dotrino-vault update --approval off para que lo haga sola)'
+        : 'sola, sin pedir aprobación (dotrino-vault update --approval on para que pida)')
   }
   const profiles = s.profiles || []
   if (profiles.length) {
@@ -631,6 +648,9 @@ async function cmdMembers () {
     // Solo si LEE variables (`secrets`). La llave de comunicación de la bóveda entra con
     // `cn: 'vault'` y solo `firma`, y no tiene llave de cifrado a propósito: salía marcada
     // en rojo «NO puede leer sus variables» cuando no tiene ninguna que leer.
+    // SI LE LLEGAN LOS AVISOS, en quien aprueba. No cambia a quién se le pide —se le pide a
+    // todos—: es para ver a cuál no le suena el pedido.
+    if (m.caps.includes('approve') && 'notifiedAt' in m) console.log('      %s%s%s', D, avisosTxt(m.notifiedAt), Z)
     if (m.cn && !m.canSeal && m.caps.includes('secrets')) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
     // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
     // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
@@ -1794,6 +1814,19 @@ async function waitForService (version, { timeoutMs = 4 * 60_000 } = {}) {
 }
 
 async function cmdUpdate (args = []) {
+  // PEDIR PERMISO PARA ACTUALIZARSE es un ajuste, apagado por defecto. Se guarda aquí y el
+  // servicio lo lee la próxima vez que mire si hay versión nueva: no hace falta reiniciarlo.
+  const iAp = args.indexOf('--approval')
+  if (iAp !== -1) {
+    const { readSettings, writeSettings } = await import('./settings.js')
+    const v = args[iAp + 1]
+    if (v === 'on' || v === 'off') writeSettings(dir, { updateApproval: v === 'on' })
+    else if (v !== undefined) { console.error('uso: dotrino-vault update --approval [on|off]'); process.exit(2) }
+    console.log(readSettings(dir).updateApproval
+      ? 'Esta bóveda pide aprobación antes de actualizarse (a los aparatos con «aprueba»).'
+      : 'Esta bóveda se actualiza sola, sin pedir aprobación.')
+    return
+  }
   const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease } = await import('./update.js')
   const soloMirar = args.includes('--check')
 
@@ -2174,6 +2207,9 @@ function help () {
   status | info       estado del servicio + fingerprint + el id de cada perfil
   update [--check]   trae la versión nueva (verificando la firma) y espera a que el
                      servicio la arranque · --check solo mira · --no-wait no espera
+  update --approval [on|off]
+                     el servicio se actualiza solo; con «on» antes pide aprobación a los
+                     aparatos con «aprueba» · sin valor, dice cómo está
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --kms <config.json>
                       el sitio que se cree (--adopt o --new-account) NACE con su clave

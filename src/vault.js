@@ -263,7 +263,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const passwordsAtRest = atRestFor(dir)
   // Los aparatos BLOQUEADOS por un aprobador (`src/blocked.js`). Cifrado en reposo como lo demás.
   const blocked = openBlocked({ dir, atRest: passwordsAtRest })
-  // Qué aprobadores dijeron que pueden recibir avisos (`src/notifiable.js`): solo lo mira la actualización.
+  // Qué aprobadores dijeron que pueden recibir avisos (`src/notifiable.js`). No decide nada: se enseña.
   const notifiable = openNotifiable({ dir, atRest: passwordsAtRest })
   const readPasswordsFile = () => {
     try { return JSON.parse(passwordsAtRest.decrypt(fs.readFileSync(passwordsFile, 'utf8'))) } catch (_) { return null }
@@ -1320,7 +1320,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // que arrancamos», que es distinto de «no declara» — y se dice distinto.
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce,
-      running: x.sub ? versionDe(x.sub) : null
+      running: x.sub ? versionDe(x.sub) : null,
+      notifiedAt: x.sub ? notifiable.since(x.sub) : null
     })))
     // LA SUBACTA VIAJA CON EL ACTA. Es la mitad de «se comparte entre todos los
     // dispositivos»: sin esto, una renuncia sin sellar solo la respeta esta máquina.
@@ -4036,7 +4037,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       return (record.members || [])
         .filter((m) => Acta.memberCan(record, m.pub, 'approve'))
         // `notifiedAt`: cuándo dijo por última vez que le llegan los avisos (null = no lo ha
-        // dicho, o caducó). Solo lo usa la actualización para saber si hay a quién pedirle.
+        // dicho, o caducó). No decide si se pide: se enseña junto al pedido sin respuesta.
         .map((m) => ({ id: m.id, label: m.label || '', pub: m.pub, notifiedAt: notifiable.since(m.pub) }))
     },
     // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
@@ -4176,6 +4177,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         members: (r?.members || []).map((m) => ({
           ...m,
           running: versionDe(m.pub),
+          // Cuándo dijo que le llegan los avisos (null = no lo ha dicho, o caducó). Solo
+          // tiene sentido en quien aprueba, y es un dato para enseñar: no decide nada.
+          notifiedAt: notifiable.since(m.pub),
           renounced: subacta.forMember(m.pub).flatMap((e) => e.caps || [])
         }))
       }
