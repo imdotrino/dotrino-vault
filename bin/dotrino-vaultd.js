@@ -59,6 +59,16 @@ try {
   throw e
 }
 
+// POR DÓNDE VA EL TRÁFICO, AL LOG. La bóveda tiene el canal directo encendido para los
+// aparatos del acta, y sin esto no había forma de ver si lo usan o si todo sigue dando la
+// vuelta por el proxio. Una vez por PROCESO y no por perfil: `logStats` lee todos los
+// clientes que haya (uno por perfil abierto). Escribe con `console.log` en el momento, así
+// que con `--tui` cae en el mismo búfer que el resto y no pinta encima de la pantalla.
+{
+  const { logStats } = await import('@dotrino/proxy-client')
+  logStats({ label: 'vault' })
+}
+
 // Atajo de dev: --pair imprime el QR directo en stdout (en producción se usa el CLI).
 // Empareja contra el perfil ACTIVO.
 if (process.argv.includes('--pair')) {
