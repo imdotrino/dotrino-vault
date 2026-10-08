@@ -79,6 +79,10 @@ const D = '\x1b[2m' // apagado: para el dato que acompaña sin competir con el n
  * En español, como el resto de esta CLI: con el idioma del sistema salía «Jul 29, 2026»
  * en medio de una frase en español, que es peor que cualquiera de los dos por separado.
  */
+function fechaHora (ms) {
+  try { return new Date(ms).toLocaleString('es', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+  catch (_) { return '' }
+}
 function fechaCorta (ms) {
   try { return new Date(ms).toLocaleDateString('es', { year: 'numeric', month: 'short', day: 'numeric' }) }
   catch (_) { return '' }
@@ -158,15 +162,22 @@ function cmdStatus () {
     console.log('  %s⬆ hay %s publicada%s (esta es la %s) · tráela con:  dotrino-vault update',
       B, s.latest.version, Z, VERSION)
   }
-  // …Y LLEVA DÍAS PIDIENDO PERMISO SIN RESPUESTA. Es un bloqueo que desde fuera no se ve:
-  // la bóveda parece normal y simplemente no se actualiza.
+  // …Y SE PIDIÓ PERMISO. El pedido se hace UNA vez por versión y dura un día: mientras
+  // espera se dice hasta cuándo; si no se aprobó, que ya no se vuelve a pedir y cómo
+  // instalarla. Es un freno que desde fuera no se ve: la bóveda parece normal.
   if (s.updateAsk?.version && isNewer(s.updateAsk.version, VERSION)) {
-    console.log('    pidió permiso para instalarla %s (%d %s) y nadie lo ha aprobado · mira Pedidos en tu teléfono',
-      hace(s.updateAsk.since), s.updateAsk.asks, s.updateAsk.asks === 1 ? 'vez' : 'veces')
+    const u = s.updateAsk
+    if (u.result === 'pending') {
+      console.log('    se pidió permiso para instalar la %s el %s y está esperando respuesta hasta el %s · mira Pedidos en tu teléfono',
+        u.version, fechaHora(u.askedAt), fechaHora(u.askedAt + 24 * 60 * 60 * 1000))
+    } else {
+      console.log('    se pidió permiso para instalar la %s el %s y no se aprobó: no se vuelve a pedir · instálala con:  dotrino-vault update',
+        u.version, fechaHora(u.askedAt))
+    }
     // A QUIÉN SE LE PIDIÓ, y si dijo que le llegan los avisos: el que no lo ha dicho es el
     // primer sitio donde mirar cuando nadie contesta.
     for (const a of s.updateAsk.approvers || []) {
-      console.log('      %s  %s · %s', a.id, a.label || '(sin nombre)', avisosTxt(a.notifiedAt))
+      console.log('      %s  %s%s · %s', a.id, a.label || '(sin nombre)', a.profile ? ` [${a.profile}]` : '', avisosTxt(a.notifiedAt))
     }
   }
   // CÓMO SE ACTUALIZA. Va siempre, también al día: es un ajuste y se mira aquí.
@@ -1813,6 +1824,18 @@ async function waitForService (version, { timeoutMs = 4 * 60_000 } = {}) {
   return false
 }
 
+/**
+ * DEJA DICHO QUE SE INSTALÓ una versión nueva, para que el servicio se lo cuente a quien
+ * aprueba cuando arranque con ella (`anunciarActualizacion` en daemon.js). Es el mismo
+ * marcador que deja el servicio cuando se actualiza solo. Si no se puede escribir se dice:
+ * la actualización está hecha, lo que se pierde es el aviso.
+ */
+function noteUpdated (to) {
+  try { ipcWrite(path.join(dir, 'updated.json'), { v: 1, from: readState().version || VERSION, to, at: Date.now() }) } catch (e) {
+    console.error('No se pudo dejar el aviso de actualización para tus aprobadores: %s', e.message)
+  }
+}
+
 async function cmdUpdate (args = []) {
   // PEDIR PERMISO PARA ACTUALIZARSE es un ajuste, apagado por defecto. Se guarda aquí y el
   // servicio lo lee la próxima vez que mire si hay versión nueva: no hace falta reiniciarlo.
@@ -1823,7 +1846,7 @@ async function cmdUpdate (args = []) {
     if (v === 'on' || v === 'off') writeSettings(dir, { updateApproval: v === 'on' })
     else if (v !== undefined) { console.error('uso: dotrino-vault update --approval [on|off]'); process.exit(2) }
     console.log(readSettings(dir).updateApproval
-      ? 'Esta bóveda pide aprobación antes de actualizarse (a los aparatos con «aprueba»).'
+      ? 'Esta bóveda pide aprobación antes de actualizarse (a los aparatos con «aprueba» de cualquiera de sus perfiles).'
       : 'Esta bóveda se actualiza sola, sin pedir aprobación.')
     return
   }
@@ -1858,6 +1881,7 @@ async function cmdUpdate (args = []) {
     }
     console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
     console.log('Instalada la %s.', res.version)
+    noteUpdated(res.version)
     if (!args.includes('--no-wait')) await waitForService(res.version)
     return
   }
@@ -1897,6 +1921,7 @@ async function cmdUpdate (args = []) {
       B, file, r.version, Z)
     return
   }
+  noteUpdated(r.version)
   console.log('Listo. El servicio se reinicia solo; compruébalo con:  dotrino-vault status')
 }
 
@@ -2209,7 +2234,8 @@ function help () {
                      servicio la arranque · --check solo mira · --no-wait no espera
   update --approval [on|off]
                      el servicio se actualiza solo; con «on» antes pide aprobación a los
-                     aparatos con «aprueba» · sin valor, dice cómo está
+                     aparatos con «aprueba» de cualquier perfil (vale para todos) · sin
+                     valor, dice cómo está
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --kms <config.json>
                       el sitio que se cree (--adopt o --new-account) NACE con su clave

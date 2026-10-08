@@ -26,7 +26,8 @@ const es = {
   // encabezado / estado
   daemonRunning: 'corriendo',
   daemonStopped: 'DETENIDO',
-  updateUnanswered: (version, days) => `⬆ la ${version} espera tu aprobación desde hace ${days < 1 ? 'menos de un día' : days === 1 ? '1 día' : days + ' días'}: mira Pedidos en tu teléfono`,
+  updateWaiting: (version, until) => `⬆ la ${version} espera tu aprobación hasta ${until} UTC: mira Pedidos en tu teléfono`,
+  updateNotApproved: (version, when) => `⬆ se pidió permiso para la ${version} el ${when} UTC y no se aprobó: no se vuelve a pedir · dotrino-vault update`,
   daemonStale: (running, installed) => `⚠ el servicio corre ${running} y el binario instalado es ${installed}: reinícialo (systemctl --user restart dotrino-vault)`,
   activeVault: 'Bóveda activa: ',
   noName: '(sin nombre)',
@@ -169,6 +170,18 @@ const es = {
   titlePairing: 'Emparejar un dispositivo',
   titlePairMode: 'Emparejar: ¿a qué cuenta entra?',
   titleDoors: 'Con qué se abre la bóveda',
+  titleSettings: 'Ajustes de esta bóveda',
+  settingUpdateAlone: 'Esta bóveda se actualiza sola, sin pedir aprobación.',
+  settingUpdateAsks: 'Esta bóveda pide aprobación antes de actualizarse.',
+  settingUpdateUnknown: 'No se sabe si esta bóveda pide aprobación para actualizarse.',
+  settingChange: 'Enter cambiar',
+  settingUpdateHint1: 'Vale para todos los perfiles: se pide a los aparatos con «aprueba» de cualquiera de ellos, una vez por versión.',
+  settingUpdateHint2: 'Si ningún perfil tiene un aparato con «aprueba», la bóveda se actualiza sola.',
+  settingsUnreadable: 'El ajuste no se pudo leer: mientras siga así, la bóveda no se actualiza.',
+  settingsUnreadableHint: 'Pulsa Enter para volver a guardarlo (queda pidiendo aprobación; Enter otra vez lo cambia).',
+  settingUpdateNowAsks: 'Hecho: pide aprobación antes de actualizarse.',
+  settingUpdateNowAlone: 'Hecho: se actualiza sola.',
+  settingSaveFailed: (m) => `No se pudo guardar el ajuste: ${m}`,
   doorsIntro: (name) => `Con qué se abre «${name}». Abre cualquiera de estas.`,
   doorsNone: 'Sin candado: se abre sola en esta máquina.',
   doorPassword: 'contraseña',
@@ -416,7 +429,7 @@ const es = {
   // INGLÉS: new/rename/delete/password/unlock/locK/pair/approve/revoke/refresh/
   // language/quit); lo único que se traduce es la palabra que las explica.
   // Segmentos, no una línea: si no caben en una, el render los reparte en varias.
-  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'u desbloq', 'k bloquear', 'l English', 'q salir'],
+  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'u desbloq', 'k bloquear', 's ajustes', 'l English', 'q salir'],
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
@@ -454,6 +467,7 @@ const es = {
   helpPairing: ['a aprobar', 'x rechazar', 'r reiniciar', '↑↓ scroll', 'Esc atrás', 'l English'],
   helpPairMode: ['↑↓', 'Enter elegir', 'Esc atrás', 'l English', 'q salir'],
   helpDoors: ['↑↓', 'Enter añadir', 'd quitar', 'Esc atrás', 'l English', 'q salir'],
+  helpSettings: ['Enter cambiar', 'Esc atrás', 'l English', 'q salir'],
   helpJoin: ['Esc bóvedas', 'l English', 'q salir'],
 
   // pantalla "daemon caído"
@@ -501,7 +515,8 @@ const en = {
 
   daemonRunning: 'running',
   daemonStopped: 'STOPPED',
-  updateUnanswered: (version, days) => `⬆ ${version} has been waiting for your approval for ${days < 1 ? 'less than a day' : days === 1 ? '1 day' : days + ' days'}: check Requests on your phone`,
+  updateWaiting: (version, until) => `⬆ ${version} is waiting for your approval until ${until} UTC: check Requests on your phone`,
+  updateNotApproved: (version, when) => `⬆ approval for ${version} was asked on ${when} UTC and not given: it will not ask again · dotrino-vault update`,
   daemonStale: (running, installed) => `⚠ the service runs ${running} but the installed binary is ${installed}: restart it (systemctl --user restart dotrino-vault)`,
   activeVault: 'Active vault: ',
   tooSmall: 'Terminal too small',
@@ -624,6 +639,18 @@ const en = {
   titlePairing: 'Pair a device',
   titlePairMode: 'Pairing: which account does it join?',
   titleDoors: 'What opens this vault',
+  titleSettings: 'Settings of this vault',
+  settingUpdateAlone: 'This vault updates on its own, without asking for approval.',
+  settingUpdateAsks: 'This vault asks for approval before updating.',
+  settingUpdateUnknown: 'It is not known whether this vault asks for approval to update.',
+  settingChange: 'Enter change',
+  settingUpdateHint1: 'It applies to every profile: devices with “approve” in any of them are asked, once per version.',
+  settingUpdateHint2: 'If no profile has a device with “approve”, the vault updates on its own.',
+  settingsUnreadable: 'The setting could not be read: while it stays like this, the vault does not update.',
+  settingsUnreadableHint: 'Press Enter to save it again (it will ask for approval; Enter again changes it).',
+  settingUpdateNowAsks: 'Done: it asks for approval before updating.',
+  settingUpdateNowAlone: 'Done: it updates on its own.',
+  settingSaveFailed: (m) => `The setting could not be saved: ${m}`,
   doorsIntro: (name) => `What opens “${name}”. Any of these opens it.`,
   doorsNone: 'No lock: it opens by itself on this machine.',
   doorPassword: 'password',
@@ -847,7 +874,7 @@ const en = {
   helpInput: 'Enter confirm · Esc cancel · Ctrl-U clear',
   helpConfirm: 'y confirm · n/Esc cancel',
 
-  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'u unlock', 'k lock', 'l Español', 'q quit'],
+  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'u unlock', 'k lock', 's settings', 'l Español', 'q quit'],
   helpDevices: ({ pending, hasDevices, isService, drafts, curBlocked } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(drafts ? ['g save permissions'] : []),
@@ -879,6 +906,7 @@ const en = {
   helpPairing: ['a approve', 'x reject', 'r restart', '↑↓ scroll', 'Esc back', 'l Español'],
   helpPairMode: ['↑↓', 'Enter choose', 'Esc back', 'l Español', 'q quit'],
   helpDoors: ['↑↓', 'Enter add', 'd remove', 'Esc back', 'l Español', 'q quit'],
+  helpSettings: ['Enter change', 'Esc back', 'l Español', 'q quit'],
   helpJoin: ['Esc vaults', 'l Español', 'q quit'],
 
   downTitle: 'The vault daemon is not running.',

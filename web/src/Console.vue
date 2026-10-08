@@ -228,6 +228,7 @@ const T = {
     apv_asks: 'pide tus claves de',
     apv_writes: 'quiere guardar variables en',
     apv_update: (v, de) => `La bóveda quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '. Se verifica antes de instalar.',
+    apv_update_device: (quien, v, de) => `${quien} quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '.',
     apv_keys: 'Variables:',
     apv_passwords: 'quiere leer una contraseña guardada',
     apv_fields: 'Campos:',
@@ -443,6 +444,7 @@ const T = {
     apv_asks: 'asks for your keys of',
     apv_writes: 'wants to save variables in',
     apv_update: (v, from) => `The vault wants to update to ${v}` + (from ? ` (now ${from})` : '') + '. It is verified before installing.',
+    apv_update_device: (who, v, from) => `${who} wants to update to ${v}` + (from ? ` (now ${from})` : '') + '.',
     apv_keys: 'Variables:',
     apv_passwords: 'wants to read a saved password',
     apv_fields: 'Fields:',
@@ -728,6 +730,16 @@ async function refresh () {
  */
 const runningBySub = ref(new Map())
 const notifiedBySub = ref(new Map())
+/**
+ * El texto de un pedido de actualización: de la bóveda (sin `product`, o el suyo) o de uno
+ * de sus aparatos, que dice cuál.
+ */
+function updateText (p) {
+  const c = p.ctx || {}
+  const esAparato = typeof c.product === 'string' && c.product && c.product !== '@dotrino/vaultd'
+  if (!esAparato) return t.value.apv_update(c.version || '?', c.from || '')
+  return t.value.apv_update_device(p.label ? `${p.label} (${p.deviceId || '?'})` : (p.deviceId || '?'), c.version || '?', c.from || '')
+}
 const vaultRunning = ref(null)
 
 /**
@@ -2053,7 +2065,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <div v-for="p in approvals" :key="p.profile + ':' + p.id" class="pending apv" :data-apv-id="p.id" :data-apv-profile="p.profile" data-testid="apv-item">
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
-            <template v-if="p.kind === 'update'">{{ t.apv_update(p.ctx?.version || '?', p.ctx?.from || '') }}</template>
+            <template v-if="p.kind === 'update'">{{ updateText(p) }}</template>
             <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_passwords }}</template>
             <template v-else-if="p.kind === 'incident'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_incident(p.ctx?.reporterLabel ? `${p.ctx.reporterLabel} (${p.ns})` : p.ns) }}</template>
             <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>

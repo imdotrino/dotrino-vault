@@ -1214,6 +1214,13 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   const suyas = (await vault.identity.profileActa()).acta.members.find((m) => m.pub === agent.device.publickey).caps
   await vault.setCaps(agent.device.publickey, suyas.filter((c) => c !== 'unattended'))
   assert.equal(await vault.needsApproval(agent.device.publickey), false, 'sin nadie que apruebe, no se pide (2026-09-24)')
+
+  // ¿PUEDO ACTUALIZARME? (`update-ask`). Lo manda el aparato que tiene encendido SU
+  // interruptor; la bóveda no mira ningún ajuste. Sin nadie que apruebe: sí, sin preguntar.
+  const { askUpdateApproval, reportUpdated } = await import('../lib/src/service.js')
+  const pregunta = { product: '@dotrino/terminal-agent', version: '9.9.9', from: '9.9.8', proxyUrl, masterPubkey: vault.master, device: agent.device, cert: agent.cert, timeoutMs: 8000 }
+  assert.deepEqual(await askUpdateApproval(pregunta), { ok: true, asked: false }, 'nadie aprueba: se actualiza solo')
+  assert.equal(vault.listApprovals().length, 0, 'y no deja ningún pedido')
   await conAprobador()
   assert.equal(await vault.needsApproval(agent.device.publickey), true)
 
@@ -1343,6 +1350,60 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   await vault.setCaps(agent.device.publickey, [...new Set([...caps, 'unattended'])])
   assert.equal(await vault.needsApproval(agent.device.publickey), false)
   assert.deepEqual(await fetchSecrets({ ...args, timeoutMs: 5000 }), { DEEPSEEK_API_KEY: 'sk-1' })
+
+  // 5) ACTUALIZARSE HABIENDO QUIEN APRUEBE: pedido `kind: 'update'` a nombre del aparato, con
+  //    qué producto y a qué versión. Denegar es no; aprobar es sí.
+  let visto = null
+  // Quien preguntó primero y se fue: su espera vence sola (aquí, corta) y eso NO es un sí.
+  const primera = askUpdateApproval({ ...pregunta, approvalTimeoutMs: 1500, onPending: (x) => { visto = x } }).catch((e) => e)
+  await settle()
+  const [u1] = vault.listApprovals()
+  assert.equal(u1?.kind, 'update'); assert.equal(u1.label, 'claude')
+  assert.deepEqual(u1.ctx, { product: '@dotrino/terminal-agent', version: '9.9.9', from: '9.9.8' })
+  assert.equal(visto?.id, u1.id, 'quien pregunta sabe que quedó pendiente')
+  // Preguntar otra vez por lo mismo NO timbra de nuevo: es el mismo pedido.
+  const repetida = askUpdateApproval(pregunta)
+  await settle()
+  assert.equal(vault.listApprovals().length, 1, 'un solo pedido vivo')
+  assert.equal((await primera).code, 'unanswered', 'sin respuesta no es un sí: se lanza')
+  await rpc({ op: 'deny', id: u1.id }, phoneCert, phone.device)
+  assert.deepEqual(await repetida, { ok: false, asked: true }, 'la respuesta va a quien pregunta ahora')
+  // Denegado no se recuerda en la bóveda: se puede volver a preguntar, y ahora se aprueba.
+  const aprobada = askUpdateApproval(pregunta)
+  await settle()
+  const [u2] = vault.listApprovals()
+  assert.ok(u2 && u2.id !== u1.id, 'un no deja volver a preguntar')
+  await rpc({ op: 'approve', id: u2.id }, phoneCert, phone.device)
+  assert.deepEqual(await aprobada, { ok: true, asked: true })
+  assert.equal(vault.listApprovals().length, 0)
+  // Lo aprobado se recuerda: quien no estaba para oírlo lo oye al volver, sin timbrar.
+  assert.deepEqual(await askUpdateApproval(pregunta), { ok: true, asked: true })
+  assert.equal(vault.listApprovals().length, 0)
+
+  // EL PEDIDO DE LA PROPIA BÓVEDA dice que es ella, y se puede RETIRAR (otro perfil ya
+  // contestó por la máquina): sale de la lista y cuenta como no.
+  const propio = vault.askUpdateApproval({ version: '9.9.9' })
+  await settle()
+  const [u3] = vault.listApprovals()
+  assert.equal(u3?.ctx?.product, '@dotrino/vaultd')
+  propio.withdraw()
+  assert.equal(await propio.answer, false)
+  assert.equal(vault.listApprovals().length, 0, 'retirado no se queda en Pedidos')
+
+  // «ME ACTUALICÉ»: le llega a quien aprueba, y queda en `notices` de su lista.
+  const anuncio = await vault.announceUpdate({ version: '9.9.9', from: '9.9.8' })
+  assert.equal(anuncio.approvers, anuncio.sent)
+  assert.ok(anuncio.sent >= 1)
+  // …Y EL DE UN APARATO (`update-done`): quién es lo pone la bóveda desde el acta.
+  assert.deepEqual(await reportUpdated({ ...pregunta, version: '9.9.9', from: '9.9.8' }), { ok: true })
+  const lista = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
+  assert.deepEqual(lista.notices.map((n) => [n.ev, n.product, n.version, n.from, n.label || null]), [
+    ['updated', '@dotrino/vaultd', '9.9.9', '9.9.8', null],
+    ['updated', '@dotrino/terminal-agent', '9.9.9', '9.9.8', 'claude']
+  ])
+  assert.equal(lista.notices[0].id, anuncio.notice.id)
+  assert.equal(lista.notices[0].deviceId, undefined, 'el de la bóveda no nombra ningún aparato')
+  assert.match(lista.notices[1].deviceId, /^[0-9A-F]{4}-[0-9A-F]{4}$/)
 })
 
 /**

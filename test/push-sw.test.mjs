@@ -36,3 +36,27 @@ test('el timbre de la bóveda en la pestaña sigue igual (sin contenido)', () =>
   assert.equal(v.options.data.url, '/vault')
   assert.equal(avisoDe(null, 'es').options.data.url, '/vault', 'un timbre ilegible avisa igual')
 })
+
+test('«me actualicé» es una noticia: dice la versión y abre la bóveda, no Pedidos', () => {
+  const { avisoDe } = cargar()
+  const es = avisoDe({ type: 'ring', ts: 5, why: { ev: 'updated', version: '0.147.0', from: '0.146.0' } }, 'es')
+  assert.equal(es.title, 'Tu bóveda se actualizó')
+  assert.equal(es.options.body, 'Ahora corre la 0.147.0.')
+  assert.equal(es.options.data.url, '/vault')
+  assert.equal(es.options.tag, 'dotrino-vault-updated', 'no pisa el aviso de un pedido')
+  const en = avisoDe({ type: 'ring', why: { ev: 'updated', version: '0.147.0' } }, 'en')
+  assert.equal(en.title, 'Your vault was updated')
+  assert.equal(en.options.body, 'It now runs 0.147.0.')
+  // De un APARATO: dice cuál (nombre, o su id si no tiene).
+  const ag = avisoDe({ type: 'ring', why: { ev: 'updated', version: '1.2.3', product: '@dotrino/terminal-agent', label: 'portátil', deviceId: 'AB12-CD34' } }, 'es')
+  assert.equal(ag.title, 'portátil se actualizó')
+  assert.equal(ag.options.body, 'Ahora corre la 1.2.3.')
+  assert.equal(avisoDe({ type: 'ring', why: { ev: 'updated', version: '1.2.3', product: '@dotrino/ia-agent', deviceId: 'AB12-CD34' } }, 'en').title, 'AB12-CD34 was updated')
+  assert.equal(avisoDe({ type: 'ring', why: { ev: 'updated', version: '0.147.0', product: '@dotrino/vaultd' } }, 'es').title, 'Tu bóveda se actualizó')
+})
+
+test('un pedido de actualización no dice de quién en el aviso: el porqué del proxio no lo trae', () => {
+  const { avisoDe } = cargar()
+  assert.match(avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'update', ns: 'vault', deviceId: 'AB12-CD34' } }, 'es').options.body, /^Hay una actualización esperando tu aprobación\. /)
+  assert.match(avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'update', ns: 'vault' } }, 'en').options.body, /^An update is waiting for your approval\. /)
+})

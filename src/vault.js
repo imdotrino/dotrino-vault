@@ -31,6 +31,7 @@ import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER }
 import { openSubacta } from './subacta.js'
 import { openBlocked } from './blocked.js'
 import { openNotifiable } from './notifiable.js'
+import { openNotices } from './notices.js'
 import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
 import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
@@ -265,6 +266,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const blocked = openBlocked({ dir, atRest: passwordsAtRest })
   // Qué aprobadores dijeron que pueden recibir avisos (`src/notifiable.js`). No decide nada: se enseña.
   const notifiable = openNotifiable({ dir, atRest: passwordsAtRest })
+  // Lo que hay que contarle a quien aprueba y no es un pedido (`src/notices.js`): hoy, «me actualicé».
+  const notices = openNotices({ dir, atRest: passwordsAtRest })
   const readPasswordsFile = () => {
     try { return JSON.parse(passwordsAtRest.decrypt(fs.readFileSync(passwordsFile, 'utf8'))) } catch (_) { return null }
   }
@@ -1526,6 +1529,122 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
   }
 
+  /**
+   * UN APARATO PREGUNTA SI PUEDE ACTUALIZARSE (`op: 'update-ask'`, dueño 2026-10-08).
+   *
+   * Pedir aprobación es un interruptor DE CADA AGENTE, independiente del de la bóveda
+   * (`updateApproval` de `src/settings.js` vale solo para la propia bóveda): el agente solo
+   * manda esto cuando lo tiene encendido. Así que aquí no se consulta ningún ajuste:
+   *
+   *   · alguien aprueba en este perfil → un pedido `kind: 'update'` a nombre del aparato, que
+   *     dura un día; se contesta «pendiente» y el resultado sale cuando alguien decide, por
+   *     donde vino la pregunta. Vencido es no.
+   *   · nadie aprueba → sí, sin preguntar: esperar un sí que nadie puede dar sería no
+   *     actualizarse nunca.
+   *
+   * Lo puede preguntar cualquier miembro del acta: no pide nada que no sea suyo.
+   */
+  const updateAsks = new Map()      // device|product|version → { id, dest } del pedido vivo
+  const updateDecisions = new Map() // device|product|version → { ok: true, exp }: lo ya aprobado
+  const cut = (v, n) => (typeof v === 'string' && v && v.length <= n ? v : null)
+  async function handleUpdateAsk (from, p) {
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      ...(await contextoActa()), revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'update-ask')
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    if (!record || !(record.members || []).some((m) => m.pub === chk.device)) {
+      audit('rejected', { what: 'update-ask', reason: record ? 'acta' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this device is not in the record' })
+    }
+    const product = cut(p.data?.product, 128)
+    const version = cut(p.data?.version, 64)
+    const fromVersion = cut(p.data?.from, 64)
+    if (!product || !version) return reply(from, { type: MSG.ERROR, code: 'bad-request', error: 'update-ask: needs `product` and `version`' })
+    const deviceId = await deviceIdOf(chk.device).catch(() => null)
+    const say = async (dest, extra) => {
+      const body = { op: 'update-ask', product, version, ...extra, ts: Date.now() }
+      reply(dest, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
+    }
+
+    const approvers = (record.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).length
+    if (!approvers) {
+      audit('update-ask', { device: deviceId, product, version, asked: false })
+      log(`[vault] update-ask: ${deviceId || '????-????'} may update ${product} to ${version} on its own (nobody approves in this profile)`)
+      return say(from, { ok: true, asked: false })
+    }
+
+    const key = `${chk.device}|${product}|${version}`
+    const now = Date.now()
+    for (const [k, d] of updateDecisions) if (d.exp <= now) updateDecisions.delete(k)
+    // YA SE DECIDIÓ y quien preguntó no estaba para oírlo: se le dice lo decidido en vez de
+    // volver a timbrar por lo mismo.
+    const decided = updateDecisions.get(key)
+    if (decided) return say(from, { ok: decided.ok, asked: true })
+    // YA HAY UN PEDIDO VIVO por esto mismo (el agente se reinició y vuelve a preguntar): no se
+    // timbra otra vez; la respuesta irá a quien pregunta ahora.
+    const vivo = updateAsks.get(key)
+    if (vivo && waiters.has(vivo.id)) {
+      vivo.dest = from
+      return say(from, { pending: true, id: vivo.id, exp: vivo.exp, asked: true })
+    }
+    const ask = { id: null, exp: null, dest: from }
+    let pend
+    try {
+      pend = await awaitApproval({
+        device: chk.device, ns: 'vault', kind: 'update', what: 'update',
+        ctx: { product, version, from: fromVersion }, ttlMs: UPDATE_TTL_MS,
+        onAnswer: async (ok) => {
+          updateAsks.delete(key)
+          // Solo se recuerda el SÍ. Un no puede ser un vencimiento (nadie lo vio), y
+          // recordarlo dejaría al aparato un día sin poder volver a preguntar.
+          if (ok === true) updateDecisions.set(key, { ok: true, exp: Date.now() + UPDATE_TTL_MS })
+          await say(ask.dest, { ok: ok === true, asked: true, id: ask.id })
+        }
+      })
+    } catch (e) {
+      log(`[vault] update-ask: could not ask for approval: ${e.message}`)
+      return reply(from, { type: MSG.ERROR, code: 'ask-failed', error: 'update-ask: could not ask for approval' })
+    }
+    ask.id = pend.id; ask.exp = pend.exp
+    updateAsks.set(key, ask)
+    return say(from, { pending: true, id: pend.id, exp: pend.exp, asked: true })
+  }
+
+  /**
+   * UN APARATO DICE QUE SE ACTUALIZÓ (`op: 'update-done'`): la bóveda se lo cuenta a quien
+   * aprueba en este perfil, por el mismo camino que su propio «me actualicé». Si el agente
+   * avisa o no lo decide él (su interruptor); aquí solo se reparte.
+   *
+   * QUIÉN ES lo dice el acta (id y nombre), no lo que el aparato cuente de sí mismo.
+   */
+  async function handleUpdateDone (from, p) {
+    const chk = await verifyChain({
+      data: p.data, signature: p.signature, cert: p.cert,
+      ...(await contextoActa()), revoked: await revocationSet()
+    })
+    if (!chk.ok) return denyChain(from, chk, p, 'update-done')
+    const record = (await identity.profileActa?.().catch(() => null))?.acta
+    const member = (record?.members || []).find((m) => m.pub === chk.device)
+    if (!member) {
+      audit('rejected', { what: 'update-done', reason: record ? 'acta' : 'sin-acta' })
+      return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this device is not in the record' })
+    }
+    const product = cut(p.data?.product, 128)
+    const version = cut(p.data?.version, 64)
+    if (!product || !version) return reply(from, { type: MSG.ERROR, code: 'bad-request', error: 'update-done: needs `product` and `version`' })
+    const deviceId = await deviceIdOf(chk.device).catch(() => null)
+    try {
+      await announceUpdate({ version, from: cut(p.data?.from, 64), product, deviceId, label: member.label || '' })
+    } catch (e) {
+      log(`[vault] update-done: ${deviceId || '????-????'} updated ${product} to ${version}, but the approvers could not be told: ${e.message}`)
+      return reply(from, { type: MSG.ERROR, code: e.code || 'announce-failed', error: 'update-done: the approvers could not be told' })
+    }
+    const body = { op: 'update-done', ok: true, product, version, ts: Date.now() }
+    reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
+  }
+
   const storeNonces = new Map()
   async function handleVarStore (from, p) {
     const ns = p.data?.ns
@@ -1593,6 +1712,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (p.data?.op === 'enckey') return handleEncKey(from, p)
     if (p.data?.op === 'store.recipients' || p.data?.op === 'store') return handleVarStore(from, p)
     if (p.data?.op === 'digest') return handleDigest(from, p)
+    if (p.data?.op === 'update-ask') return handleUpdateAsk(from, p)
+    if (p.data?.op === 'update-done') return handleUpdateDone(from, p)
     if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke', 'block', 'blocked'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
@@ -1772,7 +1893,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (op === 'approvals' && typeof p.data?.notify === 'boolean') {
       try { notifiable.declare(chk.device, p.data.notify) } catch (e) { log(`[vault] could not record whether ${by || '????-????'} can be notified: ${e.message}`) }
     }
-    if (op === 'approvals') return answer({ op: 'approvals', items: await conContextoSellado(approvals.list(), chk.device, record) })
+    // `notices`: lo que no es un pedido y quien aprueba tiene que saber (la bóveda se
+    // actualizó). El timbre de una app nativa llega vacío, así que lo lee de aquí.
+    if (op === 'approvals') return answer({ op: 'approvals', items: await conContextoSellado(approvals.list(), chk.device, record), notices: notices.list() })
     // LO QUE YA ESTÁ APROBADO SE VE Y SE CORTA DESDE DONDE SE APROBÓ. Una concesión que se
     // renueva con cada uso puede durar indefinidamente: si no se puede mirar ni quitar desde
     // el mismo sitio donde se dio, es un permiso invisible, y eso no lo damos por bueno.
@@ -1947,6 +2070,42 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       }
       log(`[vault] ${pend.ns}: rang ${who.length} approver(s) for ${pend.id}`)
     } catch (e) { log('[vault] could not notify approvers:', e.message) }
+  }
+
+  /**
+   * «ME ACTUALICÉ», a todo el que aprueba (dueño, 2026-10-08). Vale con la aprobación
+   * encendida o apagada: lo que se instala solo también se cuenta.
+   *
+   * Lo manda la versión NUEVA ya corriendo —el daemon llama aquí al arrancar, si dejó dicho
+   * que instaló—, que es la prueba de que ocurrió. El aviso queda además en `notices`, de
+   * donde lo lee una app nativa (su timbre llega vacío).
+   *
+   * También reparte el «me actualicé» de un APARATO (`op: 'update-done'`): entonces lleva su
+   * `product`, `deviceId` y `label`.
+   *
+   * A diferencia de `notifyApprovers`, aquí el fallo SE LANZA: quien llama guarda el
+   * marcador hasta que el aviso salió, y tragarlo sería borrarlo sin haber avisado.
+   * @returns {Promise<{ approvers: number, sent: number, notice: object|null }>}
+   */
+  async function announceUpdate ({ version, from = null, product = '@dotrino/vaultd', deviceId = null, label = null }) {
+    const record = await refreshActa()
+    const who = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).map((m) => m.pub)
+    if (!who.length) return { approvers: 0, sent: 0, notice: null }
+    // `deviceId`/`label`: solo cuando quien se actualizó es un APARATO (`update-done`). El
+    // aviso de la propia bóveda no los lleva.
+    const notice = notices.updated({ version, from, product, ...(deviceId ? { deviceId, label: label || '' } : {}) })
+    const { id, ev, ts, ...rest } = notice
+    const body = { ev, id, ...rest, ts }
+    const seal = await sealOrFail(body)
+    let sent = 0
+    for (const pub of who) {
+      try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, seal }, { app: 'vault' }); sent++ }
+      catch (e) { log(`[vault] could not tell ${pub.slice(0, 24)}… about the update of ${product} to ${version}: ${e.message}`) }
+    }
+    audit('update.announced', { product, version, from: notice.from, device: deviceId, approvers: who.length, sent })
+    log(`[vault] update: told ${sent} of ${who.length} approver(s) that ${deviceId ? `${deviceId} runs ${product}` : 'this vault now runs'} ${version}`)
+    if (!sent) throw Object.assign(new Error('no approver could be told'), { code: 'announce-failed' })
+    return { approvers: who.length, sent, notice }
   }
 
   /**
@@ -4020,17 +4179,32 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
      * PEDIR PERMISO PARA ACTUALIZARSE a `version` (la instala el daemon si se aprueba). Es
      * un pedido como los demás —sale en Pedidos del teléfono, `kind: 'update'`—, pero dura
      * un día (`UPDATE_TTL_MS`): no hay nadie esperando delante de una terminal.
-     * @returns {Promise<boolean>} sí o no; vencido es no.
+     * @returns {{ answer: Promise<boolean>, withdraw: () => void }} `answer`: sí o no (vencido
+     *   o retirado es no). `withdraw` quita el pedido si sigue vivo.
      */
-    askUpdateApproval: async ({ version }) => {
+    askUpdateApproval: ({ version }) => {
       const yo = identity.me?.publickey || null
-      return new Promise((resolve) => {
-        awaitApproval({
-          device: yo, ns: 'vault', kind: 'update', what: 'update',
-          ctx: { version, from: VERSION }, ttlMs: UPDATE_TTL_MS, onAnswer: resolve
-        }).catch((e) => { log(`[vault] update: could not ask for approval: ${e.message}`); resolve(false) })
-      })
+      let pendId = null
+      let withdrawn = false
+      let settle
+      const answer = new Promise((resolve) => { settle = resolve })
+      // RETIRAR: otro perfil ya contestó por la máquina, o ya no hace falta. El pedido sale
+      // de la lista de quien aprueba en vez de quedarse un día pidiendo algo ya decidido.
+      const retirar = () => {
+        if (!pendId || !waiters.delete(pendId)) return
+        const pend = approvals.take(pendId)
+        audit('update.withdrawn', { device: pend?.deviceId || null, ns: 'vault', id: pendId })
+        log(`[vault] update: request ${pendId} withdrawn`)
+        settle(false)
+      }
+      awaitApproval({
+        device: yo, ns: 'vault', kind: 'update', what: 'update',
+        ctx: { product: '@dotrino/vaultd', version, from: VERSION }, ttlMs: UPDATE_TTL_MS, onAnswer: settle
+      }).then((pend) => { pendId = pend.id; if (withdrawn) retirar() })
+        .catch((e) => { log(`[vault] update: could not ask for approval: ${e.message}`); settle(false) })
+      return { answer, withdraw: () => { withdrawn = true; retirar() } }
     },
+    announceUpdate,
     approvers: async () => {
       const record = await refreshActa()
       if (!record) return []

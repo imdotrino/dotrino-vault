@@ -254,6 +254,34 @@ firmada por la llave del servicio + cert, respuesta **sellada** (ECDH efímero +
 el proxy no ve los valores) y **firmada por la maestra**, verificada contra la `iss`
 pineada en el enrolamiento.
 
+### Actualizarse: preguntar y avisar (`@dotrino/vault/service`)
+
+Un aparato enrolado se actualiza solo (CONVENCIONES §15). Si tiene encendido **su propio**
+interruptor de «pedir aprobación», le pregunta a su bóveda antes de instalar; si tiene
+encendido el de avisos, se lo cuenta después. Son interruptores de cada pieza, independientes
+del de la bóveda (`dotrino-vault update --approval`, que vale solo para ella).
+
+```js
+import { askUpdateApproval, reportUpdated } from '@dotrino/vault/service'
+
+// Antes de instalar. Con `dir` (identidad de enrollService) o con
+// { proxyUrl, masterPubkey, device, cert }, como el resto de helpers.
+const r = await askUpdateApproval({ product: '@dotrino/terminal-agent', version: '1.3.0', from: '1.2.9', dir })
+// → { ok: true,  asked: false }   nadie aprueba en la cuenta: adelante
+// → { ok: true,  asked: true }    alguien lo aprobó
+// → { ok: false, asked: true }    lo denegaron, o pasó un día sin respuesta
+if (r.ok) { /* instalar */ }
+
+// Después de instalar: la bóveda avisa a quien aprueba, y dice qué aparato fue.
+await reportUpdated({ product: '@dotrino/terminal-agent', version: '1.3.0', from: '1.2.9', dir })  // → { ok: true }
+```
+
+- El pedido dura **un día**. Mientras vive, volver a preguntar por lo mismo no vuelve a
+  timbrar. No repetir la pregunta por una versión ya denegada es cosa de quien llama.
+- `askUpdateApproval` **lanza** si la bóveda no contesta (`code: 'vault-no-reply'`) o si quedó
+  pendiente y el resultado no llegó (`code: 'unanswered'`). Que nadie conteste nunca es un sí.
+- `reportUpdated` lanza con `code: 'vault-no-reply'` si la bóveda no contesta.
+
 ## Modelo de aprobación (seguro por diseño)
 
 - El **dispositivo** que se enrola genera un **código aleatorio** (`makePairingCode`) y

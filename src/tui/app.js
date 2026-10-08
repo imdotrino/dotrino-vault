@@ -36,6 +36,7 @@ import { createTerm, widthOf } from './term.js'
 import { qrToString } from '../qr.js'
 import { dict, otherLang, loadLang, saveLang } from './i18n.js'
 import * as vc from '../vaultControl.js'
+import { readSettings, writeSettings } from '../settings.js'
 import * as hw from '../hwkeys.js'
 import { VERSION } from '../version.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
@@ -336,6 +337,50 @@ function doorRows (st, t) {
     rows.push({ text: t.muted('     ' + hint), sel: false })
   }
   return rows
+}
+
+/**
+ * AJUSTES DE LA BÓVEDA (no de un perfil). Cada regla se lee como una frase con su estado, y
+ * Enter la cambia. Hoy hay una: pedir aprobación para actualizarse.
+ *
+ * `st.settings` es lo leído al entrar: `{ updateApproval }`, o `{ error }` si el ajuste no se
+ * pudo leer — que se DICE, no se pinta como apagado: apagado es «se actualiza sola».
+ */
+const settingsDir = (st) => st.settingsDir || vc.vaultDir()
+function loadSettings (st) {
+  try { st.settings = readSettings(settingsDir(st)) } catch (e) { st.settings = { error: e?.message || String(e) } }
+}
+function settingsRows (st, t) {
+  const i = L(st)
+  const cfg = st.settings
+  if (!cfg) return [{ text: t.muted(' —'), sel: false }]
+  const rows = []
+  if (cfg.error) {
+    rows.push({ text: ' ' + t.warn(i.settingsUnreadable), sel: false })
+    rows.push({ text: t.muted('   ' + i.settingsUnreadableHint), sel: false })
+    rows.push({ text: '', sel: false })
+  }
+  const frase = cfg.error ? i.settingUpdateUnknown : cfg.updateApproval ? i.settingUpdateAsks : i.settingUpdateAlone
+  rows.push({ text: ` ${t.bold(frase)}   ${t.accent(i.settingChange)}`, sel: true, meta: { setting: 'updateApproval' } })
+  rows.push({ text: t.muted('   ' + i.settingUpdateHint1), sel: false })
+  rows.push({ text: t.muted('   ' + i.settingUpdateHint2), sel: false })
+  return rows
+}
+async function onKeySettings (term, st, key) {
+  const i = L(st)
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (key.name === 'escape' || ch === 'b') { st.screen = 'profiles'; return true }
+  if (key.name === 'enter' || (key.name === 'char' && key.ch === ' ')) {
+    // Con el ajuste ilegible, Enter lo ESCRIBE de nuevo (encendido: es lo prudente cuando
+    // no se sabe qué había); así la pantalla también es la salida del atasco.
+    const next = st.settings?.error ? true : !st.settings?.updateApproval
+    try {
+      writeSettings(settingsDir(st), { updateApproval: next })
+      loadSettings(st)
+      flash(st, next ? i.settingUpdateNowAsks : i.settingUpdateNowAlone)
+    } catch (e) { flash(st, i.settingSaveFailed(e?.message || String(e)), 'danger') }
+  }
+  return true
 }
 
 function deviceRows (st, t) {
@@ -1204,6 +1249,11 @@ async function onKeyProfiles (term, st, key) {
       },
       onCancel: () => { st.input = null }
     }))
+  } else if (ch === 's') { // ajustes de la bóveda (no de un perfil: no hace falta elegir uno)
+    loadSettings(st)
+    st.sel.settings = 0
+    st.scroll.settings = { value: 0 }
+    st.screen = 'settings'
   } else if (ch === 'y' && cur) { // las llaves: con qué se abre la bóveda
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       st.doorsFor = p.id
@@ -2308,6 +2358,7 @@ const helpSegs = (i, screen, st = {}) => {
     pairing: i.helpPairing,
     pairmode: i.helpPairMode,
     doors: i.helpDoors,
+    settings: i.helpSettings,
     paircaps: i.helpPairCaps,
     join: i.helpJoin,
     me: i.helpMe,
@@ -2343,6 +2394,7 @@ const title = (i, screen) => ({
   pairing: i.titlePairing,
   pairmode: i.titlePairMode,
   doors: i.titleDoors,
+  settings: i.titleSettings,
   paircaps: i.titlePairCaps,
   join: i.titleJoin,
   caps: i.titleCaps,
@@ -2443,10 +2495,15 @@ function render (term, st) {
   // instalar, peor: el daemon se queda con el binario viejo, ya borrado, y hay dos copias
   // en RAM). `status` ya lo avisa; aquí también, que es donde uno se queda mirando.
   lines[2] = (up && s?.version && VERSION !== 'dev' && s.version !== VERSION) ? ' ' + t.warn(i.daemonStale(s.version, VERSION)) : ''
-  // Una actualización que lleva tiempo pidiendo permiso sin respuesta: la bóveda parece
+  // Una actualización que pidió permiso (una vez por versión, dura un día): la bóveda parece
   // normal y simplemente no se actualiza, así que se dice aquí.
   if (!lines[2] && up && s?.updateAsk?.version) {
-    lines[2] = ' ' + t.warn(i.updateUnanswered(s.updateAsk.version, Math.floor((Date.now() - s.updateAsk.since) / 86400000)))
+    const u = s.updateAsk
+    const dia = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+    // Esperando es un estado normal (gris); no aprobada es lo que hay que ver (aviso).
+    lines[2] = ' ' + (u.result === 'pending'
+      ? t.muted(i.updateWaiting(u.version, dia(u.askedAt + 24 * 60 * 60 * 1000)))
+      : t.warn(i.updateNotApproved(u.version, dia(u.askedAt))))
   }
   // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
   // el resto muestra su título simple.
@@ -2468,6 +2525,7 @@ function render (term, st) {
   else if (st.screen === 'devvars') body = renderList(devVarRows(st, t), st.sel.devvars || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairmode') body = renderList(pairModeRows(st, t), st.sel.pairmode, contentH, cols, t, scrollRef)
   else if (st.screen === 'doors') body = renderList(doorRows(st, t), st.sel.doors || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'settings') body = renderList(settingsRows(st, t), st.sel.settings || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
@@ -2551,7 +2609,7 @@ export async function runTui () {
   const st = {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
-    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0, doors: 0 },
+    sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0, doors: 0, settings: 0 },
     // Permisos tocados y sin guardar, por llave del aparato (ver `setCapsDraft`).
     capsDrafts: {},
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
@@ -2658,6 +2716,7 @@ export async function runTui () {
       else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
       else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
       else if (st.screen === 'doors') running = await onKeyDoors(term, st, key)
+      else if (st.screen === 'settings') running = await onKeySettings(term, st, key)
       else if (st.screen === 'paircaps') running = await onKeyPairCaps(term, st, key)
       else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
       else if (st.screen === 'join') running = await onKeyJoin(term, st, key)
@@ -2675,4 +2734,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

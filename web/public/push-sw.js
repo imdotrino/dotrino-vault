@@ -28,8 +28,11 @@ const TEXTO = {
     read: (who, ns) => `${who} pide tus claves de ${ns}`,
     write: (who, ns) => `${who} quiere guardar variables en ${ns}`,
     passwords: (who) => `${who} quiere leer una contraseña guardada`,
-    update: () => 'Tu bóveda quiere actualizarse',
+    update: () => 'Hay una actualización esperando tu aprobación.',
     incident: (who, ns) => `${who} falló la clave de la terminal de ${ns} tres veces`,
+    updatedTitle: 'Tu bóveda se actualizó',
+    deviceUpdatedTitle: (who) => `${who} se actualizó`,
+    updatedBody: (v) => `Ahora corre la ${v}.`,
   },
   en: {
     vaultTitle: 'Something is asking your vault',
@@ -39,8 +42,11 @@ const TEXTO = {
     read: (who, ns) => `${who} asks for your keys of ${ns}`,
     write: (who, ns) => `${who} wants to save variables in ${ns}`,
     passwords: (who) => `${who} wants to read a saved password`,
-    update: () => 'Your vault wants to update',
+    update: () => 'An update is waiting for your approval.',
     incident: (who, ns) => `${who} failed the terminal code of ${ns} three times`,
+    updatedTitle: 'Your vault was updated',
+    deviceUpdatedTitle: (who) => `${who} was updated`,
+    updatedBody: (v) => `It now runs ${v}.`,
   },
 }
 
@@ -52,6 +58,24 @@ const idioma = () => (self.registration?.scope || '').includes('/en/') ? 'en' : 
  */
 function avisoDe (ring, l) {
   const T = TEXTO[l] || TEXTO.es
+  // «ME ACTUALICÉ»: no hay nada que decidir, es una noticia. Abre la bóveda, no Pedidos.
+  if (ring && ring.why && ring.why.ev === 'updated') {
+    // De la bóveda (sin `product`, o el suyo) o de uno de sus aparatos (dice cuál).
+    const w = ring.why
+    const esAparato = typeof w.product === 'string' && w.product && w.product !== '@dotrino/vaultd'
+    const deQuien = esAparato ? (w.label || w.deviceId || w.product) : null
+    return {
+      title: deQuien ? T.deviceUpdatedTitle(deQuien) : T.updatedTitle,
+      options: {
+        body: T.updatedBody(typeof ring.why.version === 'string' ? ring.why.version : '?'),
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'dotrino-vault-updated',
+        timestamp: ring.ts || Date.now(),
+        data: { url: '/vault' },
+      },
+    }
+  }
   const why = ring && ring.why && ring.why.ev === 'approval' ? ring.why : null
   if (why) {
     const who = why.label ? `${why.label} (${why.deviceId || '?'})` : (why.deviceId || '?')

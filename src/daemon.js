@@ -28,10 +28,15 @@ import { watchBinary } from './selfupdate.js'
 import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
 import { VERSION } from './version.js'
 import { readSettings } from './settings.js'
+import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo } from './updateApproval.js'
+import { UPDATE_TTL_MS } from './approvals.js'
 import crypto from 'node:crypto'
 
 const readJsonSafe = (f) => ipcRead(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
+/** Cada cuánto se reintenta contar la actualización, y cuántas veces (≈10 min). */
+const ANNOUNCE_EVERY_MS = 5000
+const ANNOUNCE_TRIES = 120
 
 /**
  * UNA sola bóveda por directorio de datos.
@@ -90,13 +95,18 @@ export async function runDaemon () {
 
   // --- state.json ---
   const stateFile = path.join(dir, 'state.json')
+  // Lo que deja quien instala una versión nueva, para que la nueva lo cuente al arrancar.
+  const updatedFile = path.join(dir, 'updated.json')
+  /** Los perfiles que están atendiendo ahora mismo, con su nombre para los mensajes. */
+  const perfilesEnMarcha = () => [...mgr.running.entries()].map(([id, vault]) => ({ id, vault, name: mgr.profiles.get(id)?.name || id }))
   const daemonVersion = VERSION
   /** `{ version, checkedAt }` de la última consulta que salió bien, o null si aún ninguna. */
   let ultimaPublicada = null
   /**
-   * EL PEDIDO DE ACTUALIZACIÓN QUE NADIE HA CONTESTADO: `{ version, since, asks }`, o null.
-   * Va en la foto para que `status` y la TUI lo DIGAN. Sin esto, una bóveda que lleva días
-   * pidiendo permiso y sin respuesta se veía igual que una al día.
+   * EL PEDIDO DE ACTUALIZACIÓN: `{ version, askedAt, result, approvers }`, o null. `result`
+   * es `pending` mientras espera (un día) y `denied`/`expired` cuando no se aprobó — y
+   * entonces no se vuelve a pedir por esa versión. Va en la foto para que `status` y la TUI
+   * lo DIGAN: una bóveda que no se actualiza por esto se vería igual que una al día.
    */
   let pedidoSinRespuesta = null
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
@@ -1131,11 +1141,16 @@ export async function runDaemon () {
       console.log(`[vault] version ${r.version} is out, but the settings could not be read (${e?.message || e}) · not updating`)
       return
     }
-    // Y si hay que pedir y no se puede saber a quién, tampoco: lista vacía sería «nadie
-    // aprueba, adelante», el repliegue que abre la puerta justo cuando algo se rompió.
+    // EN TODOS LOS PERFILES: el ajuste es de la bóveda, no de una cuenta (dueño, 2026-10-08).
+    // Basta con que UNO tenga quien apruebe para que se pida, y se le pide a todos.
+    //
+    // Y si hay que pedir y no se puede saber a quién, tampoco se actualiza: una lista vacía
+    // o a medias sería «nadie aprueba, adelante», el repliegue que abre la puerta justo
+    // cuando algo se rompió.
+    const enMarcha = perfilesEnMarcha()
     let quienAprueba = []
     if (pedirPermiso) {
-      try { quienAprueba = await mgr.current().approvers() } catch (e) {
+      try { quienAprueba = await approversOfAll(enMarcha) } catch (e) {
         console.log(`[vault] version ${r.version} is out, but the approvers could not be read (${e?.message || e}) · not updating`)
         return
       }
@@ -1151,26 +1166,55 @@ export async function runDaemon () {
     if (actualizando) return
     actualizando = true
     try {
-      if (quienAprueba.length) {
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking one of ${quienAprueba.length} approver(s) · ${conAvisos} of them said notifications reach it`)
-        const si = await mgr.current().askUpdateApproval({ version: r.version })
-        if (!si) {
-          const antes = pedidoSinRespuesta?.version === r.version ? pedidoSinRespuesta : null
-          pedidoSinRespuesta = {
-            version: r.version, since: antes?.since || Date.now(), asks: (antes?.asks || 0) + 1,
-            // A QUIÉN SE LE PIDIÓ, y si dijo que le llegan los avisos: es lo que hay que mirar
-            // cuando nadie contesta.
-            approvers: quienAprueba.map((a) => ({ id: a.id, label: a.label, notifiedAt: a.notifiedAt }))
-          }
-          writeState()
-          console.log(`[vault] update to ${r.version}: not approved (denied or expired) · asked ${pedidoSinRespuesta.asks} time(s) since ${new Date(pedidoSinRespuesta.since).toISOString()} · it will ask again`)
+      // (`aprobada`: ya dijeron que sí a esta versión y la instalación falló; no se vuelve a
+      // preguntar por lo que ya se aprobó, se reintenta instalar.)
+      if (quienAprueba.length && aprobada !== r.version) {
+        // UNA VEZ POR VERSIÓN (dueño, 2026-10-08): el pedido dura un día y no se repite. Si
+        // se denegó o venció, esa versión queda sin aprobar y se vuelve a preguntar solo
+        // cuando salga una MÁS NUEVA. Lo preguntado se apunta al pedir y sobrevive a un
+        // reinicio (`update-asked.json`); si no se puede leer, no se actualiza y se dice.
+        let preguntado
+        try { preguntado = readAsked(dir) } catch (e) {
+          console.log(`[vault] version ${r.version} is out, but what was already asked could not be read (${e?.message || e}) · not updating`)
           return
         }
+        const quienes = quienAprueba.map((a) => ({ profile: a.profile, id: a.id, label: a.label, notifiedAt: a.notifiedAt }))
+        if (!shouldAsk(preguntado, r.version, isNewer)) {
+          // Un «pendiente» que no es de este proceso es de antes de un reinicio: el pedido
+          // murió con él, y nadie puede contestarlo ya.
+          if (preguntado.result === 'pending') { preguntado = { ...preguntado, result: 'expired' }; writeAsked(dir, preguntado) }
+          const nuevo = pedidoSinRespuesta?.version !== preguntado.version || pedidoSinRespuesta?.result !== preguntado.result
+          pedidoSinRespuesta = { ...preguntado, approvers: quienes }
+          writeState()
+          if (nuevo) console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval for ${preguntado.version} was asked on ${new Date(preguntado.askedAt).toISOString()} and not given (${preguntado.result}) · not asking again until a newer version · install it with: dotrino-vault update`)
+          return
+        }
+        const askedAt = Date.now()
+        writeAsked(dir, { version: r.version, askedAt, result: 'pending' })
+        pedidoSinRespuesta = { version: r.version, askedAt, result: 'pending', approvers: quienes }
+        writeState()
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking ${quienAprueba.length} approver(s) across ${new Set(quienAprueba.map((a) => a.profileId)).size} profile(s), once · ${conAvisos} of them said notifications reach it`)
+        // Un pedido por perfil que tenga quien apruebe, a la vez. El primer sí basta, y los
+        // que queden vivos en los demás se retiran (`src/updateApproval.js`).
+        const conAprobador = new Set(quienAprueba.map((a) => a.profileId))
+        const si = await firstYes(enMarcha.filter((p) => conAprobador.has(p.id)).map((p) => p.vault.askUpdateApproval({ version: r.version })))
+        if (!si) {
+          const result = resultOfNo(askedAt, UPDATE_TTL_MS)
+          writeAsked(dir, { version: r.version, askedAt, result })
+          pedidoSinRespuesta = { version: r.version, askedAt, result, approvers: quienes }
+          writeState()
+          console.log(`[vault] update to ${r.version}: not approved (${result}) · it will not ask again for this version · install it with: dotrino-vault update`)
+          return
+        }
+        aprobada = r.version
+      } else if (quienAprueba.length) {
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · already approved: installing`)
       } else if (pedirPermiso) {
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval is on but no approver in the record: updating on its own`)
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval is on but no profile has an approver: updating on its own`)
       } else {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · updating on its own`)
       }
+      clearAsked(dir)
       if (pedidoSinRespuesta) { pedidoSinRespuesta = null; writeState() }
       const res = await installUserRelease(r, { log: (m) => console.log(m) })
       if (!res.ok) {
@@ -1183,6 +1227,12 @@ export async function runDaemon () {
       // minutos con el CLI y la TUI nuevos hablando con el daemon viejo; el dueño abrió la
       // TUI justo ahí y no arrancó (2026-09-24). Solo bajo systemd, que es quien nos levanta:
       // sin él, irnos sería quedarnos apagados.
+      // DEJAR DICHO QUE SE INSTALÓ, para que la versión nueva se lo cuente a quien aprueba al
+      // arrancar (`anunciarActualizacion`). Si no se puede escribir se dice: la actualización
+      // está hecha igual, lo que se pierde es el aviso.
+      try { ipcWrite(updatedFile, { v: 1, from: daemonVersion, to: r.version, at: Date.now() }) } catch (e) {
+        console.log(`[vault] update: ${r.version} installed, but the note to tell the approvers could not be written: ${e.message}`)
+      }
       if (vigia) {
         console.log(`[vault] update: ${r.version} installed · restarting now to run it`)
         shutdown(`updated to ${r.version}`)
@@ -1194,6 +1244,45 @@ export async function runDaemon () {
     } finally { actualizando = false }
   }
   let actualizando = false
+  let aprobada = null
+
+  /**
+   * «ME ACTUALICÉ»: se lo cuenta a quien aprueba la versión NUEVA, ya corriendo (dueño,
+   * 2026-10-08). Quien instaló —este daemon o `dotrino-vault update`— dejó `updated.json`;
+   * si dice la versión que corre ahora, cada perfil avisa a sus aprobadores en cuanto está
+   * identificado en el proxio, y el marcador se borra cuando salió en todos.
+   *
+   * No se borra lo que no se pudo leer ni lo que no salió: se dice y se reintenta. Un
+   * marcador de una versión ya superada sí se quita: esa noticia caducó.
+   */
+  const anunciarActualizacion = () => {
+    if (!fs.existsSync(updatedFile)) return
+    const m = ipcRead(updatedFile, null)
+    if (!m || typeof m.to !== 'string') { console.log('[vault] update: updated.json exists but cannot be read · the approvers were not told'); return }
+    if (m.to !== daemonVersion) {
+      if (isNewer(daemonVersion, m.to)) rm(updatedFile)
+      return   // todavía no corre esa versión: se anuncia cuando arranque
+    }
+    const hechos = new Set()
+    let intentos = 0
+    const intento = async () => {
+      intentos++
+      let falta = false
+      for (const p of perfilesEnMarcha()) {
+        if (hechos.has(p.id)) continue
+        if (!p.vault.isIdentified?.()) { falta = true; continue }
+        try { await p.vault.announceUpdate({ version: m.to, from: typeof m.from === 'string' ? m.from : null }); hechos.add(p.id) } catch (e) {
+          falta = true
+          if (intentos === 1 || intentos === ANNOUNCE_TRIES) console.log(`[vault] update: profile ${p.name} could not tell its approvers yet: ${e?.message || e}`)
+        }
+      }
+      if (!falta) { rm(updatedFile); return }
+      if (intentos >= ANNOUNCE_TRIES) { console.log('[vault] update: some approvers were not told · it will try again on the next start'); return }
+      setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()
+    }
+    setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()
+  }
+  anunciarActualizacion()
   mirarRelease()
   const relojRelease = setInterval(mirarRelease, CHECK_EVERY_MS)
   relojRelease.unref?.()
