@@ -19,7 +19,7 @@
     "@dotrino/store": "0.11.0",
     "@dotrino/support": "0.9.0",
     "@dotrino/topbar": "0.12.1",
-    "@dotrino/vault": "0.82.0",
+    "@dotrino/vault": "0.82.1",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4",
     "scrypt-js": "3.0.1",

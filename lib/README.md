@@ -288,7 +288,7 @@ avisar que necesita permisos de administrador).
 
 ```js
 import { vaultUpdateHooks } from '@dotrino/vault/service'
-watchSelfUpdateNpm({ name: '@dotrino/terminal-agent', /* … */ ...vaultUpdateHooks({ product: '@dotrino/terminal-agent', dir, log }) })
+watchSelfUpdateNpm({ pkg: '@dotrino/terminal-agent', /* … */ ...vaultUpdateHooks({ product: '@dotrino/terminal-agent', dir, log }) })
 ```
 
 **Si el servicio no puede instalarse solo** porque necesita permisos de administrador (está
