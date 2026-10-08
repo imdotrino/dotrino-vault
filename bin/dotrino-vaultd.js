@@ -76,10 +76,10 @@ if (process.argv.includes('--pair')) {
   // que pedírsela) en vez de la dirección de la conexión.
   const { qr, expiresInMs } = await mgr.current().startPairing({ label: 'cli' })
   const { url, b64 } = pairUrl(qr)
-  console.log(`\nEmparejá un dispositivo (válido ${expiresInMs / 60000} min):\n`)
+  console.log(`\nEmpareja un dispositivo (válido ${expiresInMs / 60000} min):\n`)
   console.log(qrToString(url))
   console.log(url)
-  console.log('\nO pegá este código:\n  ' + b64)
+  console.log('\nO pega este código:\n  ' + b64)
 }
 
 // --tui: la bóveda Y su interfaz en la MISMA ventana. Donde no queda como servicio
