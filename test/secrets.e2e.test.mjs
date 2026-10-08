@@ -1217,7 +1217,7 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
 
   // ¿PUEDO ACTUALIZARME? (`update-ask`). Lo manda el aparato que tiene encendido SU
   // interruptor; la bóveda no mira ningún ajuste. Sin nadie que apruebe: sí, sin preguntar.
-  const { askUpdateApproval, reportUpdated } = await import('../lib/src/service.js')
+  const { askUpdateApproval, reportUpdated, reportUpdateNeedsRoot } = await import('../lib/src/service.js')
   const pregunta = { product: '@dotrino/terminal-agent', version: '9.9.9', from: '9.9.8', proxyUrl, masterPubkey: vault.master, device: agent.device, cert: agent.cert, timeoutMs: 8000 }
   assert.deepEqual(await askUpdateApproval(pregunta), { ok: true, asked: false }, 'nadie aprueba: se actualiza solo')
   assert.equal(vault.listApprovals().length, 0, 'y no deja ningún pedido')
@@ -1396,11 +1396,20 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.ok(anuncio.sent >= 1)
   // …Y EL DE UN APARATO (`update-done`): quién es lo pone la bóveda desde el acta.
   assert.deepEqual(await reportUpdated({ ...pregunta, version: '9.9.9', from: '9.9.8' }), { ok: true })
+  // …Y «HAY VERSIÓN NUEVA Y NECESITO PERMISOS DE ADMINISTRADOR» (`update-needs-root`): el
+  // aparato no instala ni pregunta, solo lo dice; la bóveda lo reparte con otro `ev`.
+  assert.deepEqual(await reportUpdateNeedsRoot({ ...pregunta, version: '9.9.10', from: '9.9.9' }), { ok: true })
   const lista = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
   assert.deepEqual(lista.notices.map((n) => [n.ev, n.product, n.version, n.from, n.label || null]), [
     ['updated', '@dotrino/vaultd', '9.9.9', '9.9.8', null],
-    ['updated', '@dotrino/terminal-agent', '9.9.9', '9.9.8', 'claude']
+    ['updated', '@dotrino/terminal-agent', '9.9.9', '9.9.8', 'claude'],
+    ['update-needs-root', '@dotrino/terminal-agent', '9.9.10', '9.9.9', 'claude']
   ])
+  assert.match(lista.notices[2].deviceId, /^[0-9A-F]{4}-[0-9A-F]{4}$/)
+  // Y el de la PROPIA bóveda (instalada como paquete del sistema): sin aparato.
+  const root = await vault.announceUpdate({ ev: 'update-needs-root', version: '9.9.10', from: '9.9.9' })
+  assert.deepEqual([root.notice.ev, root.notice.product, root.notice.deviceId], ['update-needs-root', '@dotrino/vaultd', undefined])
+  assert.ok(root.sent >= 1)
   assert.equal(lista.notices[0].id, anuncio.notice.id)
   assert.equal(lista.notices[0].deviceId, undefined, 'el de la bóveda no nombra ningún aparato')
   assert.match(lista.notices[1].deviceId, /^[0-9A-F]{4}-[0-9A-F]{4}$/)

@@ -108,3 +108,32 @@ export function shouldAsk (asked, version, isNewer) {
 export function resultOfNo (askedAt, ttlMs, now = Date.now()) {
   return now - askedAt >= ttlMs - 60_000 ? 'expired' : 'denied'
 }
+
+/**
+ * «NECESITO PERMISOS DE ADMINISTRADOR» SE DICE UNA VEZ POR VERSIÓN. Una bóveda instalada como
+ * paquete del sistema no puede cambiarse el binario: avisa a quien aprueba y espera a que
+ * alguien la instale a mano. Sin apuntarlo, lo repetiría en cada pasada y en cada reinicio.
+ *
+ * Mismas reglas que lo preguntado: sobrevive al reinicio, y un archivo que existe y no se
+ * puede leer se LANZA (ni «ya se dijo» ni «dilo otra vez»).
+ */
+export const ROOT_TOLD_FILE = 'update-root-told.json'
+
+/** @returns {{ version: string, at: number } | null} */
+export function readRootTold (dir) {
+  const file = path.join(dir, ROOT_TOLD_FILE)
+  if (!fs.existsSync(file)) return null
+  const d = ipcRead(file, null)
+  if (!d || typeof d.version !== 'string' || !d.version || typeof d.at !== 'number') throw fail('root-told-unreadable', `${ROOT_TOLD_FILE} exists but cannot be read`)
+  return { version: d.version, at: d.at }
+}
+
+export function writeRootTold (dir, { version, at }) {
+  if (typeof version !== 'string' || !version || typeof at !== 'number') throw fail('bad-root-told', 'writeRootTold: version and at are required')
+  ipcWrite(path.join(dir, ROOT_TOLD_FILE), { v: 1, version, at })
+}
+
+/** ¿Hay que avisar por `version`? Solo si nunca se avisó, o si es MÁS NUEVA que la avisada. */
+export function shouldTellRoot (told, version, isNewer) {
+  return !told || isNewer(version, told.version)
+}

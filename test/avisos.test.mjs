@@ -51,3 +51,12 @@ test('un archivo ilegible no es «sin avisos»: se lanza', () => {
 test('sin versión no hay aviso', () => {
   assert.throws(() => openNotices({ dir: tmp(), atRest }).updated({}), (e) => e.code === 'bad-notice')
 })
+
+test('«necesita permisos de administrador» es otro aviso, con las mismas reglas; uno desconocido no entra', () => {
+  const n = openNotices({ dir: tmp(), atRest, now: () => 7 })
+  const a = n.add('update-needs-root', { version: '0.148.0', from: '0.147.0' })
+  assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'update-needs-root', product: '@dotrino/vaultd', version: '0.148.0', from: '0.147.0', ts: 7 })
+  const b = n.add('update-needs-root', { version: '1.3.0', product: '@dotrino/terminal-agent', deviceId: 'AB12-CD34', label: 'servidor' })
+  assert.deepEqual([b.ev, b.deviceId, b.label], ['update-needs-root', 'AB12-CD34', 'servidor'])
+  assert.throws(() => n.add('whatever', { version: '1.0.0' }), (e) => e.code === 'bad-notice')
+})

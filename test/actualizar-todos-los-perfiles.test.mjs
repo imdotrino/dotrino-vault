@@ -113,3 +113,29 @@ test('un no a tiempo es una denegación; al cumplirse el día, un vencimiento', 
   assert.equal(resultOfNo(0, DIA, DIA), 'expired')
   assert.equal(resultOfNo(0, DIA, DIA + 5000), 'expired')
 })
+
+// --- LA BÓVEDA DE SISTEMA (.deb) AVISA UNA VEZ POR VERSIÓN ---------------------------------
+// No puede cambiarse el binario: se lo dice a quien aprueba (dueño, 2026-10-08), y no lo
+// repite en cada pasada ni tras un reinicio.
+import { readRootTold, writeRootTold, shouldTellRoot, ROOT_TOLD_FILE } from '../src/updateApproval.js'
+
+test('«necesita permisos de administrador» se dice una vez por versión, y sobrevive al reinicio', () => {
+  const dir = tmp()
+  assert.equal(readRootTold(dir), null)
+  assert.equal(shouldTellRoot(null, '0.148.0', isNewer), true, 'nunca se dijo: se dice')
+  writeRootTold(dir, { version: '0.148.0', at: 5 })
+  assert.ok(!fs.readFileSync(path.join(dir, ROOT_TOLD_FILE), 'utf8').includes('0.148.0'), 'cifrado en reposo')
+  const dicho = readRootTold(dir)   // «otro proceso»
+  assert.deepEqual(dicho, { version: '0.148.0', at: 5 })
+  assert.equal(shouldTellRoot(dicho, '0.148.0', isNewer), false, 'la misma no se repite')
+  assert.equal(shouldTellRoot(dicho, '0.147.9', isNewer), false)
+  assert.equal(shouldTellRoot(dicho, '0.149.0', isNewer), true, 'una más nueva vuelve a avisar')
+})
+
+test('si no se puede leer si ya se dijo, se lanza (ni «ya se dijo» ni «dilo otra vez»)', () => {
+  const dir = tmp()
+  writeRootTold(dir, { version: '0.148.0', at: 5 })
+  fs.writeFileSync(path.join(dir, ROOT_TOLD_FILE), 'basura')
+  assert.throws(() => readRootTold(dir), (e) => e.code === 'root-told-unreadable')
+  assert.throws(() => writeRootTold(dir, { version: '', at: 5 }), (e) => e.code === 'bad-root-told')
+})

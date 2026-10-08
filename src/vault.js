@@ -1617,31 +1617,36 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * aprueba en este perfil, por el mismo camino que su propio «me actualicé». Si el agente
    * avisa o no lo decide él (su interruptor); aquí solo se reparte.
    *
+   * Y su hermano `op: 'update-needs-root'`: el aparato vio una versión nueva y no puede
+   * instalarla solo porque necesita permisos de administrador. Mismo reparto, otro `ev`.
+   *
    * QUIÉN ES lo dice el acta (id y nombre), no lo que el aparato cuente de sí mismo.
    */
   async function handleUpdateDone (from, p) {
+    const op = p.data.op
+    const ev = op === 'update-needs-root' ? 'update-needs-root' : 'updated'
     const chk = await verifyChain({
       data: p.data, signature: p.signature, cert: p.cert,
       ...(await contextoActa()), revoked: await revocationSet()
     })
-    if (!chk.ok) return denyChain(from, chk, p, 'update-done')
+    if (!chk.ok) return denyChain(from, chk, p, op)
     const record = (await identity.profileActa?.().catch(() => null))?.acta
     const member = (record?.members || []).find((m) => m.pub === chk.device)
     if (!member) {
-      audit('rejected', { what: 'update-done', reason: record ? 'acta' : 'sin-acta' })
+      audit('rejected', { what: op, reason: record ? 'acta' : 'sin-acta' })
       return reply(from, { type: MSG.ERROR, error: 'unauthorized: acta — this device is not in the record' })
     }
     const product = cut(p.data?.product, 128)
     const version = cut(p.data?.version, 64)
-    if (!product || !version) return reply(from, { type: MSG.ERROR, code: 'bad-request', error: 'update-done: needs `product` and `version`' })
+    if (!product || !version) return reply(from, { type: MSG.ERROR, code: 'bad-request', error: `${op}: needs \`product\` and \`version\`` })
     const deviceId = await deviceIdOf(chk.device).catch(() => null)
     try {
-      await announceUpdate({ version, from: cut(p.data?.from, 64), product, deviceId, label: member.label || '' })
+      await announceUpdate({ ev, version, from: cut(p.data?.from, 64), product, deviceId, label: member.label || '' })
     } catch (e) {
-      log(`[vault] update-done: ${deviceId || '????-????'} updated ${product} to ${version}, but the approvers could not be told: ${e.message}`)
-      return reply(from, { type: MSG.ERROR, code: e.code || 'announce-failed', error: 'update-done: the approvers could not be told' })
+      log(`[vault] ${op}: ${deviceId || '????-????'} reported ${product} ${version}, but the approvers could not be told: ${e.message}`)
+      return reply(from, { type: MSG.ERROR, code: e.code || 'announce-failed', error: `${op}: the approvers could not be told` })
     }
-    const body = { op: 'update-done', ok: true, product, version, ts: Date.now() }
+    const body = { op, ok: true, product, version, ts: Date.now() }
     reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body), acta: record })
   }
 
@@ -1713,7 +1718,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     if (p.data?.op === 'store.recipients' || p.data?.op === 'store') return handleVarStore(from, p)
     if (p.data?.op === 'digest') return handleDigest(from, p)
     if (p.data?.op === 'update-ask') return handleUpdateAsk(from, p)
-    if (p.data?.op === 'update-done') return handleUpdateDone(from, p)
+    if (p.data?.op === 'update-done' || p.data?.op === 'update-needs-root') return handleUpdateDone(from, p)
     if (['approvals', 'approve', 'deny', 'grants', 'grant-revoke', 'block', 'blocked'].includes(p.data?.op)) return handleApproval(from, p)
     const ns = p.data?.ns
     if (!isValidSecretsNs(ns)) return reply(from, { type: MSG.ERROR, error: 'secrets: invalid namespace' })
@@ -2083,18 +2088,22 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * También reparte el «me actualicé» de un APARATO (`op: 'update-done'`): entonces lleva su
    * `product`, `deviceId` y `label`.
    *
+   * Y con `ev: 'update-needs-root'` cuenta lo contrario: hay versión nueva y NO se instaló
+   * sola porque necesita permisos de administrador (dueño, 2026-10-08: «si se requiere root
+   * por algún motivo, simplemente se notifica al aprobador»). Mismo camino, otro `ev`.
+   *
    * A diferencia de `notifyApprovers`, aquí el fallo SE LANZA: quien llama guarda el
    * marcador hasta que el aviso salió, y tragarlo sería borrarlo sin haber avisado.
    * @returns {Promise<{ approvers: number, sent: number, notice: object|null }>}
    */
-  async function announceUpdate ({ version, from = null, product = '@dotrino/vaultd', deviceId = null, label = null }) {
+  async function announceUpdate ({ version, from = null, product = '@dotrino/vaultd', deviceId = null, label = null, ev = 'updated' }) {
     const record = await refreshActa()
     const who = (record?.members || []).filter((m) => Acta.memberCan(record, m.pub, 'approve')).map((m) => m.pub)
     if (!who.length) return { approvers: 0, sent: 0, notice: null }
     // `deviceId`/`label`: solo cuando quien se actualizó es un APARATO (`update-done`). El
     // aviso de la propia bóveda no los lleva.
-    const notice = notices.updated({ version, from, product, ...(deviceId ? { deviceId, label: label || '' } : {}) })
-    const { id, ev, ts, ...rest } = notice
+    const notice = notices.add(ev, { version, from, product, ...(deviceId ? { deviceId, label: label || '' } : {}) })
+    const { id, ev: _ev, ts, ...rest } = notice
     const body = { ev, id, ...rest, ts }
     const seal = await sealOrFail(body)
     let sent = 0
@@ -2102,8 +2111,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       try { client.sendByPubkey(pub, { type: MSG.ADMIN_EVENT, body, seal }, { app: 'vault' }); sent++ }
       catch (e) { log(`[vault] could not tell ${pub.slice(0, 24)}… about the update of ${product} to ${version}: ${e.message}`) }
     }
-    audit('update.announced', { product, version, from: notice.from, device: deviceId, approvers: who.length, sent })
-    log(`[vault] update: told ${sent} of ${who.length} approver(s) that ${deviceId ? `${deviceId} runs ${product}` : 'this vault now runs'} ${version}`)
+    audit(ev === 'updated' ? 'update.announced' : 'update.needs-root', { product, version, from: notice.from, device: deviceId, approvers: who.length, sent })
+    log(`[vault] update: told ${sent} of ${who.length} approver(s) that ${deviceId ? `${deviceId} (${product})` : 'this vault'} ${ev === 'updated' ? 'now runs' : 'needs administrator rights to install'} ${version}`)
     if (!sent) throw Object.assign(new Error('no approver could be told'), { code: 'announce-failed' })
     return { approvers: who.length, sent, notice }
   }

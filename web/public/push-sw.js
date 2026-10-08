@@ -33,6 +33,9 @@ const TEXTO = {
     updatedTitle: 'Tu bóveda se actualizó',
     deviceUpdatedTitle: (who) => `${who} se actualizó`,
     updatedBody: (v) => `Ahora corre la ${v}.`,
+    rootTitle: 'Tu bóveda tiene una actualización pendiente',
+    deviceRootTitle: (who) => `${who} tiene una actualización pendiente`,
+    rootBody: (v) => `La ${v} necesita permisos de administrador: instálala a mano en esa máquina.`,
   },
   en: {
     vaultTitle: 'Something is asking your vault',
@@ -47,6 +50,9 @@ const TEXTO = {
     updatedTitle: 'Your vault was updated',
     deviceUpdatedTitle: (who) => `${who} was updated`,
     updatedBody: (v) => `It now runs ${v}.`,
+    rootTitle: 'Your vault has an update waiting',
+    deviceRootTitle: (who) => `${who} has an update waiting`,
+    rootBody: (v) => `${v} needs administrator rights: install it by hand on that machine.`,
   },
 }
 
@@ -58,19 +64,22 @@ const idioma = () => (self.registration?.scope || '').includes('/en/') ? 'en' : 
  */
 function avisoDe (ring, l) {
   const T = TEXTO[l] || TEXTO.es
-  // «ME ACTUALICÉ»: no hay nada que decidir, es una noticia. Abre la bóveda, no Pedidos.
-  if (ring && ring.why && ring.why.ev === 'updated') {
+  // «ME ACTUALICÉ», o «HAY VERSIÓN NUEVA Y NECESITA PERMISOS DE ADMINISTRADOR»: no hay nada
+  // que decidir, son noticias. Abren la bóveda, no Pedidos.
+  if (ring && ring.why && (ring.why.ev === 'updated' || ring.why.ev === 'update-needs-root')) {
     // De la bóveda (sin `product`, o el suyo) o de uno de sus aparatos (dice cuál).
     const w = ring.why
+    const root = w.ev === 'update-needs-root'
     const esAparato = typeof w.product === 'string' && w.product && w.product !== '@dotrino/vaultd'
     const deQuien = esAparato ? (w.label || w.deviceId || w.product) : null
+    const version = typeof w.version === 'string' ? w.version : '?'
     return {
-      title: deQuien ? T.deviceUpdatedTitle(deQuien) : T.updatedTitle,
+      title: root ? (deQuien ? T.deviceRootTitle(deQuien) : T.rootTitle) : (deQuien ? T.deviceUpdatedTitle(deQuien) : T.updatedTitle),
       options: {
-        body: T.updatedBody(typeof ring.why.version === 'string' ? ring.why.version : '?'),
+        body: root ? T.rootBody(version) : T.updatedBody(version),
         icon: '/icon-192.png',
         badge: '/icon-192.png',
-        tag: 'dotrino-vault-updated',
+        tag: root ? 'dotrino-vault-update-needs-root' : 'dotrino-vault-updated',
         timestamp: ring.ts || Date.now(),
         data: { url: '/vault' },
       },

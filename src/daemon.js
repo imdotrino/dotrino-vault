@@ -28,7 +28,7 @@ import { watchBinary } from './selfupdate.js'
 import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
 import { VERSION } from './version.js'
 import { readSettings } from './settings.js'
-import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo } from './updateApproval.js'
+import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo, readRootTold, writeRootTold, shouldTellRoot } from './updateApproval.js'
 import { UPDATE_TTL_MS } from './approvals.js'
 import crypto from 'node:crypto'
 
@@ -1161,6 +1161,25 @@ export async function runDaemon () {
     // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
     if (!isUserInstall()) {
       console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · installed as a system package, so it cannot update itself: \`dotrino-vault update\` (needs sudo), or move to a user install with the tarball's install.sh`)
+      // …Y SE LE DICE A QUIEN APRUEBA, en todos los perfiles (dueño, 2026-10-08: «si se
+      // requiere root por algún motivo, simplemente se notifica al aprobador que hay
+      // actualización y necesita root»). El log no lo lee nadie; el teléfono sí. UNA vez por
+      // versión, apuntado para que un reinicio no lo repita (`update-root-told.json`).
+      let dicho
+      try { dicho = readRootTold(dir) } catch (e) {
+        console.log(`[vault] update: whether the approvers were already told could not be read (${e?.message || e}) · not telling them again`)
+        return
+      }
+      if (shouldTellRoot(dicho, r.version, isNewer) && avisandoRoot !== r.version) {
+        avisandoRoot = r.version
+        contarATodos({ ev: 'update-needs-root', version: r.version, from: daemonVersion }, ({ todos, alguno }) => {
+          avisandoRoot = null
+          // Con que salió en algún perfil ya está dicho: repetirlo mañana a los que sí lo
+          // oyeron por uno que no pudo sería timbrar de más.
+          if (todos || alguno) { try { writeRootTold(dir, { version: r.version, at: Date.now() }) } catch (e) { console.log(`[vault] update: could not note that the approvers were told: ${e.message}`) } }
+          else console.log(`[vault] update: the approvers could not be told that ${r.version} needs administrator rights · it will try again on the next check`)
+        })
+      }
       return
     }
     if (actualizando) return
@@ -1245,6 +1264,7 @@ export async function runDaemon () {
   }
   let actualizando = false
   let aprobada = null
+  let avisandoRoot = null
 
   /**
    * «ME ACTUALICÉ»: se lo cuenta a quien aprueba la versión NUEVA, ya corriendo (dueño,
@@ -1263,6 +1283,18 @@ export async function runDaemon () {
       if (isNewer(daemonVersion, m.to)) rm(updatedFile)
       return   // todavía no corre esa versión: se anuncia cuando arranque
     }
+    contarATodos({ version: m.to, from: typeof m.from === 'string' ? m.from : null }, ({ todos }) => {
+      if (todos) rm(updatedFile)
+      else console.log('[vault] update: some approvers were not told · it will try again on the next start')
+    })
+  }
+
+  /**
+   * Cuenta algo a quien aprueba en TODOS los perfiles en marcha (`announceUpdate`), cada uno
+   * en cuanto está identificado en el proxio: reintenta cada pocos segundos hasta que salió
+   * en todos o se agotan los intentos. `alTerminar({ todos, alguno })`.
+   */
+  function contarATodos (aviso, alTerminar) {
     const hechos = new Set()
     let intentos = 0
     const intento = async () => {
@@ -1271,13 +1303,13 @@ export async function runDaemon () {
       for (const p of perfilesEnMarcha()) {
         if (hechos.has(p.id)) continue
         if (!p.vault.isIdentified?.()) { falta = true; continue }
-        try { await p.vault.announceUpdate({ version: m.to, from: typeof m.from === 'string' ? m.from : null }); hechos.add(p.id) } catch (e) {
+        try { await p.vault.announceUpdate(aviso); hechos.add(p.id) } catch (e) {
           falta = true
           if (intentos === 1 || intentos === ANNOUNCE_TRIES) console.log(`[vault] update: profile ${p.name} could not tell its approvers yet: ${e?.message || e}`)
         }
       }
-      if (!falta) { rm(updatedFile); return }
-      if (intentos >= ANNOUNCE_TRIES) { console.log('[vault] update: some approvers were not told · it will try again on the next start'); return }
+      if (!falta) return alTerminar({ todos: true, alguno: hechos.size > 0 })
+      if (intentos >= ANNOUNCE_TRIES) return alTerminar({ todos: false, alguno: hechos.size > 0 })
       setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()
     }
     setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()

@@ -282,6 +282,27 @@ await reportUpdated({ product: '@dotrino/terminal-agent', version: '1.3.0', from
   pendiente y el resultado no llegó (`code: 'unanswered'`). Que nadie conteste nunca es un sí.
 - `reportUpdated` lanza con `code: 'vault-no-reply'` si la bóveda no contesta.
 
+**La receta completa**, para un agente que usa `watchSelfUpdateNpm` de `@dotrino/update/npm`:
+`vaultUpdateHooks` devuelve los tres ganchos ya armados (preguntar, avisar que se actualizó,
+avisar que necesita permisos de administrador).
+
+```js
+import { vaultUpdateHooks } from '@dotrino/vault/service'
+watchSelfUpdateNpm({ name: '@dotrino/terminal-agent', /* … */ ...vaultUpdateHooks({ product: '@dotrino/terminal-agent', dir, log }) })
+```
+
+**Si el servicio no puede instalarse solo** porque necesita permisos de administrador (está
+instalado para todo el sistema y no como usuario), no instala ni pregunta: avisa.
+
+```js
+import { reportUpdateNeedsRoot } from '@dotrino/vault/service'
+await reportUpdateNeedsRoot({ product: '@dotrino/terminal-agent', version: '1.3.0', from: '1.2.9', dir })  // → { ok: true }
+```
+
+La bóveda se lo cuenta a quien aprueba («tiene una actualización pendiente: instálala a mano
+en esa máquina»). Mismos errores que `reportUpdated`; avisar una vez por versión es cosa de
+quien llama. Lo preferible es instalar los servicios como usuario, que no necesita nada de esto.
+
 ## Modelo de aprobación (seguro por diseño)
 
 - El **dispositivo** que se enrola genera un **código aleatorio** (`makePairingCode`) y

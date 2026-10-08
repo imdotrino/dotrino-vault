@@ -60,3 +60,18 @@ test('un pedido de actualización no dice de quién en el aviso: el porqué del 
   assert.match(avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'update', ns: 'vault', deviceId: 'AB12-CD34' } }, 'es').options.body, /^Hay una actualización esperando tu aprobación\. /)
   assert.match(avisoDe({ type: 'ring', why: { ev: 'approval', kind: 'update', ns: 'vault' } }, 'en').options.body, /^An update is waiting for your approval\. /)
 })
+
+test('«necesita permisos de administrador»: dice de quién, qué versión y que hay que instalarla a mano', () => {
+  const { avisoDe } = cargar()
+  const b = avisoDe({ type: 'ring', ts: 3, why: { ev: 'update-needs-root', version: '0.148.0', from: '0.147.0', product: '@dotrino/vaultd' } }, 'es')
+  assert.equal(b.title, 'Tu bóveda tiene una actualización pendiente')
+  assert.equal(b.options.body, 'La 0.148.0 necesita permisos de administrador: instálala a mano en esa máquina.')
+  assert.equal(b.options.data.url, '/vault')
+  assert.equal(b.options.tag, 'dotrino-vault-update-needs-root', 'no pisa ni un pedido ni un «se actualizó»')
+  assert.equal(avisoDe({ type: 'ring', why: { ev: 'update-needs-root', version: '0.148.0' } }, 'en').title, 'Your vault has an update waiting')
+  const a = avisoDe({ type: 'ring', why: { ev: 'update-needs-root', version: '1.3.0', product: '@dotrino/terminal-agent', label: 'servidor', deviceId: 'AB12-CD34' } }, 'es')
+  assert.equal(a.title, 'servidor tiene una actualización pendiente')
+  const e = avisoDe({ type: 'ring', why: { ev: 'update-needs-root', version: '1.3.0', product: '@dotrino/ia-agent', deviceId: 'AB12-CD34' } }, 'en')
+  assert.equal(e.title, 'AB12-CD34 has an update waiting')
+  assert.equal(e.options.body, '1.3.0 needs administrator rights: install it by hand on that machine.')
+})
