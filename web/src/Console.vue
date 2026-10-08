@@ -1513,7 +1513,7 @@ async function refreshApprovals () {
   try {
     if (!soloCuentaAbierta) {
       try {
-        const r = await id.value.vaultApprovalsAll()
+        const r = await id.value.vaultApprovalsAll({ notify: avisosAqui() })
         apvPorCuenta.value = Array.isArray(r) ? r : []
         apvError.value = ''
         return
@@ -1523,7 +1523,7 @@ async function refreshApprovals () {
       }
     }
     if (!(await id.value.canApproveVault())) { apvPorCuenta.value = []; return }
-    const r = await id.value.vaultApprovals('approvals')
+    const r = await id.value.vaultApprovals('approvals', { notify: avisosAqui() })
     apvPorCuenta.value = [{
       profile: apvCurrent.value?.id || '', name: apvCurrent.value?.name || '', current: true,
       items: Array.isArray(r?.items) ? r.items : []
@@ -1596,6 +1596,22 @@ const apvTick = () => {
 // Android) llega por `window.DotrinoNative.pushToken()` o por el evento
 // `dotrino-native-push-token`; se registra en el proxio bajo la llave de este aparato,
 // para que la bóveda pueda timbrar el teléfono cuando haya un pedido.
+/**
+ * ¿LE LLEGAN LOS AVISOS A ESTE APARATO? Se le dice a la bóveda al pedir la lista de pedidos:
+ * para actualizarse, solo pide permiso si hay un aprobador que pueda enterarse (dueño,
+ * 2026-10-07). `true` y `false` son afirmaciones; `undefined` es «todavía no lo sé» (la
+ * suscripción está en marcha) y no cambia lo ya dicho.
+ */
+let nativePushOk = false
+function avisosAqui () {
+  let estado
+  try { estado = apvPush.value } catch (_) { return undefined }   // aún no se montó esa parte
+  if (nativePushOk || estado === 'on') return true
+  if (estado === 'granted') return undefined
+  // Dentro de la app nativa el navegador embebido no tiene avisos propios: manda el token.
+  if (typeof window.DotrinoNative?.pushToken === 'function') return undefined
+  return false
+}
 async function registerNativePush (detail) {
   const token = detail?.token || (typeof window.DotrinoNative?.pushToken === 'function' ? window.DotrinoNative.pushToken() : null)
   if (!token) return
@@ -1610,9 +1626,11 @@ async function registerNativePush (detail) {
     // exactamente lo que hay que hacer.
     const me = (await id.value.currentProfile().catch(() => null))?.id || 'p'
     const key = 'dotrino-native-push.' + me
-    if (localStorage.getItem(key) === token) return
+    if (localStorage.getItem(key) === token) { nativePushOk = true; return }
     await id.value.registerPush({ kind: detail?.kind || 'fcm', token })
     try { localStorage.setItem(key, token) } catch (_) {}
+    nativePushOk = true
+    refreshApprovals()   // para decírselo ya a la bóveda (`avisosAqui`)
   } catch (_) {}
 }
 /**
@@ -1644,6 +1662,7 @@ async function suscribirAvisos () {
     } finally { try { client.close() } catch (_) {} }
     apvPush.value = 'on'
     apvPushError.value = ''
+    refreshApprovals()   // para decírselo ya a la bóveda (`avisosAqui`)
   } catch (e) {
     apvPushHecho = false
     apvPushError.value = e?.message || String(e)

@@ -92,6 +92,12 @@ export async function runDaemon () {
   const daemonVersion = VERSION
   /** `{ version, checkedAt }` de la última consulta que salió bien, o null si aún ninguna. */
   let ultimaPublicada = null
+  /**
+   * EL PEDIDO DE ACTUALIZACIÓN QUE NADIE HA CONTESTADO: `{ version, since, asks }`, o null.
+   * Va en la foto para que `status` y la TUI lo DIGAN. Sin esto, una bóveda que lleva días
+   * pidiendo permiso y sin respuesta se veía igual que una al día.
+   */
+  let pedidoSinRespuesta = null
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
   // instalador y la web, que son anteriores al multi-perfil. La lista completa va
   // en `profiles`.
@@ -107,6 +113,7 @@ export async function runDaemon () {
       // sin salir a la red: una pantalla de estado tiene que contestar al instante y
       // también sin conexión.
       ...(ultimaPublicada ? { latest: ultimaPublicada } : {}),
+      ...(pedidoSinRespuesta ? { updateAsk: pedidoSinRespuesta } : {}),
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -1107,8 +1114,24 @@ export async function runDaemon () {
      * actualizarse nunca. Entonces se actualiza sola, que es lo que hace el resto del
      * ecosistema (§15).
      */
-    let quienAprueba = []
-    try { quienAprueba = (await mgr.current()?.approvers?.()) || [] } catch (_) {}
+    // SI NO SE PUEDE SABER QUIÉN APRUEBA, NO SE ACTUALIZA. Antes un fallo aquí dejaba la
+    // lista vacía, y lista vacía es «nadie aprueba, adelante»: el repliegue que abre la
+    // puerta justo cuando algo se rompió. Se dice y se vuelve a mirar en la próxima pasada.
+    let enElActa
+    try { enElActa = await mgr.current().approvers() } catch (e) {
+      console.log(`[vault] version ${r.version} is out, but the approvers could not be read (${e?.message || e}) · not updating`)
+      return
+    }
+    /**
+     * Y SOLO CUENTA EL APROBADOR QUE PUEDE ENTERARSE (dueño, 2026-10-07). Uno que no recibe
+     * avisos no ve el pedido si no abre la app por su cuenta: la bóveda pedía cada día y se
+     * quedaba atrás para siempre, que es el mismo bloqueo de «sin aprobadores» un paso
+     * después. Lo dice el propio aparato, firmado, y caduca (`src/notifiable.js`).
+     *
+     * Esto vale SOLO para actualizarse. Lo que se instala se verifica igual contra la
+     * atestación del release, se haya pedido permiso o no.
+     */
+    const quienAprueba = enElActa.filter((a) => a.notifiedAt)
 
     // INSTALADA COMO PAQUETE DEL SISTEMA (.deb en /usr/bin): el binario es de root y este
     // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
@@ -1124,10 +1147,19 @@ export async function runDaemon () {
       if (quienAprueba.length) {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking one of ${quienAprueba.length} approver(s)`)
         const si = await mgr.current().askUpdateApproval({ version: r.version })
-        if (!si) { console.log(`[vault] update to ${r.version}: not approved (denied or expired) · it will ask again`); return }
+        if (!si) {
+          const antes = pedidoSinRespuesta?.version === r.version ? pedidoSinRespuesta : null
+          pedidoSinRespuesta = { version: r.version, since: antes?.since || Date.now(), asks: (antes?.asks || 0) + 1 }
+          writeState()
+          console.log(`[vault] update to ${r.version}: not approved (denied or expired) · asked ${pedidoSinRespuesta.asks} time(s) since ${new Date(pedidoSinRespuesta.since).toISOString()} · it will ask again`)
+          return
+        }
+      } else if (enElActa.length) {
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · ${enElActa.length} approver(s) in the record but none receives notifications: updating on its own`)
       } else {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · no approver in the record: updating on its own`)
       }
+      if (pedidoSinRespuesta) { pedidoSinRespuesta = null; writeState() }
       const res = await installUserRelease(r, { log: (m) => console.log(m) })
       if (!res.ok) {
         // Lo que NO cuadra no se instala, y se dice por qué: el archivo queda a mano.

@@ -30,6 +30,7 @@ import { openThreadStore, STORE_READ_METHODS, PROFILE_EDIT_METHODS } from './thr
 import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER } from './secretsStore.js'
 import { openSubacta } from './subacta.js'
 import { openBlocked } from './blocked.js'
+import { openNotifiable } from './notifiable.js'
 import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
 import { declare as compatDeclare, check as compatCheck, annotate as compatAnnotate } from '@dotrino/compat'
@@ -262,6 +263,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const passwordsAtRest = atRestFor(dir)
   // Los aparatos BLOQUEADOS por un aprobador (`src/blocked.js`). Cifrado en reposo como lo demás.
   const blocked = openBlocked({ dir, atRest: passwordsAtRest })
+  // Qué aprobadores dijeron que pueden recibir avisos (`src/notifiable.js`): solo lo mira la actualización.
+  const notifiable = openNotifiable({ dir, atRest: passwordsAtRest })
   const readPasswordsFile = () => {
     try { return JSON.parse(passwordsAtRest.decrypt(fs.readFileSync(passwordsFile, 'utf8'))) } catch (_) { return null }
   }
@@ -1762,6 +1765,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const answer = async (body) => {
       body = { ...body, ts: Date.now() }
       reply(from, { type: MSG.SECRETS_RESULT, body, seal: await sealOrFail(body) })
+    }
+    // AL PEDIR SU LISTA, EL APROBADOR DICE SI LE LLEGAN LOS AVISOS (`notify`). Va dentro de lo
+    // que ya firma, así que no hay mensaje nuevo ni nada que el proxio pueda inventar.
+    if (op === 'approvals' && typeof p.data?.notify === 'boolean') {
+      try { notifiable.declare(chk.device, p.data.notify) } catch (e) { log(`[vault] could not record whether ${by || '????-????'} can be notified: ${e.message}`) }
     }
     if (op === 'approvals') return answer({ op: 'approvals', items: await conContextoSellado(approvals.list(), chk.device, record) })
     // LO QUE YA ESTÁ APROBADO SE VE Y SE CORTA DESDE DONDE SE APROBÓ. Una concesión que se
@@ -4027,7 +4035,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       if (!record) return []
       return (record.members || [])
         .filter((m) => Acta.memberCan(record, m.pub, 'approve'))
-        .map((m) => ({ id: m.id, label: m.label || '', pub: m.pub }))
+        // `notifiedAt`: cuándo dijo por última vez que le llegan los avisos (null = no lo ha
+        // dicho, o caducó). Solo lo usa la actualización para saber si hay a quién pedirle.
+        .map((m) => ({ id: m.id, label: m.label || '', pub: m.pub, notifiedAt: notifiable.since(m.pub) }))
     },
     // La bóveda de contraseñas (`passwords.js`). Aquí SÍ se lista: es donde está la
     // llave. Lo que no puede es listarla un aparato.

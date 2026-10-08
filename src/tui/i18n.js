@@ -26,6 +26,7 @@ const es = {
   // encabezado / estado
   daemonRunning: 'corriendo',
   daemonStopped: 'DETENIDO',
+  updateUnanswered: (version, days) => `⬆ la ${version} espera tu aprobación desde hace ${days < 1 ? 'menos de un día' : days === 1 ? '1 día' : days + ' días'}: mira Pedidos en tu teléfono`,
   daemonStale: (running, installed) => `⚠ el servicio corre ${running} y el binario instalado es ${installed}: reinícialo (systemctl --user restart dotrino-vault)`,
   activeVault: 'Bóveda activa: ',
   noName: '(sin nombre)',
@@ -498,6 +499,7 @@ const en = {
 
   daemonRunning: 'running',
   daemonStopped: 'STOPPED',
+  updateUnanswered: (version, days) => `⬆ ${version} has been waiting for your approval for ${days < 1 ? 'less than a day' : days === 1 ? '1 day' : days + ' days'}: check Requests on your phone`,
   daemonStale: (running, installed) => `⚠ the service runs ${running} but the installed binary is ${installed}: restart it (systemctl --user restart dotrino-vault)`,
   activeVault: 'Active vault: ',
   tooSmall: 'Terminal too small',

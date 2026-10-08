@@ -2438,6 +2438,11 @@ function render (term, st) {
   // instalar, peor: el daemon se queda con el binario viejo, ya borrado, y hay dos copias
   // en RAM). `status` ya lo avisa; aquí también, que es donde uno se queda mirando.
   lines[2] = (up && s?.version && VERSION !== 'dev' && s.version !== VERSION) ? ' ' + t.warn(i.daemonStale(s.version, VERSION)) : ''
+  // Una actualización que lleva tiempo pidiendo permiso sin respuesta: la bóveda parece
+  // normal y simplemente no se actualiza, así que se dice aquí.
+  if (!lines[2] && up && s?.updateAsk?.version) {
+    lines[2] = ' ' + t.warn(i.updateUnanswered(s.updateAsk.version, Math.floor((Date.now() - s.updateAsk.since) / 86400000)))
+  }
   // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
   // el resto muestra su título simple.
   lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + title(i, st.screen))

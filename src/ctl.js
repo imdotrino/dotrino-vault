@@ -153,6 +153,12 @@ function cmdStatus () {
     console.log('  %s⬆ hay %s publicada%s (esta es la %s) · tráela con:  dotrino-vault update',
       B, s.latest.version, Z, VERSION)
   }
+  // …Y LLEVA DÍAS PIDIENDO PERMISO SIN RESPUESTA. Es un bloqueo que desde fuera no se ve:
+  // la bóveda parece normal y simplemente no se actualiza.
+  if (s.updateAsk?.version && isNewer(s.updateAsk.version, VERSION)) {
+    console.log('    pidió permiso para instalarla %s (%d %s) y nadie lo ha aprobado · mira Pedidos en tu teléfono',
+      hace(s.updateAsk.since), s.updateAsk.asks, s.updateAsk.asks === 1 ? 'vez' : 'veces')
+  }
   const profiles = s.profiles || []
   if (profiles.length) {
     console.log('  perfiles    : %d', profiles.length)
@@ -2378,6 +2384,14 @@ async function cmdReplica (args) {
   }
   console.error('uso: dotrino-vault replica [enroll <invitación>|run|status]')
   process.exit(2)
+}
+
+/** «hace 3 días», «hace 5 horas»: para decir desde cuándo espera algo. */
+function hace (ms) {
+  const h = Math.max(0, Math.floor((Date.now() - ms) / 3600000))
+  if (h < 1) return 'hace menos de una hora'
+  if (h < 48) return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`
+  return `hace ${Math.floor(h / 24)} días`
 }
 
 export async function runCtl (argv) {
