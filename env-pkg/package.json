@@ -13,6 +13,9 @@
   "dependencies": {
     "@dotrino/vault": "^0.64.0"
   },
+  "dotrino": {
+    "versionFrom": "../lib"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
