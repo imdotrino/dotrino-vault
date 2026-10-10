@@ -102,3 +102,28 @@ test('un release sin tarball se dice, no se inventa', async () => {
   })
   assert.equal(res.ok, false)
 })
+
+// --- QUÉ INSTALADOR LE TOCA A CADA MÁQUINA ------------------------------------------------
+import { assetFor, systemPackager } from '../src/update.js'
+
+const publicados = [
+  { name: 'dotrino-vault_9.9.9_amd64.deb', url: 'deb' },
+  { name: 'dotrino-vault-9.9.9-1.x86_64.rpm', url: 'rpm' },
+  { name: 'dotrino-vault-9.9.9-linux-x64.tar.gz', url: 'tar' },
+  { name: 'dotrino-vault-9.9.9-sbom.cdx.json', url: 'sbom' }
+]
+const linux = { platform: 'linux', arch: 'x64' }
+
+test('a cada máquina su instalador: .deb con dpkg, .rpm con rpm, y si no el tarball', () => {
+  assert.equal(assetFor(publicados, { ...linux, packager: 'deb' }).kind, 'deb')
+  const rpm = assetFor(publicados, { ...linux, packager: 'rpm' })
+  assert.equal(rpm.kind, 'rpm')
+  assert.equal(rpm.asset.url, 'rpm')
+  assert.equal(assetFor(publicados, { ...linux, packager: null }).kind, 'tar')
+})
+
+test('con dpkg Y rpm en la máquina manda dpkg (Ubuntu con la herramienta rpm instalada)', () => {
+  assert.equal(systemPackager(() => true), 'deb')
+  assert.equal(systemPackager((f) => f === '/usr/bin/rpm'), 'rpm')
+  assert.equal(systemPackager(() => false), null)
+})

@@ -22,7 +22,7 @@ const I18N = {
     // §9.2: los enlaces al wiki llevan el TÍTULO de su página, no un genérico.
     wikiTitles: {
       'instalacion': 'Instalación: elige tu vía',
-      'instalar-linux': 'Instalar en Linux (.deb / tarball)',
+      'instalar-linux': 'Instalar en Linux (.deb / .rpm / tarball)',
       'instalar-npx': 'Instalar con un comando (npx)',
       'instalar-docker': 'Instalar con Docker',
       'emparejar': 'Emparejar un aparato',
@@ -53,6 +53,7 @@ const I18N = {
     dl_lead: 'Gratis, un solo archivo con todo dentro. Lo descargas, lo instalas y tu bóveda queda funcionando sola.',
     dl_deb_t: 'Ubuntu o Debian',
     dl_deb_btn: 'Descargar el instalador (.deb)',
+    dl_rpm_btn: 'Fedora, RHEL u openSUSE (.rpm)',
     dl_deb_note: 'Descarga el archivo .deb, haz doble clic y se instala solo (o en la terminal: sudo apt install ./dotrino-vault_*.deb). Queda funcionando al instante.',
     dl_tar_t: 'Otro Linux',
     dl_tar_btn: 'Descargar (.tar.gz)',
@@ -143,7 +144,7 @@ const I18N = {
     how_title: 'How it works',
     wikiTitles: {
       'instalacion': 'Install: pick your path',
-      'instalar-linux': 'Install on Linux (.deb / tarball)',
+      'instalar-linux': 'Install on Linux (.deb / .rpm / tarball)',
       'instalar-npx': 'Install with one command (npx)',
       'instalar-docker': 'Install with Docker',
       'emparejar': 'Pairing a device',
@@ -174,6 +175,7 @@ const I18N = {
     dl_lead: 'Free, a single file with everything inside. Download it, install it and your vault runs on its own.',
     dl_deb_t: 'Ubuntu or Debian',
     dl_deb_btn: 'Download the installer (.deb)',
+    dl_rpm_btn: 'Fedora, RHEL or openSUSE (.rpm)',
     dl_deb_note: 'Download the .deb file, double-click and it installs on its own (or in a terminal: sudo apt install ./dotrino-vault_*.deb). Up and running instantly.',
     dl_tar_t: 'Other Linux',
     dl_tar_btn: 'Download (.tar.gz)',
@@ -499,6 +501,7 @@ onMounted(async () => {
           <template v-if="os === 'linux'">
             <p class="dl-note m1-lead">{{ t.m1_lead }}</p>
             <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-deb">↓ {{ t.dl_deb_btn }}</a>
+            <a class="btn btn-ghost" :href="RELEASES" data-testid="download-rpm">↓ {{ t.dl_rpm_btn }}</a>
             <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
           </template>
           <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>

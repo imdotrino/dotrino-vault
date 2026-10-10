@@ -1157,7 +1157,7 @@ export async function runDaemon () {
     }
     const conAvisos = quienAprueba.filter((a) => a.notifiedAt).length
 
-    // INSTALADA COMO PAQUETE DEL SISTEMA (.deb en /usr/bin): el binario es de root y este
+    // INSTALADA COMO PAQUETE DEL SISTEMA (.deb o .rpm en /usr/bin): el binario es de root y este
     // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
     if (!isUserInstall()) {
       console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · installed as a system package, so it cannot update itself: \`dotrino-vault update\` (needs sudo), or move to a user install with the tarball's install.sh`)

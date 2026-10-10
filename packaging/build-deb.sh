@@ -35,36 +35,9 @@ install -D -m0755 "$DIST/dotrino-vaultd" "$STAGE/usr/bin/dotrino-vaultd"
 install -D -m0755 "$DIST/dotrino-vault"  "$STAGE/usr/bin/dotrino-vault"
 install -D -m0644 "$ROOT/README.md"      "$STAGE/usr/share/doc/dotrino-vault/README.md"
 
-# 3. unidad systemd --user (apunta al binario en /usr/bin)
-mkdir -p "$STAGE/usr/lib/systemd/user"
-cat > "$STAGE/usr/lib/systemd/user/dotrino-vault.service" <<'UNIT'
-[Unit]
-Description=Dotrino Vault (your personal vault)
-Documentation=https://vault.dotrino.com
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=60
-StartLimitBurst=10
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/dotrino-vaultd
-Environment=DOTRINO_VAULT_DIR=%h/.local/share/dotrino/vault
-Restart=always
-RestartSec=5
-KillSignal=SIGTERM
-TimeoutStopSec=15
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%h/.local/share/dotrino
-PrivateTmp=true
-SyslogIdentifier=dotrino-vault
-
-[Install]
-WantedBy=default.target
-UNIT
-chmod 0644 "$STAGE/usr/lib/systemd/user/dotrino-vault.service"
+# 3. unidad systemd --user (apunta al binario en /usr/bin). Es la misma del .rpm: vive en
+# un archivo para que los dos paquetes no puedan decir cosas distintas.
+install -D -m0644 "$ROOT/packaging/dotrino-vault.system.service" "$STAGE/usr/lib/systemd/user/dotrino-vault.service"
 
 # 4. metadatos de control
 INSTALLED_KB="$(du -sk "$STAGE" | cut -f1)"

@@ -25,15 +25,28 @@ export const latestRelease = (opts = {}) =>
   latestVersion({ source: 'github', repo: REPO, product: 'dotrino-vault', version: VERSION, ...opts })
 
 /**
- * Qué archivo le toca a esta máquina. El `.deb` donde hay `dpkg`; en cualquier otro Linux,
- * el tarball. Fuera de Linux no se emite binario, y se dice en vez de bajar algo inútil.
+ * Con qué instala paquetes esta máquina: `'deb'`, `'rpm'` o `null` (ninguno de los dos).
+ * `dpkg` va primero: en Debian y Ubuntu es normal tener además la herramienta `rpm`
+ * instalada (para empaquetar), y ahí lo que instala sigue siendo `dpkg`.
  */
-export function assetFor (assets, { platform = process.platform, arch = process.arch, hasDpkg = null } = {}) {
+export function systemPackager (exists = fs.existsSync) {
+  if (exists('/usr/bin/dpkg')) return 'deb'
+  if (exists('/usr/bin/rpm')) return 'rpm'
+  return null
+}
+
+/**
+ * Qué archivo le toca a esta máquina. El `.deb` donde se instala con `dpkg`, el `.rpm`
+ * donde se instala con `rpm` (Fedora, RHEL, openSUSE); en cualquier otro Linux, el tarball.
+ * Fuera de Linux no se emite binario, y se dice en vez de bajar algo inútil.
+ */
+export function assetFor (assets, { platform = process.platform, arch = process.arch, packager = undefined } = {}) {
   if (platform !== 'linux') return { ok: false, reason: `there is no binary for ${platform}: update with npm (npx @dotrino/vaultd)` }
   if (arch !== 'x64') return { ok: false, reason: `there is no binary for ${arch}` }
-  const deb = hasDpkg === null ? fs.existsSync('/usr/bin/dpkg') : hasDpkg
+  const pk = packager === undefined ? systemPackager() : packager
   return pickAsset(assets, [
-    { kind: 'deb', re: /_amd64\.deb$/, when: () => deb },
+    { kind: 'deb', re: /_amd64\.deb$/, when: () => pk === 'deb' },
+    { kind: 'rpm', re: /\.x86_64\.rpm$/, when: () => pk === 'rpm' },
     { kind: 'tar', re: /-linux-x64\.tar\.gz$/ }
   ])
 }

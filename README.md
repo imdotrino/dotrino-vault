@@ -148,6 +148,19 @@ sesión**. Para levantarla ya, `systemctl --user start dotrino-vault`; si estaba
 **actualizando**, el servicio viejo sigue corriendo y hay que reiniciarlo con
 `systemctl --user restart dotrino-vault`.
 
+**Fedora / RHEL / openSUSE — `.rpm`:** el mismo instalador, para las distribuciones que
+usan `rpm`. Deja exactamente lo mismo que el `.deb` (binarios en `/usr/bin` y la unidad
+`systemd --user` para todos los usuarios):
+
+```sh
+sudo dnf install ./dotrino-vault-*.x86_64.rpm      # Fedora, RHEL y derivadas
+sudo zypper install --allow-unsigned-rpm ./dotrino-vault-*.x86_64.rpm   # openSUSE
+```
+
+El `.rpm` no lleva firma GPG (por eso `zypper` pide `--allow-unsigned-rpm`); lo que
+prueba de dónde salió es la atestación de sigstore del release:
+`gh attestation verify dotrino-vault-*.x86_64.rpm --repo imdotrino/dotrino-vault`.
+
 **Otro Linux x64 con systemd — tarball:**
 
 ```sh
@@ -160,13 +173,13 @@ Hace lo equivalente en tu `$HOME` (`~/.local/bin` + `~/.config/systemd/user`) y 
 paso más allá: lo **arranca en el acto** y activa `linger`, así el vault corre desde
 el arranque de la máquina aunque no inicies sesión.
 
-El binario del tarball y el `.deb` son **x64/amd64** y el instalador **necesita
+El binario del tarball, el `.deb` y el `.rpm` son **x64/amd64** y el instalador **necesita
 systemd** (si no lo encuentra, se detiene y te dice cómo arrancar el daemon a mano).
 Para ARM —una Raspberry— o para un Linux sin systemd, usa Docker o `npx`.
 
 Ambos traen **Node embebido**: no necesitas instalar Node ni dependencias de npm. Lo
 único que esperan del sistema es `libatomic1`, que casi todas las distribuciones
-traen puesta; el `.deb` la declara y la instala sola si falta. Con el tarball, en un
+traen puesta; el `.deb` y el `.rpm` la declaran y se instala sola si falta. Con el tarball, en un
 sistema muy pelado (un contenedor mínimo), instálala tú: `sudo apt install
 libatomic1`.
 
@@ -190,8 +203,8 @@ curl -fsSL https://install.dotrino.com/install.sh | sh -s -- @dotrino/vaultd
 & ([scriptblock]::Create((irm https://install.dotrino.com/install.ps1))) @dotrino/vaultd
 ```
 
-**Docker (cualquier sistema, y la única vía *empaquetada* para ARM — el `.deb` y el
-tarball son solo x64; `npx` también sirve en una Raspberry):**
+**Docker (cualquier sistema, y la única vía *empaquetada* para ARM — el `.deb`, el `.rpm` y
+el tarball son solo x64; `npx` también sirve en una Raspberry):**
 
 ```sh
 docker volume create dotrino-vault
@@ -615,6 +628,7 @@ npm test                             # 118 pruebas (node --test, sin dependencia
 
 bash packaging/build.sh              # binario único SEA + tarball de Linux (dist/)
 bash packaging/build-deb.sh          # el .deb (requiere dpkg-deb; construye el binario si falta)
+bash packaging/build-rpm.sh          # el .rpm (requiere rpmbuild: `apt install rpm`; mismo binario)
 bash packaging/build-win.sh          # .exe + .zip de Windows, cruzado desde Linux (sin probar)
 docker build -t dotrino-vault .      # la imagen (la misma que CI publica en GHCR)
 ```
@@ -628,8 +642,8 @@ hermano en `../dotrino-proxy` (`secrets.e2e`, `multiprofile.e2e`,
 `pairing-cita.e2e`): no se saltan solos, así que sin ese repo al lado `npm test`
 falla.
 
-Etiquetar `vaultd-v<ver>` publica la imagen de Docker en GHCR; el `.deb` y el tarball
-se suben a la release a mano.
+Etiquetar `vaultd-v<ver>` publica la imagen de Docker en GHCR. Etiquetar `v<ver>` lanza
+`release.yml`, que construye, atestigua y sube a la release el `.deb`, el `.rpm` y el tarball.
 
 ### Enrolar y usar desde un dispositivo (Node, para testing)
 

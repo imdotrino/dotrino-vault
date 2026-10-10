@@ -5,6 +5,7 @@
 # este workflow, con una atestación firmada por sigstore que cualquiera puede verificar:
 #
 #   gh attestation verify dotrino-vault_X.Y.Z_amd64.deb --repo imdotrino/dotrino-vault
+#   gh attestation verify dotrino-vault-X.Y.Z-1.x86_64.rpm --repo imdotrino/dotrino-vault
 #
 # Y de paso salen las tres cosas que el CRA da por supuestas y no teníamos: SBOM por
 # release, procedencia de los paquetes npm y artefactos firmados (ver CUMPLIMIENTO.md §2).
@@ -69,6 +70,14 @@ jobs:
       - name: Construir el binario, el tarball y el .deb
         run: bash packaging/build-deb.sh
 
+      # El .rpm (Fedora, RHEL, openSUSE) sale del MISMO binario que el .deb: build-rpm.sh ve
+      # que el de dist/ ya es de esta versión y no lo reconstruye. `rpmbuild` no viene en el
+      # runner de Ubuntu; lo trae el paquete `rpm`.
+      - name: Construir el .rpm
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+          bash packaging/build-rpm.sh
+
       # SBOM: la lista de lo que va dentro. Deja de ser opcional con el CRA y es lo primero
       # que pide un comprador corporativo.
       - name: SBOM (CycloneDX)
@@ -84,6 +93,7 @@ jobs:
         with:
           subject-path: |
             dist/*.deb
+            dist/*.rpm
             dist/*.tar.gz
             dist/*-sbom.cdx.json
 
@@ -153,6 +163,7 @@ jobs:
         with:
           files: |
             dist/*.deb
+            dist/*.rpm
             dist/*.tar.gz
             dist/*-sbom.cdx.json
           generate_release_notes: true

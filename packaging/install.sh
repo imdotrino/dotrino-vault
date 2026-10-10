@@ -50,8 +50,9 @@ echo "  binary    → $APP_DIR/dotrino-vaultd"
 echo "  cli       → $APP_DIR/dotrino-vault (linked from $BIN_DIR)"
 echo "  updates   → on its own, no sudo (first it asks a device that approves — a phone or a browser — if the account has one)"
 if [ -x /usr/bin/dotrino-vaultd ]; then
-  echo "  NOTE: the system package (.deb) is still installed. This user install takes over the"
-  echo "        service; you can remove the package with:  sudo apt remove dotrino-vault"
+  echo "  NOTE: the system package (.deb or .rpm) is still installed. This user install takes over"
+  echo "        the service; you can remove the package with:  sudo apt remove dotrino-vault"
+  echo "        (or, where it came as an .rpm:  sudo dnf remove dotrino-vault)"
 fi
 
 # Aviso si ~/.local/bin no está en el PATH (no es fatal: el CLI es opcional).

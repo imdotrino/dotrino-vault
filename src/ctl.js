@@ -1792,7 +1792,7 @@ async function cmdLogins (rest) {
  * solo: pide permiso a un aparato con `aprueba` (el teléfono, un navegador…) si lo hay y,
  * si no hay ninguno, no hace falta
  * (dueño, 2026-09-24). Esto es lo mismo a mano, sin esperar al aviso del día. Con el
- * `.deb` del sistema el binario es de root y aquí solo se verifica y se dice el `sudo`.
+ * paquete del sistema (`.deb` o `.rpm`) el binario es de root y aquí solo se verifica y se dice el `sudo`.
  *
  * Lo que se baja SE VERIFICA contra la atestación de sigstore antes de tocar el disco, y
  * si no se puede verificar NO SE INSTALA. Que la URL sea la correcta no prueba nada.
@@ -1904,14 +1904,15 @@ async function cmdUpdate (args = []) {
   }
   console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
 
-  if (pick.kind === 'deb') {
+  if (pick.kind === 'deb' || pick.kind === 'rpm') {
+    const cmd = pick.kind === 'deb' ? ['dpkg', '-i'] : ['rpm', '-U']
     if (typeof process.getuid === 'function' && process.getuid() === 0) {
-      execFileSync('dpkg', ['-i', file], { stdio: 'inherit' })
+      execFileSync(cmd[0], [cmd[1], file], { stdio: 'inherit' })
     } else {
       // No se pide sudo por dentro: que la contraseña la escriba quien la escribe, en su
       // terminal y viendo qué comando la pide.
       console.log('\nYa verificada. Instálala con:')
-      console.log('  %ssudo dpkg -i %s%s', B, file, Z)
+      console.log('  %ssudo %s %s%s', B, cmd.join(' '), file, Z)
       console.log('\nEl servicio se reinicia solo al cambiar el binario.')
       return
     }

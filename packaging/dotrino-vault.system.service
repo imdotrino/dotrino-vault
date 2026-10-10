@@ -1,0 +1,25 @@
+[Unit]
+Description=Dotrino Vault (your personal vault)
+Documentation=https://vault.dotrino.com
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dotrino-vaultd
+Environment=DOTRINO_VAULT_DIR=%h/.local/share/dotrino/vault
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/dotrino
+PrivateTmp=true
+SyslogIdentifier=dotrino-vault
+
+[Install]
+WantedBy=default.target
