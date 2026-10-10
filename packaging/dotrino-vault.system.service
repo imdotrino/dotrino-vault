@@ -1,8 +1,9 @@
 [Unit]
 Description=Dotrino Vault (your personal vault)
 Documentation=https://vault.dotrino.com
-After=network-online.target
+After=network-online.target dotrino-vault-dir.service
 Wants=network-online.target
+Requires=dotrino-vault-dir.service
 StartLimitIntervalSec=60
 StartLimitBurst=10
 

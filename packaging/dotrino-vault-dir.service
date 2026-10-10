@@ -1,0 +1,10 @@
+[Unit]
+# La unidad de la bóveda solo deja escribir en ~/.local/share/dotrino (ReadWritePaths), y
+# systemd no la arranca si esa carpeta no existe (226/NAMESPACE): en un usuario que nunca la
+# usó, no existe. Esta la crea antes, fuera de ese encierro.
+Description=Dotrino Vault (creates its folder)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mkdir -p -m 0700 %h/.local/share/dotrino

@@ -141,16 +141,22 @@ clic, o en la terminal:
 sudo apt install ./dotrino-vault_*.deb
 ```
 
-Deja los binarios en `/usr/bin` e instala la unidad `systemd --user` en
-`/usr/lib/systemd/user`, habilitada para **todos** los usuarios de la máquina (cada
-uno con su propia bóveda en su `$HOME`): te arranca sola en tu **próximo inicio de
-sesión**. Para levantarla ya, `systemctl --user start dotrino-vault`; si estabas
+Instala la unidad `systemd --user` en `/usr/lib/systemd/user`, habilitada para
+**todos** los usuarios de la máquina (cada uno con su propia bóveda en su `$HOME`): te
+arranca sola en tu **próximo inicio de sesión**.
+
+**El paquete no deja la bóveda en `/usr/bin`: deja un lanzador** (desde la 0.150.0,
+`packaging/pkg-launcher.sh`). El binario viene en `/usr/lib/dotrino-vault` y el lanzador lo
+copia a `~/.local/share/dotrino/bin` de cada usuario la primera vez, y lo corre desde ahí.
+Es la misma instalación de usuario del tarball, así que **se actualiza sola, sin `sudo`**
+(CONVENCIONES §15). Un paquete más nuevo repone esa copia; uno más viejo que la copia no la
+toca. Quitar el paquete no borra ni esa copia ni tus datos. Para levantarla ya, `systemctl --user start dotrino-vault`; si estabas
 **actualizando**, el servicio viejo sigue corriendo y hay que reiniciarlo con
 `systemctl --user restart dotrino-vault`.
 
 **Fedora / RHEL / openSUSE — `.rpm`:** el mismo instalador, para las distribuciones que
-usan `rpm`. Deja exactamente lo mismo que el `.deb` (binarios en `/usr/bin` y la unidad
-`systemd --user` para todos los usuarios):
+usan `rpm`. Deja exactamente lo mismo que el `.deb` (el lanzador, la copia en tu carpeta
+que se actualiza sola, y la unidad `systemd --user` para todos los usuarios):
 
 ```sh
 sudo dnf install ./dotrino-vault-*.x86_64.rpm      # Fedora, RHEL y derivadas

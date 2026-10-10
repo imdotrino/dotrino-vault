@@ -2,7 +2,8 @@
 # build-rpm.sh — empaqueta dotrino-vault como paquete RPM (.rpm) para x86_64
 # (Fedora, RHEL y derivadas, openSUSE).
 #
-# Es el hermano de build-deb.sh y deja lo mismo: binarios en /usr/bin y la UNIDAD DE
+# Es el hermano de build-deb.sh y deja lo mismo: el binario en /usr/lib/dotrino-vault, el
+# lanzador en /usr/bin (lo copia a la carpeta del usuario: pkg-launcher.sh) y la UNIDAD DE
 # USUARIO en /usr/lib/systemd/user/, habilitada para todos los usuarios
 # (`systemctl --global enable`). Cada usuario tiene su bóveda en ~/.local/share/dotrino/vault.
 #
@@ -27,7 +28,10 @@ TOP="$(mktemp -d)"
 trap 'rm -rf "$TOP"' EXIT
 mkdir -p "$TOP/SPECS" "$TOP/SRC"
 cp "$DIST/dotrino-vaultd" "$DIST/dotrino-vault" "$ROOT/README.md" "$TOP/SRC/"
+cp "$ROOT/packaging/pkg-launcher.sh" "$TOP/SRC/launcher"
+printf '%s\n' "$VER" > "$TOP/SRC/VERSION"
 cp "$ROOT/packaging/dotrino-vault.system.service" "$TOP/SRC/dotrino-vault.service"
+cp "$ROOT/packaging/dotrino-vault-dir.service" "$TOP/SRC/"
 
 # 2. el spec. Tres cosas que NO son adorno:
 #
@@ -69,15 +73,24 @@ of your session and your data lives only in your account.
 
 %install
 rm -rf %{buildroot}
-install -D -m0755 $TOP/SRC/dotrino-vaultd        %{buildroot}/usr/bin/dotrino-vaultd
-install -D -m0755 $TOP/SRC/dotrino-vault         %{buildroot}/usr/bin/dotrino-vault
+install -D -m0755 $TOP/SRC/dotrino-vaultd        %{buildroot}/usr/lib/dotrino-vault/dotrino-vaultd
+install -D -m0755 $TOP/SRC/dotrino-vault         %{buildroot}/usr/lib/dotrino-vault/dotrino-vault
+install -D -m0644 $TOP/SRC/VERSION               %{buildroot}/usr/lib/dotrino-vault/VERSION
+install -D -m0755 $TOP/SRC/launcher              %{buildroot}/usr/bin/dotrino-vaultd
+install -D -m0755 $TOP/SRC/launcher              %{buildroot}/usr/bin/dotrino-vault
 install -D -m0644 $TOP/SRC/README.md             %{buildroot}/usr/share/doc/dotrino-vault/README.md
 install -D -m0644 $TOP/SRC/dotrino-vault.service %{buildroot}/usr/lib/systemd/user/dotrino-vault.service
+install -D -m0644 $TOP/SRC/dotrino-vault-dir.service %{buildroot}/usr/lib/systemd/user/dotrino-vault-dir.service
 
 %files
 %attr(0755,root,root) /usr/bin/dotrino-vaultd
 %attr(0755,root,root) /usr/bin/dotrino-vault
+%dir %attr(0755,root,root) /usr/lib/dotrino-vault
+%attr(0755,root,root) /usr/lib/dotrino-vault/dotrino-vaultd
+%attr(0755,root,root) /usr/lib/dotrino-vault/dotrino-vault
+%attr(0644,root,root) /usr/lib/dotrino-vault/VERSION
 %attr(0644,root,root) /usr/lib/systemd/user/dotrino-vault.service
+%attr(0644,root,root) /usr/lib/systemd/user/dotrino-vault-dir.service
 %dir %attr(0755,root,root) /usr/share/doc/dotrino-vault
 %attr(0644,root,root) /usr/share/doc/dotrino-vault/README.md
 

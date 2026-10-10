@@ -2,8 +2,9 @@
 # build-deb.sh — empaqueta dotrino-vault como paquete Debian (.deb) para amd64.
 #
 # El vault es POR-USUARIO (datos en tu $HOME, servicio `systemd --user`), pero un
-# .deb instala a nivel sistema. La solución estándar: dejar los binarios en
-# /usr/bin, instalar la UNIDAD DE USUARIO en /usr/lib/systemd/user/ y habilitarla
+# .deb instala a nivel sistema. La solución: el paquete trae el binario y un lanzador
+# que lo copia a la carpeta de cada usuario (así se actualiza solo, sin sudo),
+# instalar la UNIDAD DE USUARIO en /usr/lib/systemd/user/ y habilitarla
 # para todos los usuarios (`systemctl --global enable`) en su próximo login. Cada
 # usuario tiene su propia bóveda en ~/.local/share/dotrino/vault.
 #
@@ -31,13 +32,21 @@ trap 'rm -rf "$STAGE"' EXIT
 PKG="dotrino-vault_${VER}_amd64"
 
 # 2. layout del paquete
-install -D -m0755 "$DIST/dotrino-vaultd" "$STAGE/usr/bin/dotrino-vaultd"
-install -D -m0755 "$DIST/dotrino-vault"  "$STAGE/usr/bin/dotrino-vault"
+# El binario va en /usr/lib/dotrino-vault; en /usr/bin queda el LANZADOR, que lo copia a la
+# carpeta del usuario y lo corre desde ahí: es la instalación de usuario, la única que se
+# actualiza sola (pkg-launcher.sh).
+install -D -m0755 "$DIST/dotrino-vaultd" "$STAGE/usr/lib/dotrino-vault/dotrino-vaultd"
+install -D -m0755 "$DIST/dotrino-vault"  "$STAGE/usr/lib/dotrino-vault/dotrino-vault"
+printf '%s\n' "$VER" > "$STAGE/usr/lib/dotrino-vault/VERSION"
+chmod 0644 "$STAGE/usr/lib/dotrino-vault/VERSION"
+install -D -m0755 "$ROOT/packaging/pkg-launcher.sh" "$STAGE/usr/bin/dotrino-vaultd"
+install -D -m0755 "$ROOT/packaging/pkg-launcher.sh" "$STAGE/usr/bin/dotrino-vault"
 install -D -m0644 "$ROOT/README.md"      "$STAGE/usr/share/doc/dotrino-vault/README.md"
 
 # 3. unidad systemd --user (apunta al binario en /usr/bin). Es la misma del .rpm: vive en
 # un archivo para que los dos paquetes no puedan decir cosas distintas.
 install -D -m0644 "$ROOT/packaging/dotrino-vault.system.service" "$STAGE/usr/lib/systemd/user/dotrino-vault.service"
+install -D -m0644 "$ROOT/packaging/dotrino-vault-dir.service" "$STAGE/usr/lib/systemd/user/dotrino-vault-dir.service"
 
 # 4. metadatos de control
 INSTALLED_KB="$(du -sk "$STAGE" | cut -f1)"
