@@ -36,7 +36,7 @@ export async function masterPubkeyOf (identity) {
  * @param {string} [opts.url] URL del proxy (default wss://proxy.dotrino.com).
  * @returns {Promise<{ client, token:string, identify():Promise<void> }>}
  */
-export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null, announce = null }) {
+export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null, announce = null, recheckMs = 60_000, reannounceMs = 10 * 60_000 }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
   // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
@@ -174,8 +174,10 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
    * existe». Si el anuncio falla, la bóveda sigue sirviendo a todo lo demás y se dice en voz
    * alta: lo que se pierde es que la encuentren por su dirección, no que deje de funcionar.
    */
+  let announcedAt = 0
   const announceAccount = async () => {
     if (!announce || !identificado) return
+    announcedAt = Date.now()
     try { await client.publish(announce) } catch (e) {
       log(`[vault] could not announce this account on the proxy (${e.message}) — a borrowed machine will not find this vault by its address`)
     }
@@ -219,8 +221,9 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
    * `connect()` es seguro de repetir: si ya está conectado devuelve el token y no abre
    * nada.
    */
-  const RECHECK_MS = 60_000
+  const RECHECK_MS = recheckMs
   const PATIENCE_MS = 5 * 60_000
+  const REANNOUNCE_MS = reannounceMs   // la mitad de lo que el proxio guarda una entrada
   let downSince = 0
   let saidDown = false
   client.on('disconnect', ({ code, reason } = {}) => {
@@ -236,6 +239,11 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
     if (identificado && client.token) {
       if (downSince) log(`[vault] back on the proxy after ${Math.round((Date.now() - downSince) / 1000)}s`)
       downSince = 0; saidDown = false
+      // EL ANUNCIO CADUCA: el proxio borra una entrada de canal a los 20 minutos de publicada.
+      // Sin renovarlo, entrar con usuario y contraseña solo funcionaba los primeros 20 minutos
+      // tras identificarse, y desde fuera se veía como «no hay ninguna bóveda en esa dirección»
+      // con la bóveda encendida (2026-10-12, la demo de los revisores).
+      if (announce && Date.now() - announcedAt >= REANNOUNCE_MS) await announceAccount()
       return
     }
     if (!downSince) downSince = Date.now()
