@@ -3,8 +3,9 @@
  * de ENVs a Dotrino»). Es lo que hay detrás de `dotrino-env import`.
  *
  * Los límites que fija esta suite, dichos por el dueño:
- *   · sin nadie que apruebe, no se pide aprobación y solo se AÑADE: lo que ya existe no se toca;
- *   · con quien apruebe, se pide SIEMPRE —`unattended` no exime— y con el sí también se EDITA;
+ *   · AÑADIR una variable nueva es directo, haya o no quien apruebe (dueño, 2026-10-12);
+ *   · EDITAR una que ya existe pide aprobación —`unattended` no exime—;
+ *   · sin nadie que apruebe, lo que ya existe no se toca;
  *   · un servicio solo escribe en SU cajón.
  *
  * Bóveda propia en este archivo: la suite grande añade un aprobador que se queda para siempre,
@@ -104,7 +105,7 @@ test('un servicio no escribe en el cajón de otro', async () => {
   await assert.rejects(storeVars({ dir: svcDir, ns: 'otro', vars: [{ key: 'X', value: 'y' }] }), /unauthorized/)
 })
 
-test('con quien apruebe: se pide SIEMPRE (también con `unattended`), y al aprobar puede EDITAR', async () => {
+test('con quien apruebe: añadir es directo; editar pide aprobación (también con `unattended`)', async () => {
   const { storeVars, fetchSecrets, enrollWithVault } = await lib()
   const { signWithDevice } = await import('@dotrino/identity/capabilities')
   const { requestRenew } = await import('@dotrino/identity/vault/remote.js')
@@ -133,12 +134,22 @@ test('con quien apruebe: se pide SIEMPRE (también con `unattended`), y al aprob
     } finally { c.close() }
   }
 
-  // El servicio sigue con `unattended` (de la prueba anterior): aun así, se pide.
+  // AÑADIR ES DIRECTO: con aprobador en el acta, una variable nueva se guarda sin pedido.
+  const nueva = await storeVars({ dir: svcDir, vars: [{ key: 'SOLO_NUEVA', value: 'n' }] })
+  assert.equal(nueva.pending, null, 'una variable nueva no pide aprobación')
+  assert.equal(nueva.approval, true)
+  assert.deepEqual(nueva.keys, ['SOLO_NUEVA'])
+  assert.equal((await fetchSecrets({ dir: svcDir })).SOLO_NUEVA, 'n')
+  assert.equal(vault.listApprovals().filter((p) => p.kind === 'write').length, 0, 'no se timbró a nadie')
+
+  // EDITAR PIDE. El servicio sigue con `unattended` (de la prueba anterior): aun así, se
+  // pide, y la tanda va entera: la nueva que la acompaña tampoco se guarda todavía.
   const r = await storeVars({ dir: svcDir, vars: [{ key: 'DB_URL', value: 'postgres://dos' }, { key: 'OTRA', value: 'o' }] })
-  assert.ok(r.pending, 'con aprobador, queda en espera aunque el servicio sea desatendido')
+  assert.ok(r.pending, 'editar queda en espera aunque el servicio sea desatendido')
   assert.equal(r.approval, true)
   assert.deepEqual(r.keys, [], 'todavía no se guardó nada')
   assert.equal((await fetchSecrets({ dir: svcDir })).DB_URL, 'postgres://uno')
+  assert.equal(guardadas().OTRA, undefined, 'todo o nada: la nueva espera con la editada')
   const [pedido] = vault.listApprovals().filter((p) => p.id === r.pending)
   assert.equal(pedido.kind, 'write')
 

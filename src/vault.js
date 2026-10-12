@@ -1477,9 +1477,9 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
    * firma del autor, las envolturas, la espera de aprobación. Aquí no hay otra puerta.
    *
    * Los límites (dueño, 2026-09-29):
-   *   · si hay alguien que aprueba, SIEMPRE se pide aprobación —`unattended` no exime— y con
-   *     el sí puede también EDITAR lo que ya existe;
-   *   · si nadie puede aprobar, no se pide y solo puede AÑADIR lo que falta;
+   *   · AÑADIR una variable nueva es directo, haya o no quien apruebe (dueño, 2026-10-12);
+   *   · EDITAR una que ya existe pide aprobación —`unattended` no exime—;
+   *   · si nadie puede aprobar, no se pide y lo que ya existe no se toca (`exists`);
    *   · BORRAR, nunca: eso es de la consola y del CLI de la bóveda.
    *
    * Dos operaciones: `store.recipients` (para quién se sella: solo públicas, nada que ocultar)
@@ -1696,7 +1696,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         log(`[vault] ${ns}: ${deviceId || '????-????'} wants to store ${items.length} variable(s) — waiting for approval (${result.pending})`)
       } else {
         audit('store', { device: deviceId, ns, keys: result?.keys || [] })
-        log(`[vault] ${ns}: ${deviceId || '????-????'} stored ${(result?.keys || []).length} variable(s) (nobody can approve: add only)`)
+        log(`[vault] ${ns}: ${deviceId || '????-????'} stored ${(result?.keys || []).length} new variable(s)`)
         await notifyMembers('vars', { by: deviceId, keys: result?.keys || [], ns })
       }
       return await answer({ op: 'store.result', ns, ts: Date.now(), keys: result?.keys || [], pending: result?.pending || null })
@@ -2811,13 +2811,18 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       const owner = ns ? `ns:${ns}` : `dev:${pub}`
       const keys = []
       // ¿SE PIDE APROBACIÓN? Desde la mesa del admin, lo de siempre (`needsApproval`: quien
-      // tiene `unattended` escribe solo). Desde el propio SERVICIO que guarda en su cajón, se
-      // pide SIEMPRE que haya quien apruebe, tenga o no `unattended` (dueño, 2026-09-29:
-      // «el unattended también pediría aprobación»): `unattended` es para llevarse claves al
-      // arrancar, no para reescribir su propia configuración. Sin nadie que apruebe no se
-      // pide —la regla de siempre— y entonces solo puede añadir.
+      // tiene `unattended` escribe solo). Desde el propio SERVICIO que guarda en su cajón, la
+      // aprobación es SOLO PARA EDITAR (dueño, 2026-10-12: «la aprobación solamente es para
+      // editar una env; para almacenarla es directo»): una variable nueva no le quita nada a
+      // nadie y se guarda en el acto; reemplazar una que ya existe pide el sí de quien
+      // aprueba, tenga o no `unattended` el servicio (dueño, 2026-09-29: «el unattended
+      // también pediría aprobación»). Una tanda con alguna que ya existe se pide ENTERA: va
+      // todo o nada. Sin nadie que apruebe no se pide —la regla de siempre— y lo que ya
+      // existe falla con `exists`.
       const record = await refreshActa()
-      const ask = fromService ? hasApprover(record) : needsApproval(caller, record)
+      const ask = fromService
+        ? hasApprover(record) && items.some((it) => it?.key && secrets.has(owner, it.key))
+        : needsApproval(caller, record)
       for (const it of items) {
         if (!it?.key || !it?.sealed) throw new Error('var.setMany: each variable needs its key and its sealed envelope')
         await checkAuthor(owner, it.key, it.sealed, caller, { allowOverwrite: ask })
