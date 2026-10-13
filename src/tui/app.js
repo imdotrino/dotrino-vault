@@ -30,7 +30,7 @@
  * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
  */
 import fs from 'node:fs'
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { parseEnvInput } from '../../lib/src/envtext.js'
 import { createTerm, widthOf } from './term.js'
 import { qrToString } from '../qr.js'
@@ -39,6 +39,7 @@ import * as vc from '../vaultControl.js'
 import { readSettings, writeSettings } from '../settings.js'
 import * as hw from '../hwkeys.js'
 import { VERSION } from '../version.js'
+import * as up from '../update.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -182,6 +183,65 @@ const activePwd = (st) => st.sessionPwd?.get(activeId(st)) || undefined
 function lockGlyph (p) {
   if (!p?.protected) return ''
   return p.locked ? '🔒' : '🔓'
+}
+
+function restartDaemonService () {
+  return new Promise((res, rej) => {
+    execFile('systemctl', ['--user', 'restart', 'dotrino-vault'], { timeout: 20000 }, (err, so, se) => {
+      if (err) rej(new Error(String(se || '').trim() || err.message)); else res()
+    })
+  })
+}
+
+/**
+ * AL ENTRAR SE DICE SI HAY VERSIÓN NUEVA, Y SE OFRECE INSTALARLA (dueño, 2026-10-13: como
+ * hace la app de Terminal). El servicio ya se actualiza solo; esto es para quien está
+ * mirando: enterarse ahí mismo, instalarla sin salir y, al terminar, reiniciar.
+ *
+ * Se mira EN SEGUNDO PLANO: la pantalla sale al momento y el aviso llega cuando el registro
+ * contesta. «No se pudo mirar» no es «estás al día»: no se dice nada y queda en `st.update`.
+ */
+function checkForUpdate (st, { latest = up.latestRelease } = {}) {
+  if (VERSION === 'dev') return
+  st.update = { checking: true }
+  Promise.resolve().then(() => latest()).then((r) => {
+    if (!r?.ok) { st.update = { failed: r?.reason || 'unknown' }; return }
+    st.update = up.isNewer(r.version, VERSION) ? { release: r, offer: true } : { current: true }
+  }).catch((e) => { st.update = { failed: e?.message || String(e) } })
+}
+
+/** Pregunta UNA vez por sesión. Decir que no deja el aviso arriba, sin volver a preguntar. */
+function offerUpdate (term, st) {
+  const i = L(st)
+  const r = st.update.release
+  st.update = { release: r }
+  setConfirm(st, { text: i.updateOffer(r.version, VERSION), onYes: () => installUpdate(term, st, r) })
+}
+
+async function installUpdate (term, st, release, { install = up.installUserRelease, userInstall = up.isUserInstall } = {}) {
+  const i = L(st)
+  // Solo la instalación de usuario se puede cambiar desde aquí. Un paquete del sistema es
+  // de root: no se pide la contraseña por dentro, se dice el comando.
+  if (!userInstall()) { flash(st, i.updateNeedsCommand, 'warn'); return }
+  const r = await guard(term, st, i.updateInstalling(release.version), () => install(release))
+  if (!r.ok) return
+  if (!r.v.ok) { flash(st, i.updateFailed(r.v.reason), 'danger'); return }
+  try { up.noteUpdated(vc.vaultDir(), { from: st.state?.version || VERSION, to: r.v.version }) } catch (e) {
+    flash(st, i.updateNoteFailed(e.message), 'warn')
+  }
+  st.update = { installed: r.v.version }
+  // Reiniciar se PREGUNTA: cierra las bóvedas abiertas y corta lo que estén haciendo los
+  // aparatos. Si dices que no, el servicio se reinicia solo en un par de minutos.
+  setConfirm(st, {
+    text: i.updateRestartOffer(r.v.version),
+    onYes: async () => {
+      const rr = await guard(term, st, i.updateRestarting, () => restartDaemonService())
+      if (!rr.ok) return
+      st.relaunch = true
+      st.quit = true
+    },
+    onNo: () => { flash(st, i.updateRestartLater(r.v.version)) }
+  })
 }
 
 function startDaemonService () {
@@ -2502,6 +2562,8 @@ function render (term, st) {
       ? t.muted(i.updateWaiting(u.version, dia(u.askedAt + 24 * 60 * 60 * 1000)))
       : t.warn(i.updateNotApproved(u.version, dia(u.askedAt))))
   }
+  // Hay versión nueva y se dijo que no (o todavía no se preguntó): se queda dicho aquí.
+  if (!lines[2] && st.update?.release) lines[2] = ' ' + t.warn(i.updateAvailable(st.update.release.version))
   // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
   // el resto muestra su título simple.
   lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + title(i, st.screen))
@@ -2642,11 +2704,14 @@ export async function runTui () {
     st.state = vc.readState()
     st.daemonUp = true
     await refreshAll(term, st)
+    checkForUpdate(st)
 
     let running = true
     while (running) {
       st.state = vc.readState()
       st.daemonUp = vc.daemonAlive()
+      // El aviso de versión nueva sale cuando no hay otra cosa preguntando.
+      if (st.update?.offer && !st.input && !st.confirm) offerUpdate(term, st)
       // ¿Se cerró sola mientras nadie miraba? Olvida su contraseña y sal de su contenido.
       await forgetAutoLocked(term, st)
       // caducar el flash a los ~4 s
@@ -2656,7 +2721,10 @@ export async function runTui () {
       const base = (st.screen === 'pairing' || st.screen === 'join' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
       // Despertar a tiempo del bloqueo automático, además del sondeo de la pantalla.
       const wake = autoLockWakeIn(st)
-      const tick = base && wake ? Math.min(base, wake) : (base || wake)
+      let tick = base && wake ? Math.min(base, wake) : (base || wake)
+      // Mientras se mira si hay versión nueva hay que despertar sin tecla, o el aviso no
+      // saldría hasta que tocaras algo.
+      if (st.update?.checking) tick = tick ? Math.min(tick, 500) : 500
       const key = await term.readKey(tick)
 
       if (key.name === 'resize') continue
@@ -2728,7 +2796,13 @@ export async function runTui () {
     for (const id of st.unlockedHere) { try { await vc.lockProfile(id) } catch (_) {} }
     term.close()
   }
+  // TRAS ACTUALIZAR Y REINICIAR, esta pantalla también se vuelve a abrir: es el binario
+  // anterior el que sigue en memoria. Se lanza el nuevo en esta misma terminal.
+  if (st.relaunch) {
+    const r = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit' })
+    process.exit(r.status ?? 0)
+  }
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }

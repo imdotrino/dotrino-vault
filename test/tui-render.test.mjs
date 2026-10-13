@@ -1127,3 +1127,72 @@ test('renombrar un aparato cierra el cuadro al aplicar', async () => {
     else process.env.DOTRINO_VAULT_DIR = antes
   }
 })
+
+/**
+ * AL ENTRAR SE AVISA DE LA VERSIÓN NUEVA Y SE OFRECE INSTALARLA; AL TERMINAR, REINICIAR
+ * (dueño, 2026-10-13: como la app de Terminal). Lo que se clava aquí son las tres cosas que
+ * se pueden romper sin que nadie lo note: que «no se pudo mirar» no pase por «estás al día»,
+ * que se pregunte una sola vez, y que un fallo al instalar no ofrezca reiniciar.
+ */
+test('versión nueva: se ofrece instalar una vez, y al terminar se ofrece reiniciar', async () => {
+  const term = fakeTerm()
+  // Sin versión del servicio: si no, la cabecera la ocupa «el servicio corre otra versión».
+  const st = baseState({ state: {} })
+  const release = { ok: true, version: '999.0.0', assets: [] }
+
+  // Decir que no deja el aviso arriba y no vuelve a preguntar.
+  st.update = { release, offer: true }
+  V.offerUpdate(term, st)
+  assert.match(st.confirm.text, /999\.0\.0/)
+  assert.equal(st.update.offer, undefined, 'no se vuelve a preguntar en esta sesión')
+  st.confirm = null
+  V.render(term, st)
+  assert.match(term.last.join('\n'), /999\.0\.0.*dotrino-vault update/, 'el aviso se queda en la cabecera')
+
+  // Una instalación que no es de usuario no se toca: se dice el comando.
+  let llamado = false
+  await V.installUpdate(term, st, release, { userInstall: () => false, install: async () => { llamado = true } })
+  assert.equal(llamado, false)
+  assert.equal(st.confirm, null, 'y no se ofrece reiniciar')
+  assert.equal(st.flash.kind, 'warn')
+
+  // Si la firma no cuadra no se instala nada, y tampoco se ofrece reiniciar.
+  await V.installUpdate(term, st, release, { userInstall: () => true, install: async () => ({ ok: false, reason: 'la firma no cuadra' }) })
+  assert.equal(st.confirm, null)
+  assert.match(st.flash.text, /la firma no cuadra/)
+
+  // Instalada: se ofrece reiniciar, y decir que no avisa de que se reinicia sola.
+  const antes = process.env.DOTRINO_VAULT_DIR
+  process.env.DOTRINO_VAULT_DIR = fs.mkdtempSync('/tmp/vault-tui-')
+  try {
+    await V.installUpdate(term, st, release, { userInstall: () => true, install: async () => ({ ok: true, version: '999.0.0' }) })
+  } finally {
+    if (antes === undefined) delete process.env.DOTRINO_VAULT_DIR
+    else process.env.DOTRINO_VAULT_DIR = antes
+  }
+  assert.match(st.confirm.text, /999\.0\.0/, 'se ofrece reiniciar')
+  assert.equal(st.update.installed, '999.0.0')
+  await st.confirm.onNo()
+  assert.match(st.flash.text, /se reinicia sola/)
+  assert.notEqual(st.relaunch, true)
+})
+
+test('versión nueva: «no se pudo mirar» no es «estás al día»', async () => {
+  const esperar = () => new Promise((r) => setTimeout(r, 20))
+  const caida = baseState()
+  V.checkForUpdate(caida, { latest: async () => ({ ok: false, reason: 'sin red' }) })
+  await esperar()
+  // En desarrollo (`dev`) no se mira nada: no hay versión con la que comparar.
+  if (caida.update) {
+    assert.equal(caida.update.failed, 'sin red')
+    assert.equal(caida.update.current, undefined)
+    const alDia = baseState()
+    V.checkForUpdate(alDia, { latest: async () => ({ ok: true, version: '0.0.1', assets: [] }) })
+    await esperar()
+    assert.equal(alDia.update.current, true)
+    const nueva = baseState()
+    V.checkForUpdate(nueva, { latest: async () => ({ ok: true, version: '999.0.0', assets: [] }) })
+    await esperar()
+    assert.equal(nueva.update.offer, true)
+  }
+})

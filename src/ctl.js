@@ -1832,8 +1832,8 @@ async function waitForService (version, { timeoutMs = 4 * 60_000 } = {}) {
  * marcador que deja el servicio cuando se actualiza solo. Si no se puede escribir se dice:
  * la actualización está hecha, lo que se pierde es el aviso.
  */
-function noteUpdated (to) {
-  try { ipcWrite(path.join(dir, 'updated.json'), { v: 1, from: readState().version || VERSION, to, at: Date.now() }) } catch (e) {
+async function noteUpdated (to) {
+  try { (await import('./update.js')).noteUpdated(dir, { from: readState().version || VERSION, to }) } catch (e) {
     console.error('No se pudo dejar el aviso de actualización para tus aprobadores: %s', e.message)
   }
 }
@@ -1883,8 +1883,23 @@ async function cmdUpdate (args = []) {
     }
     console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
     console.log('Instalada la %s.', res.version)
-    noteUpdated(res.version)
-    if (!args.includes('--no-wait')) await waitForService(res.version)
+    await noteUpdated(res.version)
+    if (args.includes('--no-wait')) return
+    // AL TERMINAR SE OFRECE REINICIAR (dueño, 2026-10-13). El servicio se reinicia solo al
+    // ver el binario nuevo, pero espera a verlo quieto dos minutos: quien está delante puede
+    // no querer esperar. Solo se pregunta con alguien delante y con systemd; si no, se espera.
+    const s = ipcRead(stateFile, null)
+    if (s && alive(s.pid) && s.version !== res.version && process.stdin.isTTY && process.platform === 'linux' && !IN_DOCKER) {
+      const resp = (await askText('¿Reiniciar la bóveda ahora para usarla? Cierra las bóvedas abiertas. [s/N] ')).trim().toLowerCase()
+      if (resp === 's' || resp === 'y') {
+        try { execFileSync('systemctl', ['--user', 'restart', 'dotrino-vault'], { stdio: 'inherit' }) } catch (e) {
+          console.error('No se pudo reiniciar: %s', e.message)
+          console.error('Hazlo a mano:  %s', RESTART_HINT)
+          process.exit(1)
+        }
+      }
+    }
+    await waitForService(res.version)
     return
   }
 
@@ -1924,7 +1939,7 @@ async function cmdUpdate (args = []) {
       B, file, r.version, Z)
     return
   }
-  noteUpdated(r.version)
+  await noteUpdated(r.version)
   console.log('Listo. El servicio se reinicia solo; compruébalo con:  dotrino-vault status')
 }
 

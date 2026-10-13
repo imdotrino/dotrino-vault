@@ -16,11 +16,22 @@ import { execFileSync } from 'node:child_process'
 import { latestVersion, isNewer, CHECK_EVERY_MS } from '@dotrino/update'
 import { pickAsset, download, verifyArtifact as verify, fetchVerified } from '@dotrino/update/fetch'
 import { VERSION } from './version.js'
+import { ipcWrite } from './ipc.js'
 
 export const REPO = 'imdotrino/dotrino-vault'
 export { isNewer, CHECK_EVERY_MS, download }
 
 /** La última release del vault. `{ ok:false, reason }` si no se pudo mirar, que NO es «al día». */
+/**
+ * DEJA DICHO QUE SE INSTALÓ una versión nueva, para que el servicio se lo cuente a quien
+ * aprueba cuando arranque con ella (`anunciarActualizacion` en daemon.js). Es el mismo
+ * marcador que deja el servicio cuando se actualiza solo, y lo dejan igual el comando
+ * `update` y la TUI.
+ */
+export function noteUpdated (dir, { from, to }) {
+  ipcWrite(path.join(dir, 'updated.json'), { v: 1, from, to, at: Date.now() })
+}
+
 export const latestRelease = (opts = {}) =>
   latestVersion({ source: 'github', repo: REPO, product: 'dotrino-vault', version: VERSION, ...opts })
 
