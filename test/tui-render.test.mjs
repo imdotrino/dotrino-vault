@@ -1094,3 +1094,36 @@ test('dispositivos: `b` sobre la propia bóveda avisa y no llama al daemon', asy
   await V.onKeyDevices({ t }, st, { name: 'char', ch: 'b' })
   assert.equal(st.flash?.text, dict('es').cantBlockMaster)
 })
+
+/**
+ * APLICAR CIERRA EL CUADRO. Renombrar un aparato dejaba el cuadro abierto después de Enter:
+ * el nombre ya estaba cambiado y la pantalla seguía preguntando, así que parecía que no
+ * había pasado nada (dueño, 2026-10-13). Los otros prompts ponen `st.input = null` antes de
+ * trabajar; este no lo hacía.
+ *
+ * La bóveda de la prueba es un directorio vacío: la orden falla («no está en marcha») y el
+ * cuadro se tiene que cerrar igual, que es justo cuando más confunde que se quede.
+ */
+test('renombrar un aparato cierra el cuadro al aplicar', async () => {
+  const antes = process.env.DOTRINO_VAULT_DIR
+  process.env.DOTRINO_VAULT_DIR = fs.mkdtempSync('/tmp/vault-tui-')
+  try {
+    const term = fakeTerm()
+    const st = baseState({
+      screen: 'devices',
+      members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: ['secrets'], cn: 'proxy' }],
+      devices: { issued: [{ sub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', scope: ['vault:secrets:proxy'], exp: Date.now() + 8.64e7, nonce: 'n2' }], revoked: [] }
+    })
+    await V.onKeyDevices(term, st, { name: 'char', ch: 'r' })
+    assert.ok(st.input, 'se abrió el cuadro de entrada')
+    assert.equal(st.input.value, 'proxy de casa', 'viene relleno con el nombre actual')
+
+    await V.onInputKey(st, { name: 'char', ch: '2' })
+    await V.onInputKey(st, { name: 'enter' })
+    assert.equal(st.input, null, 'Enter cierra el cuadro')
+    assert.ok(st.flash, 'y dice qué pasó')
+  } finally {
+    if (antes === undefined) delete process.env.DOTRINO_VAULT_DIR
+    else process.env.DOTRINO_VAULT_DIR = antes
+  }
+})

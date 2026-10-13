@@ -1344,7 +1344,8 @@ async function onKeyDevices (term, st, key) {
       value: cur.label || '',
       onSubmit: async (raw) => {
         const name = String(raw || '').trim()
-        if (!name) return
+        st.input = null
+        if (!name) { flash(st, i.nameEmpty, 'danger'); return }
         const r = await guard(term, st, i.renaming, () => vc.setDeviceLabel(cur.sub, name, activeId(st)))
         if (r.ok) { applyDump(st, r.v); flash(st, i.deviceRenamed(name)) }
       }
@@ -1415,6 +1416,7 @@ async function onKeyLogins (term, st, key, api = vc) {
                   mask: true,
                   onSubmit: async (pw2) => {
                     if (pw1 !== pw2) { flash(st, i.loginPassMismatch, 'warn'); return }
+                    st.input = null
                     const r = await guard(term, st, i.loginCreating,
                       () => api.addLogin({ user, password: pw1, label }))
                     if (r.ok) {
@@ -1442,6 +1444,7 @@ async function onKeyLogins (term, st, key, api = vc) {
           mask: true,
           onSubmit: async (nueva) => {
             if (String(nueva || '').length < MIN_LOGIN_PASSWORD) { flash(st, i.loginPassShort, 'warn'); return }
+            st.input = null
             const r = await guard(term, st, i.loginChanging,
               () => api.passwdLogin({ user: cur.user, oldPassword: vieja, newPassword: nueva }))
             if (r.ok) { flash(st, i.loginChanged); await refreshLogins(term, st, api) }
