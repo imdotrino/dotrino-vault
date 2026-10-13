@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import prerender from '@dotrino/prerender/vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -81,6 +82,8 @@ const spaFallback = {
 export default defineConfig({
   base: '/',
   plugins: [
+    // El HTML llega con contenido para quien lo lee sin ejecutar JavaScript.
+    prerender(),
     vue({ template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('dotrino-') } } }),
     identityVaultDev,
     commitMeta,
