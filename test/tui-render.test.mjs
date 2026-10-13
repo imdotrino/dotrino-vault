@@ -379,7 +379,7 @@ test('la lista de dispositivos avisa cuántas variables propias tiene cada uno',
   const term = fakeTerm(110, 24)
   V.render(term, baseState({
     screen: 'devices',
-    members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: ['secrets'], cn: 'proxy' }],
+    members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: [], cn: 'proxy' }],
     devices: { issued: [{ sub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', scope: ['vault:secrets:proxy'], exp: Date.now() + 8.64e7, nonce: 'n2' }], revoked: [] },
     secrets: { ns: {}, dev: [{ pub: 'PUB2', id: 'EF56-7890', label: '', cn: 'proxy', orphan: false, keys: [{ key: 'PORT', public: false }, { key: 'PUBLIC_URL', public: false }] }] }
   }))
@@ -843,21 +843,21 @@ test('Permisos: salir de la bóveda con cambios sin guardar PREGUNTA antes de ti
  * `unattended` y con `sealer`. Y a un aparato sin `cn` no se le ofrece: no hay cajón que
  * abrir, el acta lo filtra, y una casilla que no hace nada es peor que ninguna.
  */
-test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', () => {
+test('Permisos: el cajón de un servicio se DICE, no es una casilla', () => {
   const t = makeTheme()
   const servicio = baseState({
     screen: 'caps',
     capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' },
-    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'proxy1', cn: 'proxy', caps: ['secrets'] }]
+    members: [{ pub: 'PUB1', id: 'AB12-CD34', label: 'proxy1', cn: 'proxy', caps: [] }]
   })
   const filas = V.capsRows(servicio, t)
   const texto = filas.map((r) => r.text).join('\n')
-  assert.match(texto, /\[x\].*secretos «proxy»/, 'se ve, marcado, y dice QUÉ cajón')
-  assert.match(texto, /y ningún otro/, 'y que no puede abrir otro')
-  assert.equal(filas.filter((r) => r.sel).length, 11, 'los diez de aparato + el suyo')
-  assert.equal(filas.find((r) => r.meta?.cap === 'secrets') !== undefined, true)
+  assert.match(texto, /abre el cajón «proxy» y ningún otro/, 'dice QUÉ cajón abre, y que no abre otro')
+  assert.doesNotMatch(texto, /\[.\].*proxy/, 'pero no es algo que se marque')
+  assert.equal(filas.filter((r) => r.sel).length, 10, 'los mismos diez que cualquier aparato')
+  assert.equal(filas.find((r) => r.meta?.cap === 'secrets'), undefined)
 
-  // Un aparato TUYO no tiene cajón: no se le ofrece.
+  // Un aparato TUYO no tiene cajón: no se dice nada.
   const aparato = baseState({
     screen: 'caps',
     capsFor: { pub: 'PUB2', deviceId: 'EF56-7890' },
@@ -865,7 +865,7 @@ test('Permisos: el cajón sale SOLO para un servicio, y con su nombre dentro', (
   })
   const suyas = V.capsRows(aparato, t)
   assert.equal(suyas.filter((r) => r.sel).length, 10)
-  assert.equal(suyas.find((r) => r.meta?.cap === 'secrets'), undefined, 'no hay cajón que abrir')
+  assert.doesNotMatch(suyas.map((r) => r.text).join('\n'), /cajón/, 'no hay cajón que abrir')
 })
 
 /**
@@ -1111,7 +1111,7 @@ test('renombrar un aparato cierra el cuadro al aplicar', async () => {
     const term = fakeTerm()
     const st = baseState({
       screen: 'devices',
-      members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: ['secrets'], cn: 'proxy' }],
+      members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'proxy de casa', caps: [], cn: 'proxy' }],
       devices: { issued: [{ sub: 'PUB2', deviceId: 'EF56-7890', label: 'proxy de casa', scope: ['vault:secrets:proxy'], exp: Date.now() + 8.64e7, nonce: 'n2' }], revoked: [] }
     })
     await V.onKeyDevices(term, st, { name: 'char', ch: 'r' })

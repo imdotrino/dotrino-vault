@@ -149,7 +149,7 @@ test('un cert con sign + secrets:<ns>: enrollWithVault no persiste y fetchSecret
   // `unattended` lo añade el arnés (`aprobarYPermitir`), no el emparejamiento: entrar NO
   // lo concede —como `admin`, se da a mano— y sin él este bot se quedaría esperando a un
   // teléfono. Aquí se ve el modelo entero: lo que trae la invitación y lo que decides tú.
-  assert.deepEqual([...me.caps].sort(), ['secrets', 'sign', 'unattended'])
+  assert.deepEqual([...me.caps].sort(), ['sign', 'unattended'])
   assert.equal(link.iss, qr.iss)
   const secrets = await fetchSecrets({ ns: 'eco', proxyUrl, masterPubkey: link.iss, device: link.device, cert: link.cert, enc: link.enc })
   assert.deepEqual(secrets, { BUFFER_API_KEY: 'b-789' })
@@ -1502,7 +1502,7 @@ test('una consola sin `unattended` deja la escritura en espera: denegar la tira,
 })
 
 /**
- * QUITARLE EL PERMISO SURTE EFECTO YA — TAMBIÉN EN `enckey`.
+ * EL ACTA MANDA SOBRE EL PAPEL — TAMBIÉN EN `enckey`.
  *
  * `handleEncKey` no le preguntaba al acta, solo al certificado. Y no es un mostrador
  * inocente: acto seguido le ENVUELVE al aparato la llave de su cajón (`spreadKey`). O sea
@@ -1514,34 +1514,32 @@ test('una consola sin `unattended` deja la escritura en espera: denegar la tira,
  * repliegue que decía «sin acta, pasa») y el que registra la llave (que no miraba).
  */
 test('a un servicio al que el acta ya no reconoce: ni le sirven el cajón ni le registran la llave', async () => {
+  // Un servicio «sonda» de verdad, enrolado: deja en `dir` el enlace con la bóveda.
   const { qr } = await vault.startPairing({ scope: ['vault:secrets:sonda'], label: 'service:sonda', ttlMs: 60_000 })
   const dir = tmp('svc-sonda-')
-  const { enrollService, fetchSecrets, registerEncKey } = await import('../lib/src/service.js')
-  const { device, cert } = await enrolar({
-    qr, ns: 'sonda', dir
-  })
-  // EL PAPEL ORIGINAL, guardado aparte: es el que dice `vault:secrets:sonda`. Con él en la
-  // mano y el acta en contra se prueba justo el hueco que había.
+  const { fetchSecrets, registerEncKey } = await import('../lib/src/service.js')
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  await enrolar({ qr, ns: 'sonda', dir })
+  assert.deepEqual(await fetchSecrets({ dir }), {}, 'al que el acta reconoce, se lo sirven')
+
+  // EL CAJÓN LO ABRE EL `cn`, no un permiso (identity 0.111.0). El caso que hay que cerrar es
+  // un papel que dice un cajón y un acta que dice otro: aquí el miembro es el servicio
+  // «otra», con todos sus permisos en regla, y trae un papel —firmado de verdad por la
+  // bóveda— que dice `vault:secrets:sonda`.
+  const device = await makeDeviceKey()
+  await vault.identity.admitMember({ pub: device.publickey, label: 'service:otra', cn: 'otra', caps: ['unattended'] })
+  const { cert } = await vault.identity.signDelegation(device.publickey, ['vault:secrets:sonda'], { ttlMs: 60_000, label: 'service:sonda' })
   const conElCajon = { ns: 'sonda', proxyUrl, masterPubkey: vault.master, device, cert }
 
-  assert.deepEqual(await fetchSecrets({ dir }), {}, 'mientras el acta lo reconoce, se lo sirven')
-  await registerEncKey({ dir, ...conElCajon })
-
-  // El dueño le quita EL CAJÓN en el acta y le deja `firma`: sigue siendo miembro y su papel
-  // sigue vivo diciendo `vault:secrets:sonda`. Dejarlo sin ningún permiso lo echaría del acta
-  // y entonces lo pararía la revocación, que es otro camino.
-  await vault.setCaps(device.publickey, ['sign'])
-
-  // `enckey` con el papel viejo: la firma vale, el papel dice el cajón… y el acta no. Este
-  // mostrador NO preguntaba, y acto seguido le ENVUELVE la llave del cajón (`spreadKey`).
+  // `enckey`: la firma vale, el papel dice el cajón… y el acta no. Este mostrador NO
+  // preguntaba, y acto seguido le ENVUELVE la llave del cajón (`spreadKey`).
   // Se exige el motivo EXACTO: «revoked» también contiene `unauthorized`, y el test pasaría
   // sin haber probado nada del acta.
   await assert.rejects(() => registerEncKey({ dir, ...conElCajon }), /cn —/,
     'registrar la llave tiene que mirar el acta, que era por donde se colaba')
 
-  // Y servir el cajón tampoco. Aquí ni siquiera llega a preguntarse por el `cn`: al ver que
-  // el acta cambió, el servicio pide papel nuevo y el que le dan ya no trae el cajón.
-  await assert.rejects(() => fetchSecrets({ dir }), /scope|cn —/, 'servir el cajón dice que no')
+  // Y servir el cajón tampoco.
+  await assert.rejects(() => fetchSecrets({ dir, ...conElCajon }), /scope|cn —/, 'servir el cajón dice que no')
 })
 
 /**
@@ -1686,12 +1684,12 @@ test('un servicio SIN el permiso espera aprobación; con él, se sirve solo', as
   // Se le concede, y ya se sirve solo. El secreto se guarda DESPUÉS de que el aparato esté
   // dentro: un cajón escrito antes no tiene envoltura para quien llega luego, y el fallo
   // sería «no key to open», que no es lo que este test mira.
-  await vault.setCaps(device.publickey, ['secrets', 'unattended'])
+  await vault.setCaps(device.publickey, ['unattended'])
   await vault.setSecret('vigilado', 'TOKEN', 't-1')
   assert.deepEqual(await fetchSecrets({ dir }), { TOKEN: 't-1' }, 'con el permiso, sin preguntar a nadie')
 
   // Y quitárselo lo devuelve a pedir permiso, en el acto.
-  await vault.setCaps(device.publickey, ['secrets'])
+  await vault.setCaps(device.publickey, [])
   await assert.rejects(() => fetchSecrets({ dir, timeoutMs: 3000, approvalTimeoutMs: 3000 }), /approval|timeout/i)
 })
 
@@ -1857,7 +1855,7 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
   // Misma regla que `putWrap`, y por lo mismo: reemplazar un sobre con uno basura dejaría
   // sin leer a otro miembro — denegación de servicio disfrazada de escritura.
   const servicio = await makeDeviceKey()
-  await vault.identity.admitMember({ pub: servicio.publickey, label: 'svc', cn: ns, caps: ['secrets', 'unattended'] })
+  await vault.identity.admitMember({ pub: servicio.publickey, label: 'svc', cn: ns, caps: ['unattended'] })
   const rec2 = await vault.vars.recipients({ ns })
   const suyo = await buildSealedVar({ recipients: rec2, owner, key: 'TOKEN', value: 'pisado', author: authorFromDeviceKey(servicio) })
   await assert.rejects(vault.vars.set({ ns, key: 'TOKEN', sealed: suyo, caller: servicio.publickey }),

@@ -31,13 +31,10 @@ test('todos los permisos tienen nombre y explicación en los dos idiomas', () =>
   for (const lang of LANGS) {
     const t = dict(lang)
     for (const cap of CAPS) {
-      // `secrets` es una función (lleva el cajón dentro); los demás, texto.
       const nombre = t.capName[cap]
       assert.ok(nombre, `falta el nombre de «${cap}» en ${lang}: la fila saldría en blanco`)
-      if (cap !== 'secrets') {
-        assert.equal(typeof nombre, 'string')
-        assert.ok(t.capHint[cap], `falta la explicación de «${cap}» en ${lang}`)
-      }
+      assert.equal(typeof nombre, 'string')
+      assert.ok(t.capHint[cap], `falta la explicación de «${cap}» en ${lang}`)
     }
   }
 })
@@ -54,7 +51,6 @@ test('los nombres de los permisos no usan jerga', () => {
   for (const lang of LANGS) {
     const t = dict(lang)
     for (const cap of CAPS) {
-      if (cap === 'secrets') continue
       assert.ok(!jerga.test(t.capName[cap]),
         `el nombre de «${cap}» en ${lang} usa jerga: "${t.capName[cap]}"`)
     }

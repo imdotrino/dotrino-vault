@@ -66,7 +66,7 @@ const T = {
     page_build: 'Esta página sale del commit',
     copy_id: 'Copiar el identificador completo',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
-    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', secrets: 'Lee sus propias claves', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', passkeys: 'Abre tus passkeys', sealer: 'Sella el acta (otra bóveda)', unattended: 'Recibe claves sin aprobación', replica: 'Atiende cuando la bóveda no está' },
+    caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas', passkeys: 'Abre tus passkeys', sealer: 'Sella el acta (otra bóveda)', unattended: 'Recibe claves sin aprobación', replica: 'Atiende cuando la bóveda no está' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
     debt_t: 'Este aparato todavía no puede abrir:',
@@ -311,7 +311,7 @@ const T = {
     page_build: 'This page was built from commit',
     copy_id: 'Copy the full identifier',
     members: 'Devices', me: 'this device', is_master: 'Master',
-    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', secrets: 'Reads its own keys', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', passkeys: 'Opens your passkeys', sealer: 'Seals the record (another vault)', unattended: 'Gets keys without approval', replica: 'Answers while the vault is away' },
+    caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords', passkeys: 'Opens your passkeys', sealer: 'Seals the record (another vault)', unattended: 'Gets keys without approval', replica: 'Answers while the vault is away' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
     debt_t: 'This device cannot open yet:',
@@ -939,8 +939,8 @@ const saveCaps = () => run('caps-save', async () => {
   await id.value.setCapsMany(changes)
   capsDraft.value = {}
 })
-/** Los permisos que se ofrecen a un miembro: todos los del acta, y el cajón si es un servicio. */
-const capsFor = (m) => (m.cn ? ['secrets', ...DEVICE_CAPS] : DEVICE_CAPS)
+/** Los permisos que se ofrecen a un miembro: los del acta. El cajón de un servicio lo abre su nombre, no un permiso. */
+const capsFor = () => DEVICE_CAPS
 /**
  * QUITAR UN DISPOSITIVO — una sola operación, se sea el master o se administre a distancia.
  *

@@ -322,6 +322,6 @@ test('permisos al emparejar: entran al acta en la admisión, y el QR no los llev
 test('permisos al emparejar: uno que no existe se rechaza al abrir, no al aprobar', async () => {
   const { desk } = await mount()
   await assert.rejects(() => desk.startPairing({ caps: ['sign', 'volar'] }), (e) => e.code === 'bad-caps')
-  await assert.rejects(() => desk.startPairing({ caps: ['secrets'] }), (e) => e.code === 'bad-caps', 'secrets sin cajón no significa nada')
+  await assert.rejects(() => desk.startPairing({ caps: ['secrets'] }), (e) => e.code === 'bad-caps', 'el cajón no es un permiso: lo abre el nombre del servicio')
   await assert.rejects(() => desk.startPairing({ caps: [] }), (e) => e.code === 'empty-scope')
 })

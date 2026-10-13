@@ -79,6 +79,7 @@ const es = {
   // PERMISOS de un dispositivo (§9.1: se dice el beneficio, no el scope del cert).
   titleCaps: 'Permisos del dispositivo',
   capsFor: (id, name) => `Permisos de ${id}${name ? ' · ' + name : ''}`,
+  capsDrawer: (cn) => `Es el servicio «${cn}»: abre el cajón «${cn}» y ningún otro.`,
   capsNoMember: '  (este dispositivo ya no está en el perfil)',
   capsApplyHint: 'Enter marca o desmarca · G guarda · Esc vuelve a la lista sin perder lo marcado',
   capsPending: (n) => `${n} cambio(s) sin guardar en este aparato (*) · G guarda todo en una sola acta`,
@@ -104,7 +105,6 @@ const es = {
   // resultado fue una lista donde no se sabía qué permiso era cuál ni cómo nombrarlo para
   // el CLI. Lo que hace cada uno va DEBAJO, que es su sitio.
   capName: {
-    secrets: (cn) => `secretos «${cn}»`,
     sign: 'firma',
     store: 'guarda',
     read: 'lee',
@@ -120,7 +120,6 @@ const es = {
   // continuaba a «Conectar y quitar dispositivos»—; ahora el título es la palabra que se
   // teclea, así que la pista tiene que decir la frase entera.
   capHint: {
-    secrets: (cn) => `abrir el cajón de «${cn}» y ningún otro`,
     sign: 'usar tu identidad en las apps del ecosistema',
     store: 'escribir en tu bóveda: perfil, contenido, datos',
     read: 'ver lo que guardaste',
@@ -564,6 +563,7 @@ const en = {
   tabMe: 'Profile',
   titleCaps: 'Device permissions',
   capsFor: (id, name) => `Permissions for ${id}${name ? ' · ' + name : ''}`,
+  capsDrawer: (cn) => `It is the “${cn}” service: it opens the “${cn}” drawer and no other.`,
   capsNoMember: '  (this device is no longer in the record)',
   capsApplyHint: 'Enter ticks or unticks · G saves · Esc goes back to the list keeping your ticks',
   capsPending: (n) => `${n} unsaved change(s) on this device (*) · G saves everything in ONE record`,
@@ -583,7 +583,6 @@ const en = {
   // El título es el NOMBRE del permiso, el mismo que se teclea. Ver la nota en el bloque
   // español: describirlo dejaba una lista donde no se sabía qué permiso era cuál.
   capName: {
-    secrets: (cn) => `secrets «${cn}»`,
     sign: 'sign',
     store: 'store',
     read: 'read',
@@ -597,7 +596,6 @@ const en = {
   },
   // Cada pista se sostiene sola: el título es la palabra, no una frase que continuar.
   capHint: {
-    secrets: (cn) => `open the «${cn}» drawer and no other`,
     sign: 'use your identity across the ecosystem apps',
     store: 'write to your vault: profile, content, data',
     read: 'see what you saved',

@@ -562,17 +562,12 @@ const CAPS_ORDER = [...ORDEN.filter((c) => DEVICE_CAPS.includes(c)),
   ...DEVICE_CAPS.filter((c) => !ORDEN.includes(c))]
 
 /**
- * Los permisos que se le pueden dar A ESTE miembro, en orden.
- *
- * `secrets` solo existe para un SERVICIO (los que tienen `cn`), y por eso faltaba: la
- * lista era fija y no cabía algo que depende de quién sea. Pero para un servicio es EL
- * permiso —el que decide si abre su cajón— y no verlo aquí hacía creer que no existe,
- * igual que pasaba con `unattended`. Se enseña primero, que es su importancia real.
- *
- * A un aparato SIN `cn` no se le ofrece: no hay cajón que abrir, el acta lo filtra
- * (`allowedCaps`) y enseñar una casilla que no hace nada es peor que no enseñarla.
+ * EL CAJÓN NO ES UNA CASILLA (dueño, 2026-10-13: «no entiendo por qué es un permiso el
+ * acceso a un cajón, el cn ya garantiza eso»). Antes un servicio traía aquí «secretos
+ * «passmanager»» al lado de «contrasenas», y parecían dos permisos sobre lo mismo. Un
+ * servicio abre el cajón de su nombre por ser ese servicio: se DICE arriba de la lista
+ * (`capsDrawer`), y no se marca ni se desmarca.
  */
-const capsForMember = (member) => (member?.cn ? ['secrets', ...CAPS_ORDER] : CAPS_ORDER)
 
 /** Con lo que entra un aparato si no eliges otra cosa: lo mismo que `pair` sin `--scope`. */
 const PAIR_DEFAULT_CAPS = ['sign', 'read', 'store']
@@ -586,11 +581,10 @@ const PAIR_DEFAULT_CAPS = ['sign', 'read', 'store']
 function capChecklist (i, t, { cn = null, has, real = has }) {
   const rows = []
   let tocados = 0
-  for (const cap of capsForMember({ cn })) {
+  if (cn) rows.push({ text: t.muted(' ' + i.capsDrawer(cn)), sel: false }, { text: '', sel: false })
+  for (const cap of CAPS_ORDER) {
     const mark = has.has(cap) ? '[x]' : '[ ]'
-    // El nombre de `secrets` lleva el cajón dentro: «las claves de proxy» dice qué abre,
-    // «lee sus claves» te deja preguntándote cuáles.
-    const name = typeof i.capName[cap] === 'function' ? i.capName[cap](cn) : i.capName[cap]
+    const name = i.capName[cap]
     // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
     // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
     const cambia = has.has(cap) !== real.has(cap)
@@ -599,8 +593,7 @@ function capChecklist (i, t, { cn = null, has, real = has }) {
     // así que no hay que repetirlo al lado. Lo que hace va debajo.
     const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })
-    const hint = typeof i.capHint[cap] === 'function' ? i.capHint[cap](cn) : i.capHint[cap]
-    rows.push({ text: t.muted('      ' + hint), sel: false })
+    rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
   }
   return { rows, tocados }
 }
@@ -1596,7 +1589,8 @@ async function onKeyPairCaps (term, st, key) {
     return true
   }
   if (ch === 'g') {
-    if (!pc.caps.length) { flash(st, i.pairCapsNone, 'warn'); return true }
+    // Un servicio puede entrar sin ningún permiso: su cajón lo abre el nombre.
+    if (!pc.caps.length && !pc.service) { flash(st, i.pairCapsNone, 'warn'); return true }
     const go = async () => {
       st.pairCaps = null
       const ok = await beginPairing(term, st, pc.profile, pc.service, pc.label, pc.caps)
@@ -1617,7 +1611,7 @@ async function onKeyPairCaps (term, st, key) {
 
 /** Abre la pantalla de permisos del emparejamiento; el QR sale al pulsar G. */
 function choosePairCaps (st, { profile, service = null, label = null, after = null }) {
-  st.pairCaps = { profile, service, label, after, caps: service ? ['secrets'] : [...PAIR_DEFAULT_CAPS] }
+  st.pairCaps = { profile, service, label, after, caps: service ? [] : [...PAIR_DEFAULT_CAPS] }
   st.sel.paircaps = 0
   st.scroll.paircaps = { value: 0 }
   st.screen = 'paircaps'

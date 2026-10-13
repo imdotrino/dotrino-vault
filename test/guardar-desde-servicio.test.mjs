@@ -92,7 +92,7 @@ test('sin nadie que apruebe: lo que ya existe NO se toca, ni con `unattended`', 
   const { storeVars, fetchSecrets } = await lib()
   await assert.rejects(storeVars({ dir: svcDir, vars: [{ key: 'DB_URL', value: 'postgres://pisado' }] }), (e) => e.code === 'exists')
   const pub = await servicePub()
-  await vault.setCaps(pub, ['secrets', 'unattended'])
+  await vault.setCaps(pub, ['unattended'])
   await assert.rejects(storeVars({ dir: svcDir, vars: [{ key: 'DB_URL', value: 'postgres://pisado' }] }), (e) => e.code === 'exists')
   assert.equal((await fetchSecrets({ dir: svcDir })).DB_URL, 'postgres://uno')
   // Y todo o nada: si una de la tanda ya existe, no se guarda ninguna.

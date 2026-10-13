@@ -245,7 +245,7 @@ export async function runDaemon () {
       if (caps) {
         caps = [...new Set(caps)]
         const cn = scopeToCn(base)
-        const fromCaps = caps.map((c) => capScope(c, cn)).filter((x) => x && ALLOWED(x))
+        const fromCaps = caps.map((c) => capScope(c)).filter((x) => x && ALLOWED(x))
         // Sin `--scope` el papel sale de los permisos; con él, se suman.
         scope = [...new Set([...(asked?.length || isService ? base : []), ...fromCaps])]
         if (!scope.length) {

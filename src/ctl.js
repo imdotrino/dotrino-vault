@@ -39,6 +39,7 @@ import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, en
 import { VERSION } from './version.js'
 import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
+import { COMM_CN } from './commKey.js'
 
 const dir = dataDir()
 const stateFile = path.join(dir, 'state.json')
@@ -614,7 +615,7 @@ async function cmdMembers () {
   // español. Se resaltan como `admin` y `approve`: los cuatro cambian lo que ese aparato
   // puede hacerle a la cuenta, y eso se lee de un vistazo o no se lee.
   const CAP = {
-    sign: 'firma', store: 'guarda', read: 'lee', secrets: 'lee sus claves',
+    sign: 'firma', store: 'guarda', read: 'lee',
     admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}`,
     sealer: `${B}sella el acta${Z}`, passwords: `${B}pide contraseñas${Z}`,
     // Resaltado como los otros cuatro: dice si esa máquina se lleva tus claves privadas
@@ -644,7 +645,8 @@ async function cmdMembers () {
       m.isMe ? 'este dispositivo' : null,
       m.cn ? `servicio «${m.cn}»` : null
     ].filter(Boolean)
-    const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : '(sin permisos)'
+    // Un servicio sin permisos no está «sin nada»: su cajón lo abre el nombre, no un permiso.
+    const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : (m.cn && m.cn !== COMM_CN ? '(solo su cajón)' : '(sin permisos)')
     // CUÁNDO ENTRÓ. El nombre lo pone el propio aparato al emparejarse y muchas veces no
     // distingue nada —dos teléfonos con el mismo apodo, o «cli» a secas—, así que la fecha
     // es lo que deja reconocer cuál es cuál y ver si hay uno que no recuerdas haber
@@ -656,13 +658,13 @@ async function cmdMembers () {
     // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
     // se mira quién es quién — y en la lista de variables ya seria tarde.
     //
-    // Solo si LEE variables (`secrets`). La llave de comunicación de la bóveda entra con
-    // `cn: 'vault'` y solo `firma`, y no tiene llave de cifrado a propósito: salía marcada
-    // en rojo «NO puede leer sus variables» cuando no tiene ninguna que leer.
+    // Menos la llave de comunicación de la bóveda: entra con `cn: 'vault'` y solo `firma`,
+    // y no tiene llave de cifrado a propósito: salía marcada en rojo «NO puede leer sus
+    // variables» cuando no tiene ninguna que leer.
     // SI LE LLEGAN LOS AVISOS, en quien aprueba. No cambia a quién se le pide —se le pide a
     // todos—: es para ver a cuál no le suena el pedido.
     if (m.caps.includes('approve') && 'notifiedAt' in m) console.log('      %s%s%s', D, avisosTxt(m.notifiedAt), Z)
-    if (m.cn && !m.canSeal && m.caps.includes('secrets')) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
+    if (m.cn && m.cn !== COMM_CN && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
     // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
     // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
     // fallo más caro que ha tenido el ecosistema. No bloquea nada: se enseña.

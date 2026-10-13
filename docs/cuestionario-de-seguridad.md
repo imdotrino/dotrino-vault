@@ -133,7 +133,7 @@ una persona no puede haberla. Los repos privados **no tienen colaboradores**, a 
 El corazón del producto. **El acta manda**: qué puede cada aparato lo dice ella, va firmada
 por la maestra, y quitar un aparato es quitarle la llave. No hay una segunda lista.
 
-- Permisos por capacidad (`sign`, `secrets`, `admin`, `approve`, `sealer`, `unattended`…),
+- Permisos por capacidad (`sign`, `admin`, `approve`, `sealer`, `unattended`…),
   no por tipo de aparato.
 - Un papel bien firmado de un aparato que el acta ya no nombra **no entra**.
 - **Recibir claves privadas sin aprobación es un permiso** (`unattended`) que se concede a

@@ -675,7 +675,10 @@ Son tres cerrojos, y ninguno es un accidente:
 1. **No hay a dónde envolver.** Un sobre se cierra contra una pública de **cifrado** y
    esta es un par de **firma**: no tiene `encPub` en el acta, y `recipientsFor` filtra por
    `encPub`. Sin ella, no hay envoltura posible aunque alguien la pidiera.
-2. **El acta no le reconoce `secrets`.** Entra con `cn: 'vault'` y `caps: ['sign']`. Este
+2. **El acta no le reconoce ningún cajón.** Entra con `cn: 'vault'` y `caps: ['sign']`, y
+   ese `cn` es el de la propia bóveda (`VAULT_CN`): `memberCanReadSecrets` dice que no para
+   él, se llame como se llame el cajón (identity ≥ 0.111.0; antes lo decía no tener la
+   capacidad `secrets`, que ya no existe). Este
    cerrojo es el que faltaba: `nsMembers` miraba **solo el `cn`**, y `cn` es texto libre —
    un cajón llamado `vault` (nombre perfectamente válido) la contaba entre sus dueños. No
    llegaba a recibir sobre por el cerrojo 1, pero la salvaguarda era estructural por
@@ -684,7 +687,7 @@ Son tres cerrojos, y ninguno es un accidente:
 3. **No puede conseguir una `encPub`.** La única puerta es `handleEncKey`, que exige una
    cadena de certificados válida con scope `vault:secrets:<ns>` **y** `memberCanReadSecrets`.
    La llave de comunicación **no tiene certificado** —entra por `admitMember`, no se
-   enrola— y no tiene `secrets`. Dos noes independientes.
+   enrola— y su `cn` no abre cajón. Dos noes independientes.
 
 Y tampoco entra por las otras dos puertas: `adminDevices` exige `!m.cn` (ella lleva uno) y
 `cosealerMembers` exige `sealer` + `encPub` (no tiene ninguno de los dos).

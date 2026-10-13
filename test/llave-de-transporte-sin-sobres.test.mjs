@@ -29,7 +29,7 @@ const acta = {
   sealKeys: [{ pub: 'LLAVE-DE-SELLADO-VIEJA', from: 1, to: 3 }],
   members: [
     { pub: 'APARATO-DEL-DUENO', encPub: 'e1', cn: null, caps: ['sign', 'read', 'store'] },
-    { pub: 'SERVICIO-PROXY', encPub: 'e2', cn: 'proxy', caps: ['secrets'] }
+    { pub: 'SERVICIO-PROXY', encPub: 'e2', cn: 'proxy', caps: [] }
   ]
 }
 
@@ -75,7 +75,7 @@ test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
   // 2026-09-02 y `passkeys` con identity 0.100.0: abre la privada de una passkey guardada,
   // que es leer lo del usuario, no firmar el transporte.
   assert.deepEqual([...CAPS].sort(),
-    ['admin', 'approve', 'passkeys', 'passwords', 'read', 'replica', 'sealer', 'secrets', 'sign', 'store', 'unattended'])
+    ['admin', 'approve', 'passkeys', 'passwords', 'read', 'replica', 'sealer', 'sign', 'store', 'unattended'])
   for (const c of ['seal', 'transport', 'serve']) {
     assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar el transporte no es leer`)
   }

@@ -59,7 +59,6 @@ cuál firma, cuál guarda el contenido— sin que ninguna llave privada viaje nu
 | `sign` | `vault:sign` | firmar como la identidad ante terceros | dispositivo |
 | `store` | `vault:store` | leer y escribir el contenido del perfil | dispositivo |
 | `read` | `vault:read` | sólo leer el contenido | dispositivo |
-| `secrets` | `vault:secrets:<cn>` | abrir **su propio** cajón de claves | servicio |
 
 Sellar el acta y admitir miembros **no son capacidades**: son el rol de master, y lo tiene
 exactamente un miembro.
@@ -70,13 +69,17 @@ Cada miembro lleva un **`cn`** (nombre común, como en un certificado de toda la
 
 - **`cn: null` → es un DISPOSITIVO tuyo.** Puede tener `sign`/`store`/`read`, o sea acceso
   a lo que es tuyo. No tiene cajón de claves que abrir.
-- **`cn: 'proxy'` → es un SERVICIO.** Su única capacidad posible es `secrets`, y lo que abre
-  es **exactamente** el cajón `proxy`. No ve el cajón de `geo`, no firma por ti, no lee tu
-  contenido. La llave del proxy no puede acceder a nada que no sea del proxy.
+- **`cn: 'proxy'` → es un SERVICIO.** Abre **exactamente** el cajón `proxy` (scope del cert
+  `vault:secrets:proxy`), y lo abre **por llevar ese nombre**: no hay una capacidad aparte
+  que darle ni que quitarle (identity ≥ 0.111.0; antes existía `secrets`, que el alta ponía
+  sola a todo miembro con `cn` y no decidía nada). No ve el cajón de `geo`. Lo demás
+  —firmar, leer tu contenido— son permisos que se le dan o no, como a cualquier aparato.
+  Para cortarle el cajón se le bloquea o se le quita.
+- **`cn: 'vault'` → es la propia bóveda**, no un servicio: su llave de comunicación no abre
+  ningún cajón, tampoco uno que se llame `vault` (`docs/secretos-sellados.md` §9.2).
 
-Esto **no es una costumbre, es una regla de forma del acta**: un acta donde un miembro con
-`cn` tenga capacidades de dispositivo —o uno sin `cn` tenga `secrets`— **no valida**
-(`servicio-con-capacidades-de-dispositivo` / `secretos-sin-cn`). Y no se puede ascender un
+Las actas selladas antes de eso llevan la palabra `secrets` en la lista de un servicio: se
+siguen leyendo y la palabra no cuenta. Y no se puede ascender un
 servicio cambiándole los permisos: para eso hay que sacarlo y volver a admitirlo, que es un
 gesto visible en el acta.
 
