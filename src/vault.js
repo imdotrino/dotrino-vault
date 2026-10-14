@@ -1288,6 +1288,12 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // sigue pidiendo `lee`. Antes no preguntaba nada, así que un aparato al que le quitaste
     // el permiso seguía viéndolo todo hasta que su papel caducara.
     const record = (await identity.profileActa?.().catch(() => null))?.acta || null
+    // LA CADENA DE SELLADORES VIAJA CON LA LISTA, también para quien solo puede ver
+    // revocaciones. Es lo que un aparato de Node necesita para FIRMAR a nombre de la cuenta
+    // de forma que un extraño lo compruebe (`verifySignedFor` exige la cadena desde el
+    // génesis), y hasta ahora ningún agente headless podía: solo el navegador la tenía. Es
+    // corta a propósito (génesis, cambios de sellador, actual), así que no pasa por `fitChain`.
+    const sealerChainOf = async () => { try { return (await identity.sealerChain?.()) || null } catch (e) { log('[vault] could not build the sealer chain:', e.message); return null } }
     const puedeVerTodo = !!record && Acta.memberCanScope(record, chk.device, SCOPE.READ)
     const { issued, revoked } = await identity.listDelegations()
     if (!puedeVerTodo) {
@@ -1296,7 +1302,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         return reply(from, { type: MSG.ERROR, error: 'unauthorized: this vault has no record to decide with' })
       }
       audit('devices', { device: await deviceIdOf(chk.device).catch(() => null), solo: 'revocaciones' })
-      return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, blocked: blocked.pubs(), acta: record })
+      return reply(from, { type: MSG.DEVICES_RESULT, devices: [], revoked, blocked: blocked.pubs(), acta: record, sealerChain: await sealerChainOf() })
     }
     // El acta viaja con la lista: así cada dispositivo se entera de los cambios de
     // política (quién manda, quién puede qué) sin un canal aparte.
@@ -1329,7 +1335,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     // LA SUBACTA VIAJA CON EL ACTA. Es la mitad de «se comparte entre todos los
     // dispositivos»: sin esto, una renuncia sin sellar solo la respeta esta máquina.
     // Cada entrada va firmada por su sujeto, así que quien la recibe la verifica sola.
-    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, blocked: blocked.pubs(), acta: record, chain, vault: MI_VERSION, subacta: subacta.entries() }))
+    reply(from, fitChain({ type: MSG.DEVICES_RESULT, devices, revoked, blocked: blocked.pubs(), acta: record, chain, sealerChain: await sealerChainOf(), vault: MI_VERSION, subacta: subacta.entries() }))
   }
 
   /**

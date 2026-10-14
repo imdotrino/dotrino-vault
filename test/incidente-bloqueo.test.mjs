@@ -115,6 +115,11 @@ test('con aprobador: el incidente llega como pedido `incident`, y BLOQUEAR cierr
   // Los demás reciben la lista con el acta.
   const d = await devices(terminal)
   assert.deepEqual(d.blocked, [laptop.pub])
+  // Y con la CADENA DE SELLADORES, desde el génesis y comprobable: es lo que un aparato de
+  // Node necesita para firmar a nombre de la cuenta ante un extraño (`verifySignedFor`).
+  const { verifySealerChain } = await import('@dotrino/identity/acta')
+  assert.equal(d.sealerChain[0].seq, 1)
+  assert.equal((await verifySealerChain(d.sealerChain)).ok, true)
   // Y los bloqueados se ven desde donde se bloquean.
   assert.equal((await aprobador('blocked')).items[0].deviceId, vault.listBlocked()[0].deviceId)
   // Otro incidente sobre el mismo no vuelve a timbrar.
