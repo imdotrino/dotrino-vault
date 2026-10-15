@@ -28,7 +28,7 @@ test('la bóveda vuelve a anunciarse sin que nadie la reinicie', async () => {
   await createTransport({
     identity: identityDoble(), dir, commKey: commDoble(), announce: 'dotrino-vault-AB12-CD34-EF56',
     recheckMs: 20, reannounceMs: 40,
-    makeClient: () => ({ token: 'tok', connect: async () => {}, on: () => {}, identifyAs: async () => {}, publish: async (c) => { publicados.push(c) } })
+    makeClient: () => ({ token: 'tok', isConnected: true, connect: async () => {}, on: () => {}, identifyAs: async () => {}, publish: async (c) => { publicados.push(c) } })
   })
   assert.equal(publicados.length, 1, 'se anuncia al identificarse')
   await new Promise((r) => setTimeout(r, 300))

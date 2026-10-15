@@ -34,7 +34,7 @@ const commDoble = () => ({ pub: () => COMM, sign: async () => 'firma' })
 
 /** Cliente de mentira: el sitio donde se decide si el proxio dice que sí o que no. */
 function clienteDoble (identifyAs) {
-  return { token: 'tok', connect: async () => {}, on: () => {}, identifyAs }
+  return { token: 'tok', isConnected: true, connect: async () => {}, on: () => {}, identifyAs }
 }
 
 function dirTemporal () {

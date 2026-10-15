@@ -36,7 +36,7 @@ export async function masterPubkeyOf (identity) {
  * @param {string} [opts.url] URL del proxy (default wss://proxy.dotrino.com).
  * @returns {Promise<{ client, token:string, identify():Promise<void> }>}
  */
-export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null, announce = null, recheckMs = 60_000, reannounceMs = 10 * 60_000 }) {
+export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, commKey = null, log = () => {}, makeClient = null, announce = null, recheckMs = 60_000, patienceMs = 5 * 60_000, reannounceMs = 10 * 60_000 }) {
   installNodeGlobals(dir)
   // Import dinámico DESPUÉS de instalar los globals que el paquete usa.
   // `WebSocketProxyClient` (la clase) y NO el helper `getWebSocketProxyClient`:
@@ -222,21 +222,33 @@ export async function createTransport ({ identity, dir, url = DEFAULT_PROXY, com
    * nada.
    */
   const RECHECK_MS = recheckMs
-  const PATIENCE_MS = 5 * 60_000
+  const PATIENCE_MS = patienceMs
   const REANNOUNCE_MS = reannounceMs   // la mitad de lo que el proxio guarda una entrada
   let downSince = 0
   let saidDown = false
   client.on('disconnect', ({ code, reason } = {}) => {
+    // Sin socket no hay nadie atado al proxio: lo que se identificó era la conexión anterior.
+    identificado = false
     if (!downSince) downSince = Date.now()
     if (saidDown) return
     saidDown = true
     log(`[vault] off the proxy (${code || '?'}${reason ? ': ' + reason : ''}) — nobody can reach this vault while this lasts`)
   })
+  // LOS INTENTOS SE VEN. El 2026-10-15 la bóveda pasó hora y media fuera y no quedó ni una
+  // línea de si el transporte estaba reintentando o no; en el proxio no llegó ninguno. El
+  // primero se dice, y luego uno de cada 15 (un minuto con el retardo de 4 s).
+  client.on('reconnecting', (attempt) => {
+    if (attempt === 1 || attempt % 15 === 0) log(`[vault] reconnecting to the proxy (attempt ${attempt})`)
+  })
   client.on('reconnect_failed', (attempts) => {
     log(`[vault] the transport gave up reconnecting after ${attempts} attempt(s) — this vault is unreachable until it is restarted`)
   })
   const watchdog = setInterval(async () => {
-    if (identificado && client.token) {
+    // CONECTADO DE VERDAD, no «tengo un token». El token es el de la última conexión y no se
+    // borra al caerse, así que mirarlo daba la bóveda por vuelta con el socket cerrado: el
+    // 2026-10-15 dijo «back on the proxy after 50s», no volvió a marcar nunca y pasó hora y
+    // media fuera, avisando cada 10 minutos de que no podía anunciarse.
+    if (identificado && client.isConnected && client.token) {
       if (downSince) log(`[vault] back on the proxy after ${Math.round((Date.now() - downSince) / 1000)}s`)
       downSince = 0; saidDown = false
       // EL ANUNCIO CADUCA: el proxio borra una entrada de canal a los 20 minutos de publicada.
