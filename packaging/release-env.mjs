@@ -49,7 +49,7 @@ if (!cambios.length) console.log('\nYa están sincronizados.')
 else console.log('\nCambios:\n  ' + cambios.join('\n  '))
 
 if (!publicar) {
-  console.log('\n(simulacro — usá --publish para aplicar y publicar)')
+  console.log('\n(simulacro — usa --publish para aplicar y publicar)')
   process.exit(0)
 }
 
