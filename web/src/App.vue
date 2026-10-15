@@ -150,7 +150,7 @@ const I18N = {
       'emparejar': 'Pairing a device',
       'modelo': 'The model: profile, record, keys',
       'perfiles': 'Profiles and password',
-      'seguridad': 'Encryption, store and scope',
+      'seguridad': 'Encryption, storage and permissions',
       'cli': 'Control CLI',
       'secretos': 'Service secrets',
       'empezar/que-es': 'What is Dotrino',
