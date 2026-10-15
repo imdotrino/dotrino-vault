@@ -1,23 +1,23 @@
 :root {
-  --bg: #0b1220;
-  --bg2: #0e1726;
-  --surface: #131d30;
-  --line: #21304a;
-  --text: #e9eef4;
-  --muted: #93a3b6;
-  --accent: #2dd4bf;
-  --accent2: #0d9488;
-  --accent-ink: #04201c;
-  color-scheme: dark;
+  /* Colores del ecosistema (@dotrino/theme, CONVENCIONES §5): aquí solo se nombran. */
+  --bg: var(--dt-bg);
+  --bg2: var(--dt-bg-2);
+  --surface: var(--dt-surface);
+  --line: var(--dt-line-soft);
+  --text: var(--dt-text);
+  --muted: var(--dt-text-dim);
+  --accent: var(--dt-accent);
+  --accent2: var(--dt-accent-press);
+  --accent-ink: var(--dt-accent-ink);
 }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 50% -10%, #122238 0%, var(--bg) 55%) fixed;
+  background: var(--bg);
   color: var(--text);
-  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.6 var(--dt-font);
   -webkit-tap-highlight-color: transparent;
 }
 a { color: inherit; }
@@ -33,9 +33,9 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; text-decoration: none; font-size: 1.1rem; }
 .brand img { display: block; }
 .navlinks { display: flex; gap: 22px; margin-left: 8px; }
-.navlinks a { color: var(--muted); text-decoration: none; font-size: .95rem; }
-.navlinks a:hover { color: var(--text); }
-.navlinks a.on, .mobile-nav a.on { color: var(--accent); font-weight: 700; }
+.navlinks a, dotrino-topbar > a { color: var(--muted); text-decoration: none; font-size: .95rem; }
+.navlinks a:hover, dotrino-topbar > a:hover { color: var(--text); }
+.navlinks a.on, .mobile-nav a.on, dotrino-topbar > a.on { color: var(--accent); font-weight: 700; }
 .actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
 /* menú móvil: en pantallas estrechas `.navlinks` se oculta (§5); el botón ☰
@@ -79,7 +79,7 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
   background: transparent; color: var(--muted); border: 0; padding: 5px 11px;
   font-size: .82rem; font-weight: 700; cursor: pointer;
 }
-.lang-selector button.on { background: var(--accent2); color: #fff; }
+.lang-selector button.on { background: var(--accent2); color: var(--dt-accent-ink); }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -98,12 +98,12 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
 .hero { position: relative; padding: 56px 0 40px; max-width: 720px; }
 .kicker { color: var(--accent); font-weight: 700; font-size: .82rem; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 14px; }
 .hero h1 { font-size: clamp(2.4rem, 7vw, 4rem); margin: 0 0 18px; }
-.hero .lead { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: #c4d0de; margin: 0 0 28px; }
+.hero .lead { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--dt-text); margin: 0 0 28px; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; }
 .note { color: var(--muted); font-size: .9rem; margin-top: 16px; }
 .hero .shield {
   position: absolute; top: 40px; right: -10px; opacity: .5;
-  filter: drop-shadow(0 20px 50px rgba(13, 148, 136, .4));
+  filter: drop-shadow(0 20px 50px var(--dt-shadow-color));
 }
 .hero .shield img { display: block; }
 
@@ -111,7 +111,7 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
 section { padding: 26px 0; }
 section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 .why { max-width: 760px; }
-.why p { font-size: 1.12rem; color: #c4d0de; }
+.why p { font-size: 1.12rem; color: var(--dt-text); }
 
 /* steps */
 .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
@@ -135,47 +135,47 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 
 /* download */
 .download { max-width: 760px; }
-.download .lead { color: #c4d0de; font-size: 1.08rem; margin: 0 0 22px; }
+.download .lead { color: var(--dt-text); font-size: 1.08rem; margin: 0 0 22px; }
 .download .btn-lg { margin-bottom: 14px; }
 .dl-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; margin-bottom: 16px; }
 .dl-card h3 { margin: 0 0 14px; font-size: 1.08rem; color: var(--accent); }
 .dl-note { color: var(--muted); font-size: .95rem; margin: 12px 0 0; }
-.codeblock { background: #0a1322; border: 1px solid var(--line); border-radius: 12px; margin: 0 0 14px; overflow: hidden; }
+.codeblock { background: var(--dt-surface); border: 1px solid var(--line); border-radius: 12px; margin: 0 0 14px; overflow: hidden; }
 .code-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
 .copy { background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 1rem; }
 .copy:hover { color: var(--accent); }
 .codeblock pre { margin: 0; padding: 14px 16px; overflow-x: auto; }
-.codeblock code { font: .9rem/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #cfe9e2; white-space: pre; }
-.warn { color: #e6c07a; font-size: .92rem; border-left: 3px solid #e6c07a55; padding-left: 12px; }
+.codeblock code { font: .9rem/1.7 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--dt-text); white-space: pre; }
+.warn { color: var(--dt-busy); font-size: .92rem; border-left: 3px solid #e6c07a55; padding-left: 12px; }
 .other { color: var(--muted); font-size: .92rem; }
 
 /* cómo se usa */
 .use { max-width: 900px; }
-.use .lead { color: #c4d0de; font-size: 1.08rem; margin: 0 0 22px; }
+.use .lead { color: var(--dt-text); font-size: 1.08rem; margin: 0 0 22px; }
 .use-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 22px; }
 .use-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; }
 .use-card h3 { margin: 0 0 8px; font-size: 1.02rem; color: var(--accent); }
 .use-card p { margin: 0; color: var(--muted); font-size: .95rem; }
 /* El aviso de que perder la máquina es perder la cuenta va DESTACADO, no en una nota al
    pie: es la consecuencia asumida del modelo y esconderla sería vender otra cosa. */
-.use-warn { background: #2a1f10; border: 1px solid #e6c07a55; border-radius: 16px; padding: 20px 22px; margin-bottom: 20px; }
-.use-warn h3 { margin: 0 0 8px; font-size: 1.02rem; color: #e6c07a; }
-.use-warn p { margin: 0; color: #e3d6bd; font-size: .95rem; }
+.use-warn { background: color-mix(in srgb, var(--dt-busy) 14%, transparent); border: 1px solid #e6c07a55; border-radius: 16px; padding: 20px 22px; margin-bottom: 20px; }
+.use-warn h3 { margin: 0 0 8px; font-size: 1.02rem; color: var(--dt-busy); }
+.use-warn p { margin: 0; color: var(--dt-text); font-size: .95rem; }
 .use-more { margin: 0 0 18px; }
 .use-more a { color: var(--accent); }
 .use-cmds summary { cursor: pointer; color: var(--muted); font-size: .95rem; margin-bottom: 14px; }
 .use-cmds table { width: 100%; border-collapse: collapse; margin-bottom: 16px; display: block; overflow-x: auto; }
 .use-cmds td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: .92rem; color: var(--muted); }
 .use-cmds td:first-child { white-space: nowrap; }
-.use-cmds code { font: .88rem/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #cfe9e2; }
+.use-cmds code { font: .88rem/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--dt-text); }
 
 /* footer */
 .foot { border-top: 1px solid var(--line); margin-top: 40px; padding: 34px 0 calc(40px + env(safe-area-inset-bottom)); text-align: center; }
-.foot-tag { color: #c4d0de; margin: 0 0 14px; }
+.foot-tag { color: var(--dt-text); margin: 0 0 14px; }
 .foot-links { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
 .foot-links a { color: var(--muted); text-decoration: none; font-size: .92rem; }
 .foot-links a:hover { color: var(--accent); }
-.foot-lic { color: #5a6b80; font-size: .82rem; margin: 0; }
+.foot-lic { color: var(--dt-accent); font-size: .82rem; margin: 0; }
 
 /* ---------- mobile: acciones a segunda fila (CONVENCIONES §5) ---------- */
 @media (max-width: 600px) {
@@ -189,12 +189,12 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 }
 .use-cmds .cmds-how { color: var(--muted); font-size: .92rem; margin: 0 0 8px; }
 .use-cmds ul.cmds-how { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; }
-.use-cmds ul.cmds-how code { background: #0a1322; border-radius: 5px; padding: 1px 5px; }
+.use-cmds ul.cmds-how code { background: var(--dt-surface); border-radius: 5px; padding: 1px 5px; }
 /* pestañas por sistema (las tres vías existen para los tres: mostrarlas juntas era
    la misma página tres veces) */
 .os-tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
 .os-tabs button { background: transparent; color: var(--muted); border: 0; padding: 9px 20px; font-size: .95rem; font-weight: 700; cursor: pointer; }
-.os-tabs button.on { background: var(--accent2); color: #fff; }
+.os-tabs button.on { background: var(--accent2); color: var(--dt-accent-ink); }
 .os-hint { color: var(--muted); font-size: .85rem; margin: 0 0 18px; }
 .dl-card .m1-lead { margin: 0 0 14px; }
 .dl-card h4.sub { margin: 20px 0 12px; font-size: .95rem; color: var(--muted); font-weight: 600; }

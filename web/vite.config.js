@@ -100,8 +100,8 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#0b1220',
-        theme_color: '#0b1220',
+        background_color: '#f7fafc',
+        theme_color: '#00658c',
         launch_handler: { client_mode: 'focus-existing' },
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },

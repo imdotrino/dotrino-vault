@@ -230,21 +230,21 @@ const submit = () => props.save({
    una lista que crece mientras tecleas, no fichas sueltas. */
 .varrow.added { margin-top: 14px; }
 .varrow.added + .varrow.added { margin-top: 6px; }
-.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: #9fb3c8; }
+.chk { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--dt-accent); }
 .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0 12px; }
-.hint { font-size: 12px; color: #9fb3c8; }
+.hint { font-size: 12px; color: var(--dt-accent); }
 .paste-hint { margin: 6px 0 0 12px; }
-.err { margin: 6px 0 0 12px; font-size: 13px; color: #ffb4a2; }
-.tag { font-size: 12px; color: #ffd79a; }
+.err { margin: 6px 0 0 12px; font-size: 13px; color: var(--dt-error); }
+.tag { font-size: 12px; color: var(--dt-busy); }
 input[type="text"], input[type="password"] {
-  background: #0d1521; color: #dbe7f7; border: 1px solid #223047;
+  background: var(--dt-surface); color: var(--dt-text); border: 1px solid var(--dt-line);
   border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; min-width: 0; flex: 1 1 160px;
 }
 /* El nombre, en monoespaciada y sin encogerse: es lo que se busca al leer la lista. */
 input.k { font-family: ui-monospace, monospace; flex: 0 1 220px; }
-input:disabled { color: #9fb0c9; background: #101927; border-style: dashed; }
-.btn { border-radius: 10px; padding: 8px 14px; border: 1px solid #2a3a52; background: #17263c; color: #dbe7f7; cursor: pointer; font: inherit; }
+input:disabled { color: var(--dt-accent); background: var(--dt-surface); border-style: dashed; }
+.btn { border-radius: 10px; padding: 8px 14px; border: 1px solid var(--dt-line); background: var(--dt-surface-2); color: var(--dt-text); cursor: pointer; font: inherit; }
 .btn.sm { padding: 5px 10px; font-size: 13px; }
-.btn.ghost { background: transparent; border-color: #223047; color: #9fb3c8; }
+.btn.ghost { background: transparent; border-color: var(--dt-line); color: var(--dt-accent); }
 .btn:disabled { opacity: .5; cursor: default; }
 </style>

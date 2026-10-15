@@ -421,7 +421,7 @@ onMounted(async () => {
       brand="Dotrino Vault"
       icon="/icon.svg"
       brand-href="/"
-      profile
+      profile theme
       support-repo="imdotrino/dotrino-vault"
       support-discord="https://discord.gg/D648uq7cth"
       :lang="lang"

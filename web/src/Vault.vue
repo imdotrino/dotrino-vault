@@ -678,27 +678,27 @@ onBeforeUnmount(() => { responder?.stop(); if (sweeper) clearInterval(sweeper) }
 .vault { padding: 0; }
 h2 { font-size: .95rem; margin: 1.4rem 0 .6rem; opacity: .85; }
 .loading, .hint { opacity: .7; font-size: .9rem; }
-.err { color: #ff8a8a; font-size: .9rem; }
+.err { color: var(--dt-error); font-size: .9rem; }
 .state { display: flex; align-items: center; gap: .6rem; font-weight: 600; }
-.dot { width: .7rem; height: .7rem; border-radius: 50%; background: #777; }
-.dot.on { background: #35d07f; box-shadow: 0 0 .6rem #35d07f; }
-.warn { margin: .8rem 0 0; padding: .8rem 1rem; border-left: 3px solid #f0b429;
-        background: rgba(240,180,41,.08); font-size: .9rem; }
+.dot { width: .7rem; height: .7rem; border-radius: 50%; background: var(--dt-surface-3); }
+.dot.on { background: var(--dt-ok); box-shadow: 0 0 .6rem var(--dt-ok); }
+.warn { margin: .8rem 0 0; padding: .8rem 1rem; border-left: 3px solid var(--dt-busy);
+        background: color-mix(in srgb, var(--dt-busy) 8%, transparent); font-size: .9rem; }
 .rows { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-       padding: .7rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+       padding: .7rem 0; border-bottom: 1px solid var(--dt-line-soft); }
 button, .import { cursor: pointer; padding: .55rem .9rem; border-radius: .5rem; border: 0;
-                  background: #2f6df6; color: #fff; font: inherit; }
-button.danger { background: transparent; color: #ff8a8a; border: 1px solid rgba(255,138,138,.4); }
+                  background: var(--dt-accent); color: var(--dt-accent-ink); font: inherit; }
+button.danger { background: transparent; color: var(--dt-error); border: 1px solid color-mix(in srgb, var(--dt-error) 40%, transparent); }
 .import { display: inline-block; margin-top: .8rem; }
 button:disabled, .import.disabled { opacity: .45; cursor: not-allowed; }
 .ask-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid;
                 place-items: center; padding: 1rem; z-index: 50; }
-.ask { max-width: 26rem; background: #14161c; padding: 1.4rem; border-radius: .8rem;
-       border: 1px solid rgba(255,255,255,.12); }
+.ask { max-width: 26rem; background: var(--dt-surface); padding: 1.4rem; border-radius: .8rem;
+       border: 1px solid var(--dt-line-soft); }
 .ask-row { display: flex; gap: .6rem; justify-content: flex-end; margin-top: 1rem; }
 .pw { display: flex; flex-wrap: wrap; gap: .6rem; margin: .8rem 0; }
 .pw input, .ask input { flex: 1 1 12rem; padding: .55rem .7rem; border-radius: .5rem; font: inherit;
-        border: 1px solid rgba(255,255,255,.18); background: #0f1116; color: inherit; }
+        border: 1px solid var(--dt-line); background: var(--dt-bg); color: inherit; }
 .ask input { margin-top: .8rem; width: 100%; }
 </style>

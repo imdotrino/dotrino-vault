@@ -4,6 +4,7 @@ import '@dotrino/support'
 import '@dotrino/topbar'
 import '@dotrino/install'
 import App from './App.vue'
+import '@dotrino/theme/theme.css'
 import './style.css'
 
 const updateSW = registerSW({ immediate: true })

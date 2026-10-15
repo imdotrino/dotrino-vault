@@ -2587,7 +2587,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
 /* Lo que está sin entregar se dice en rojo y arriba: es lo único de esta pantalla que
    significa «algo tuyo no está funcionando ahora mismo». */
 .pendbar { margin: .75rem 0; padding: .6rem .75rem; border-radius: 8px;
-  border: 1px solid var(--bad, #c94f4f); background: color-mix(in srgb, var(--bad, #c94f4f) 8%, transparent); }
+  border: 1px solid var(--bad, var(--dt-error)); background: color-mix(in srgb, var(--bad, var(--dt-error)) 8%, transparent); }
 .pendbar ul { margin: .4rem 0 0; padding-left: 1.1rem; }
 .pendbar li { margin: .15rem 0; }
 .pendbar code { font-size: .92em; }
@@ -2605,127 +2605,127 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
 .debt code { font-size: .95em; }
 /* Variables: una fila por variable, el valor a la vista solo si es pública. */
 .vars { list-style: none; padding: 0; margin: 0; }
-.vargroup { border-top: 1px solid #1e2a3d; padding: 10px 0; }
+.vargroup { border-top: 1px solid var(--dt-line-soft); padding: 10px 0; }
 .varrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 0 12px; }
 .varrow .val { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
 .varnew { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-.varnew input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
+.varnew input { background: var(--dt-surface); color: var(--dt-text); border: 1px solid var(--dt-line); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
 /* Las variables de un servicio, dentro de su fila: subordinadas a ella, no otra sección. */
-.devvars { border-top: 1px solid #1e2a3d; margin: 10px 0 0; padding-top: 10px; }
-.devvars h3 { font-size: 13px; font-weight: 600; color: #9fb0c9; margin: 0; }
+.devvars { border-top: 1px solid var(--dt-line-soft); margin: 10px 0 0; padding-top: 10px; }
+.devvars h3 { font-size: 13px; font-weight: 600; color: var(--dt-accent); margin: 0; }
 .devhint { font-size: 13px; margin: 4px 0 0; }
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 /* Dónde vive la bóveda: una línea, con su lucecita. Es estado, no un cartel. */
 .vaultat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; font-size: 15px; }
-.vaultat .dot { width: 9px; height: 9px; border-radius: 50%; background: #56637a; }
-.vaultat .dot.on { background: #35d07f; box-shadow: 0 0 8px #35d07f; }
+.vaultat .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dt-surface-3); }
+.vaultat .dot.on { background: var(--dt-ok); box-shadow: 0 0 8px var(--dt-ok); }
 .vaultat .muted { font-size: 13px; }
 h1 { font-size: clamp(24px, 4vw, 34px); margin: 0 0 6px; }
 h2 { font-size: 18px; margin: 32px 0 8px; }
-.lead { color: #9fb0c9; margin: 0 0 20px; }
-.muted { color: #8ea0b8; }
-.facts { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 0; margin: 0 0 8px; color: #9fb0c9; }
-.facts code, .mid { background: #131c2b; border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+.lead { color: var(--dt-accent); margin: 0 0 20px; }
+.muted { color: var(--dt-accent); }
+.facts { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 0; margin: 0 0 8px; color: var(--dt-accent); }
+.facts code, .mid { background: var(--dt-surface); border-radius: 6px; padding: 1px 6px; font-size: 12px; }
 .banner { border-radius: 10px; padding: 10px 12px; margin: 12px 0; font-size: 14px; }
-.banner.ok { background: #0f2a1c; color: #7fe0a8; }
-.banner.bad { background: #2a1113; color: #ff9aa2; }
+.banner.ok { background: var(--dt-mint-soft); color: var(--dt-ok); }
+.banner.bad { background: var(--dt-error-soft); color: var(--dt-error); }
 /* ── La pantalla del PROCESO de conectar ─────────────────────────────────────
    Una sola tarjeta grande, centrada, con los tres pasos arriba. Nada compite con
    ella: mientras dura el proceso no hay nada más en la página. */
 .flow { max-width: 560px; margin: 8px auto 0; }
-.card { background: #0f1725; border: 1px solid #24344d; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.card { background: var(--dt-surface); border: 1px solid var(--dt-line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .card p { margin: 0; }
-.card strong { color: #9cc4ff; font-size: 15px; }
+.card strong { color: var(--dt-accent); font-size: 15px; }
 /* Lo que la bóveda va a hacer se lee ANTES de aceptar: en grande, no al vuelo. */
-.card .big { font-size: 18px; line-height: 1.35; color: #eaf1fb; }
-.card.announce { border-color: #2f4a6d; }
-.card.done { border-color: #2c5c44; }
-.card.done strong { color: #7fe0a8; }
-.card.bad { border-color: #5a2027; }
-.card.bad strong { color: #ff9aa2; }
+.card .big { font-size: 18px; line-height: 1.35; color: var(--dt-text); }
+.card.announce { border-color: var(--dt-line); }
+.card.done { border-color: var(--dt-ok); }
+.card.done strong { color: var(--dt-ok); }
+.card.bad { border-color: var(--dt-error); }
+.card.bad strong { color: var(--dt-error); }
 .card details { width: 100%; }
 .card ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; }
-.waiting { color: #ffd98a; font-size: 13px; }
+.waiting { color: var(--dt-busy); font-size: 13px; }
 /* Qué quiere hacer la bóveda: en la MISMA pantalla del código, debajo. Es
    información para leer mientras esperas, no una pregunta que responder. */
-.what { border-top: 1px solid #1e2a3d; margin-top: 8px; padding-top: 14px; text-align: left; width: 100%; }
+.what { border-top: 1px solid var(--dt-line-soft); margin-top: 8px; padding-top: 14px; text-align: left; width: 100%; }
 .what p { margin: 4px 0 0; }
-.cmd { font-size: 12px; color: #8ea0b8; }
-.cmd code { background: #131c2b; border-radius: 6px; padding: 2px 6px; font-family: ui-monospace, monospace; color: #bfe0ff; }
-.two-accounts, .announce { background: #101826; border: 1px solid #24344d; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-.banner.info { background: #10203a; color: #9cc4ff; }
-.banner.warn { background: #2a2310; color: #ffd98a; }
+.cmd { font-size: 12px; color: var(--dt-accent); }
+.cmd code { background: var(--dt-surface); border-radius: 6px; padding: 2px 6px; font-family: ui-monospace, monospace; color: var(--dt-accent); }
+.two-accounts, .announce { background: var(--dt-surface); border: 1px solid var(--dt-line); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.banner.info { background: var(--dt-accent-soft); color: var(--dt-accent); }
+.banner.warn { background: color-mix(in srgb, var(--dt-busy) 14%, transparent); color: var(--dt-busy); }
 /* Aviso junto al código de aprobación: es la única defensa contra que te lo dicten. */
-.muted.warn { color: #ffd98a; }
+.muted.warn { color: var(--dt-busy); }
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-.member { background: #0f1725; border: 1px solid #1e2a3d; border-radius: 12px; padding: 12px 14px; }
+.member { background: var(--dt-surface); border: 1px solid var(--dt-line-soft); border-radius: 12px; padding: 12px 14px; }
 .who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tag { font-size: 11px; background: #1b2536; color: #9fb0c9; border-radius: 999px; padding: 2px 8px; }
-.tag.master { background: #1d3350; color: #9cc4ff; }
-.tag.svc { background: #2a2310; color: #ffd98a; }
+.tag { font-size: 11px; background: var(--dt-surface-2); color: var(--dt-accent); border-radius: 999px; padding: 2px 8px; }
+.tag.master { background: var(--dt-accent-soft); color: var(--dt-accent); }
+.tag.svc { background: color-mix(in srgb, var(--dt-busy) 14%, transparent); color: var(--dt-busy); }
 /* «Sin acceso»: está en el acta pero no puede entrar. Es un aviso, y se ve como tal. */
-.tag.out { background: #2a1113; color: #ff9aa2; }
+.tag.out { background: var(--dt-error-soft); color: var(--dt-error); }
 /* La fecha acompaña; no compite con el nombre ni con las marcas que importan. */
-.tag.since { background: transparent; color: #6b7a90; padding-left: 0; }
+.tag.since { background: transparent; color: var(--dt-accent); padding-left: 0; }
 /* Qué corre: es un DATO, así que va en gris como la fecha. El que no cuadra usa `.out`,
    que ya es el color de aviso — no hace falta un tercero. */
-.tag.runs { background: transparent; color: #6b7a90; padding-left: 0; }
+.tag.runs { background: transparent; color: var(--dt-accent); padding-left: 0; }
 /* Cerrada es el estado NORMAL de la bóveda, no una avería: se informa con el mismo tono
    que los demás avisos (`.announce`), no con el rojo de un error. */
-.lockcard { background: #101826; border-color: #24344d; }
+.lockcard { background: var(--dt-surface); border-color: var(--dt-line); }
 .unlockform { display: flex; gap: .5rem; padding: 0 .75rem .75rem; flex-wrap: wrap; }
 .unlockform input { flex: 1 1 12rem; min-width: 0; }
 .svc-note { font-size: 12px; margin: 8px 0 0; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
-.cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid #2a3a52; background: transparent; color: #7d8fa8; cursor: pointer; }
-.cap.on { background: #14304a; color: #bfe0ff; border-color: #2f5f8f; }
-.cap.changed { border-style: dashed; border-color: #e0b04a; }
-.capsbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px; border: 1px dashed #e0b04a; border-radius: 10px; }
+.cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid var(--dt-line); background: transparent; color: var(--dt-accent); cursor: pointer; }
+.cap.on { background: var(--dt-accent-soft); color: var(--dt-accent); border-color: var(--dt-accent); }
+.cap.changed { border-style: dashed; border-color: var(--dt-busy); }
+.capsbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px; border: 1px dashed var(--dt-busy); border-radius: 10px; }
 .cap:disabled { cursor: default; opacity: .75; }
 .acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: #ffd98a; }
-.btn { border-radius: 10px; padding: 8px 14px; border: 1px solid #2a3a52; background: #17263c; color: #dbe7f7; cursor: pointer; font: inherit; }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--dt-busy); }
+.btn { border-radius: 10px; padding: 8px 14px; border: 1px solid var(--dt-line); background: var(--dt-surface-2); color: var(--dt-text); cursor: pointer; font: inherit; }
 .btn.ghost { background: transparent; }
-.btn.danger { background: #2a1113; border-color: #5a2027; color: #ff9aa2; }
+.btn.danger { background: var(--dt-error-soft); border-color: var(--dt-error); color: var(--dt-error); }
 .btn.sm { padding: 5px 10px; font-size: 13px; }
 .btn:disabled { opacity: .5; cursor: default; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
-textarea { width: 100%; background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; font-size: 12px; }
-.codebox { border-color: #2f5f8f; text-align: center; align-items: center; }
-.digits { font-size: clamp(38px, 12vw, 56px); letter-spacing: .18em; font-family: ui-monospace, monospace; color: #bfe0ff; margin: 6px 0; }
-.qrbox { background: #fff; padding: 12px; border-radius: 12px; width: max-content; margin: 12px 0; }
+textarea { width: 100%; background: var(--dt-surface); color: var(--dt-text); border: 1px solid var(--dt-line); border-radius: 10px; padding: 10px; font-family: ui-monospace, monospace; font-size: 12px; }
+.codebox { border-color: var(--dt-accent); text-align: center; align-items: center; }
+.digits { font-size: clamp(38px, 12vw, 56px); letter-spacing: .18em; font-family: ui-monospace, monospace; color: var(--dt-accent); margin: 6px 0; }
+.qrbox { background: var(--dt-surface); padding: 12px; border-radius: 12px; width: max-content; margin: 12px 0; }
 .qrbox :deep(svg) { width: 220px; height: 220px; display: block; }
 /* El enlace de la invitación: largo, así que se parte en vez de desbordar, y el botón
    de copiar no se encoge nunca. */
 .copyid {
   margin-left: 6px; padding: 0 5px; line-height: 1.4;
-  background: none; border: 1px solid #33465c; border-radius: 5px;
-  color: #9fb3c8; font-size: .85em; cursor: pointer;
+  background: none; border: 1px solid var(--dt-line); border-radius: 5px;
+  color: var(--dt-accent); font-size: .85em; cursor: pointer;
 }
-.copyid:hover { color: #e6eef7; border-color: #4a6b8a; }
+.copyid:hover { color: var(--dt-text); border-color: var(--dt-accent); }
 .invite { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
 .invite .url {
-  background: #131c2b; border-radius: 6px; padding: 6px 8px; font-size: 12px;
-  font-family: ui-monospace, monospace; color: #bfe0ff; overflow-wrap: anywhere;
+  background: var(--dt-surface); border-radius: 6px; padding: 6px 8px; font-size: 12px;
+  font-family: ui-monospace, monospace; color: var(--dt-accent); overflow-wrap: anywhere;
   max-width: 100%; flex: 1 1 260px;
 }
 .invite .btn { flex: 0 0 auto; }
 .scanbox { margin: 10px 0; }
-.scanbox video { width: 100%; max-width: 360px; border-radius: 12px; background: #000; }
+.scanbox video { width: 100%; max-width: 360px; border-radius: 12px; background: var(--dt-bg); }
 .who.acc { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
-.who.acc:focus-visible { outline: 1px solid #4f8cff; border-radius: 8px; }
-.chev { color: #9fb3c8; width: 14px; display: inline-block; }
+.who.acc:focus-visible { outline: 1px solid var(--dt-accent); border-radius: 8px; }
+.chev { color: var(--dt-accent); width: 14px; display: inline-block; }
 .count { font-size: 12px; }
-.pending { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #10203a; border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
-.pending input { background: #0d1521; color: #dbe7f7; border: 1px solid #223047; border-radius: 8px; padding: 6px 10px; width: 140px; font-family: ui-monospace, monospace; }
-details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
+.pending { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--dt-accent-soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.pending input { background: var(--dt-surface); color: var(--dt-text); border: 1px solid var(--dt-line); border-radius: 8px; padding: 6px 10px; width: 140px; font-family: ui-monospace, monospace; }
+details summary { cursor: pointer; color: var(--dt-accent); margin: 10px 0 6px; }
 
 /* LA CUENTA DE CADA PEDIDO. Solo aparece con más de una: es el dato que faltaba —«¿de
    quién es esto?»— y va delante, donde se lee primero. */
 .apvtag {
   display: inline-block; margin-right: 6px; padding: 1px 8px;
-  background: #1b2f4d; color: #9cc4ff; border-radius: 999px; font-size: 12px;
+  background: var(--dt-accent-soft); color: var(--dt-accent); border-radius: 999px; font-size: 12px;
 }
 
 /* EL PEDIDO, EN UN TELÉFONO. Una fila por dato y los botones al final: el comando puede ser
@@ -2736,7 +2736,7 @@ details summary { cursor: pointer; color: #9fb0c9; margin: 10px 0 6px; }
 .apvline { margin-top: 2px; word-break: break-all; }
 .apvcmd .cmd {
   display: inline-block; max-width: 100%; padding: 4px 8px; border-radius: 6px;
-  background: #0d1521; color: #dbe7f7; border: 1px solid #223047;
+  background: var(--dt-surface); color: var(--dt-text); border: 1px solid var(--dt-line);
   font-family: ui-monospace, monospace; word-break: break-all; white-space: pre-wrap;
 }
 .apvbtns { display: flex; gap: 8px; margin-top: 10px; }
