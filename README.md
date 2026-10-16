@@ -159,12 +159,18 @@ con `dotrino-vault service autostart on|off`. Desinstalar no borra tus datos.
 Aplicaciones. Dentro van la ventana y la bóveda. Para que arranque al iniciar sesión, en
 Ajustes (un LaunchAgent de tu usuario, `~/Library/LaunchAgents/com.dotrino.vault.plist`).
 
-> Ni el instalador de Windows ni la app de macOS llevan la firma de un desarrollador
-> registrado: Windows enseña el aviso de SmartScreen («editor desconocido») y macOS el de
-> Gatekeeper la primera vez (clic derecho → Abrir). Lo que prueba de dónde salieron es la
-> atestación de sigstore: `gh attestation verify <archivo> --repo imdotrino/dotrino-vault`.
-> En Windows y macOS la bóveda todavía **no se actualiza sola**: se instala la versión nueva
-> encima.
+**Se actualizan solas, como en Linux** (CONVENCIONES §15): una vez al día miran si hay versión
+nueva, bajan el instalador (Windows) o la app (macOS), lo **verifican contra la atestación de
+sigstore** del release —dentro del propio binario, sin `gh`— y lo instalan. En Windows el
+instalador cierra la bóveda, la cambia y la vuelve a arrancar (y vuelve a abrir la ventana si
+estaba abierta); en macOS se cambia la app entera y la levanta launchd o, suelta, un
+relanzador. La aprobación opcional (`update --approval on`) vale igual.
+
+> El instalador de Windows **no lleva firma de Microsoft, y no la va a llevar** (decisión del
+> dueño): Windows enseña el aviso de SmartScreen («editor desconocido»). La app de macOS
+> todavía no lleva la firma de Apple: Gatekeeper avisa la primera vez (clic derecho → Abrir).
+> Lo que prueba de dónde salieron es la atestación de sigstore:
+> `gh attestation verify <archivo> --repo imdotrino/dotrino-vault`.
 
 **Ubuntu / Debian — `.deb`:** descarga el `.deb` (versionado) desde
 [Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y haz doble
@@ -893,9 +899,8 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
   actividad. Contraseña opcional por perfil, **para editarlo** (verificador PBKDF2).
 - **v2:** cifrado en reposo **con la contraseña del perfil** (hoy la clave sale solo de
   la máquina) y atado a tu cuenta del sistema —DPAPI en Windows, Keychain en macOS— o
-  al TPM; cifrar también los secretos y el store; que la bóveda de Windows y macOS se
-  actualice sola, como la de Linux; firma de Apple y de Microsoft; firma de documentos
-  con sellado de tiempo (`dotrino-signer`).
+  al TPM; cifrar también los secretos y el store; firma y notarización de Apple para la app de
+  macOS; firma de documentos con sellado de tiempo (`dotrino-signer`).
 
 ## Estructura
 
