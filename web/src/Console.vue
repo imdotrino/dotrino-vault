@@ -27,8 +27,9 @@ import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope, DEVICE_CAPS } from '@dotrino/identity/acta'
 import { machineLine } from '@dotrino/identity/machine'
-import jsQR from 'jsqr'
-import { qrSvg } from './qr.js'
+// El QR, el del ecosistema: dibujarlo y leerlo (cámara o foto) con @dotrino/qr.
+import { qrSvg } from '@dotrino/qr/svg'
+import { scanFrame, scanImageFile } from '@dotrino/qr'
 import Vars from './Vars.vue'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
@@ -1108,26 +1109,9 @@ async function connect (qr, mode = 'join') {
 
 const connectPasted = () => announce(extractPayload(pasted.value))
 
-function decodeImage (file) {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight
-      try {
-        const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0)
-        const d = ctx.getImageData(0, 0, c.width, c.height)
-        resolve(jsQR(d.data, d.width, d.height)?.data || null)
-      } catch { resolve(null) }
-      URL.revokeObjectURL(img.src)
-    }
-    img.onerror = () => resolve(null)
-    img.src = URL.createObjectURL(file)
-  })
-}
-
 async function onFile (ev) {
   const f = ev.target.files?.[0]; if (!f) return
-  const text = /^image\//.test(f.type) ? await decodeImage(f) : await f.text()
+  const text = /^image\//.test(f.type) ? await scanImageFile(f) : await f.text()
   if (!text) { msg.value = { kind: 'bad', text: t.value.no_qr }; return }
   announce(extractPayload(text))
 }
@@ -1137,7 +1121,7 @@ let scanStop = null
 async function scan () {
   scanning.value = true
   const video = scanHost.value.querySelector('video')
-  const c = document.createElement('canvas'); const ctx = c.getContext('2d')
+  const c = document.createElement('canvas')
   let stream = null, raf = null, done = false
   const stop = (val) => {
     if (done) return; done = true
@@ -1150,13 +1134,8 @@ async function scan () {
   const tick = () => {
     if (done) return
     if (video.readyState >= 2 && video.videoWidth) {
-      c.width = video.videoWidth; c.height = video.videoHeight
-      ctx.drawImage(video, 0, 0, c.width, c.height)
-      try {
-        const d = ctx.getImageData(0, 0, c.width, c.height)
-        const r = jsQR(d.data, d.width, d.height)
-        if (r?.data) return stop(r.data)
-      } catch (_) {}
+      const text = scanFrame(video, c)
+      if (text) return stop(text)
     }
     raf = requestAnimationFrame(tick)
   }
@@ -1290,7 +1269,7 @@ const selfPair = () => run('selfpair', async () => {
   // la cámara y se le abre esta misma consola, en vez de quedarse con un texto que
   // hay que pegar a mano. Y de paso cabe: el JSON daba un QR de 69 módulos.
   selfUrl.value = r?.qr ? inviteUrl(r.qr) : ''
-  selfQr.value = selfUrl.value ? qrSvg(selfUrl.value) : null
+  selfQr.value = selfUrl.value ? qrSvg(selfUrl.value, { ecc: 'L', margin: 5 }) : null
   clearInterval(selfTimer)
   selfTimer = setInterval(refreshSelf, 2000)
 })

@@ -23,6 +23,6 @@ if (!process.stdout.isTTY) {
 
 runTui().catch((e) => {
   // El finally de runTui ya restauró el terminal; aquí solo reportamos.
-  console.error('error en la TUI:', e?.stack || e?.message || e)
+  console.error('TUI error:', e?.stack || e?.message || e)
   process.exit(1)
 })
