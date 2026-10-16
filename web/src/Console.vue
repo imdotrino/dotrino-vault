@@ -26,6 +26,7 @@ import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope, DEVICE_CAPS } from '@dotrino/identity/acta'
+import { machineLine } from '@dotrino/identity/machine'
 import jsQR from 'jsqr'
 import { qrSvg } from './qr.js'
 import Vars from './Vars.vue'
@@ -674,6 +675,8 @@ async function refresh () {
     // QUÉ CORRE CADA UNO (CONVENCIONES §14). Viene con la lista, no del acta: el acta dice
     // quién puede qué, no qué build es. Y la de la bóveda, para el pie.
     runningBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.running).map((d) => [d.sub, d.running]))
+    // DÓNDE CORRE CADA UNO, según lo último que le dijo a la bóveda (o lo del acta).
+    machineBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.machine).map((d) => [d.sub, d.machine]))
     // SI A CADA UNO LE LLEGAN LOS AVISOS, según lo que le dijo a la bóveda. Es un dato para
     // enseñar en quien aprueba; no cambia a quién se le pide.
     notifiedBySub.value = new Map((r?.devices || []).filter((d) => d.sub && 'notifiedAt' in d).map((d) => [d.sub, d.notifiedAt]))
@@ -729,6 +732,7 @@ async function refresh () {
  * abajo desaparecía, la de arriba no.
  */
 const runningBySub = ref(new Map())
+const machineBySub = ref(new Map())
 const notifiedBySub = ref(new Map())
 /**
  * El texto de un pedido de actualización: de la bóveda (sin `product`, o el suyo) o de uno
@@ -768,6 +772,8 @@ const devices = computed(() => members.value.map((m) => {
     // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
     noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size,
     running: runningBySub.value.get(m.pub) || null,
+    // Dónde corre (`@dotrino/identity/machine`): lo último que dijo, o lo que dijo al entrar.
+    machine: machineLine(machineBySub.value.get(m.pub) || m.machine),
     // `undefined` = no aprueba, o la bóveda no lo dice (anterior a 0.146): no se pinta.
     notified: (m.caps || []).includes('approve') && notifiedBySub.value.has(m.pub) ? notifiedBySub.value.get(m.pub) : undefined
   }
@@ -2271,6 +2277,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <!-- QUÉ VERSIÓN CORRE. Sin esto una incompatibilidad se ve como que ese
                  aparato «no responde», que es el fallo más caro que ha tenido el
                  ecosistema. En gris si cuadra —es un dato— y en aviso si no. -->
+            <!-- DÓNDE CORRE: sistema, máquina y si es navegador, extensión o app. Con
+                 tres aparatos que se llaman igual, es lo que dice cuál es cuál. -->
+            <span v-if="m.machine" class="tag runs" :data-testid="'machine-' + m.id">{{ m.machine }}</span>
             <span v-if="m.running" class="tag" :class="m.running.compatible ? 'runs' : 'out'"
                   :data-testid="'runs-' + m.id" :title="m.running.reason || ''">
               {{ m.running.compatible ? t.dev_runs(m.running.version) : t.dev_mismatch(m.running.product, m.running.version) }}

@@ -87,8 +87,8 @@ export async function runDaemon () {
   const pendingEnrollFile = path.join(dir, 'pending-enroll.json')
   // Cuando un dispositivo pide enrolarse, exponemos su deviceId (y a QUÉ perfil
   // quiere entrar) para que el dueño lo compare con el del dispositivo y apruebe.
-  const onEnrollChallenge = ({ deviceId, scope, profile, profileName }) => {
-    ipcWrite(pendingEnrollFile, { v: 2, at: Date.now(), deviceId, scope, profile, profileName })
+  const onEnrollChallenge = ({ deviceId, scope, profile, profileName, machine }) => {
+    ipcWrite(pendingEnrollFile, { v: 2, at: Date.now(), deviceId, scope, profile, profileName, machine: machine || null })
   }
 
   const mgr = await startVaultManager({ root: dir, proxyUrl, onEnrollChallenge })

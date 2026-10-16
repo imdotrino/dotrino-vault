@@ -40,6 +40,7 @@ import { VERSION } from './version.js'
 import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
 import { COMM_CN } from './commKey.js'
+import { machineLine } from '@dotrino/identity/machine'
 
 const dir = dataDir()
 const stateFile = path.join(dir, 'state.json')
@@ -673,6 +674,8 @@ async function cmdMembers () {
     if (m.renounced?.length) {
       console.log('      %s↓ renunció a %s (pendiente de sellar: abre la bóveda)%s', R, m.renounced.join(', '), Z)
     }
+    // DÓNDE CORRE (`@dotrino/identity/machine`): con qué se reconoce cuál es cuál.
+    if (machineLine(m.machine)) console.log('      %s%s%s', D, machineLine(m.machine), Z)
     if (m.running) {
       const v = `${m.running.product} ${m.running.version}`
       if (m.running.compatible) console.log('      %scorre %s%s', D, v, Z)

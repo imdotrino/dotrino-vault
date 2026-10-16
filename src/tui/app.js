@@ -41,6 +41,7 @@ import * as hw from '../hwkeys.js'
 import { VERSION } from '../version.js'
 import * as up from '../update.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
+import { machineLine } from '@dotrino/identity/machine'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -158,6 +159,9 @@ function mergeMembersAndCerts (members, issued) {
       // QUÉ CORRE ESE APARATO (CONVENCIONES §14). Lo apunta la bóveda cuando le habla, así
       // que aquí solo hay que dejarlo pasar — que es justo lo que le faltaba a `addedAt`.
       running: m.running || null,
+      // DÓNDE CORRE (`@dotrino/identity/machine`): lo último que dijo firmado o, si no, lo
+      // que dijo al emparejarse. Es lo que distingue tres navegadores que se llaman igual.
+      machine: m.machine || cert?.machine || null,
       // SI LE LLEGAN LOS AVISOS, solo en quien aprueba (`undefined` = no aprueba, no se pinta).
       notifiedAt: (m.caps || []).includes('approve') && 'notifiedAt' in m ? m.notifiedAt : undefined
     }
@@ -473,6 +477,9 @@ function deviceRows (st, t) {
   }
   for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
+    // Dónde corre (`node · Linux 7.0 · mi-pc`), pegado al nombre: es con lo que se reconoce.
+    const maquina = machineLine(d.machine)
+    const donde = maquina ? t.muted(`  ${maquina}`) : ''
     const vars = devVarsOf(st, d.sub).length
     const debt = debtOf(st, d.sub)
     const desde = d.addedAt ? t.muted(`  ${i.deviceSince}:${fmtExp(d.addedAt)}`) : ''
@@ -511,7 +518,7 @@ function deviceRows (st, t) {
         ? t.muted(i.thisVault)
         : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp)))
     const marca = conCambios.has(d.sub) ? t.bold('*') : ' '
-    rows.push({ text: `${marca}${t.bold(d.deviceId)}  ${label}${desde}  ${status}${extra}`, sel: true, meta: d })
+    rows.push({ text: `${marca}${t.bold(d.deviceId)}  ${label}${donde}${desde}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -2504,7 +2511,11 @@ function pairingBody (st, t, cols, height) {
   lines.push('')
   lines.push(t.danger(i.pairWarning))
   lines.push('')
-  if (st.pending) lines.push(t.warn(i.pairConnected(st.pending.deviceId)))
+  if (st.pending) {
+    lines.push(t.warn(i.pairConnected(st.pending.deviceId)))
+    // Dónde dice que corre, para comprobar que es el aparato que tienes delante.
+    if (machineLine(st.pending.machine)) lines.push(t.muted('  ' + machineLine(st.pending.machine)))
+  }
   else lines.push(t.muted(i.pairWaiting))
   return lines
 }

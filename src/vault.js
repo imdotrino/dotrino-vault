@@ -31,6 +31,8 @@ import { openSecretsStore, assertVar, RECOVERY as RECOVERY_WRAP, PROFILE_OWNER }
 import { openSubacta } from './subacta.js'
 import { openBlocked } from './blocked.js'
 import { openNotifiable } from './notifiable.js'
+import { openMachines } from './machines.js'
+import { machineLine } from '@dotrino/identity/machine'
 import { openNotices } from './notices.js'
 import { makeEphemeralKey, openSealed } from '../lib/src/sealed.js'
 import { VERSION } from './version.js'
@@ -266,6 +268,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const blocked = openBlocked({ dir, atRest: passwordsAtRest })
   // Qué aprobadores dijeron que pueden recibir avisos (`src/notifiable.js`). No decide nada: se enseña.
   const notifiable = openNotifiable({ dir, atRest: passwordsAtRest })
+  // Dónde corre cada aparato, según lo último que dijo firmado (`src/machines.js`). Se enseña.
+  const machines = openMachines({ dir, atRest: passwordsAtRest })
   // Lo que hay que contarle a quien aprueba y no es un pedido (`src/notices.js`): hoy, «me actualicé».
   const notices = openNotices({ dir, atRest: passwordsAtRest })
   const readPasswordsFile = () => {
@@ -549,6 +553,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   }
   /** El dictamen de un aparato, para enseñarlo o para pegárselo a un error. */
   const versionDe = (pub) => versiones.get(pub) || null
+  /** Dónde corre un aparato: lo último que dijo firmado (`machines`) o, si no, lo del acta. */
+  const machineOf = (pub, record) => machines.of(pub) || (record?.members || []).find((m) => m.pub === pub)?.machine || null
 
   // ----- LA SUBACTA: lo decidido que todavía no selló el acta (`src/subacta.js`) -----
   //
@@ -612,6 +618,11 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
   const verifyChain = async (args) => {
     const chk = await verifyChainRaw(args)
     if (chk.ok && args?.data?.v) apuntarVersion(chk.device, args.data.v)
+    // DÓNDE CORRE, por el mismo motivo: se apunta de lo firmado. Un fallo al guardarlo no
+    // puede tumbar el pedido —es un dato para la lista—, pero se dice.
+    if (chk.ok && args?.data?.machine) {
+      try { machines.note(chk.device, args.data.machine) } catch (e) { log(`[vault] could not record where a device runs: ${e.message}`) }
+    }
     // UN BLOQUEADO NO PASA POR NINGÚN MOSTRADOR. Sigue en el acta —bloquear no la toca,
     // porque la bóveda vive cerrada y eso lo decide un aprobador desde el teléfono—, así que
     // el papel verifica; la puerta se cierra aquí, que es por donde entra todo, y con su
@@ -809,12 +820,13 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
       markRotationDue(sub).catch((e) => log('[vault] could not rotate after the removal:', e.message))
     },
     defaultScope: [SCOPE.READ],
-    onChallenge ({ deviceId, scope }) {
+    onChallenge ({ deviceId, scope, machine }) {
       log(`\n[vault] Un dispositivo quiere conectarse:`)
       log(`        deviceId: ${deviceId}`)
+      if (machine) log(`        machine: ${machineLine(machine)}`)
       log(`        Ingresa el código que MUESTRA el dispositivo:`)
       log(`          dotrino-vault approve <código>    (o rechaza: dotrino-vault reject ${deviceId})\n`)
-      try { onEnrollChallenge?.({ deviceId, scope }) } catch (_) {}
+      try { onEnrollChallenge?.({ deviceId, scope, machine: machine || null }) } catch (_) {}
     }
   })
 
@@ -1330,6 +1342,7 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
     const devices = await Promise.all(issued.map(async (x) => ({
       deviceId: x.sub ? await deviceIdOf(x.sub) : null, sub: x.sub || null, label: x.label || '', scope: x.scope, exp: x.exp, nonce: x.nonce,
       running: x.sub ? versionDe(x.sub) : null,
+      machine: x.sub ? machineOf(x.sub, record) : null,
       notifiedAt: x.sub ? notifiable.since(x.sub) : null
     })))
     // LA SUBACTA VIAJA CON EL ACTA. Es la mitad de «se comparte entre todos los
@@ -4371,6 +4384,8 @@ export async function startVault ({ dir = dataDir(), proxyUrl, log = console.log
         members: (r?.members || []).map((m) => ({
           ...m,
           running: versionDe(m.pub),
+          // Dónde corre: lo último que dijo firmado y, si nunca habló, lo del acta.
+          machine: machines.of(m.pub) || m.machine || null,
           // Cuándo dijo que le llegan los avisos (null = no lo ha dicho, o caducó). Solo
           // tiene sentido en quien aprueba, y es un dato para enseñar: no decide nada.
           notifiedAt: notifiable.since(m.pub),
