@@ -136,7 +136,7 @@ const es = {
     store: 'escribir en tu bóveda: perfil, contenido, datos',
     read: 'ver lo que guardaste',
     admin: 'conectar y quitar aparatos desde ahí, sin venir aquí. No puede cambiar permisos',
-    passwords: 'pedir una contraseña por sitio, nunca la lista entera',
+    passwords: 'pedir contraseñas y passkeys de a una, por sitio; nunca la lista entera',
     // Una passkey copiada sirve hasta que la borres en cada sitio: de una contraseña, al
     // menos, se puede cambiar. Por eso es una decisión aparte.
     approve: 'dar el visto bueno cuando otro aparato pide claves privadas',
@@ -628,7 +628,7 @@ const en = {
     store: 'write to your vault: profile, content, data',
     read: 'see what you saved',
     admin: 'connect and remove devices from there, without coming here. It cannot change permissions',
-    passwords: 'ask for one password per site, never the whole list',
+    passwords: 'ask for passwords and passkeys one at a time, per site; never the whole list',
     approve: 'give the go-ahead when another device asks for private keys',
     sealer: 'admit devices and change permissions on its own when this vault is away. Only useful on another VAULT',
     unattended: 'take private keys without asking you. Off, it must be approved from a device with «approve» every time it starts',
