@@ -59,7 +59,8 @@ export function spawnDaemon () {
 // ------------------------------- Linux ------------------------------------
 
 async function hasSystemdUnit () {
-  if (process.platform !== 'linux') return false
+  // Con una carpeta de datos propia, la unidad (que tiene la suya) arrancaría OTRA bóveda.
+  if (process.platform !== 'linux' || process.env.DOTRINO_VAULT_DIR) return false
   return (await run('systemctl', ['--user', 'cat', 'dotrino-vault'], 5000)).ok
 }
 

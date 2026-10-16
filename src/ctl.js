@@ -2249,7 +2249,8 @@ async function cmdService (rest) {
   const sv = await import('./service.js')
   const [sub, val] = rest
   if (sub === 'start') {
-    const s = readState()
+    // `readState()` sale si no hay state.json, y sin state.json es justo cuando hay que arrancar.
+    const s = ipcRead(stateFile, null)
     if (s && alive(s.pid)) { console.log('ya está corriendo (pid ' + s.pid + ')'); return }
     const r = await sv.startDaemonService()
     if (!r.ok) { console.error('no se pudo arrancar: ' + r.err); process.exit(1) }
