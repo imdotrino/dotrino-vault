@@ -233,6 +233,8 @@ const T = {
     apv_update_device: (quien, v, de) => `${quien} quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '.',
     apv_keys: 'Variables:',
     apv_passwords: 'quiere leer una contraseña guardada',
+    apv_passwords_remove: 'quiere borrar una contraseña o passkey guardada',
+    apv_passwords_change: 'quiere cambiar una contraseña o passkey guardada',
     apv_fields: 'Campos:',
     apv_field: { password: 'contraseña', totp: 'código de verificación (2FA)', passkey: 'llave de acceso (passkey)', webauthn: 'llave de acceso (passkey)', notes: 'notas' },
     apv_passwords_hint: 'Al aprobar una contraseña, ese aparato puede leer contraseñas hasta que la bóveda se reinicie.',
@@ -449,6 +451,8 @@ const T = {
     apv_update_device: (who, v, from) => `${who} wants to update to ${v}` + (from ? ` (now ${from})` : '') + '.',
     apv_keys: 'Variables:',
     apv_passwords: 'wants to read a saved password',
+    apv_passwords_remove: 'wants to delete a saved password or passkey',
+    apv_passwords_change: 'wants to change a saved password or passkey',
     apv_fields: 'Fields:',
     apv_field: { password: 'password', totp: 'verification code (2FA)', passkey: 'passkey', webauthn: 'passkey', notes: 'notes' },
     apv_passwords_hint: 'Approving a password lets that device read passwords until the vault restarts.',
@@ -2051,7 +2055,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag" data-testid="apv-item-profile">{{ p.profileName || p.profile }}</b>
             <template v-if="p.kind === 'update'">{{ updateText(p) }}</template>
-            <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_passwords }}</template>
+            <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.ctx?.op === 'remove' ? t.apv_passwords_remove : (p.ctx?.op === 'put' || p.ctx?.op === 'patch') ? t.apv_passwords_change : t.apv_passwords }}</template>
             <template v-else-if="p.kind === 'incident'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_incident(p.ctx?.reporterLabel ? `${p.ctx.reporterLabel} (${p.ns})` : p.ns) }}</template>
             <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
