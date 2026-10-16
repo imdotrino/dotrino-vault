@@ -15,7 +15,7 @@ const I18N = {
     hero_title: 'Toda tu información, en un solo lugar seguro',
     hero_sub: 'Tus archivos, tus contactos, tus contraseñas y lo que guardan tus apps, todo junto en una bóveda que vive en tu propia computadora. No en la nube de una empresa: en tu máquina, bajo tu control. Sin anuncios, sin rastreo, sin que nadie venda tus datos.',
     hero_download: 'Descargar gratis', hero_source: 'Ver el código',
-    hero_note: 'Instalador para Linux. En Windows y macOS, con un comando o con Docker.',
+    hero_note: 'Para Linux, Windows y macOS. También con un comando o con Docker.',
     why_title: '¿Para qué sirve?',
     why_body: 'Hoy tu información está repartida y, casi siempre, en servidores de grandes empresas que la guardan, la miran y la usan para ganar dinero: unas cosas en Google, otras en tu teléfono, otras en cada app. Dotrino Vault las junta en un solo lugar que es tuyo de verdad —tu computadora— y tus demás dispositivos acceden a ella de forma segura, estés donde estés. Tu información deja de estar prestada y vuelve a ser tuya.',
     how_title: 'Cómo funciona',
@@ -23,6 +23,8 @@ const I18N = {
     wikiTitles: {
       'instalacion': 'Instalación: elige tu vía',
       'instalar-linux': 'Instalar en Linux (.deb / .rpm / tarball)',
+      'instalar-windows': 'Instalar en Windows',
+      'instalar-macos': 'Instalar en macOS',
       'instalar-npx': 'Instalar con un comando (npx)',
       'instalar-docker': 'Instalar con Docker',
       'emparejar': 'Emparejar un aparato',
@@ -65,7 +67,10 @@ const I18N = {
     dl_os_hint: 'Elegimos tu sistema por ti. Si no acertamos, cámbialo aquí.',
     m1_t: '1 · Instalador',
     m1_lead: 'La forma más cómoda: lo instalas y queda funcionando solo, también cuando enciendes la computadora.',
-    m1_soon: 'Para este sistema todavía no hay instalador de un clic: está en camino. Las dos formas de abajo ya funcionan y dejan tu bóveda igual de lista.',
+    m1_lead_win: 'Un instalador para tu usuario, sin permisos de administrador. Trae la ventana de la bóveda y la deja arrancando cuando inicias sesión.',
+    m1_lead_mac: 'La app Dotrino Vault, para Apple Silicon e Intel: la arrastras a Aplicaciones y trae la ventana de la bóveda.',
+    dl_win_btn: 'Descargar el instalador (.exe)',
+    dl_mac_btn: 'Descargar la app (.zip)',
     m2_t: '2 · Un comando',
     m2_lead: 'Un comando que se encarga de todo, incluido bajar lo que haga falta. No pide permisos de administrador ni instala nada en el sistema.',
     m2_tui: 'O con la pantalla de control incluida, que es lo más cómodo: te enseña tus dispositivos y ahí mismo apruebas el que se conecta, sin tener que abrir otra ventana ni recordar comandos.',
@@ -112,6 +117,7 @@ const I18N = {
     docs_links: [
       ['Instalación al detalle', 'https://wiki.dotrino.com/vault/instalacion/'],
       ['La CLI completa', 'https://wiki.dotrino.com/vault/cli/'],
+      ['La ventana de la bóveda', 'https://wiki.dotrino.com/vault/ventana/'],
       ['La interfaz de terminal (TUI)', 'https://wiki.dotrino.com/vault/tui/'],
       ['Conectar tus aparatos', 'https://wiki.dotrino.com/vault/emparejar/'],
       ['Secretos de servicios', 'https://wiki.dotrino.com/vault/secretos/'],
@@ -138,13 +144,15 @@ const I18N = {
     hero_title: 'All your information, in one safe place',
     hero_sub: 'Your files, your contacts, your passwords and whatever your apps save, all together in a vault that lives on your own computer. Not on a company’s cloud: on your machine, under your control. No ads, no tracking, nobody selling your data.',
     hero_download: 'Download free', hero_source: 'View the code',
-    hero_note: 'Installer for Linux. On Windows and macOS, with one command or with Docker.',
+    hero_note: 'For Linux, Windows and macOS. Also with one command or with Docker.',
     why_title: 'What is it for?',
     why_body: 'Today your information is scattered and, almost always, sitting on big companies’ servers that keep it, look at it and use it to make money: some things on Google, others on your phone, others in each app. Dotrino Vault brings it all into one place that is truly yours —your computer— and your other devices reach it securely, wherever you are. Your information stops being borrowed and becomes yours again.',
     how_title: 'How it works',
     wikiTitles: {
       'instalacion': 'Install: pick your path',
       'instalar-linux': 'Install on Linux (.deb / .rpm / tarball)',
+      'instalar-windows': 'Install on Windows',
+      'instalar-macos': 'Install on macOS',
       'instalar-npx': 'Install with one command (npx)',
       'instalar-docker': 'Install with Docker',
       'emparejar': 'Pairing a device',
@@ -187,7 +195,10 @@ const I18N = {
     dl_os_hint: 'We picked your system for you. If we got it wrong, change it here.',
     m1_t: '1 · Installer',
     m1_lead: 'The most comfortable way: you install it and it keeps running on its own, including when you turn the computer on.',
-    m1_soon: 'There is no one-click installer for this system yet: it is on the way. The two ways below already work and leave your vault just as ready.',
+    m1_lead_win: 'An installer for your user, with no administrator rights. It brings the vault window and leaves the vault starting when you sign in.',
+    m1_lead_mac: 'The Dotrino Vault app, for Apple Silicon and Intel: drag it to Applications and it brings the vault window.',
+    dl_win_btn: 'Download the installer (.exe)',
+    dl_mac_btn: 'Download the app (.zip)',
     m2_t: '2 · One command',
     m2_lead: 'One command that takes care of everything, including downloading whatever is missing. It does not ask for admin rights and installs nothing system-wide.',
     m2_tui: 'Or with the control screen included, which is the most comfortable: it shows your devices and you approve the one connecting right there, without opening another window or remembering commands.',
@@ -234,6 +245,7 @@ const I18N = {
     docs_links: [
       ['Install in detail', 'https://wiki.dotrino.com/en/vault/instalacion/'],
       ['The full CLI', 'https://wiki.dotrino.com/en/vault/cli/'],
+      ['The vault window', 'https://wiki.dotrino.com/en/vault/ventana/'],
       ['The terminal UI (TUI)', 'https://wiki.dotrino.com/en/vault/tui/'],
       ['Pairing your devices', 'https://wiki.dotrino.com/en/vault/emparejar/'],
       ['Service secrets', 'https://wiki.dotrino.com/en/vault/secretos/'],
@@ -311,6 +323,8 @@ function guessOs () {
   return 'linux'
 }
 const os = ref(guessOs())
+/** La guía del instalador de cada sistema, en el wiki. */
+const installGuide = computed(() => ({ linux: 'instalar-linux', windows: 'instalar-windows', macos: 'instalar-macos' })[os.value])
 const dockerCmd = [
   'docker volume create dotrino-vault',
   'docker run -d --name dotrino-vault --restart unless-stopped \\',
@@ -504,8 +518,15 @@ onMounted(async () => {
             <a class="btn btn-ghost" :href="RELEASES" data-testid="download-rpm">↓ {{ t.dl_rpm_btn }}</a>
             <a class="btn btn-ghost" :href="RELEASES" data-testid="download-tar">↓ {{ t.dl_tar_btn }}</a>
           </template>
-          <p v-else class="dl-note" data-testid="m-installer-soon">{{ t.m1_soon }}</p>
-          <p class="dl-guide"><a :href="wikiUrl('instalar-linux')" rel="noopener" data-testid="guide-linux">{{ t.wikiTitles['instalar-linux'] }} →</a></p>
+          <template v-else-if="os === 'windows'">
+            <p class="dl-note m1-lead">{{ t.m1_lead_win }}</p>
+            <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-win">↓ {{ t.dl_win_btn }}</a>
+          </template>
+          <template v-else>
+            <p class="dl-note m1-lead">{{ t.m1_lead_mac }}</p>
+            <a class="btn btn-primary btn-lg" :href="RELEASES" data-testid="download-mac">↓ {{ t.dl_mac_btn }}</a>
+          </template>
+          <p class="dl-guide"><a :href="wikiUrl(installGuide)" rel="noopener" :data-testid="'guide-' + os">{{ t.wikiTitles[installGuide] }} →</a></p>
         </div>
 
         <div class="dl-card" data-testid="m-command">
