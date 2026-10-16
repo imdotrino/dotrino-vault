@@ -118,8 +118,11 @@ ${argv}
   <string>${xml(log)}</string>
   <key>StandardErrorPath</key>
   <string>${xml(log)}</string>
+  <!-- Standard y no Background: en Background macOS frena la red y la CPU, y la bóveda
+       atiende al teléfono (firmas, aprobaciones). Con Background una actualización tardaba
+       más de 5 minutos en bajar y la verificación se caía por tiempo. -->
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
 </dict>
 </plist>
 `

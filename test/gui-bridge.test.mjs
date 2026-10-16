@@ -110,6 +110,7 @@ test('macOS: el LaunchAgent arranca el daemon al entrar y lo relanza siempre que
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/)
   assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/, 'también tras salir bien: así arranca la versión nueva')
   assert.match(plist, /\/tmp\/v &amp; log/, 'escapa el XML')
+  assert.match(plist, /<key>ProcessType<\/key>\s*<string>Standard<\/string>/, 'Background frena la red y la CPU de la bóveda')
 })
 
 test('Windows: la entrada de inicio de sesión lanza el daemon sin consola', () => {
