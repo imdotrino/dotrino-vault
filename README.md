@@ -128,10 +128,43 @@ firmado**. Se lee con `dotrino-vault activity`.
 
 ## Instalación
 
-Tres vías, y todas dejan la misma bóveda: **instalador de Linux** (queda como
-servicio), **un comando** (`npx`, en cualquier sistema con Node) y **Docker**. En
-Linux la primera es la cómoda; en Windows y macOS todavía no hay instalador de un
-clic, así que van por las otras dos.
+Todas las vías dejan la misma bóveda: **instalador** de Linux (`.deb`, `.rpm`,
+tarball), de **Windows** (`-setup.exe`) y de **macOS** (`Dotrino Vault.app`), **un
+comando** (`npx`, en cualquier sistema con Node) y **Docker**. Los instaladores traen
+además **la ventana** (ver abajo); `npx` y Docker, la TUI.
+
+### La ventana (`desktop/`)
+
+Una app de escritorio con **las mismas pantallas que la TUI**: bóvedas, aparatos,
+emparejar (con el QR como imagen), permisos, cajones y variables, inicios de sesión, mi
+perfil, llaves de seguridad y ajustes. No reimplementa nada: lanza `dotrino-vaultd
+--gui-bridge` y pinta el modelo que le manda el puente (`src/tui/gui.js`), que corre la
+misma sesión que la TUI. Una acción nueva en la TUI aparece en la ventana sin tocarla. Sin
+puertos: el canal son las tuberías del proceso hijo. Rust + `iced`, con el tema del
+ecosistema (Quicksand/Comfortaa, claro u oscuro según el sistema).
+
+Busca la bóveda al lado de su ejecutable (así la ponen los instaladores), luego en el
+`PATH` (`dotrino-vaultd`, o el `dotrino-vault` de npm). Para desarrollo:
+`DOTRINO_VAULT_BRIDGE="node bin/dotrino-vault.js" cargo run` en `desktop/`.
+
+**Windows — instalador:** `dotrino-vault-X.Y.Z-windows-x64-setup.exe` desde
+[Releases](https://github.com/imdotrino/dotrino-vault/releases/latest). Se instala para
+tu usuario, sin administrador, en `%LOCALAPPDATA%\Programs\Dotrino Vault`, con su entrada
+en el menú Inicio, y deja la bóveda **arrancando al iniciar sesión** (una entrada `Run`
+que lanza `dotrino-vault-desktop.exe --start-daemon`, sin ventana). Se cambia en Ajustes o
+con `dotrino-vault service autostart on|off`. Desinstalar no borra tus datos.
+
+**macOS — `Dotrino Vault.app`:** el `.zip` universal (Apple Silicon e Intel) desde
+[Releases](https://github.com/imdotrino/dotrino-vault/releases/latest); arrástrala a
+Aplicaciones. Dentro van la ventana y la bóveda. Para que arranque al iniciar sesión, en
+Ajustes (un LaunchAgent de tu usuario, `~/Library/LaunchAgents/com.dotrino.vault.plist`).
+
+> Ni el instalador de Windows ni la app de macOS llevan la firma de un desarrollador
+> registrado: Windows enseña el aviso de SmartScreen («editor desconocido») y macOS el de
+> Gatekeeper la primera vez (clic derecho → Abrir). Lo que prueba de dónde salieron es la
+> atestación de sigstore: `gh attestation verify <archivo> --repo imdotrino/dotrino-vault`.
+> En Windows y macOS la bóveda todavía **no se actualiza sola**: se instala la versión nueva
+> encima.
 
 **Ubuntu / Debian — `.deb`:** descarga el `.deb` (versionado) desde
 [Releases](https://github.com/imdotrino/dotrino-vault/releases/latest) y haz doble
@@ -196,7 +229,7 @@ npx -y @dotrino/vaultd          # Node ≥ 20
 npx -y @dotrino/vaultd --tui    # la bóveda y su pantalla de control en la misma ventana
 ```
 
-Es la vía normal en **Windows y macOS**, y sirve igual en Linux. Arranca en primer
+Sirve en cualquier sistema (y es la vía en ARM fuera de Docker). Arranca en primer
 plano: la bóveda vive mientras dejes esa ventana abierta. Los comandos de control se
 anteponen con `npx -p @dotrino/vaultd` (por ejemplo, `npx -p @dotrino/vaultd
 dotrino-vault pair`). Si no tienes Node, el instalador del ecosistema lo baja en tu
@@ -228,9 +261,9 @@ recupera.
 
 > Sin firma de código: tu sistema puede advertir que el binario no está firmado. Es
 > autohospedado y de código abierto; en Linux solo necesita permiso de ejecución (el
-> instalador lo da). Hay un build de Windows (`packaging/build-win.sh`) pero **no se
-> publica**: se construye desde Linux y no se ha probado en un Windows de verdad, y
-> la inyección del blob invalida la firma de Microsoft, así que saltaría SmartScreen.
+> instalador lo da). El daemon de Windows (`packaging/build-win.sh`) se construye desde
+> Linux y va dentro del instalador de Windows; el de macOS (`packaging/build-mac.sh`) se
+> construye en un Mac y va dentro de la app.
 
 **Dónde vive todo y cómo se para.** Tus datos —llave incluida— viven en
 `~/.local/share/dotrino/vault` (Linux y macOS), `%LOCALAPPDATA%\Dotrino\vault`
@@ -848,8 +881,10 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
 ## Alcance
 
 - **v1 (este):** daemon headless en Node, **multi-perfil**. En **Linux** queda como
-  servicio `systemd --user` (binario único Node SEA: `.deb` y tarball); en **Windows y
-  macOS** se corre con `npx`, en primer plano; y en cualquier sistema, con **Docker**
+  servicio `systemd --user` (binario único Node SEA: `.deb`, `.rpm` y tarball); en
+  **Windows** con un instalador por usuario y en **macOS** como `Dotrino Vault.app`, los
+  dos con arranque al iniciar sesión; en los tres, con **una ventana** que tiene las
+  pantallas de la TUI (`desktop/`); y en cualquier sistema, con `npx` o **Docker**
   (imagen amd64/arm64 en GHCR). Identidad **cifrada en reposo y ligada a esta
   máquina**. Emparejamiento endurecido con los dos caminos de vinculación, acta del
   perfil (miembros, capacidades y `cn` de servicio), firma delegada, renovación
@@ -858,9 +893,9 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
   actividad. Contraseña opcional por perfil, **para editarlo** (verificador PBKDF2).
 - **v2:** cifrado en reposo **con la contraseña del perfil** (hoy la clave sale solo de
   la máquina) y atado a tu cuenta del sistema —DPAPI en Windows, Keychain en macOS— o
-  al TPM; cifrar también los secretos y el store; **instalador de un clic para Windows
-  y macOS**; UI de escritorio (Tauri) como cliente del daemon; firma de documentos con
-  sellado de tiempo (`dotrino-signer`).
+  al TPM; cifrar también los secretos y el store; que la bóveda de Windows y macOS se
+  actualice sola, como la de Linux; firma de Apple y de Microsoft; firma de documentos
+  con sellado de tiempo (`dotrino-signer`).
 
 ## Estructura
 
@@ -870,7 +905,9 @@ ed25519 en formato OpenSSH (sin frase: la bóveda es el candado) y RSA/P-256 en 
 - `src/daemon.js` — modo servicio: `state.json`, control por archivos + señales, apagado limpio.
 - `src/ctl.js` — CLI de control (habla con el daemon por archivos + señales, sin socket).
 - `src/vaultControl.js` — API de control programática (misma vía que la CLI); la usa la TUI.
-- `src/tui/` — interfaz de terminal, sin dependencias (`term.js` primitivas ANSI/raw-mode; `app.js` pantallas; `i18n.js` los textos es/en).
+- `src/tui/` — interfaz de terminal, sin dependencias (`term.js` primitivas ANSI/raw-mode; `app.js` pantallas; `i18n.js` los textos es/en; `gui.js` el puente de la ventana).
+- `src/service.js` — arrancar, reiniciar y arrancar al iniciar sesión en Linux, Windows y macOS.
+- `desktop/` — la ventana (Rust + `iced`): pinta lo que le manda `gui.js`.
 - `src/transport.js` — conexión headless al proxy + `identify` firmado (con el acta).
 - `src/threadStore.js` — el store del usuario: hilos, "recientes" y perfil (`threads.json`).
 - `src/store.js` — árbol de contenidos (`vault.json`, versionado). Hoy es un esqueleto: se lee, nadie escribe.

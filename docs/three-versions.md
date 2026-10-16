@@ -36,6 +36,20 @@ Dos piezas cierran el círculo:
   pidiéndoselo a la pestaña de bóveda por un canal entre páginas; sin la pestaña abierta, se
   dice (`not-the-vault`). Es lo mismo que el binario: `logins add` pide el demonio encendido.
 
+## El binario en los tres sistemas, y su ventana
+
+El binario no es solo de Linux. Es el mismo núcleo y el mismo ejecutable (Node SEA) en
+**Linux** (`.deb`, `.rpm`, tarball), **Windows** (instalador por usuario, `build-win.sh`) y
+**macOS** (`Dotrino Vault.app` universal, `build-mac.sh`). Lo que cambia por sistema está en
+`src/service.js`: cómo se arranca y cómo arranca solo al iniciar sesión (systemd, la entrada
+`Run` de Windows, un LaunchAgent). No es una cuarta bóveda: es la del binario.
+
+Su pantalla de control existe en dos formas que son **una sola**: la TUI y **la ventana**
+(`desktop/`, Rust + iced). La ventana no tiene pantallas propias: lanza
+`dotrino-vaultd --gui-bridge` y dibuja el modelo que le manda `src/tui/gui.js`, que corre
+la misma sesión que la TUI (`handleKey`, `viewModel`). Una acción que se añade a la TUI
+aparece en la ventana sin tocarla, y no hay manera de que una tenga algo que la otra no.
+
 ## Lo que atiende cada una
 
 | Capacidad | Binario | Pestaña | Extensión |

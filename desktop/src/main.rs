@@ -57,7 +57,7 @@ fn main() -> iced::Result {
         .font(COMFORTAA)
         .default_font(BODY)
         .window(window::Settings {
-            size: iced::Size::new(980.0, 680.0),
+            size: iced::Size::new(920.0, 600.0),
             min_size: Some(iced::Size::new(560.0, 420.0)),
             icon,
             ..Default::default()
