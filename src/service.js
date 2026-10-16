@@ -40,6 +40,16 @@ export function daemonCommand () {
   return { cmd: process.execPath, args: [path.join(here, '..', 'bin', 'dotrino-vaultd.js')] }
 }
 
+/**
+ * La orden para volver a correr ESTA misma invocación (la TUI tras actualizar). En el binario
+ * (SEA) `process.argv[1]` es otra vez el ejecutable, así que `argv.slice(1)` le pasaba su
+ * propia ruta como primer argumento: `sea-entry.js` no lo reconocía y arrancaba el DAEMON en
+ * la terminal en vez de la TUI (2026-10-16, al pasar a 0.159.0).
+ */
+export function selfCommand (argv = process.argv, sea = !!globalThis.__DOTRINO_SEA__) {
+  return { cmd: process.execPath, args: argv.slice(sea ? 2 : 1) }
+}
+
 /** Dónde escribe el daemon suelto lo que diría por consola. */
 export const daemonLogFile = () => path.join(dataDir(), 'daemon.log')
 

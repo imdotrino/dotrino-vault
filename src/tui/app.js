@@ -3006,7 +3006,8 @@ export async function runTui () {
   // TRAS ACTUALIZAR Y REINICIAR, esta pantalla también se vuelve a abrir: es el binario
   // anterior el que sigue en memoria. Se lanza el nuevo en esta misma terminal.
   if (st.relaunch) {
-    const r = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit' })
+    const { cmd, args } = service.selfCommand()
+    const r = spawnSync(cmd, args, { stdio: 'inherit' })
     process.exit(r.status ?? 0)
   }
 }
