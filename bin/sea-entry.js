@@ -17,6 +17,10 @@ if (argv[0] === '--tui') {
   if (!process.stdout.isTTY) { console.error('la TUI necesita un terminal interactivo (TTY).'); process.exit(2) }
   import('../src/tui/app.js').then(({ runTui }) => runTui())
     .catch((e) => { console.error('error en la TUI:', e.message); process.exit(1) })
+} else if (argv[0] === '--gui-bridge') {
+  // El canal de la ventana de escritorio (JSON por stdin/stdout, ver src/tui/gui.js).
+  import('../src/tui/gui.js').then(({ runGuiBridge }) => runGuiBridge()).then(() => process.exit(0))
+    .catch((e) => { console.error('error en el puente de la ventana:', e.message); process.exit(1) })
 } else if (argv[0] === '--ctl') {
   // CLI de control: NO toca la identidad ni el proxy; habla con el daemon vía
   // el dir de datos (state.json) y señales (SIGUSR1 para emparejar).

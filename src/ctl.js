@@ -102,7 +102,7 @@ const START_HINT = IN_DOCKER
   ? 'docker start dotrino-vault'
   : process.platform === 'linux'
     ? 'systemctl --user start dotrino-vault'
-    : 'dotrino-vaultd   (o: npx -y @dotrino/vaultd)'
+    : 'dotrino-vault service start   (o: npx -y @dotrino/vaultd)'
 const RESTART_HINT = IN_DOCKER
   ? 'docker restart dotrino-vault'
   : process.platform === 'linux'
@@ -2240,6 +2240,35 @@ function cmdLogs () {
 }
 
 // Import dinámico: así `dotrino-vault status` (el caso común) no carga la TUI.
+/**
+ * `service start | autostart [on|off]`: arrancar el daemon y dejarlo arrancando al iniciar
+ * sesión, en los tres sistemas (`src/service.js`). En Linux es la unidad de systemd; en
+ * Windows una entrada de inicio de sesión; en macOS un LaunchAgent.
+ */
+async function cmdService (rest) {
+  const sv = await import('./service.js')
+  const [sub, val] = rest
+  if (sub === 'start') {
+    const s = readState()
+    if (s && alive(s.pid)) { console.log('ya está corriendo (pid ' + s.pid + ')'); return }
+    const r = await sv.startDaemonService()
+    if (!r.ok) { console.error('no se pudo arrancar: ' + r.err); process.exit(1) }
+    console.log('arrancado · registro: ' + sv.daemonLogFile())
+    return
+  }
+  if (sub === 'autostart') {
+    if (val === 'on' || val === 'off') {
+      const r = val === 'on' ? await sv.enableAutostart() : await sv.disableAutostart()
+      if (!r.ok) { console.error('no se pudo: ' + r.err); process.exit(1) }
+    } else if (val !== undefined) { console.error('uso: dotrino-vault service autostart [on|off]'); process.exit(2) }
+    const st = await sv.autostartStatus()
+    console.log('arranca al iniciar sesión: ' + (st.on === null ? 'no se sabe en este sistema' : st.on ? 'sí' : 'no') + (st.how !== 'none' ? ` (${st.how})` : ''))
+    return
+  }
+  console.error('uso: dotrino-vault service start | autostart [on|off]')
+  process.exit(2)
+}
+
 async function cmdTui () {
   if (!process.stdout.isTTY) { console.error('la TUI necesita un terminal interactivo (TTY).'); process.exit(2) }
   const { runTui } = await import('./tui/app.js')
@@ -2250,6 +2279,10 @@ function help () {
   console.log(`dotrino-vault — control del certificador personal
 
   tui                 interfaz de terminal a pantalla completa (bóvedas, pares, secretos)
+  service start       arranca el servicio en segundo plano (sin ventana)
+  service autostart [on|off]
+                     que arranque solo al iniciar sesión (systemd en Linux, una entrada
+                     de inicio en Windows, un LaunchAgent en macOS) · sin valor, dice cómo está
   status | info       estado del servicio + fingerprint + el id de cada perfil
   update [--check]   trae la versión nueva (verificando la firma) y espera a que el
                      servicio la arranque · --check solo mira · --no-wait no espera
@@ -2485,6 +2518,10 @@ export async function runCtl (argv) {
   if (rest.includes('--help') || rest.includes('-h')) return help()
   switch (cmd) {
     case 'tui': return cmdTui()
+    // El canal de la ventana de escritorio (`desktop/`). No es para personas: habla JSON por
+    // stdin/stdout. Ver `src/tui/gui.js`.
+    case 'gui-bridge': { await (await import('./tui/gui.js')).runGuiBridge(); process.exit(0) }
+    case 'service': return cmdService(rest)
     case 'profile': return cmdProfile(rest)
     case 'unlock': return cmdUnlock(rest)
     case 'lock': return cmdLock()

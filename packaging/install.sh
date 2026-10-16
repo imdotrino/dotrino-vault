@@ -46,6 +46,18 @@ install -m 0755 "$SRC/dotrino-vault"  "$APP_DIR/dotrino-vault"
 # `ln -sfn` reemplaza también un archivo de verdad de una instalación anterior.
 ln -sfn "$APP_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vaultd"
 ln -sfn "$APP_DIR/dotrino-vault"  "$BIN_DIR/dotrino-vault"
+# LA VENTANA (si viene en el tarball): al lado del daemon, que es donde lo busca, y con su
+# entrada en el menú de aplicaciones.
+if [ -f "$SRC/dotrino-vault-desktop" ]; then
+  install -m 0755 "$SRC/dotrino-vault-desktop" "$APP_DIR/dotrino-vault-desktop"
+  ln -sfn "$APP_DIR/dotrino-vault-desktop" "$BIN_DIR/dotrino-vault-desktop"
+  APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+  ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+  mkdir -p "$APPS_DIR" "$ICON_DIR"
+  install -m 0644 "$SRC/icon.svg" "$ICON_DIR/dotrino-vault.svg"
+  sed "s|^Exec=.*|Exec=$APP_DIR/dotrino-vault-desktop|" "$SRC/dotrino-vault.desktop" > "$APPS_DIR/dotrino-vault.desktop"
+  echo "  window    → $APP_DIR/dotrino-vault-desktop (in your applications menu as «Dotrino Vault»)"
+fi
 echo "  binary    → $APP_DIR/dotrino-vaultd"
 echo "  cli       → $APP_DIR/dotrino-vault (linked from $BIN_DIR)"
 echo "  updates   → on its own, no sudo (first it asks a device that approves — a phone or a browser — if the account has one)"

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Dotrino Vault
+Name[es]=Bóveda Dotrino
+GenericName=Personal vault
+GenericName[es]=Bóveda personal
+Comment=Your devices, your keys and your variables, in your own computer
+Comment[es]=Tus aparatos, tus llaves y tus variables, en tu propia computadora
+Exec=dotrino-vault-desktop
+Icon=dotrino-vault
+Terminal=false
+Categories=Utility;Security;
+Keywords=vault;keys;password;dotrino;bóveda;llaves;
+StartupWMClass=dotrino-vault-desktop

@@ -49,8 +49,16 @@ cat > "$WORK/sea-config.json" <<JSON
 JSON
 # `useCodeCache` NO se puede usar cruzando de plataforma: la caché de código es del
 # binario que la generó. Con `false` arranca un pelo más lento y es portable.
-echo "  → generando blob SEA…"
-node --experimental-sea-config "$WORK/sea-config.json"
+# EL BLOB LO GENERA EL MISMO NODE QUE LO VA A CORRER. El formato del blob cambia entre
+# versiones de Node, y uno hecho con el Node de esta máquina (otra versión) no arranca dentro
+# del node.exe de $NODE_VER. Se baja el Node de Linux de esa misma versión solo para esto.
+LNODE="node-$NODE_VER-linux-x64"
+if [ ! -x "$WORK/$LNODE/bin/node" ]; then
+  echo "  → bajando $LNODE (para generar el blob con la misma versión)…"
+  curl -fsSL "https://nodejs.org/dist/$NODE_VER/$LNODE.tar.xz" | tar -xJ -C "$WORK"
+fi
+echo "  → generando blob SEA con node $NODE_VER…"
+"$WORK/$LNODE/bin/node" --experimental-sea-config "$WORK/sea-config.json"
 
 # --- 2. node.exe oficial de Windows ------------------------------------------
 ZIPNAME="node-$NODE_VER-win-x64"

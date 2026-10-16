@@ -15,6 +15,9 @@
 import path from 'node:path'
 import { dataDir, readJson, writeJson } from '../paths.js'
 
+// Solo Linux tiene la unidad de systemd: en Windows y macOS nombrarla manda a un comando que no existe.
+const LINUX = process.platform === 'linux'
+
 // --------------------------------- español ---------------------------------
 
 const es = {
@@ -37,7 +40,7 @@ const es = {
   updateRestartOffer: (version) => `Instalada la ${version}. ¿Reiniciar ahora la bóveda y esta pantalla? Cierra las bóvedas abiertas`,
   updateRestarting: 'Reiniciando la bóveda…',
   updateRestartLater: (version) => `La ${version} queda instalada: la bóveda se reinicia sola en un par de minutos`,
-  daemonStale: (running, installed) => `⚠ el servicio corre ${running} y el binario instalado es ${installed}: reinícialo (systemctl --user restart dotrino-vault)`,
+  daemonStale: (running, installed) => `⚠ el servicio corre ${running} y el binario instalado es ${installed}: reinícialo${LINUX ? ' (systemctl --user restart dotrino-vault)' : ''}`,
   activeVault: 'Bóveda activa: ',
   noName: '(sin nombre)',
   tooSmall: 'Terminal muy pequeño',
@@ -190,6 +193,14 @@ const es = {
   settingUpdateNowAsks: 'Hecho: pide aprobación antes de actualizarse.',
   settingUpdateNowAlone: 'Hecho: se actualiza sola.',
   settingSaveFailed: (m) => `No se pudo guardar el ajuste: ${m}`,
+  settingAutostartOn: 'La bóveda arranca sola al iniciar sesión en esta computadora.',
+  settingAutostartOff: 'La bóveda no arranca sola: hay que abrirla cada vez.',
+  settingAutostartUnknown: 'No se sabe si la bóveda arranca sola al iniciar sesión.',
+  settingAutostartHint: 'Sin ella encendida, tus aparatos no pueden pedirle nada a esta bóveda.',
+  settingAutostartNoUnit: 'Para que arranque sola, instálala con el paquete de tu sistema (.deb o .rpm).',
+  settingAutostartSaving: 'Guardando…',
+  settingAutostartNowOn: 'Hecho: arranca sola al iniciar sesión.',
+  settingAutostartNowOff: 'Hecho: ya no arranca sola.',
   doorsIntro: (name) => `Con qué se abre «${name}». Abre cualquiera de estas.`,
   doorsNone: 'Sin candado: se abre sola en esta máquina.',
   doorPassword: 'contraseña',
@@ -480,7 +491,7 @@ const es = {
 
   // pantalla "daemon caído"
   downTitle: 'El daemon del vault no está corriendo.',
-  downBody1: 'La TUI le da órdenes al daemon (custodio de tu clave). Sin él no puede',
+  downBody1: 'Esta pantalla le da órdenes al servicio de la bóveda (el que guarda tu llave). Sin él no puede',
   downBody2: 'crear bóvedas, listar dispositivos ni tocar secretos.',
   downStart: '  intentar arrancarlo:  ',
   downRecheck: '  volver a comprobar',
@@ -496,7 +507,7 @@ const es = {
   startFailed: (err) => `No se pudo arrancar: ${err}`,
 
   // errores
-  errDaemonDown: 'El daemon no está corriendo. Arráncalo: systemctl --user start dotrino-vault (o reinicia la TUI).',
+  errDaemonDown: LINUX ? 'El daemon no está corriendo. Arráncalo: systemctl --user start dotrino-vault (o reinicia la TUI).' : 'El servicio de la bóveda no está corriendo. Cierra esta pantalla y vuelve a abrirla para arrancarlo.',
   errNoReply: 'El daemon no respondió.',
   errNotApplied: 'El daemon no aplicó el cambio (revisa los logs del servicio).',
   errNotDeleted: 'El daemon no borró la variable (revisa los logs del servicio).',
@@ -534,7 +545,7 @@ const en = {
   updateRestartOffer: (version) => `${version} is installed. Restart the vault and this screen now? It locks the open vaults`,
   updateRestarting: 'Restarting the vault…',
   updateRestartLater: (version) => `${version} is installed: the vault restarts by itself in a couple of minutes`,
-  daemonStale: (running, installed) => `⚠ the service runs ${running} but the installed binary is ${installed}: restart it (systemctl --user restart dotrino-vault)`,
+  daemonStale: (running, installed) => `⚠ the service runs ${running} but the installed binary is ${installed}: restart it${LINUX ? ' (systemctl --user restart dotrino-vault)' : ''}`,
   activeVault: 'Active vault: ',
   tooSmall: 'Terminal too small',
   tooSmallHint: (cols, rows) => `Resize to ≥ 24×9 (now ${cols}×${rows}).`,
@@ -667,6 +678,14 @@ const en = {
   settingUpdateNowAsks: 'Done: it asks for approval before updating.',
   settingUpdateNowAlone: 'Done: it updates on its own.',
   settingSaveFailed: (m) => `The setting could not be saved: ${m}`,
+  settingAutostartOn: 'The vault starts on its own when you sign in to this computer.',
+  settingAutostartOff: 'The vault does not start on its own: you have to open it every time.',
+  settingAutostartUnknown: 'It is not known whether the vault starts on its own when you sign in.',
+  settingAutostartHint: 'While it is off, your devices cannot ask this vault for anything.',
+  settingAutostartNoUnit: 'To have it start on its own, install it with your system package (.deb or .rpm).',
+  settingAutostartSaving: 'Saving…',
+  settingAutostartNowOn: 'Done: it starts on its own when you sign in.',
+  settingAutostartNowOff: 'Done: it no longer starts on its own.',
   doorsIntro: (name) => `What opens “${name}”. Any of these opens it.`,
   doorsNone: 'No lock: it opens by itself on this machine.',
   doorPassword: 'password',
@@ -926,7 +945,7 @@ const en = {
   helpJoin: ['Esc vaults', 'l Español', 'q quit'],
 
   downTitle: 'The vault daemon is not running.',
-  downBody1: 'The TUI gives orders to the daemon (the keeper of your key). Without it',
+  downBody1: 'This screen gives orders to the vault service (the keeper of your key). Without it',
   downBody2: 'it cannot create vaults, list devices or touch secrets.',
   downStart: '  try to start it:  ',
   downRecheck: '  check again',
@@ -941,7 +960,7 @@ const en = {
   startedNotReady: 'It started but does not answer yet; press R',
   startFailed: (err) => `Could not start it: ${err}`,
 
-  errDaemonDown: 'The daemon is not running. Start it: systemctl --user start dotrino-vault (or restart the TUI).',
+  errDaemonDown: LINUX ? 'The daemon is not running. Start it: systemctl --user start dotrino-vault (or restart the TUI).' : 'The vault service is not running. Close this screen and open it again to start it.',
   errNoReply: 'The daemon did not answer.',
   errNotApplied: 'The daemon did not apply the change (check the service logs).',
   errNotDeleted: 'The daemon did not delete the variable (check the service logs).',

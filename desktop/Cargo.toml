@@ -1,0 +1,30 @@
+[package]
+name = "dotrino-vault-desktop"
+version = "0.156.0"
+edition = "2024"
+description = "Dotrino Vault: the control window of your vault (Linux, macOS, Windows). Same screens as the terminal one."
+license = "MIT"
+repository = "https://github.com/imdotrino/dotrino-vault"
+homepage = "https://vault.dotrino.com/"
+
+[dependencies]
+iced = { version = "0.14", features = ["tokio", "qr_code", "svg", "image"] }
+open = "5"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt"] }
+
+# Windows: el idioma de la interfaz (no hay LANG).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
+
+# La elige el destino en `build.rs` (las dependencias de build se eligen por la máquina que
+# compila, y el .exe se compila también desde Linux).
+[build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

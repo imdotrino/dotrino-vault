@@ -33,6 +33,7 @@ function tarball (version, contenido) {
   fs.mkdirSync(top)
   fs.writeFileSync(path.join(top, 'dotrino-vaultd'), contenido + ' daemon')
   fs.writeFileSync(path.join(top, 'dotrino-vault'), contenido + ' cli')
+  fs.writeFileSync(path.join(top, 'dotrino-vault-desktop'), contenido + ' ventana')
   const file = path.join(tmp('dl-'), `dotrino-vault-${version}-linux-x64.tar.gz`)
   execFileSync('tar', ['czf', file, '-C', dir, path.basename(top)])
   return file
@@ -126,4 +127,16 @@ test('con dpkg Y rpm en la máquina manda dpkg (Ubuntu con la herramienta rpm in
   assert.equal(systemPackager(() => true), 'deb')
   assert.equal(systemPackager((f) => f === '/usr/bin/rpm'), 'rpm')
   assert.equal(systemPackager(() => false), null)
+})
+
+test('la ventana se actualiza con la bóveda, pero solo donde ya estaba instalada', async () => {
+  const sinVentana = binDirNuevo()
+  const conVentana = binDirNuevo()
+  fs.writeFileSync(path.join(conVentana, 'dotrino-vault-desktop'), 'vieja ventana')
+  for (const binDir of [sinVentana, conVentana]) {
+    const res = await installUserRelease(release('9.9.9'), { binDir, fetchVerifiedImpl: async () => ({ ok: true, file: tarball('9.9.9', 'nuevo') }) })
+    assert.equal(res.ok, true)
+  }
+  assert.equal(fs.existsSync(path.join(sinVentana, 'dotrino-vault-desktop')), false, 'un servidor no recibe un programa de escritorio')
+  assert.equal(fs.readFileSync(path.join(conVentana, 'dotrino-vault-desktop'), 'utf8'), 'nuevo ventana')
 })

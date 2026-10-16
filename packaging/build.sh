@@ -69,6 +69,10 @@ chmod 0755 "$DIST/dotrino-vault"
 STAGE="$WORK/dotrino-vault-$VER-linux-x64"
 mkdir -p "$STAGE"
 cp "$DIST/dotrino-vaultd" "$DIST/dotrino-vault" "$STAGE/"
+# LA VENTANA viaja con la bóveda (ver build-desktop.sh): la instala install.sh.
+bash "$ROOT/packaging/build-desktop.sh"
+cp "$DIST/dotrino-vault-desktop" "$STAGE/"
+cp "$ROOT/desktop/assets/dotrino-vault.desktop" "$ROOT/desktop/assets/icon.svg" "$STAGE/"
 cp "$ROOT/packaging/install.sh" "$ROOT/packaging/uninstall.sh" "$STAGE/"
 cp "$ROOT/packaging/dotrino-vault.service" "$STAGE/"
 cp "$ROOT/README.md" "$STAGE/" 2>/dev/null || true

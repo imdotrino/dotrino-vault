@@ -67,8 +67,24 @@ jobs:
       # la lista de rotas más nueva. Va antes de publicar: aquí sí frena.
       - run: npx --yes @dotrino/roadmap@latest check
 
-      - name: Construir el binario, el tarball y el .deb
+      # LA VENTANA (desktop/, Rust) va dentro del .deb, el .rpm y el tarball.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop }
+
+      - name: Construir el binario, la ventana, el tarball y el .deb
         run: bash packaging/build-deb.sh
+
+      # El daemon de Windows se construye AQUÍ, cruzado (ver build-win.sh): el job de Windows
+      # solo compila la ventana y arma el instalador con este binario.
+      - name: Construir el daemon de Windows
+        run: bash packaging/build-win.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-vaultd
+          path: |
+            dist/dotrino-vaultd.exe
+            dist/dotrino-vault.cmd
 
       # El .rpm (Fedora, RHEL, openSUSE) sale del MISMO binario que el .deb: build-rpm.sh ve
       # que el de dist/ ya es de esta versión y no lo reconstruye. `rpmbuild` no viene en el
@@ -175,3 +191,73 @@ jobs:
       # declare. Es una casilla en la web, no algo que se arregle desde aquí.
       - name: Publicar @dotrino/env (el envoltorio)
         run: node packaging/release-env.mjs --publish
+
+  # ------------------------------------------------------------------------------------------
+  # WINDOWS: la ventana (compilada aquí, MSVC) + el daemon del job de Linux, en un instalador
+  # por usuario (Inno Setup, sin administrador). Solo con tag: necesita la release ya creada.
+  windows:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop }
+      - name: La ventana
+        working-directory: desktop
+        run: cargo build --release --locked
+      - uses: actions/download-artifact@v4
+        with: { name: win-vaultd, path: dist/win }
+      - name: El instalador
+        shell: pwsh
+        run: |
+          Copy-Item desktop/target/release/dotrino-vault-desktop.exe dist/win/
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          $v = node -p "require('./package.json').version"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" "/DSrc=$pwd\dist\win" packaging\windows\dotrino-vault.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*-setup.exe
+      - name: Subir a la release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*-setup.exe --clobber
+
+  # ------------------------------------------------------------------------------------------
+  # macOS: el daemon (SEA universal) y la ventana (universal), juntos en «Dotrino Vault.app».
+  macos:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: El daemon
+        run: bash packaging/build-mac.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: desktop }
+      - name: La ventana (universal)
+        working-directory: desktop
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/dotrino-vault-desktop \
+            target/aarch64-apple-darwin/release/dotrino-vault-desktop \
+            target/x86_64-apple-darwin/release/dotrino-vault-desktop
+      - name: La app
+        run: sh desktop/scripts/macos-bundle.sh "$PWD/desktop/target/universal/dotrino-vault-desktop" "$PWD/dist/dotrino-vaultd-macos"
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: desktop/dist/*.zip
+      - name: Subir a la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" desktop/dist/*.zip --clobber

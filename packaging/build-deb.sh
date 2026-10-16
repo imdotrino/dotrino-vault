@@ -42,6 +42,12 @@ chmod 0644 "$STAGE/usr/lib/dotrino-vault/VERSION"
 install -D -m0755 "$ROOT/packaging/pkg-launcher.sh" "$STAGE/usr/bin/dotrino-vaultd"
 install -D -m0755 "$ROOT/packaging/pkg-launcher.sh" "$STAGE/usr/bin/dotrino-vault"
 install -D -m0644 "$ROOT/README.md"      "$STAGE/usr/share/doc/dotrino-vault/README.md"
+# LA VENTANA: en /usr/bin, al lado del lanzador `dotrino-vaultd`, que es donde la busca.
+[ "$(cat "$DIST/.desktop-version" 2>/dev/null)" = "$VER" ] || bash "$ROOT/packaging/build-desktop.sh"
+install -D -m0755 "$DIST/dotrino-vault-desktop" "$STAGE/usr/bin/dotrino-vault-desktop"
+install -D -m0644 "$ROOT/desktop/assets/dotrino-vault.desktop" "$STAGE/usr/share/applications/dotrino-vault.desktop"
+install -D -m0644 "$ROOT/desktop/assets/icon.svg" "$STAGE/usr/share/icons/hicolor/scalable/apps/dotrino-vault.svg"
+install -D -m0644 "$ROOT/desktop/assets/icon-512.png" "$STAGE/usr/share/icons/hicolor/512x512/apps/dotrino-vault.png"
 
 # 3. unidad systemd --user (apunta al binario en /usr/bin). Es la misma del .rpm: vive en
 # un archivo para que los dos paquetes no puedan decir cosas distintas.
@@ -59,6 +65,7 @@ Maintainer: Dotrino <hola@dotrino.com>
 Section: utils
 Priority: optional
 Depends: systemd, libatomic1
+Recommends: libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libxcursor1, libxi6, libxrandr2, libvulkan1 | libgl1
 Suggests: fido2-tools, yubikey-personalization
 Homepage: https://vault.dotrino.com
 Installed-Size: $INSTALLED_KB

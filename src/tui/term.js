@@ -87,8 +87,13 @@ export function padEnd (s, width) {
 
 // ------------------------------- tema/estilos -------------------------------
 
-export function makeTheme () {
-  const on = supportsColor()
+/**
+ * `color: true` fuerza los estilos aunque no haya terminal: lo usa el puente de la ventana
+ * (`gui.js`), que convierte esos mismos escapes en tramos con estilo. Así las filas que
+ * pinta la TUI son, carácter a carácter, las que pinta la ventana.
+ */
+export function makeTheme ({ color } = {}) {
+  const on = color ?? supportsColor()
   const sgr = (...c) => (on ? CSI + c.join(';') + 'm' : '')
   const R = on ? CSI + '0m' : ''
   const wrap = (open) => (s) => on ? open + s + R : s

@@ -124,8 +124,12 @@ async function instalarDesde (work, pick, release, { binDir, log, fetchVerifiedI
   const src = fs.readdirSync(work).map((d) => path.join(work, d)).find((d) => fs.existsSync(path.join(d, 'dotrino-vaultd')))
   if (!src) return { ok: false, code: 'BAD_TARBALL', reason: 'the tarball has no dotrino-vaultd inside' }
   fs.mkdirSync(binDir, { recursive: true })
+  // LA VENTANA se pone al día con la bóveda, pero solo donde ya estaba: una bóveda de
+  // servidor no tiene por qué recibir un programa de escritorio que nadie instaló.
+  const names = ['dotrino-vault', 'dotrino-vaultd']
+  if (fs.existsSync(path.join(binDir, 'dotrino-vault-desktop')) && fs.existsSync(path.join(src, 'dotrino-vault-desktop'))) names.unshift('dotrino-vault-desktop')
   // El CLI primero y el daemon al final: cambiar el daemon es lo que dispara el reinicio.
-  for (const name of ['dotrino-vault', 'dotrino-vaultd']) {
+  for (const name of names) {
     const tmp = path.join(binDir, `.${name}.new`)
     fs.copyFileSync(path.join(src, name), tmp)
     fs.chmodSync(tmp, 0o755)

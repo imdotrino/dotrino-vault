@@ -28,6 +28,9 @@ TOP="$(mktemp -d)"
 trap 'rm -rf "$TOP"' EXIT
 mkdir -p "$TOP/SPECS" "$TOP/SRC"
 cp "$DIST/dotrino-vaultd" "$DIST/dotrino-vault" "$ROOT/README.md" "$TOP/SRC/"
+# LA VENTANA (ver build-desktop.sh), en /usr/bin al lado del lanzador.
+[ "$(cat "$DIST/.desktop-version" 2>/dev/null)" = "$VER" ] || bash "$ROOT/packaging/build-desktop.sh"
+cp "$DIST/dotrino-vault-desktop" "$ROOT/desktop/assets/dotrino-vault.desktop" "$ROOT/desktop/assets/icon.svg" "$ROOT/desktop/assets/icon-512.png" "$TOP/SRC/"
 cp "$ROOT/packaging/pkg-launcher.sh" "$TOP/SRC/launcher"
 printf '%s\n' "$VER" > "$TOP/SRC/VERSION"
 cp "$ROOT/packaging/dotrino-vault.system.service" "$TOP/SRC/dotrino-vault.service"
@@ -62,6 +65,9 @@ AutoReqProv:    no
 Requires:       systemd
 Requires:       libatomic.so.1()(64bit)
 Suggests:       fido2-tools
+# Lo que la ventana carga al arrancar (no enlazado: no lo ve AutoReq). Un servidor sin
+# escritorio no lo necesita, así que no es obligatorio.
+Recommends:     libxkbcommon libxkbcommon-x11 libwayland-client libXcursor libXi libXrandr
 
 %description
 Keep all your information -files, contacts, passwords and whatever your apps
@@ -79,6 +85,10 @@ install -D -m0644 $TOP/SRC/VERSION               %{buildroot}/usr/lib/dotrino-va
 install -D -m0755 $TOP/SRC/launcher              %{buildroot}/usr/bin/dotrino-vaultd
 install -D -m0755 $TOP/SRC/launcher              %{buildroot}/usr/bin/dotrino-vault
 install -D -m0644 $TOP/SRC/README.md             %{buildroot}/usr/share/doc/dotrino-vault/README.md
+install -D -m0755 $TOP/SRC/dotrino-vault-desktop %{buildroot}/usr/bin/dotrino-vault-desktop
+install -D -m0644 $TOP/SRC/dotrino-vault.desktop %{buildroot}/usr/share/applications/dotrino-vault.desktop
+install -D -m0644 $TOP/SRC/icon.svg              %{buildroot}/usr/share/icons/hicolor/scalable/apps/dotrino-vault.svg
+install -D -m0644 $TOP/SRC/icon-512.png          %{buildroot}/usr/share/icons/hicolor/512x512/apps/dotrino-vault.png
 install -D -m0644 $TOP/SRC/dotrino-vault.service %{buildroot}/usr/lib/systemd/user/dotrino-vault.service
 install -D -m0644 $TOP/SRC/dotrino-vault-dir.service %{buildroot}/usr/lib/systemd/user/dotrino-vault-dir.service
 
@@ -93,6 +103,10 @@ install -D -m0644 $TOP/SRC/dotrino-vault-dir.service %{buildroot}/usr/lib/system
 %attr(0644,root,root) /usr/lib/systemd/user/dotrino-vault-dir.service
 %dir %attr(0755,root,root) /usr/share/doc/dotrino-vault
 %attr(0644,root,root) /usr/share/doc/dotrino-vault/README.md
+%attr(0755,root,root) /usr/bin/dotrino-vault-desktop
+%attr(0644,root,root) /usr/share/applications/dotrino-vault.desktop
+%attr(0644,root,root) /usr/share/icons/hicolor/scalable/apps/dotrino-vault.svg
+%attr(0644,root,root) /usr/share/icons/hicolor/512x512/apps/dotrino-vault.png
 
 %post
 systemctl daemon-reload 2>/dev/null || true

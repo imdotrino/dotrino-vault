@@ -30,9 +30,9 @@
  * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
  */
 import fs from 'node:fs'
-import { execFile, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { parseEnvInput } from '../../lib/src/envtext.js'
-import { createTerm, widthOf } from './term.js'
+import { createTerm, widthOf, makeTheme } from './term.js'
 import { qrToString } from '../qr.js'
 import { dict, otherLang, loadLang, saveLang } from './i18n.js'
 import * as vc from '../vaultControl.js'
@@ -40,6 +40,8 @@ import { readSettings, writeSettings } from '../settings.js'
 import * as hw from '../hwkeys.js'
 import { VERSION } from '../version.js'
 import * as up from '../update.js'
+import * as service from '../service.js'
+import { startDaemonService, restartDaemonService } from '../service.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
 import { machineLine } from '@dotrino/identity/machine'
 
@@ -189,14 +191,6 @@ function lockGlyph (p) {
   return p.locked ? '🔒' : '🔓'
 }
 
-function restartDaemonService () {
-  return new Promise((res, rej) => {
-    execFile('systemctl', ['--user', 'restart', 'dotrino-vault'], { timeout: 20000 }, (err, so, se) => {
-      if (err) rej(new Error(String(se || '').trim() || err.message)); else res()
-    })
-  })
-}
-
 /**
  * AL ENTRAR SE DICE SI HAY VERSIÓN NUEVA, Y SE OFRECE INSTALARLA (dueño, 2026-10-13: como
  * hace la app de Terminal). El servicio ya se actualiza solo; esto es para quien está
@@ -239,20 +233,12 @@ async function installUpdate (term, st, release, { install = up.installUserRelea
   setConfirm(st, {
     text: i.updateRestartOffer(r.v.version),
     onYes: async () => {
-      const rr = await guard(term, st, i.updateRestarting, () => restartDaemonService())
+      const rr = await guard(term, st, i.updateRestarting, () => restartDaemonService({ pid: st.state?.pid, alive: vc.daemonAlive }))
       if (!rr.ok) return
       st.relaunch = true
       st.quit = true
     },
     onNo: () => { flash(st, i.updateRestartLater(r.v.version)) }
-  })
-}
-
-function startDaemonService () {
-  return new Promise((res) => {
-    execFile('systemctl', ['--user', 'start', 'dotrino-vault'], { timeout: 8000 }, (err, so, se) => {
-      res({ ok: !err, err: err ? (String(se || '').trim() || err.message) : '' })
-    })
   })
 }
 
@@ -428,12 +414,45 @@ function settingsRows (st, t) {
   rows.push({ text: ` ${t.bold(frase)}   ${t.accent(i.settingChange)}`, sel: true, meta: { setting: 'updateApproval' } })
   rows.push({ text: t.muted('   ' + i.settingUpdateHint1), sel: false })
   rows.push({ text: t.muted('   ' + i.settingUpdateHint2), sel: false })
+  // ARRANCAR AL INICIAR SESIÓN. En Linux lo deja la unidad de systemd; en Windows y macOS no
+  // había forma de pedirlo sin la línea de comandos, y una bóveda que hay que arrancar a mano
+  // cada día es una bóveda que un día no está.
+  const as = st.autostart
+  if (as) {
+    rows.push({ text: '', sel: false })
+    if (as.how === 'none') {
+      rows.push({ text: ' ' + t.muted(i.settingAutostartNoUnit), sel: false })
+    } else {
+      const f = as.error ? i.settingAutostartUnknown : as.on ? i.settingAutostartOn : i.settingAutostartOff
+      rows.push({ text: ` ${t.bold(f)}   ${t.accent(i.settingChange)}`, sel: true, meta: { setting: 'autostart' } })
+      rows.push({ text: t.muted('   ' + i.settingAutostartHint), sel: false })
+    }
+  }
   return rows
+}
+
+/** Mira si la bóveda arranca sola al iniciar sesión (`service.js`). `st.autostartApi`: pruebas. */
+async function loadAutostart (st) {
+  const api = st.autostartApi || service
+  try { st.autostart = await api.autostartStatus() } catch (e) { st.autostart = { error: e?.message || String(e) } }
 }
 async function onKeySettings (term, st, key) {
   const i = L(st)
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
   if (key.name === 'escape' || ch === 'b') { st.screen = 'profiles'; return true }
+  const selectable = settingsRows(st, makeTheme()).filter((r) => r.sel)
+  if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) { moveSel(st, key, 'settings', selectable.length); return true }
+  const cur = selectable[Math.min(st.sel.settings || 0, selectable.length - 1)]?.meta
+  if (cur?.setting === 'autostart' && (key.name === 'enter' || (key.name === 'char' && key.ch === ' '))) {
+    const api = st.autostartApi || service
+    const on = !st.autostart?.on
+    const r = await guard(term, st, i.settingAutostartSaving, () => (on ? api.enableAutostart() : api.disableAutostart()))
+    if (!r.ok) return true
+    if (!r.v?.ok) { flash(st, i.settingSaveFailed(r.v?.err || '?'), 'danger'); return true }
+    await loadAutostart(st)
+    flash(st, st.autostart?.on ? i.settingAutostartNowOn : i.settingAutostartNowOff)
+    return true
+  }
   if (key.name === 'enter' || (key.name === 'char' && key.ch === ' ')) {
     // Con el ajuste ilegible, Enter lo ESCRIBE de nuevo (encendido: es lo prudente cuando
     // no se sabe qué había); así la pantalla también es la salida del atasco.
@@ -1311,6 +1330,7 @@ async function onKeyProfiles (term, st, key) {
     }))
   } else if (ch === 's') { // ajustes de la bóveda (no de un perfil: no hace falta elegir uno)
     loadSettings(st)
+    await loadAutostart(st)
     st.sel.settings = 0
     st.scroll.settings = { value: 0 }
     st.screen = 'settings'
@@ -2291,6 +2311,8 @@ function promptLoadVars (term, st, { ns = null, pub = null, where }) {
   setInput(st, {
     label: i.loadLabel(where),
     hint: i.loadHint,
+    // La ventana ofrece además elegir el `.env` con el diálogo del sistema.
+    file: true,
     onSubmit: async (raw) => {
       const text = raw.trim()
       st.input = null
@@ -2476,7 +2498,7 @@ function renderTabs (st, t) {
   }).join(' ') + t.muted(i.tabsHint)
 }
 
-function pairingBody (st, t, cols, height) {
+function pairingBody (st, t, cols, height, { qr: withQr = true } = {}) {
   const i = L(st)
   const info = st.pairing
   const lines = []
@@ -2492,8 +2514,9 @@ function pairingBody (st, t, cols, height) {
   if (info.service) lines.push(t.warn(i.pairService(info.service)))
   // QR: se dibuja siempre que quepa de ancho; si es más alto que la pantalla se
   // puede hacer scroll hacia arriba/abajo para verlo completo.
+  // La ventana dibuja el QR como imagen: aquí solo le hacen falta los textos.
   let qr = ''
-  try { qr = qrToString(info.url) } catch (_) {}
+  if (withQr) { try { qr = qrToString(info.url) } catch (_) {} }
   const qrLines = qr ? qr.replace(/\n$/, '').split('\n') : []
   const qrWidth = qrLines.length ? Math.max(...qrLines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').length)) : 0
   if (qrLines.length && qrWidth <= cols) {
@@ -2539,6 +2562,9 @@ function contentHeight (st, cols, rows, help = helpLines(st, L(st), cols, rows))
 }
 
 function render (term, st) {
+  // LA VENTANA dibuja el mismo estado con sus propios widgets (`gui.js`): aquí solo se le
+  // avisa de que hay algo nuevo que pintar.
+  if (term.gui) { term.gui(st); return }
   const t = term.t
   const i = L(st)
   const { cols, rows } = term.size()
@@ -2625,6 +2651,120 @@ function render (term, st) {
   term.render(lines)
 }
 
+// ------------------------- modelo para la ventana --------------------------
+
+/** Las filas de cada pantalla de lista, y qué índice de selección usa. */
+const LIST_SCREENS = {
+  profiles: [profileRows, 'profiles'],
+  devices: [deviceRows, 'devices'],
+  secrets: [secretRows, 'secrets'],
+  logins: [loginRows, 'logins'],
+  me: [meRows, null],
+  caps: [capsRows, 'caps'],
+  devvars: [devVarRows, 'devvars'],
+  pairmode: [pairModeRows, 'pairmode'],
+  doors: [doorRows, 'doors'],
+  settings: [settingsRows, 'settings'],
+  paircaps: [pairCapsRows, 'paircaps']
+}
+
+/**
+ * LO MISMO QUE PINTA `render`, pero como datos: la ventana de escritorio (`gui.js` y la app
+ * de `desktop/`) lo dibuja con sus propios controles. Las filas, los títulos, los avisos y
+ * las acciones salen de las MISMAS funciones que usa la TUI, con sus estilos como escapes
+ * que el puente convierte en tramos. Así no hay una segunda copia de ninguna pantalla.
+ *
+ * `t` es el tema con color forzado (`makeTheme({ color: true })`).
+ */
+export function viewModel (st, t) {
+  const i = L(st)
+  const s = st.state
+  const up = st.daemonUp
+  const ap = activeProfile(st)
+  const vm = {
+    lang: st.lang,
+    version: s?.version || VERSION,
+    uiVersion: VERSION,
+    daemonUp: !!up,
+    daemonText: up ? i.daemonRunning : i.daemonStopped,
+    dir: vc.vaultDir(),
+    screen: st.screen,
+    active: ap ? { id: ap.id, name: ap.name || i.noName, protected: !!ap.protected, locked: !!ap.locked, fingerprint: ap.fingerprint || '' } : null,
+    activeLabel: i.activeVault,
+    notice: null,
+    tabs: null,
+    title: '',
+    rows: null,
+    selected: -1,
+    body: null,
+    qr: null,
+    status: null,
+    help: [],
+    input: null,
+    confirm: null
+  }
+  // El aviso de la segunda línea de la TUI, con el mismo orden de prioridad.
+  if (up && s?.version && VERSION !== 'dev' && s.version !== VERSION) vm.notice = { text: i.daemonStale(s.version, VERSION), kind: 'warn' }
+  else if (up && s?.updateAsk?.version) {
+    const u = s.updateAsk
+    const dia = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+    vm.notice = u.result === 'pending'
+      ? { text: i.updateWaiting(u.version, dia(u.askedAt + 24 * 60 * 60 * 1000)), kind: 'muted' }
+      : { text: i.updateNotApproved(u.version, dia(u.askedAt)), kind: 'warn' }
+  } else if (st.update?.release) vm.notice = { text: i.updateAvailable(st.update.release.version), kind: 'warn' }
+
+  if (INNER_TABS.includes(st.screen)) vm.tabs = INNER_TABS.map((k) => ({ key: k, label: tabLabel(i, k), active: st.screen === k }))
+  else vm.title = title(i, st.screen)
+
+  const list = LIST_SCREENS[st.screen]
+  if (list) {
+    const [rowsOf, selKey] = list
+    const rows = rowsOf(st, t)
+    let n = 0
+    vm.rows = rows.map((r) => ({ text: r.text, sel: !!r.sel, idx: r.sel ? n++ : -1 }))
+    vm.selected = selKey ? Math.max(0, Math.min(st.sel[selKey] || 0, n - 1)) : -1
+    if (!n) vm.selected = -1
+  } else if (st.screen === 'pairing' && st.pairing) {
+    vm.body = pairingBody(st, t, 999, 999, { qr: false })
+    vm.qr = st.pairing.url
+    vm.code = st.pairing.b64 || st.pairing.payload || ''
+  } else if (st.screen === 'join') vm.body = joinBody(st, t, 999)
+
+  if (st.busy) vm.status = { text: st.busy, kind: 'busy' }
+  else if (st.flash) vm.status = { text: st.flash.text, kind: st.flash.kind || 'ok' }
+  if (st.input) {
+    const inp = st.input
+    vm.input = { label: inp.label || '', hint: inp.hint || '', mask: !!inp.mask, value: inp.value || '', file: !!inp.file }
+  } else if (st.confirm) vm.confirm = { text: st.confirm.text, defaultYes: !!st.confirm.defaultYes }
+  else vm.help = helpSegs(i, st.screen, st)
+  return vm
+}
+
+/** La pantalla de «el servicio no está», como datos. */
+export function downModel (st) {
+  const i = L(st)
+  return {
+    lang: st.lang,
+    down: true,
+    uiVersion: VERSION,
+    dir: vc.vaultDir(),
+    title: i.downTitle,
+    body: [i.downBody1 + ' ' + i.downBody2],
+    help: i.downHelp,
+    status: st.busy ? { text: st.busy, kind: 'busy' } : st.flash ? { text: st.flash.text, kind: st.flash.kind || 'warn' } : null
+  }
+}
+
+/** Seleccionar la fila `idx` (entre las seleccionables) de la pantalla actual. */
+export function selectRow (st, idx) {
+  const list = LIST_SCREENS[st.screen]
+  if (!list || !list[1]) return false
+  st.sel[list[1]] = Math.max(0, idx | 0)
+  return true
+}
+
+export { onKeyDown }
+
 // --------------------------- pantalla daemon caído -------------------------
 
 async function daemonDownScreen (term, st) {
@@ -2641,7 +2781,7 @@ async function daemonDownScreen (term, st) {
       i.downBody1,
       i.downBody2,
       '',
-      t.bold('S') + i.downStart + t.muted('systemctl --user start dotrino-vault'),
+      t.bold('S') + i.downStart + t.muted(process.platform === 'linux' ? 'systemctl --user start dotrino-vault' : ''),
       t.bold('R') + i.downRecheck,
       t.bold('l') + i.downLang,
       t.bold('Q') + i.downQuit,
@@ -2656,27 +2796,39 @@ async function daemonDownScreen (term, st) {
     term.render(lines)
 
     const key = await term.readKey()
-    const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-    if (ch === 'q' || key.name === 'ctrl-c') return false
-    if (ch === 'l') { toggleLang(st); continue }
-    if (ch === 'r') { if (vc.daemonAlive()) return true; flash(st, L(st).stillDown, 'warn') }
-    if (ch === 's') {
-      st.busy = L(st).starting // (no re-render aquí; mensaje simple)
-      flash(st, L(st).startingShort, 'warn'); term.render(lines)
-      const r = await startDaemonService()
-      await sleep(1500)
-      if (vc.daemonAlive()) return true
-      flash(st, r.ok ? L(st).startedNotReady : L(st).startFailed(r.err), 'danger')
-      st.busy = null
-    }
+    const r = await onKeyDown(st, key, () => term.render(lines))
+    if (r !== null) return r
   }
+}
+
+/**
+ * Una tecla en la pantalla de «el servicio no está». Devuelve `false` (salir), `true` (ya
+ * está: seguir a la TUI) o `null` (seguir aquí). La comparten la TUI y la ventana.
+ */
+async function onKeyDown (st, key, redraw = () => {}) {
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (ch === 'q' || key.name === 'ctrl-c') return false
+  if (ch === 'l') { toggleLang(st); return null }
+  if (ch === 'r') { if (vc.daemonAlive()) return true; flash(st, L(st).stillDown, 'warn') }
+  if (ch === 's') {
+    st.busy = L(st).starting
+    flash(st, L(st).startingShort, 'warn'); redraw()
+    const r = await startDaemonService()
+    // Un daemon recién lanzado tarda en escribir su `state.json`: se le espera un poco, no
+    // un tiempo fijo, para no dar por fallido uno que solo iba lento.
+    for (let n = 0; n < 20 && !vc.daemonAlive(); n++) await sleep(250)
+    st.busy = null
+    if (vc.daemonAlive()) return true
+    flash(st, r.ok ? L(st).startedNotReady : L(st).startFailed(r.err), 'danger')
+  }
+  return null
 }
 
 // ---------------------------------- loop -----------------------------------
 
-export async function runTui () {
-  const term = createTerm()
-  const st = {
+/** El estado de una sesión de la pantalla de control (TUI o ventana). */
+export function newSession () {
+  return {
     screen: 'profiles', // se arranca en la lista de bóvedas: hay que ENTRAR a una
     lang: loadLang(), // es/en — se conmuta con `l` y se recuerda en prefs.json
     sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0, doors: 0, settings: 0 },
@@ -2684,7 +2836,7 @@ export async function runTui () {
     capsDrafts: {},
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
     unlockedHere: new Set(),
-    // Su contraseña, SOLO en memoria y SOLO mientras la TUI esté abierta: sirve para
+    // Su contraseña, SOLO en memoria y SOLO mientras la pantalla esté abierta: sirve para
     // reabrir sin volver a preguntar si el daemon pierde el estado (ver
     // `reunlockSilently`). Se olvida con `k`, al quitar la contraseña y al salir.
     sessionPwd: new Map(),
@@ -2704,107 +2856,147 @@ export async function runTui () {
     input: null,
     confirm: null
   }
+}
+
+/** Con el daemon ya vivo: la primera foto y la búsqueda de versión nueva. */
+export async function startSession (term, st) {
+  st.flash = null
+  st.state = vc.readState()
+  st.daemonUp = true
+  await refreshAll(term, st)
+  checkForUpdate(st)
+}
+
+/** Lo que se mira antes de cada pintado: estado del daemon, aviso de versión, candado, flash. */
+export async function beforeRender (term, st) {
+  st.state = vc.readState()
+  st.daemonUp = vc.daemonAlive()
+  // El aviso de versión nueva sale cuando no hay otra cosa preguntando.
+  if (st.update?.offer && !st.input && !st.confirm) offerUpdate(term, st)
+  // ¿Se cerró sola mientras nadie miraba? Olvida su contraseña y sal de su contenido.
+  await forgetAutoLocked(term, st)
+  // caducar el flash a los ~4 s
+  if (st.flash && Date.now() - st.flash.at > 4000) st.flash = null
+}
+
+/** Cada cuánto despertar sin tecla (0 = solo con tecla). */
+export function tickFor (st) {
+  const base = (st.screen === 'pairing' || st.screen === 'join' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
+  // Despertar a tiempo del bloqueo automático, además del sondeo de la pantalla.
+  const wake = autoLockWakeIn(st)
+  let tick = base && wake ? Math.min(base, wake) : (base || wake)
+  // Mientras se mira si hay versión nueva hay que despertar sin tecla, o el aviso no
+  // saldría hasta que tocaras algo.
+  if (st.update?.checking) tick = tick ? Math.min(tick, 500) : 500
+  return tick
+}
+
+/**
+ * UNA TECLA. Devuelve `false` si hay que salir. Es el corazón de la pantalla de control y
+ * lo comparten la TUI y la ventana: una acción nueva aparece en las dos sin tocar la otra.
+ */
+export async function handleKey (term, st, key) {
+  if (key.name === 'resize') return true
+  // Un despertar del bloqueo automático no es una tecla: ya se atendió arriba, y las
+  // pantallas que NO esperan `tick` (todas menos aparatos y emparejamiento) no tienen
+  // por qué verlo.
+  if (key.name === 'tick' && !['pairing', 'join', 'devices'].includes(st.screen)) return true
+  // input/confirm se AWAITan: serializa las ops contra el daemon (ver onInputKey).
+  // Ctrl-C dentro de un modal lo CANCELA (no sale); fuera de un modal, sale.
+  if (st.input) { await onInputKey(st, key); return true }
+  if (st.confirm) { await onConfirmKey(st, key); return !st.quit }
+  if (key.name === 'ctrl-c') return false
+
+  // TECLEAR ES USO. El candado se cierra a los 5 min de no usarse, y hasta ahora
+  // «usar» solo contaba cuando algo pedía al daemon: podías estar media hora
+  // navegando esta pantalla y se cerraba igual, que es lo contrario de lo que se
+  // quería. Se avisa como mucho una vez por minuto —el plazo son cinco, así que
+  // sobra— para no escribir un archivo por tecla.
+  seguirAqui(st)
+
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  // 'q' global sale — preguntando antes si hay permisos sin guardar.
+  if (ch === 'q') {
+    if (draftChanges(st).length) { unlessDrafts(st, () => { st.quit = true }); return true }
+    return false
+  }
+  // 'l' global: idioma es⇄en en cualquier pantalla (por eso el candado es 'c').
+  if (ch === 'l') { toggleLang(st); return true }
+  // ←→ cambia entre las pestañas de la bóveda entrada (Dispositivos/Scopes).
+  if ((key.name === 'left' || key.name === 'right') && INNER_TABS.includes(st.screen)) {
+    const n = INNER_TABS.indexOf(st.screen)
+    await openTab(term, st, INNER_TABS[(n + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length])
+    return true
+  }
+  // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
+  // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
+  if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
+    // El borrador es de ESTA bóveda: al salir de ella se guarda o se tira.
+    unlessDrafts(st, () => { st.capsDrafts = {}; st.screen = 'profiles' })
+    return true
+  }
+
+  if (st.screen === 'profiles') return onKeyProfiles(term, st, key)
+  if (st.screen === 'devices') return onKeyDevices(term, st, key)
+  if (st.screen === 'secrets') return onKeySecrets(term, st, key)
+  if (st.screen === 'logins') return onKeyLogins(term, st, key)
+  if (st.screen === 'me') return onKeyMe(term, st, key)
+  if (st.screen === 'caps') return onKeyCaps(term, st, key)
+  if (st.screen === 'devvars') return onKeyDevVars(term, st, key)
+  if (st.screen === 'pairmode') return onKeyPairMode(term, st, key)
+  if (st.screen === 'doors') return onKeyDoors(term, st, key)
+  if (st.screen === 'settings') return onKeySettings(term, st, key)
+  if (st.screen === 'paircaps') return onKeyPairCaps(term, st, key)
+  if (st.screen === 'pairing') return onKeyPairing(term, st, key)
+  if (st.screen === 'join') return onKeyJoin(term, st, key)
+  return true
+}
+
+/**
+ * Ir a una pestaña de la bóveda entrada. El perfil y los inicios de sesión se piden al
+ * ENTRAR en su pestaña, no al arrancar: es contenido del usuario y no hay por qué sacarlo
+ * del cifrado si nadie lo está mirando.
+ */
+export async function openTab (term, st, tab) {
+  if (!INNER_TABS.includes(tab) || !INNER_TABS.includes(st.screen)) return
+  st.screen = tab
+  if (st.screen === 'me' && st.me === undefined) await refreshMe(term, st)
+  if (st.screen === 'logins' && st.logins === null) await refreshLogins(term, st)
+}
+
+/**
+ * AL SALIR SE VUELVE A CERRAR lo que se abrió aquí. Sin esto, teclear la contraseña una
+ * vez dejaba la bóveda abierta para todo el que pasara por esta máquina hasta el
+ * siguiente reinicio del servicio — un candado que solo se cierra reiniciando no es un
+ * candado. (Si la pantalla muere de un tirón —kill, ventana cerrada— no hay quien lo haga:
+ * ahí el cierre lo pone el reinicio, como antes.)
+ */
+export async function endSession (st) {
+  st.sessionPwd.clear()
+  for (const id of st.unlockedHere) { try { await vc.lockProfile(id) } catch (_) {} }
+}
+
+export async function runTui () {
+  const term = createTerm()
+  const st = newSession()
 
   try {
     // Arranque: exige daemon vivo.
     if (!vc.daemonAlive()) {
       const cont = await daemonDownScreen(term, st)
       if (!cont) { term.close(); return }
-      st.flash = null
     }
-    st.state = vc.readState()
-    st.daemonUp = true
-    await refreshAll(term, st)
-    checkForUpdate(st)
+    await startSession(term, st)
 
     let running = true
     while (running) {
-      st.state = vc.readState()
-      st.daemonUp = vc.daemonAlive()
-      // El aviso de versión nueva sale cuando no hay otra cosa preguntando.
-      if (st.update?.offer && !st.input && !st.confirm) offerUpdate(term, st)
-      // ¿Se cerró sola mientras nadie miraba? Olvida su contraseña y sal de su contenido.
-      await forgetAutoLocked(term, st)
-      // caducar el flash a los ~4 s
-      if (st.flash && Date.now() - st.flash.at > 4000) st.flash = null
+      await beforeRender(term, st)
       render(term, st)
-
-      const base = (st.screen === 'pairing' || st.screen === 'join' || (st.screen === 'devices' && !st.input && !st.confirm)) ? 800 : 0
-      // Despertar a tiempo del bloqueo automático, además del sondeo de la pantalla.
-      const wake = autoLockWakeIn(st)
-      let tick = base && wake ? Math.min(base, wake) : (base || wake)
-      // Mientras se mira si hay versión nueva hay que despertar sin tecla, o el aviso no
-      // saldría hasta que tocaras algo.
-      if (st.update?.checking) tick = tick ? Math.min(tick, 500) : 500
-      const key = await term.readKey(tick)
-
-      if (key.name === 'resize') continue
-      // Un despertar del bloqueo automático no es una tecla: ya se atendió arriba, y las
-      // pantallas que NO esperan `tick` (todas menos aparatos y emparejamiento) no tienen
-      // por qué verlo.
-      if (key.name === 'tick' && !['pairing', 'join', 'devices'].includes(st.screen)) continue
-      // input/confirm se AWAITan: serializa las ops contra el daemon (ver onInputKey).
-      // Ctrl-C dentro de un modal lo CANCELA (no sale); fuera de un modal, sale.
-      if (st.input) { await onInputKey(st, key); continue }
-      if (st.confirm) { await onConfirmKey(st, key); if (st.quit) running = false; continue }
-      if (key.name === 'ctrl-c') { running = false; continue }
-
-      // TECLEAR ES USO. El candado se cierra a los 5 min de no usarse, y hasta ahora
-      // «usar» solo contaba cuando algo pedía al daemon: podías estar media hora
-      // navegando esta pantalla y se cerraba igual, que es lo contrario de lo que se
-      // quería. Se avisa como mucho una vez por minuto —el plazo son cinco, así que
-      // sobra— para no escribir un archivo por tecla.
-      seguirAqui(st)
-
-      const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-      // 'q' global sale — preguntando antes si hay permisos sin guardar.
-      if (ch === 'q') {
-        if (draftChanges(st).length) unlessDrafts(st, () => { st.quit = true })
-        else running = false
-        continue
-      }
-      // 'l' global: idioma es⇄en en cualquier pantalla (por eso el candado es 'c').
-      if (ch === 'l') { toggleLang(st); continue }
-      // ←→ cambia entre las pestañas de la bóveda entrada (Dispositivos/Scopes).
-      if ((key.name === 'left' || key.name === 'right') && INNER_TABS.includes(st.screen)) {
-        const n = INNER_TABS.indexOf(st.screen)
-        st.screen = INNER_TABS[(n + (key.name === 'right' ? 1 : -1) + INNER_TABS.length) % INNER_TABS.length]
-        // El perfil se pide al ENTRAR en su pestaña, no al arrancar: es contenido del
-        // usuario y no hay por qué sacarlo del cifrado si nadie lo está mirando.
-        if (st.screen === 'me' && st.me === undefined) await refreshMe(term, st)
-        if (st.screen === 'logins' && st.logins === null) await refreshLogins(term, st)
-        continue
-      }
-      // Esc/'b' desde una pestaña vuelve a la lista de bóvedas (salir de la bóveda
-      // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
-      if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
-        // El borrador es de ESTA bóveda: al salir de ella se guarda o se tira.
-        unlessDrafts(st, () => { st.capsDrafts = {}; st.screen = 'profiles' })
-        continue
-      }
-
-      if (st.screen === 'profiles') running = await onKeyProfiles(term, st, key)
-      else if (st.screen === 'devices') running = await onKeyDevices(term, st, key)
-      else if (st.screen === 'secrets') running = await onKeySecrets(term, st, key)
-      else if (st.screen === 'logins') running = await onKeyLogins(term, st, key)
-      else if (st.screen === 'me') running = await onKeyMe(term, st, key)
-      else if (st.screen === 'caps') running = await onKeyCaps(term, st, key)
-      else if (st.screen === 'devvars') running = await onKeyDevVars(term, st, key)
-      else if (st.screen === 'pairmode') running = await onKeyPairMode(term, st, key)
-      else if (st.screen === 'doors') running = await onKeyDoors(term, st, key)
-      else if (st.screen === 'settings') running = await onKeySettings(term, st, key)
-      else if (st.screen === 'paircaps') running = await onKeyPairCaps(term, st, key)
-      else if (st.screen === 'pairing') running = await onKeyPairing(term, st, key)
-      else if (st.screen === 'join') running = await onKeyJoin(term, st, key)
+      const key = await term.readKey(tickFor(st))
+      running = await handleKey(term, st, key)
     }
   } finally {
-    // AL SALIR SE VUELVE A CERRAR lo que se abrió aquí. Sin esto, teclear la contraseña una
-    // vez dejaba la bóveda abierta para todo el que pasara por esta máquina hasta el
-    // siguiente reinicio del servicio — un candado que solo se cierra reiniciando no es un
-    // candado. (Si la TUI muere de un tirón —kill, ventana cerrada— no hay quien lo haga:
-    // ahí el cierre lo pone el reinicio, como antes.)
-    st.sessionPwd.clear()
-    for (const id of st.unlockedHere) { try { await vc.lockProfile(id) } catch (_) {} }
+    await endSession(st)
     term.close()
   }
   // TRAS ACTUALIZAR Y REINICIAR, esta pantalla también se vuelve a abrir: es el binario

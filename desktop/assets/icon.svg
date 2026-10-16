@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Dotrino Vault">
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34d8c0"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="#0b1220"/>
+  <!-- escudo (custodia / autoridad propia) -->
+  <path d="M256 92 C300 112 348 124 396 132 L396 266 C396 350 332 400 256 426 C180 400 116 350 116 266 L116 132 C164 124 212 112 256 92 Z"
+        fill="url(#shield)"/>
+  <!-- cerradura (la llave maestra que nunca sale) -->
+  <circle cx="256" cy="246" r="36" fill="#0b1220"/>
+  <path d="M256 270 L236 344 L276 344 Z" fill="#0b1220"/>
+</svg>

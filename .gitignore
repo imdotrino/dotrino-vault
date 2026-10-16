@@ -5,6 +5,8 @@ node_modules/
 dist/
 .build/
 .build-win/
+.build-mac/
+desktop/target/
 
 # datos locales del vault — NUNCA commitear: contienen la llave maestra en claro
 .dotrino/

@@ -28,6 +28,9 @@ fi
 # --- 2. binarios --------------------------------------------------------------
 rm -f "$BIN_DIR/dotrino-vaultd" "$BIN_DIR/dotrino-vault"
 rm -f "$HOME/.local/share/dotrino/bin/dotrino-vaultd" "$HOME/.local/share/dotrino/bin/dotrino-vault"
+# La ventana y su entrada en el menú.
+rm -f "$BIN_DIR/dotrino-vault-desktop" "$HOME/.local/share/dotrino/bin/dotrino-vault-desktop"
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/dotrino-vault.desktop" "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/dotrino-vault.svg"
 echo "  binaries  → removed from $BIN_DIR and ~/.local/share/dotrino/bin"
 
 # --- 3. datos (solo con --purge) ---------------------------------------------
