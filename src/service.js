@@ -22,6 +22,7 @@ import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dataDir, ensureDir } from './paths.js'
+import { ipcRead } from './ipc.js'
 
 const run = (cmd, args, timeout = 15000) => new Promise((resolve) => {
   execFile(cmd, args, { timeout, windowsHide: true }, (err, so, se) => {
@@ -54,6 +55,20 @@ export function spawnDaemon () {
   } catch (e) {
     return { ok: false, err: e.message }
   } finally { fs.closeSync(fd) }
+}
+
+/**
+ * Para el daemon suelto que esté corriendo (el de `spawnDaemon`), y espera a que se vaya.
+ * Hace falta antes de dárselo a un supervisor: el candado del dir de datos solo deja uno,
+ * y el del supervisor saldría con error y se relanzaría en bucle.
+ */
+async function stopLooseDaemon () {
+  const st = ipcRead(path.join(dataDir(), 'state.json'), null)
+  const alive = () => { try { return !!st?.pid && (process.kill(st.pid, 0) || true) } catch { return false } }
+  if (!alive()) return
+  try { process.kill(st.pid, 'SIGTERM') } catch (_) {}
+  for (let n = 0; n < 40 && alive(); n++) await new Promise((r) => setTimeout(r, 250))
+  if (alive()) throw new Error(`the running vault (pid ${st.pid}) did not stop`)
 }
 
 // ------------------------------- Linux ------------------------------------
@@ -150,9 +165,11 @@ export async function enableAutostart () {
     const file = launchAgentFile()
     ensureDir(path.dirname(file))
     fs.writeFileSync(file, launchAgentPlist(dc), { mode: 0o644 })
-    // Si ya hay un daemon suelto corriendo, el agente lo encontraría ocupado y se
-    // relanzaría en bucle: el candado del dir de datos solo deja uno.
     await run('launchctl', ['bootout', `${guiDomain()}/${LABEL}`], 5000)
+    // Si ya hay un daemon suelto corriendo, el agente lo encontraría ocupado y se
+    // relanzaría en bucle: el candado del dir de datos solo deja uno. Se para y lo levanta
+    // el agente, que es quien lo cuidará desde ahora.
+    try { await stopLooseDaemon() } catch (e) { return { ok: false, err: e.message } }
     return run('launchctl', ['bootstrap', guiDomain(), file])
   }
   if (process.platform === 'win32') {
