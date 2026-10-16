@@ -6,7 +6,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { PAGE_BYTES } from '@dotrino/store/core'
-import { openThreadStore, STORE_READ_METHODS } from '../src/threadStore.js'
+import { openThreadStore, STORE_READ_METHODS } from '../lib/src/core/threadStore.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'thread-sync-'))
 const bytes = (v) => Buffer.byteLength(JSON.stringify(v))
@@ -14,7 +15,7 @@ const bytes = (v) => Buffer.byteLength(JSON.stringify(v))
 // Vector compartido con @dotrino/store (test/vault-sync.spec.ts): si cambia uno, cambian los dos.
 test('the digest matches the vector shared with the store page', async () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   m.importThreads({ threads: { t: [{ id: 'b', ts: 2 }, { id: 'a', ts: 1 }] } })
   assert.equal((await m.getThreadDigests()).t.digest, '01599daf8046b8f94a7198d1ecbbf0a2665c246d9187f8d2bdf562cc78bf512e')
   assert.deepEqual(Object.keys(await m.getThreadDigests({ keys: ['t', 'nope'] })), ['t'])
@@ -25,7 +26,7 @@ test('the digest matches the vector shared with the store page', async () => {
 
 test('a thread keeps more than 1000 entries (it used to drop the oldest in silence)', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   const buyers = Array.from({ length: 2500 }, (_, i) => ({ id: `b${i}`, ts: i + 1 }))
   m.importThreads({ threads: { 'facturero.buyers': buyers } })
   assert.equal(m.listThread({ threadKey: 'facturero.buyers' }).length, 2500)
@@ -34,7 +35,7 @@ test('a thread keeps more than 1000 entries (it used to drop the oldest in silen
 
 test('indexes and entries come in pages under the byte budget and cover everything', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   const xml = 'x'.repeat(11_000) // lo que ocupa una factura de facturero
   const threads = {}
   for (let day = 1; day <= 3; day++) threads[`inv.${day}`] = Array.from({ length: 60 }, (_, i) => ({ id: `${day}-${i}`, ts: i + 1, xml }))
@@ -79,7 +80,7 @@ test('indexes and entries come in pages under the byte budget and cover everythi
 
 test('tombs travel both ways and a deleted entry does not come back', () => {
   const d = tmp()
-  const { methods: m, raw } = openThreadStore(d)
+  const { methods: m, raw } = openThreadStore(nodeDisk(d))
   m.importThreads({ threads: { p: [{ id: 'p1', ts: 3 }, { id: 'p2', ts: 4 }] } })
 
   // Un aparato borró p1 sin conexión y ahora lo cuenta.
@@ -97,14 +98,14 @@ test('tombs travel both ways and a deleted entry does not come back', () => {
   // Borrar aquí deja lápida con el ts de lo borrado, y sobrevive a reabrir el archivo.
   m.removeThread({ threadKey: 'p' })
   assert.deepEqual(Object.keys(raw().tombs.p).sort(), ['p1', 'p2'])
-  const again = openThreadStore(d).methods
+  const again = openThreadStore(nodeDisk(d)).methods
   assert.deepEqual(again.getThreadIndexes({ keys: ['p'] }).indexes.p.tombs.map((r) => r.slice(0, 2)).sort(), [['p1', 8], ['p2', 4]])
   fs.rmSync(d, { recursive: true, force: true })
 })
 
 test('upsert lets the writer win a tie; merge keeps what was there', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   m.importThreads({ threads: { t: [{ id: 'a', ts: 5, v: 'old' }] } })
   m.importThreads({ threads: { t: [{ id: 'a', ts: 5, v: 'copy' }] }, mode: 'merge' })
   assert.equal(m.listThread({ threadKey: 't' })[0].v, 'old')
@@ -116,7 +117,7 @@ test('upsert lets the writer win a tie; merge keeps what was there', () => {
 
 test('opens merge by keeping the larger count and the later time', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   m.recordOpen({ appId: 'a.dotrino.com' })
   const merged = m.mergeOpens({ opens: { 'a.dotrino.com': { count: 5, ts: 1 }, 'b.dotrino.com': { count: 2, ts: 7 } } })
   assert.equal(merged['a.dotrino.com'].count, 5)
@@ -128,7 +129,7 @@ test('opens merge by keeping the larger count and the later time', () => {
 
 test('a thread key named __proto__ is refused, not written into the prototype', () => {
   const d = tmp()
-  const { methods: m, raw } = openThreadStore(d)
+  const { methods: m, raw } = openThreadStore(nodeDisk(d))
   assert.throws(() => m.appendMessage({ threadKey: '__proto__', entry: { id: 'x' } }), /threadKey required/)
   m.importThreads({ threads: JSON.parse('{"__proto__":[{"id":"x","ts":1}]}') })
   assert.equal(Object.getPrototypeOf(raw().threads), Object.prototype)

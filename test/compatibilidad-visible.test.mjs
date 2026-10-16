@@ -37,7 +37,7 @@ test('el cliente mete su versión DENTRO de lo que firma, no en el envoltorio', 
 })
 
 test('la bóveda apunta la versión donde YA comprueba la firma', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('const verifyChain = async (args)')
   assert.notEqual(i, -1, 'verifyChain va envuelto: una comprobación copiada ocho veces son siete olvidos')
   const cuerpo = src.slice(i, i + 400)
@@ -46,13 +46,13 @@ test('la bóveda apunta la versión donde YA comprueba la firma', () => {
 })
 
 test('la bóveda anuncia lo suyo en cada respuesta', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('const reply = (to, obj) => {')
   assert.match(src.slice(i, i + 900), /v: MI_VERSION/)
 })
 
 test('se ve en la lista de dispositivos: en el mensaje y en la CLI', () => {
-  const vault = leer('src/vault.js')
+  const vault = leer('lib/src/core/vault.js')
   assert.match(vault, /running: x\.sub \? versionDe\(x\.sub\) : null/, 'DEVICES_RESULT lleva lo que corre cada uno')
   // Sin fijar la línea entera: lo que importa es que el volcado del que sale `members`
   // lleve lo que corre cada uno. Atar el texto exacto convierte cualquier añadido en un
@@ -69,7 +69,7 @@ test('se ve en la lista de dispositivos: en el mensaje y en la CLI', () => {
  * originaron esto lo que faltó fue enterarse, no parar.
  */
 test('el dictamen NO corta a nadie: informa', () => {
-  const vault = leer('src/vault.js')
+  const vault = leer('lib/src/core/vault.js')
   const i = vault.indexOf('const apuntarVersion')
   const cuerpo = vault.slice(i, i + 600)
   assert.doesNotMatch(cuerpo, /return reply\(|MSG\.ERROR/,
@@ -78,7 +78,7 @@ test('el dictamen NO corta a nadie: informa', () => {
 })
 
 test('la lista de rotas sale del registro común, que viaja con esta versión', () => {
-  const vault = leer('src/vault.js')
+  const vault = leer('lib/src/core/vault.js')
   assert.match(vault, /brokenOf\(loadManifest\(\)\)/)
   const m = loadManifest()
   assert.ok(Array.isArray(brokenOf(m)))

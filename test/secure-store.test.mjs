@@ -10,14 +10,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openThreadStore, STORE_READ_METHODS } from '../src/threadStore.js'
+import { openThreadStore, STORE_READ_METHODS } from '../lib/src/core/threadStore.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'secure-'))
 const clean = (d) => fs.rmSync(d, { recursive: true, force: true })
 
 test('guardar, listar, abrir y borrar una ficha', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
 
   const { id } = m['secure.put']({ meta: 'META-SELLADA', enc: 'VALOR-SELLADO' })
   assert.ok(id, 'la ficha nace con id')
@@ -38,7 +39,7 @@ test('guardar, listar, abrir y borrar una ficha', () => {
 
 test('editar conserva id y fecha de creación, y actualiza updatedAt', async () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   const { id } = m['secure.put']({ meta: 'm1', enc: 'v1' })
   const created = m['secure.get']({ id }).ts
   await new Promise((r) => setTimeout(r, 5))
@@ -54,7 +55,7 @@ test('editar conserva id y fecha de creación, y actualiza updatedAt', async () 
 
 test('en el disco no se ve nada: ni el valor ni el nombre', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   m['secure.put']({ meta: 'BancoDelPacifico', enc: 'contrasena-secreta' })
   const raw = fs.readFileSync(path.join(d, 'threads.json'), 'utf8')
   assert.ok(!raw.includes('contrasena-secreta'), 'el valor no queda en claro (cifrado en reposo)')
@@ -64,15 +65,15 @@ test('en el disco no se ve nada: ni el valor ni el nombre', () => {
 
 test('sobrevive a reabrir el store', () => {
   const d = tmp()
-  const { id } = openThreadStore(d).methods['secure.put']({ meta: 'm', enc: 'v' })
-  const { methods: m2 } = openThreadStore(d)
+  const { id } = openThreadStore(nodeDisk(d)).methods['secure.put']({ meta: 'm', enc: 'v' })
+  const { methods: m2 } = openThreadStore(nodeDisk(d))
   assert.equal(m2['secure.get']({ id }).enc, 'v')
   clean(d)
 })
 
 test('topes: sin valor, demasiado grande, demasiadas fichas', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   assert.throws(() => m['secure.put']({ meta: 'm' }), /enc required/)
   assert.throws(() => m['secure.put']({ meta: { no: 'sellado' }, enc: 'v' }), /sealed string/)
   assert.throws(() => m['secure.put']({ enc: 'x'.repeat(64 * 1024 + 1) }), /too large/)
@@ -89,7 +90,7 @@ test('leer datos sensibles NO se conforma con `vault:read`', () => {
 
 test('los datos sensibles no se mezclan con hilos ni aperturas', () => {
   const d = tmp()
-  const { methods: m } = openThreadStore(d)
+  const { methods: m } = openThreadStore(nodeDisk(d))
   m['secure.put']({ meta: 'm', enc: 'v' })
   m.appendMessage({ threadKey: 't', entry: { text: 'hola' } })
   assert.equal(m.listThreadKeys().length, 1)

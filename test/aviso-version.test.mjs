@@ -44,7 +44,7 @@ test('99 no es mayor que 100', () => {
  * mañana se vuelve a pedir y se vuelve a perder, porque mirar el teléfono puede tardar
  * horas. Un pedido que nunca llega a tiempo es una función que no existe.
  */
-import { createApprovals, PENDING_TTL_MS, UPDATE_TTL_MS } from '../src/approvals.js'
+import { createApprovals, PENDING_TTL_MS, UPDATE_TTL_MS } from '../lib/src/core/approvals.js'
 
 test('un comando caduca en cinco minutos; una actualización aguanta el día', () => {
   let t = 1_000_000

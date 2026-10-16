@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openNotices, NOTICES_FILE, NOTICE_TTL_MS } from '../src/notices.js'
+import { openNotices, NOTICES_FILE, NOTICE_TTL_MS } from '../lib/src/core/notices.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'notices-'))
 const atRest = { encrypt: (t) => 'enc.' + Buffer.from(t).toString('base64'), decrypt: (t) => { if (!t.startsWith('enc.')) throw new Error('not encrypted'); return Buffer.from(t.slice(4), 'base64').toString() } }
@@ -15,7 +16,7 @@ const atRest = { encrypt: (t) => 'enc.' + Buffer.from(t).toString('base64'), dec
 test('lo apuntado se lista, sobrevive a un reinicio y no va en claro', () => {
   const dir = tmp()
   const t = 1000
-  const n = openNotices({ dir, atRest, now: () => t })
+  const n = openNotices({ disk: nodeDisk(dir, { atRest }), now: () => t })
   assert.deepEqual(n.list(), [])
   const a = n.updated({ version: '0.147.0', from: '0.146.0' })
   assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'updated', product: '@dotrino/vaultd', version: '0.147.0', from: '0.146.0', ts: 1000 })
@@ -25,13 +26,13 @@ test('lo apuntado se lista, sobrevive a un reinicio y no va en claro', () => {
   const raw = fs.readFileSync(path.join(dir, NOTICES_FILE), 'utf8')
   assert.ok(raw.startsWith('enc.') && !raw.includes('0.147.0'), 'cifrado en reposo')
   assert.equal((fs.statSync(path.join(dir, NOTICES_FILE)).mode & 0o777), 0o600)
-  assert.deepEqual(openNotices({ dir, atRest, now: () => t }).list(), [a, b])
+  assert.deepEqual(openNotices({ disk: nodeDisk(dir, { atRest }), now: () => t }).list(), [a, b])
 })
 
 test('caduca a las 24 h', () => {
   const dir = tmp()
   let t = 1000
-  const n = openNotices({ dir, atRest, now: () => t })
+  const n = openNotices({ disk: nodeDisk(dir, { atRest }), now: () => t })
   n.updated({ version: '0.147.0' })
   t += NOTICE_TTL_MS - 1
   assert.equal(n.list().length, 1)
@@ -43,17 +44,17 @@ test('caduca a las 24 h', () => {
 
 test('un archivo ilegible no es «sin avisos»: se lanza', () => {
   const dir = tmp()
-  openNotices({ dir, atRest }).updated({ version: '0.147.0' })
+  openNotices({ disk: nodeDisk(dir, { atRest }) }).updated({ version: '0.147.0' })
   fs.writeFileSync(path.join(dir, NOTICES_FILE), 'basura')
-  assert.throws(() => openNotices({ dir, atRest }), (e) => e.code === 'notices-unreadable')
+  assert.throws(() => openNotices({ disk: nodeDisk(dir, { atRest }) }), (e) => e.code === 'notices-unreadable')
 })
 
 test('sin versión no hay aviso', () => {
-  assert.throws(() => openNotices({ dir: tmp(), atRest }).updated({}), (e) => e.code === 'bad-notice')
+  assert.throws(() => openNotices({ disk: nodeDisk(tmp(), { atRest }) }).updated({}), (e) => e.code === 'bad-notice')
 })
 
 test('«necesita permisos de administrador» es otro aviso, con las mismas reglas; uno desconocido no entra', () => {
-  const n = openNotices({ dir: tmp(), atRest, now: () => 7 })
+  const n = openNotices({ disk: nodeDisk(tmp(), { atRest }), now: () => 7 })
   const a = n.add('update-needs-root', { version: '0.148.0', from: '0.147.0' })
   assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'update-needs-root', product: '@dotrino/vaultd', version: '0.148.0', from: '0.147.0', ts: 7 })
   const b = n.add('update-needs-root', { version: '1.3.0', product: '@dotrino/terminal-agent', deviceId: 'AB12-CD34', label: 'servidor' })

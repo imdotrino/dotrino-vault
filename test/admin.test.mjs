@@ -400,7 +400,7 @@ test('el mostrador de la bóveda ofrece lo que el módulo le va a pedir', async 
   const fs = await import('node:fs')
   const { fileURLToPath } = await import('node:url')
   const raiz = fileURLToPath(new URL('..', import.meta.url))
-  const vault = fs.readFileSync(raiz + 'src/vault.js', 'utf8')
+  const vault = fs.readFileSync(raiz + 'lib/src/core/vault.js', 'utf8')
   for (const metodo of ['list', 'set', 'setMany', 'recipients']) {
     assert.match(vault, new RegExp('async ' + metodo + ' \\('),
       `el mostrador de variables no ofrece «${metodo}»`)

@@ -15,12 +15,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { startVault } from '../src/vault.js'
-import { openSecretsStore } from '../src/secretsStore.js'
-import { makeSealer } from '../src/sealer.js'
+import { openSecretsStore } from '../lib/src/core/secretsStore.js'
+import { makeSealer } from '../lib/src/core/sealer.js'
 import { enrollService, fetchSecrets } from '../lib/src/service.js'
 import { encodeInvite } from '../lib/src/invite.js'
 import { readJson } from '../src/paths.js'
 import { atRestFor } from '../src/atrest.js'
+import { nodeDisk } from '../src/disk.js'
 
 /**
  * Aprobar el emparejamiento Y conceder `unattended`.
@@ -76,7 +77,7 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
 
   // --- 3) LA MIGRACION. Es lo unico que exige la contrasena.
   const CLAVE = new Uint8Array(32).fill(7) // en produccion: derivada de la frase del perfil
-  const store = openSecretsStore(dir, { sealer: makeSealer() })
+  const store = openSecretsStore(nodeDisk(dir), { sealer: makeSealer() })
   const miembros = (await vault.profileMembers()).members
   const r = await store.migrate((owner) => (owner.startsWith('ns:') ? miembros.filter((x) => x.cn === owner.slice(3)) : miembros), CLAVE)
   ok('migra v3 -> v4', r.migrated === true)
@@ -95,7 +96,7 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
 
   // --- 4b) Y SE PUEDE SEGUIR ESCRIBIENDO. Si esto fallara, migrar dejaria el vault
   // de solo lectura: es el camino que recorre `secret set` despues del despliegue.
-  const tras = openSecretsStore(dir, { sealer: makeSealer() })
+  const tras = openSecretsStore(nodeDisk(dir), { sealer: makeSealer() })
   await tras.set('proxy', 'NUEVA', 'puesta-despues-de-sellar', false, CLAVE)
   ok('se sigue escribiendo tras sellar', (await tras.openBundle('proxy', null, CLAVE)).NUEVA === 'puesta-despues-de-sellar')
   ok('y lo de antes sigue ahi', (await tras.openBundle('proxy', null, CLAVE)).TURN_KEY === 'la-clave-de-verdad')
@@ -104,7 +105,7 @@ test('el ciclo completo: v3 en claro -> llave del agente -> migracion -> v4 sell
   // (Se prueba contra el store directo, que es lo que veria alguien con una copia:
   // el `openSecrets` del vault cae a la llave de la maquina cuando el perfil no
   // tiene contrasena, y eso esta dicho en voz alta al arrancar.)
-  const conElDisco = openSecretsStore(dir, { sealer: makeSealer() })
+  const conElDisco = openSecretsStore(nodeDisk(dir), { sealer: makeSealer() })
   let cerrado = false
   try { await conElDisco.openBundle('proxy', null, new Uint8Array(32).fill(9)) } catch { cerrado = true }
   ok('con una frase EQUIVOCADA no se abre', cerrado)

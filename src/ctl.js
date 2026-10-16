@@ -30,7 +30,7 @@ import { pubkeyId } from '@dotrino/identity/capabilities'
 import { dataDir } from './paths.js'
 // EL CANAL LOCAL VA CIFRADO (ver `ipc.js`): por aquí salen la contraseña y los valores.
 import { ipcRead, ipcWrite } from './ipc.js'
-import { assertVar } from './secretsStore.js'
+import { assertVar } from '../lib/src/core/secretsStore.js'
 import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
@@ -39,7 +39,7 @@ import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, en
 import { VERSION } from './version.js'
 import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
-import { COMM_CN } from './commKey.js'
+import { COMM_CN } from '../lib/src/core/commKey.js'
 import { machineLine } from '@dotrino/identity/machine'
 
 const dir = dataDir()

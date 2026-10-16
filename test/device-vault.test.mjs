@@ -227,7 +227,7 @@ const mensajesDe = (archivo) => new Set(
     .map(m => m[1]))
 
 test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
-  const daemon = mensajesDe('src/vault.js')
+  const daemon = mensajesDe('lib/src/core/vault.js')
   const dispositivo = mensajesDe('lib/src/index.js')
 
   // Lo que el daemon hace y aquí no tendría sentido, con su motivo. Cualquier otra

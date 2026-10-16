@@ -14,10 +14,11 @@ import path from 'node:path'
 import { makeDeviceKey, signWithDevice, makePairingCode, commitCode, signDelegationWith } from '@dotrino/identity/capabilities'
 import { createEnrollDesk } from '../lib/src/enroll.js'
 import { selfMachine } from '../lib/src/proc.js'
-import { openMachines, MACHINES_FILE } from '../src/machines.js'
+import { openMachines, MACHINES_FILE } from '../lib/src/core/machines.js'
 import { atRestFor } from '../src/atrest.js'
 import { __test as V } from '../src/tui/app.js'
 import { makeTheme } from '../src/tui/term.js'
+import { nodeDisk } from '../src/disk.js'
 
 test('selfMachine: un proceso de Node dice su hostname y su sistema', () => {
   const m = selfMachine()
@@ -58,7 +59,7 @@ test('al emparejarse, lo que dice el aparato entra en el acta con él', async ()
 test('la bóveda guarda lo último que dijo cada aparato, cifrado, y solo reescribe si cambia', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'machines-'))
   const atRest = atRestFor(dir)
-  const m = openMachines({ dir, atRest })
+  const m = openMachines({ disk: nodeDisk(dir, { atRest }) })
   assert.equal(m.of('P'), null)
   assert.equal(m.note('P', { kind: 'node', os: 'Linux 6.1', name: 'pc' }), true)
   assert.equal(m.note('P', { kind: 'node', os: 'Linux 6.1', name: 'pc' }), false, 'lo mismo no se reescribe')
@@ -67,9 +68,9 @@ test('la bóveda guarda lo último que dijo cada aparato, cifrado, y solo reescr
   const raw = fs.readFileSync(path.join(dir, MACHINES_FILE), 'utf8')
   assert.equal(raw.includes('Linux'), false, 'no queda nada en claro en el disco')
   // Sobrevive a reiniciar la bóveda.
-  assert.equal(openMachines({ dir, atRest }).of('P').os, 'Linux 7.0')
+  assert.equal(openMachines({ disk: nodeDisk(dir, { atRest }) }).of('P').os, 'Linux 7.0')
   fs.writeFileSync(path.join(dir, MACHINES_FILE), 'roto')
-  assert.throws(() => openMachines({ dir, atRest }), (e) => e.code === 'machines-unreadable')
+  assert.throws(() => openMachines({ disk: nodeDisk(dir, { atRest }) }), (e) => e.code === 'machines-unreadable')
 })
 
 test('la TUI pinta dónde corre cada aparato, pegado a su nombre', () => {

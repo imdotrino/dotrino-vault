@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { machineKey, atRestFor, migrateFile, isEncrypted, encryptText, decryptText } from '../src/atrest.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'atrest-'))
 
@@ -59,9 +60,9 @@ test('sin archivo no hay nada que migrar', () => {
  * anterior se lee igual y queda cifrado al abrirlo.
  */
 test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', async () => {
-  const { openStore } = await import('../src/store.js')
-  const { openThreadStore } = await import('../src/threadStore.js')
-  const { openSecretsStore } = await import('../src/secretsStore.js')
+  const { openStore } = await import('../lib/src/core/store.js')
+  const { openThreadStore } = await import('../lib/src/core/threadStore.js')
+  const { openSecretsStore } = await import('../lib/src/core/secretsStore.js')
   const d = tmp()
 
   // Una instalación anterior: los tres archivos, en claro.
@@ -70,11 +71,11 @@ test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', a
   fs.writeFileSync(path.join(d, 'secrets.json'), JSON.stringify({ schemaVersion: 1, ns: { proxy: { TURN_KEY_ID: 'TOKEN' } } }))
 
   // Abrir basta para migrar: no se le pide nada al usuario.
-  assert.equal(openStore(d).getSetting('nota'), 'ARBOL')
-  assert.equal(openThreadStore(d).methods.listThread({ threadKey: 'k' })[0].texto, 'HILO')
+  assert.equal(openStore(nodeDisk(d)).getSetting('nota'), 'ARBOL')
+  assert.equal(openThreadStore(nodeDisk(d)).methods.listThread({ threadKey: 'k' })[0].texto, 'HILO')
   // Un v1 en claro se lee igual: el store lo sube a v3 y sigue sirviendo sin sellar
   // (sellar exige la contraseña, y abrir no debe pedirla).
-  assert.equal(openSecretsStore(d).bundleFor('proxy').entries.TURN_KEY_ID.v, 'TOKEN')
+  assert.equal(openSecretsStore(nodeDisk(d)).bundleFor('proxy').entries.TURN_KEY_ID.v, 'TOKEN')
 
   for (const [f, secreto] of [['vault.json', 'ARBOL'], ['threads.json', 'HILO'], ['secrets.json', 'TOKEN']]) {
     const raw = fs.readFileSync(path.join(d, f), 'utf8')
@@ -85,13 +86,13 @@ test('los stores del vault escriben CIFRADO, y migran lo que venía en claro', a
 })
 
 test('el salt viaja con los datos: mover un perfil sin él los dejaría ilegibles', async () => {
-  const { openSecretsStore } = await import('../src/secretsStore.js')
-  const { makeSealer } = await import('../src/sealer.js')
+  const { openSecretsStore } = await import('../lib/src/core/secretsStore.js')
+  const { makeSealer } = await import('../lib/src/core/sealer.js')
   const source = tmp(); const target = tmp()
   // CON SELLADOR, aunque la variable sea pública: desde 2026-09-02 las públicas van en
   // sobre igual que las privadas, así que escribir cualquiera lo necesita. Lo que se prueba
   // aquí es el SALT, no la visibilidad.
-  const abrir = (dir) => openSecretsStore(dir, { sealer: makeSealer(), defaultKey: () => new Uint8Array(32).fill(3), recipients: () => [] })
+  const abrir = (dir) => openSecretsStore(nodeDisk(dir), { sealer: makeSealer(), defaultKey: () => new Uint8Array(32).fill(3), recipients: () => [] })
   await abrir(source).set('proxy', 'TURN_KEY_ID', 'TOKEN', true)
 
   // Migración legacy → dir del perfil, tal como la hace profiles.js.

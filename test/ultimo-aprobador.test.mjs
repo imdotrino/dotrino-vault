@@ -7,7 +7,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { lastApproverGone } from '../src/approvals.js'
+import { lastApproverGone } from '../lib/src/core/approvals.js'
 
 test('había aprobadores, la limpieza se llevó el último: se dice cuál', () => {
   assert.deepEqual(lastApproverGone(['TEL'], [], ['TEL', 'CLI']), ['TEL'])

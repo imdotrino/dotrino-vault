@@ -14,10 +14,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openSubacta, isAcceptable, OPS } from '../src/subacta.js'
+import { openSubacta, isAcceptable, OPS } from '../lib/src/core/subacta.js'
 import { atRestFor } from '../src/atrest.js'
 import { makeRenounce } from '@dotrino/identity/acta'
 import { fileURLToPath } from 'node:url'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'subacta-'))
 const par = async () => {
@@ -58,11 +59,11 @@ test('sobrevive al reinicio: se guarda en disco y cifrada en reposo', async () =
   const tel = await par()
   const r = await makeRenounce({ member: tel.pub, caps: ['admin'], privateJwk: tel.privateJwk })
 
-  const s1 = openSubacta(dir, atRestFor(dir))
+  const s1 = openSubacta(nodeDisk(dir))
   assert.equal((await s1.add(r)).ok, true)
   assert.equal(s1.count, 1)
 
-  const s2 = openSubacta(dir, atRestFor(dir))
+  const s2 = openSubacta(nodeDisk(dir))
   assert.equal(s2.count, 1, 'un reinicio no puede perder la renuncia que protege la cuenta')
   assert.equal(s2.forMember(tel.pub).length, 1)
   assert.equal(s2.forMember('otra-llave').length, 0)
@@ -75,7 +76,7 @@ test('juntar dos es unir: la misma entrada no se guarda dos veces', async () => 
   const dir = tmp()
   const tel = await par()
   const r = await makeRenounce({ member: tel.pub, caps: ['admin'], privateJwk: tel.privateJwk })
-  const s = openSubacta(dir, atRestFor(dir))
+  const s = openSubacta(nodeDisk(dir))
   assert.equal((await s.add(r)).ok, true)
   const otra = await s.add(r)
   assert.equal(otra.ok, false)
@@ -93,7 +94,7 @@ test('al absorber se vacía lo absorbido, no todo', async () => {
   const b = await par()
   const ra = await makeRenounce({ member: a.pub, caps: ['admin'], privateJwk: a.privateJwk })
   const rb = await makeRenounce({ member: b.pub, caps: ['sign'], privateJwk: b.privateJwk })
-  const s = openSubacta(dir, atRestFor(dir))
+  const s = openSubacta(nodeDisk(dir))
   await s.add(ra)
 
   const enVuelo = s.drain()          // lo que se va a sellar
@@ -111,7 +112,7 @@ test('al absorber se vacía lo absorbido, no todo', async () => {
  * puede pasar es que alguien llame al pilar directamente y se salte la lista.
  */
 test('la bóveda envuelve al acta en UN sitio, no en los diecisiete mostradores', () => {
-  const src = fs.readFileSync(fileURLToPath(new URL('../src/vault.js', import.meta.url)), 'utf8')
+  const src = fs.readFileSync(fileURLToPath(new URL('../lib/src/core/vault.js', import.meta.url)), 'utf8')
   assert.match(src, /import \* as ActaPilar from '@dotrino\/identity\/acta'/,
     'el pilar entra con otro nombre para que `Acta` sea el envoltorio')
   for (const fn of ['memberCan', 'memberCanScope', 'memberCanReadSecrets', 'memberCanSign', 'memberScopes', 'effectiveCaps']) {
@@ -121,7 +122,7 @@ test('la bóveda envuelve al acta en UN sitio, no en los diecisiete mostradores'
 })
 
 test('el unlock absorbe, y renunciar no falla con la bóveda cerrada', () => {
-  const src = fs.readFileSync(fileURLToPath(new URL('../src/vault.js', import.meta.url)), 'utf8')
+  const src = fs.readFileSync(fileURLToPath(new URL('../lib/src/core/vault.js', import.meta.url)), 'utf8')
 
   // LA FUNCIÓN ENTERA, no los primeros N caracteres: la ventana fija se pasaba de
   // frágil — un comentario nuevo dentro de `takeMasterKey` empujaba la línea buscada

@@ -7,7 +7,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { makeGeneration, sealAccount as encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
-import { openThreadStore } from '../src/threadStore.js'
+import { openThreadStore } from '../lib/src/core/threadStore.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'reseal-'))
 
@@ -19,7 +20,7 @@ async function miembro (label) {
 
 test('the vault reseals old-generation envelopes, keeps the old copy and does not serve it', async () => {
   const d = tmp()
-  const store = openThreadStore(d)
+  const store = openThreadStore(nodeDisk(d))
   const boveda = await miembro('boveda'); const pcx = await miembro('pcx')
   const g1 = await makeGeneration({ members: [boveda, pcx], gen: 1 })
   const firma = await encryptWithCek({ cek: g1.cek, gen: 1, plaintext: 'p12' })
@@ -53,17 +54,17 @@ test('the vault reseals old-generation envelopes, keeps the old copy and does no
   assert.ok(!JSON.stringify(store.methods.exportThreads()).includes('"gen":1'))
 
   // Sobrevive a reabrir (va al disco) y no repite trabajo.
-  const again = openThreadStore(d)
+  const again = openThreadStore(nodeDisk(d))
   assert.equal(again.methods.listThread({ threadKey: 'facturero.settings' })[0].envelope.gen, 2)
   assert.deepEqual(await again.resealStaleEnvelopes({ gen: 2, reseal }), { changed: 0, entries: 0, skipped: 0 })
   fs.rmSync(d, { recursive: true, force: true })
 })
 
 test('policy: the previous envelope is kept at least a year, then it can go', async () => {
-  const { RESEALED_KEEP_MS } = await import('../src/threadStore.js')
+  const { RESEALED_KEEP_MS } = await import('../lib/src/core/threadStore.js')
   assert.ok(RESEALED_KEEP_MS >= 365 * 24 * 60 * 60 * 1000, 'at least one year (owner policy, 2026-09-30)')
   const d = tmp()
-  const store = openThreadStore(d)
+  const store = openThreadStore(nodeDisk(d))
   const a = await miembro('a')
   const g1 = await makeGeneration({ members: [a], gen: 1 })
   const g2 = await makeGeneration({ members: [a], gen: 2 })

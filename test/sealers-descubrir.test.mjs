@@ -13,7 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeDeviceKey, signDelegationWith } from '@dotrino/identity/capabilities'
-import { startSealersPublisher, CANAL } from '../src/sealers.js'
+import { startSealersPublisher, CANAL } from '../lib/src/core/sealers.js'
 
 const SCOPE = ['vault:secrets:sealers']
 

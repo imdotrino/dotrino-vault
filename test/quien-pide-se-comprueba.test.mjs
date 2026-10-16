@@ -39,7 +39,7 @@ const cuerpoDe = (src, cabecera) => {
 }
 
 test('la bóveda no dice a quién envolver antes de saber quién pregunta', () => {
-  const cuerpo = cuerpoDe(leer('src/vault.js'), 'async function handleProfile (')
+  const cuerpo = cuerpoDe(leer('lib/src/core/vault.js'), 'async function handleProfile (')
 
   const control = cuerpo.indexOf('await verifyChain(')
   const acta = cuerpo.indexOf('actaAllows(')
@@ -69,7 +69,7 @@ test('el replicador comprueba el papel, la frescura y el acta antes de entregar 
 })
 
 test('un acta anunciada por un desconocido no entra en una bóveda sin acta propia', () => {
-  const cuerpo = cuerpoDe(leer('src/vault.js'), 'async function handleAdminEvent (')
+  const cuerpo = cuerpoDe(leer('lib/src/core/vault.js'), 'async function handleAdminEvent (')
   assert.match(cuerpo, /profileActa/, 'hay que mirar si esta bóveda tiene acta propia')
   const mira = cuerpo.indexOf('profileActa')
   const adopta = cuerpo.indexOf('adoptActa')
@@ -89,7 +89,7 @@ test('un acta anunciada por un desconocido no entra en una bóveda sin acta prop
  * viejo lo quita otra vez.
  */
 test('una renuncia que no quita nada no se honra', () => {
-  const cuerpo = cuerpoDe(leer('src/vault.js'), 'async function handleRenounce (')
+  const cuerpo = cuerpoDe(leer('lib/src/core/vault.js'), 'async function handleRenounce (')
   const mira = cuerpo.indexOf('effectiveCaps(')
   const absorbe = cuerpo.indexOf('absorbRenounce(')
   assert.notEqual(mira, -1, 'hay que mirar lo que el miembro tiene HOY')

@@ -19,6 +19,7 @@ import {
 } from '../src/atrest.js'
 import { clearCache } from '../lib/src/kek.js'
 import { keyDirName } from '../src/keyowner.js'
+import { nodeDisk } from '../src/disk.js'
 
 const FAKE_KMS = fileURLToPath(new URL('./fixtures/fake-kms.mjs', import.meta.url))
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kek-'))
@@ -299,17 +300,17 @@ test('si el KMS no responde, el perfil NO se crea a medias', async () => {
 })
 
 test('los stores del vault funcionan igual con la clave de un KMS', async () => {
-  const { openStore } = await import('../src/store.js')
+  const { openStore } = await import('../lib/src/core/store.js')
   const d = tmp()
   writeConfig(d, kmsConfig())
 
-  openStore(d).setSetting('nota', 'CONTENIDO')
+  openStore(nodeDisk(d)).setSetting('nota', 'CONTENIDO')
   const raw = fs.readFileSync(path.join(d, 'vault.json'), 'utf8')
   assert.ok(isEncrypted(raw))
   assert.ok(!raw.includes('CONTENIDO'))
 
   clearCache()
-  assert.equal(openStore(d).getSetting('nota'), 'CONTENIDO')
+  assert.equal(openStore(nodeDisk(d)).getSetting('nota'), 'CONTENIDO')
   rm(d)
 })
 

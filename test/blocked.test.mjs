@@ -7,7 +7,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openBlocked, BLOCKED_FILE } from '../src/blocked.js'
+import { openBlocked, BLOCKED_FILE } from '../lib/src/core/blocked.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'blocked-'))
 const atRest = { encrypt: (t) => 'enc.' + Buffer.from(t).toString('base64'), decrypt: (t) => t.startsWith('enc.') ? Buffer.from(t.slice(4), 'base64').toString() : t }
@@ -15,7 +16,7 @@ const atRest = { encrypt: (t) => 'enc.' + Buffer.from(t).toString('base64'), dec
 test('bloquear, listar, desbloquear; y lo escrito no va en claro', () => {
   const dir = tmp()
   let t = 1000
-  const b = openBlocked({ dir, atRest, now: () => t })
+  const b = openBlocked({ disk: nodeDisk(dir, { atRest }), now: () => t })
   assert.deepEqual(b.list(), [])
   const e = b.block({ pub: 'PUB-A', deviceId: 'AAAA-0001', label: 'portátil', by: 'BBBB-0002', reason: 'bad-code' })
   assert.equal(e.since, 1000)
@@ -27,16 +28,16 @@ test('bloquear, listar, desbloquear; y lo escrito no va en claro', () => {
   assert.ok(raw.startsWith('enc.') && !raw.includes('PUB-A'), 'cifrado en reposo')
   assert.equal((fs.statSync(path.join(dir, BLOCKED_FILE)).mode & 0o777), 0o600)
   // Otra instancia lee lo mismo.
-  assert.deepEqual(openBlocked({ dir, atRest }).list()[0].deviceId, 'AAAA-0001')
+  assert.deepEqual(openBlocked({ disk: nodeDisk(dir, { atRest }) }).list()[0].deviceId, 'AAAA-0001')
   assert.equal(b.unblock('PUB-A'), true)
   assert.equal(b.unblock('PUB-A'), false)
-  assert.deepEqual(openBlocked({ dir, atRest }).list(), [])
+  assert.deepEqual(openBlocked({ disk: nodeDisk(dir, { atRest }) }).list(), [])
 })
 
 test('un archivo ilegible lanza, no vacía la lista', () => {
   const dir = tmp()
   fs.writeFileSync(path.join(dir, BLOCKED_FILE), 'enc.' + Buffer.from('{"v":7}').toString('base64'))
-  assert.throws(() => openBlocked({ dir, atRest }), (e) => e.code === 'blocked-unreadable')
+  assert.throws(() => openBlocked({ disk: nodeDisk(dir, { atRest }) }), (e) => e.code === 'blocked-unreadable')
   fs.writeFileSync(path.join(dir, BLOCKED_FILE), 'esto no es json')
-  assert.throws(() => openBlocked({ dir, atRest }), (e) => e.code === 'blocked-unreadable')
+  assert.throws(() => openBlocked({ disk: nodeDisk(dir, { atRest }) }), (e) => e.code === 'blocked-unreadable')
 })

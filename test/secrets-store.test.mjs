@@ -14,9 +14,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openSecretsStore, NeedsPassword, NeedsMigration, RECOVERY } from '../src/secretsStore.js'
+import { openSecretsStore, NeedsPassword, NeedsMigration, RECOVERY } from '../lib/src/core/secretsStore.js'
 import { readJson, writeJson } from '../src/paths.js'
 import { atRestFor } from '../src/atrest.js'
+import { nodeDisk } from '../src/disk.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-secrets-'))
 
@@ -94,7 +95,7 @@ const miembros = (...pubs) => pubs.map((p) => ({ pub: p, encPub: `enc-${p}` }))
 /** Una privada de miembro para el falso: `enc-A` ↔ `A`. */
 const privDe = (pub) => ({ d: `enc-${pub}`.replace('enc-', 'enc-') })
 
-const abrir = (dir, sealer, opts = {}) => openSecretsStore(dir, {
+const abrir = (dir, sealer, opts = {}) => openSecretsStore(nodeDisk(dir), {
   sealer, defaultKey: () => MAQUINA, ...opts
 })
 
@@ -382,7 +383,7 @@ test('sin sellador: se sirve y se lista, pero no se escribe una privada', async 
   await s.set('proxy', 'K', 'v')
   await s.set('proxy', 'URL', 'wss://x', true)
 
-  const mudo = openSecretsStore(dir, {})            // el daemon arrancando sin nada
+  const mudo = openSecretsStore(nodeDisk(dir), {})            // el daemon arrancando sin nada
   assert.deepEqual(mudo.list().proxy.map((x) => x.key).sort(), ['K', 'URL'])
   // Sin sellador se listan los NOMBRES, incluidos los de las públicas — pero ningún valor:
   // desde 2026-09-02 una pública va en sobre igual que una privada.

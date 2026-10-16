@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
-import { makeSealer, WrongPassword } from '../src/sealer.js'
+import { makeSealer, WrongPassword } from '../lib/src/core/sealer.js'
 import { makeDeviceEncKey, importDeviceEncKey } from '@dotrino/identity'
 import { openWrap } from '@dotrino/identity/content'
 

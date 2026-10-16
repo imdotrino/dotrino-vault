@@ -45,7 +45,7 @@ test('el sobre va de ida: lo sella el admin, lo abre solo la bóveda', async () 
  * nuevo y el candado del nonce no sirve de nada — lo único que quedaría es la efímera.
  */
 test('el nonce se compara contra el de DENTRO del sobre', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   assert.notEqual(i, -1, 'el mostrador de apertura tiene que existir')
   const cuerpo = src.slice(i, i + 2000)
@@ -56,7 +56,7 @@ test('el nonce se compara contra el de DENTRO del sobre', () => {
 })
 
 test('la efímera se tira ANTES de usarla: un segundo intento no tiene con qué', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   const cuerpo = src.slice(i, i + 2000)
   const saca = cuerpo.indexOf("aperturas.get('pendiente')")
@@ -67,7 +67,7 @@ test('la efímera se tira ANTES de usarla: un segundo intento no tiene con qué'
 })
 
 test('la derivada se borra de memoria pase lo que pase', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   const cuerpo = src.slice(i, i + 2000)
   assert.match(cuerpo, /finally \{\s*derivada\.fill\(0\)/,
@@ -79,7 +79,7 @@ test('la derivada se borra de memoria pase lo que pase', () => {
  * responde y no sabe por qué — que es exactamente el silencio del que venimos.
  */
 test('el rechazo lleva el freno', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   const cuerpo = src.slice(i, i + 2000)
   assert.match(cuerpo, /tries: e\.tries/, 'cuántos intentos van')
@@ -93,7 +93,7 @@ test('el rechazo lleva el freno', () => {
  * que se le da a quien no la tiene puesta — eso es copy, no un dato.)
  */
 test('la bóveda nunca recibe la contraseña, solo lo que sale del molino', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('const unlockDesk =')
   const cuerpo = src.slice(i, i + 3200)
   assert.match(cuerpo, /payload\.key/, 'lo que llega es la derivada')
@@ -102,7 +102,7 @@ test('la bóveda nunca recibe la contraseña, solo lo que sale del molino', () =
 })
 
 test('sin contraseña de admin no se puede abrir a distancia, y se dice', () => {
-  const src = leer('src/vault.js')
+  const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async begin ({ by })')
   const cuerpo = src.slice(i, i + 700)
   assert.match(cuerpo, /has no admin password/, 'se enciende a propósito, no viene puesto')
@@ -139,7 +139,7 @@ test('la consola usa la MISMA cripto que la bóveda, no una copia', () => {
 })
 
 test('la bóveda le dice a la consola si está cerrada y si se puede abrir', () => {
-  const vault = leer('src/vault.js')
+  const vault = leer('lib/src/core/vault.js')
   assert.match(vault, /locked: \(\(\) => \{ try \{ return !!isLocked\(\)/, 'que está cerrada')
   assert.match(vault, /remoteUnlock: \(\(\) => \{ try \{ return !!hasSecondary\(\)/,
     'y si hay contraseña de admin puesta: son dos cosas distintas y llevan a acciones distintas')

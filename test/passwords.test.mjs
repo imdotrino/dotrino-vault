@@ -14,7 +14,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createPasswordDesk, convertPasswords } from '../src/passwords.js'
+import { createPasswordDesk, convertPasswords } from '../lib/src/core/passwords.js'
 import { SealedVault, ProxyTransport, makeEncKeypair, seal, open, isSealed, CODES } from '@dotrino/passmanager'
 import { openWrap, decryptWithCek } from '@dotrino/identity/content'
 import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'

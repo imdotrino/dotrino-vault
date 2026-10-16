@@ -59,7 +59,7 @@ test('un archivo cualquiera con ese nombre NO se toma por un mostrador', () => {
  * lo haga, el socket deja de ser un atajo y pasa a ser una puerta de atrás.
  */
 test('ningún handler decide nada por el canal de entrada', async () => {
-  const src = fs.readFileSync(new URL('../src/vault.js', import.meta.url), 'utf8')
+  const src = fs.readFileSync(new URL('../lib/src/core/vault.js', import.meta.url), 'utf8')
   const sospechas = src.split('\n')
     .map((l, i) => [i + 1, l])
     .filter(([, l]) => /from\s*(===|!==|\.startsWith\()\s*['"`]local/.test(l))
@@ -82,8 +82,8 @@ test('ningún handler decide nada por el canal de entrada', async () => {
  * funciona.
  */
 test('con el directorio abierto a otros, el mostrador local no se abre', async () => {
-  const fuente = fs.readFileSync(new URL('../src/vault.js', import.meta.url), 'utf8')
-  const i = fuente.indexOf('function abrirMostradorLocal (')
+  const fuente = fs.readFileSync(new URL('../src/platform.js', import.meta.url), 'utf8')
+  const i = fuente.indexOf('function openLocalDesk (')
   assert.notEqual(i, -1)
   const cuerpo = fuente.slice(i, i + 3000)
 

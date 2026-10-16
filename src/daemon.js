@@ -29,7 +29,7 @@ import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelea
 import { VERSION } from './version.js'
 import { readSettings } from './settings.js'
 import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo, readRootTold, writeRootTold, shouldTellRoot } from './updateApproval.js'
-import { UPDATE_TTL_MS } from './approvals.js'
+import { UPDATE_TTL_MS } from '../lib/src/core/approvals.js'
 import crypto from 'node:crypto'
 
 const readJsonSafe = (f) => ipcRead(f, null)

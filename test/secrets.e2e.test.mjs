@@ -1147,7 +1147,7 @@ test('sin nadie encendido que la reparta, la deuda se queda A LA VISTA', async (
  */
 test('el cajón del perfil: la deuda la dice `recipientsOf`, y lo público no debe nada', async () => {
   const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
-  const { makeSealer } = await import('../src/sealer.js')
+  const { makeSealer } = await import('../lib/src/core/sealer.js')
   const encDe = new Map()
   const nuevo = async (label, caps, cn = null) => {
     const k = await makeDeviceKey()
@@ -1336,7 +1336,7 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
     /ctx/, 'un comando que no es el que corre ese pid se deniega')
 
   // 4) Lo no atendido vence solo; y DEVOLVERLE el permiso vuelve a la entrega directa.
-  const { createApprovals } = await import('../src/approvals.js')
+  const { createApprovals } = await import('../lib/src/core/approvals.js')
   let t = 0
   const a = createApprovals({ now: () => t, pendingTtlMs: 10 })
   const r = a.request({ ns: 'x', device: 'd', deviceId: 'D', ek: 'e' })
