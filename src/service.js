@@ -63,12 +63,18 @@ export function spawnDaemon () {
  * y el del supervisor saldría con error y se relanzaría en bucle.
  */
 async function stopLooseDaemon () {
-  const st = ipcRead(path.join(dataDir(), 'state.json'), null)
-  const alive = () => { try { return !!st?.pid && (process.kill(st.pid, 0) || true) } catch { return false } }
-  if (!alive()) return
-  try { process.kill(st.pid, 'SIGTERM') } catch (_) {}
-  for (let n = 0; n < 40 && alive(); n++) await new Promise((r) => setTimeout(r, 250))
-  if (alive()) throw new Error(`the running vault (pid ${st.pid}) did not stop`)
+  const pid = ipcRead(path.join(dataDir(), 'state.json'), null)?.pid
+  if (!pidAlive(pid)) return
+  try { process.kill(pid, 'SIGTERM') } catch (_) {}
+  await waitGone(pid)
+}
+
+const pidAlive = (pid) => { try { return !!pid && (process.kill(pid, 0) || true) } catch { return false } }
+
+/** Espera a que el proceso se vaya (y suelte el candado del dir de datos). */
+async function waitGone (pid) {
+  for (let n = 0; n < 40 && pidAlive(pid); n++) await new Promise((r) => setTimeout(r, 250))
+  if (pidAlive(pid)) throw new Error(`the running vault (pid ${pid}) did not stop`)
 }
 
 // ------------------------------- Linux ------------------------------------
@@ -187,10 +193,13 @@ export async function disableAutostart () {
     // `bootout` también lo PARA. Se vuelve a lanzar suelto para no apagarle la bóveda a
     // quien solo quería que no arrancara sola la próxima vez.
     const wasRunning = (await run('launchctl', ['print', `${guiDomain()}/${LABEL}`], 5000)).ok
+    const pid = ipcRead(path.join(dataDir(), 'state.json'), null)?.pid
     await run('launchctl', ['bootout', `${guiDomain()}/${LABEL}`], 5000)
     fs.rmSync(file, { force: true })
-    if (wasRunning) spawnDaemon()
-    return { ok: true, err: '' }
+    if (!wasRunning) return { ok: true, err: '' }
+    // El suelto entra cuando el del agente ya soltó el candado; antes chocaría con él.
+    try { await waitGone(pid) } catch (e) { return { ok: false, err: e.message } }
+    return spawnDaemon()
   }
   if (process.platform === 'win32') {
     const r = await run('reg', ['delete', RUN_KEY, '/v', RUN_VALUE, '/f'])
