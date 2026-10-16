@@ -72,10 +72,9 @@ test('sealKeyAt devuelve llaves de sellado y JAMÁS un miembro', () => {
 test('ninguna capacidad de miembro concede firmar el TRANSPORTE', () => {
   // La lista va a mano, no derivada: que crezca sin que nadie la mire es el fallo que
   // esta prueba existe para impedir. `unattended` entró el 2026-09-01, `replica` el
-  // 2026-09-02 y `passkeys` con identity 0.100.0: abre la privada de una passkey guardada,
-  // que es leer lo del usuario, no firmar el transporte.
+  // 2026-09-02; `passkeys` estuvo de identity 0.100.0 a 0.118.0, fusionado en `passwords`.
   assert.deepEqual([...CAPS].sort(),
-    ['admin', 'approve', 'passkeys', 'passwords', 'read', 'replica', 'sealer', 'sign', 'store', 'unattended'])
+    ['admin', 'approve', 'passwords', 'read', 'replica', 'sealer', 'sign', 'store', 'unattended'])
   for (const c of ['seal', 'transport', 'serve']) {
     assert.ok(!CAPS.includes(c), `«${c}» no puede ser una capacidad de miembro: firmar el transporte no es leer`)
   }

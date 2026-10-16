@@ -281,7 +281,8 @@ async function listDevices () {
  */
 async function recipientsOf (kind) {
   const r = await identity.profileMembers()
-  const cap = kind === 'passkeys' ? 'passkeys' : 'passwords'
+  // Las dos generaciones van a los mismos: `passwords` cubre también las passkeys (2026-10-16).
+  const cap = 'passwords'
   return (r?.members || [])
     .filter((m) => (m.caps || []).includes(cap) && m.encPub && !samePubkey(m.pub, miPub))
     .map((m) => ({ pub: m.pub, encPub: m.encPub }))

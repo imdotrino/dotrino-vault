@@ -785,12 +785,9 @@ const CAP_BY_WORD = {
   // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
   // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
   contrasenas: 'passwords', 'contraseñas': 'passwords',
-  // `passkeys`: además de las contraseñas, puede abrir la LLAVE PRIVADA de una passkey.
-  // Va aparte porque una passkey copiada sirve hasta que la borres en cada sitio donde
-  // la registraste — de una contraseña, al menos, se puede cambiar
-  // (`dotrino-passmanager/docs/sealed-passwords.md` §2.8). Sin `contraseñas` no
-  // significa nada: la passkey vive en una entrada de contraseñas.
-  passkeys: 'passkeys', llaves: 'passkeys',
+  // `contraseñas` cubre también las PASSKEYS: hubo un `passkeys` aparte y se fusionó en este
+  // (dueño, 2026-10-16). Quien escriba la palabra vieja recibe lo que hoy significa.
+  passkeys: 'passwords',
   // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
   // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
   //
@@ -2340,7 +2337,7 @@ function help () {
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
   pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (firma,lee,guarda,administra,
-                      aprueba,contrasenas,passkeys,sella,desatendido,replica) y secrets:<ns>. Sin esto: firma,lee,guarda.
+                      aprueba,contrasenas,sella,desatendido,replica) y secrets:<ns>. Sin esto: firma,lee,guarda.
                       Entra al acta ya con ellos. Se combina con --service: --service eco --scope firma
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
