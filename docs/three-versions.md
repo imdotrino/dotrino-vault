@@ -1,69 +1,89 @@
-# Las tres versiones del vault: qué tiene cada una hoy
+# Las tres versiones del vault: un solo núcleo
 
-> **Estado: inventario del 2026-09-17**, hecho leyendo el código, sin cambiar nada. Regla del
-> dueño del mismo día: el vault existe **siempre** en tres versiones —la **pestaña**, la
-> **extensión** y el **binario**—, **compatibles y con las mismas funciones**, salvo lo que
-> limita su contexto; **el binario es la fuente de verdad**.
+> **Estado: 2026-10-16.** Regla del dueño (2026-09-17): el vault existe **siempre** en tres
+> versiones —la **pestaña**, la **extensión** y el **binario**—, **compatibles y con las mismas
+> funciones**, salvo lo que limita su contexto; **el binario es la fuente de verdad**.
 >
-> Este documento dice **cuánto falta** para eso. Se hizo antes de construir el aparato que se
-> abre con usuario y contraseña (`dotrino-passmanager/docs/temporary-access.md`) y las
-> contraseñas selladas (`dotrino-passmanager/docs/sealed-passwords.md`), que tienen que ir en
-> las tres.
+> Desde vaultd 0.156.0 / `@dotrino/vault` 0.86.0 / `@dotrino/identity` 0.116.0 las tres corren
+> **el mismo código**: el núcleo del demonio (`lib/src/core/vault.js`). Antes la pestaña y la
+> extensión corrían un mostrador aparte (`startDeviceVault`, 500 líneas) que atendía la mitad
+> del protocolo. El inventario anterior (2026-09-17) está en el historial de este archivo.
 
-## Qué es cada una
+## Cómo está hecho
 
-| Versión | Dónde vive | Piezas |
-|---|---|---|
-| **binario** | el demonio `dotrino-vault` | `src/vault.js`, `src/profiles.js`, `src/ctl.js` (CLI), `src/tui/app.js` |
-| **pestaña** | `vault.dotrino.com` con «este aparato es la bóveda» | el iframe de identidad corre `startDeviceVault` (`lib/src/index.js`, desde `dotrino-identity/vault/vault.js`); `web/src/Vault.vue` atiende contraseñas; `web/src/Console.vue` administra |
-| **extensión** | dentro del gestor | `dotrino-passmanager/extension/src/background.js`, `identity-core.js`, `popup.js` |
+El núcleo recibe todo lo que depende de dónde corre en una **plataforma**:
 
-## La tabla
+| | Binario | Pestaña | Extensión |
+|---|---|---|---|
+| Dónde corre | el demonio `dotrino-vault` | el iframe de `id.dotrino.com`, en la pestaña visible con «este dispositivo es bóveda» | la pestaña de bóveda (`vault-tab.html`) |
+| Plataforma | `src/platform.js` | `lib/src/browser.js` (`startBrowserVault`) | la misma, desde `extension/src/logins.js` |
+| Disco | archivos 0600 cifrados con la llave de la máquina (`src/disk.js`) | IndexedDB cifrado con una llave AES no extraíble, uno por perfil (`lib/src/core/browserDisk.js`) | igual que la pestaña |
+| Identidad | `Identity` sobre su directorio, maestra sellada con la contraseña | el core del iframe, envuelto con `IdentityFacade` | el core del service worker, por mensaje (ninguna llave privada cruza) |
+| `/proc` y mostrador local | sí | no: lo declarado se queda como declarado | no |
+| OPAQUE | el del paquete | el del paquete | inyectado desde la página sandbox (su CSP no deja WASM) |
+| Contraseñas | el núcleo las atiende | el núcleo las atiende | las atiende el worker (único escritor de su almacén) con la **política del núcleo** |
+
+Dos piezas cierran el círculo:
+
+- **La consola en el mismo navegador administra su bóveda por un camino local**
+  (`registerLocalVault` en `@dotrino/identity/remote.js`, `core.setSelfVault`): el MISMO
+  protocolo de la consola remota (`vault.admin`, `vault.secrets`, `vault.devices`), con la
+  misma firma y el mismo certificado, sin proxio. Así `vault.dotrino.com/vault` enseña
+  cajones, bloqueados y la lista de aparatos con dónde corre cada uno, igual que contra el
+  binario. Para eso la llave de la cuenta se da `admin` a sí misma al arrancar la bóveda
+  (queda a la vista en el acta); `aprueba` no, porque haría esperar a los servicios.
+- **Una bóveda escribe.** En la extensión, el gestor administra los inicios de sesión
+  pidiéndoselo a la pestaña de bóveda por un canal entre páginas; sin la pestaña abierta, se
+  dice (`not-the-vault`). Es lo mismo que el binario: `logins add` pide el demonio encendido.
+
+## Lo que atiende cada una
 
 | Capacidad | Binario | Pestaña | Extensión |
 |---|---|---|---|
-| **Admitir un aparato en el acta** | sí (`lib/src/enroll.js` → `admitMember`; pide perfil abierto y sellador) | sí (mismo `createEnrollDesk`; además pide ser la pestaña visible y activa) | **no** |
-| **Candado, frase y recuperación** | sí: la maestra va sellada con la llave de la contraseña; recuperación `#recovery` | a medias: el candado **no cifra**, solo impide llamar; la llave maestra no depende de la contraseña; sin recuperación | **no** hay candado cableado |
-| **Identidad en el proxio con el perfil cerrado** | sí: llave de comunicación aparte (`src/commKey.js`) | **no**: usa la llave del perfil, que el candado bloquea | solo como cliente de otra bóveda; nunca escucha |
-| **Atender a otros aparatos** | sí: firma, almacén, cajones, contraseñas, aprobaciones, administración | a medias: emparejar, renovar, firmar y contraseñas; **`get` y `store` no hacen nada** (el adaptador del iframe no los da); sin cajones ni administración | **no**: solo mensajes de sus propias páginas |
-| **Aprobaciones** | sí: lee `unattended` del acta y avisa a los aprobadores | a medias: modal local y push; **ignora `unattended`** | a medias: solo local, y nunca recuerda un sí |
-| **Estado por aparato guardado** | sí, cifrado en reposo; aprobaciones y concesiones en memoria | a medias (localStorage / IndexedDB, sin bitácora) | a medias (sin estado por aparato) |
-| **Canales del proxio** | solo `list` (`src/sealers.js`), nunca publica | no | no |
-| **Pantalla de aparatos** | a medias: CLI y TUI con permisos, revocar y nombre; **sin lista de aprobaciones ni concesiones** | a medias: permisos solo si es la maestra, y **sin `sealer`, `unattended` ni `replica`** | **no** |
-| **Anunciar la versión (`@dotrino/compat`)** | sí | no (solo enseña la del demonio) | no |
-| **Abrir con llave de seguridad (YubiKey)** | sí (2026-10-05): puertas `fido2` (con toque), `chalresp` (sin toque) y con contraseña (`llaves-de-hardware.md` §2bis) | **no**: el candado no cifra; el camino sería WebAuthn PRF | **no** hay candado |
-| **Límite de intentos** | sí, solo al abrir el perfil: 5 y después espera que se duplica, tope 5 min, se olvida a los 15 | solo al abrir la identidad, sin olvido y sin código de error | no |
+| Emparejar, firmar, almacén, renovar, `check` | sí | sí | sí |
+| Cajones de servicios (`vault.secrets`: claves, `enckey`, `digest`, guardar variables, `rewrap`) | sí | sí | sí |
+| Consola remota (`vault.admin`), renuncia, avisos entre bóvedas | sí | sí | sí |
+| Aprobaciones, concesiones, incidentes y aparatos bloqueados | sí | sí | sí |
+| Pedir y avisar actualizaciones de los aparatos (`update-ask`, `update-done`) | sí | sí | sí |
+| Dónde corre cada aparato (`machines`) | sí | sí | sí |
+| Llave de comunicación (atender con el perfil cerrado) | sí | sí | sí |
+| Llave de sellado de los sobres | sí | sí | sí (la guarda la pestaña; el worker se la pide al sellar el acta) |
+| Entrar con usuario y contraseña | sí | sí | sí |
+| Política de contraseñas (sin aprobador no se pide; con aprobadores, pedido al teléfono salvo `unattended`) | sí | sí | sí (antes preguntaba siempre en pantalla) |
+| Anunciar la versión (`@dotrino/compat`) | `vaultd` | `vault` (versión de la librería) | `vault` |
+| Bitácora encadenada | sí | sí (en IndexedDB) | sí |
+| Réplicas (empujar a otra bóveda) | sí | sí (el núcleo lo hace; nadie configura una réplica desde el navegador todavía) | igual |
 
-## Lo que importa para el aparato con contraseña
+## Lo que NO es igual, y por qué
 
-1. **La extensión no es una bóveda para otros aparatos.** No escucha en el proxio, no admite
-   aparatos ni tiene pantalla de aparatos. Para que el aparato con contraseña exista también
-   ahí, hay que construirle eso entero.
-2. **La pestaña no atiende con el perfil cerrado**, ni si no es la pestaña visible, porque no
-   tiene llave de comunicación. Y su `get`/`store` no hace nada.
-3. **Admitir un aparato pide la bóveda abierta en todas.** No hay operación remota para
-   admitir, y si `admitMember` falla, el error se anota y el certificado sale igual
-   (`lib/src/enroll.js:357-368`).
-4. **No existe un límite de intentos por aparato** con la forma decidida (5, y después una
-   espera que se duplica). Hay uno por perfil en el binario y otro distinto en la identidad.
-5. **No existe una lista de inicios de sesión con «cerrar» en ninguna.** Lo más parecido son
-   las concesiones de aprobación, que solo lista y cierra la consola web contra el demonio.
-6. **Anunciarse en un canal es nuevo en las tres.** `publish` firma con la llave de transporte
-   y `list` no devuelve los datos extra, así que comprobar el acta pide una ida y vuelta como
-   la de `src/sealers.js`. Además la huella que usa hoy el binario es la de la maestra
-   (`src/vault.js:290`), no la del `profileId`, y eso importa con varias bóvedas.
-7. **Ninguna guarda llaves cifradas ni registros OPAQUE**, y las contraseñas usan una sola
-   llave por bóveda. Las contraseñas selladas no existen en ninguna.
-8. **La política de aprobación no es la misma**: solo el binario lee `unattended`.
-9. **Ninguna pantalla deja elegir `unattended` al crear un aparato**, y la consola no lo tiene
-   ni para cambiarlo.
-10. **Pestaña y extensión no anuncian su versión.**
+Limitaciones de contexto, no olvidos:
 
-## Fallos encontrados de paso
+- **Actualizarse sola.** La pestaña se sirve siempre al día y la extensión la actualiza su
+  canal. No hay nada que instalar ni que aprobar.
+- **El candado que cifra la maestra con la contraseña** y las **llaves de hardware** como
+  puerta del perfil (`llaves-de-hardware.md`) son del binario: viven en `src/profiles.js`,
+  fuera del núcleo. En el navegador la identidad tiene su propio candado, que impide usarla
+  pero no cifra la maestra con la contraseña. Por eso el núcleo del navegador arranca con
+  `hasPassword: false` y lo dice en el registro: la copia de recuperación de los cajones se
+  cierra con la llave del almacén del navegador.
+- **El mostrador local por socket** y la lectura de `/proc` no existen en el navegador: un
+  servicio de la misma máquina llega por el proxio y lo que declara de su comando se enseña
+  como declarado.
+- **Atiende mientras la pestaña esté abierta.** La que está encendida siempre es la del
+  binario.
 
-- **`dotrino-vault approval` revienta**: `src/ctl.js:1867` llama a `cmdApproval`, que no existe
-  (`ReferenceError`). La lista de aparatos que piden aprobación se sustituyó por el permiso
-  `unattended` (`caps <ID> +desatendido`), pero el comando y `docs/passwords.md` siguen
-  diciendo `approval <ID> on`.
-- **Que `admitMember` falle no para el emparejamiento** (punto 3): el aparato recibe su
-  certificado sin estar en el acta.
+## Lo que falta (pantallas, no protocolo)
+
+El núcleo ya atiende todo lo de arriba. Lo que el binario hace desde su TUI y el navegador
+todavía no enseña:
+
+- **Ver el valor de una variable privada, su historial y volver a una versión** (`secret
+  show/history/revert`): la consola remota no lo tiene a propósito, y la pestaña administra por
+  ese protocolo. En la TUI es local.
+- **Listar y cortar concesiones** (`grants`) desde la pantalla.
+- **La pantalla de administración de la extensión** (aparatos, cajones, bloqueados): la
+  extensión tiene su propia identidad, distinta de la de `id.dotrino.com`, así que
+  `vault.dotrino.com` no la administra. El núcleo ya responde a la consola remota; falta la
+  pantalla dentro de la extensión.
+- **`dotrino-passmanager serve`** (la cuarta, en Node) sigue con el mostrador viejo
+  (`startDeviceVault`, que se conserva solo para ella).

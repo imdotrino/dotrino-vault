@@ -1,41 +1,41 @@
 # @dotrino/vault
 
-Usa **este dispositivo (navegador) como bóveda/CA** del ecosistema Dotrino, sin un PC
-con el daemon. Es la contraparte browser del daemon `dotrino-vault`: atiende el mismo
-protocolo de enrolamiento endurecido por el proxy y firma certificados de delegación
-`D ← P` (donde `P` es la identidad de este dispositivo, `@dotrino/identity`).
+La bóveda de Dotrino como librería. **El mismo núcleo que el binario `dotrino-vault`**
+(`src/core/vault.js`) corre en el navegador: la pestaña de `vault.dotrino.com` y la extensión
+del gestor de contraseñas son la misma bóveda que el demonio, con el disco en IndexedDB
+(regla de las tres versiones, `docs/three-versions.md` del repo).
 
-Pensado para que **cualquier app** del ecosistema (no solo la terminal) pueda ofrecer
-"usar este dispositivo como bóveda".
+Incluye además el cliente de SERVICIO (Node): un proyecto se enrola una vez y jala sus
+credenciales del vault en vez del `.env` (abajo).
 
-## Uso
+## La bóveda en el navegador
 
 ```js
-import { Identity } from '@dotrino/identity'
-import { startDeviceVault } from '@dotrino/vault'
+import { startBrowserVault } from '@dotrino/vault/browser'
 
-const identity = await Identity.connect()
-const vault = await startDeviceVault(identity)          // se conecta al proxy como P
+// `core`: el núcleo de identidad ya abierto (`createIdentityCore` de @dotrino/identity),
+// el del iframe de id.dotrino.com o el de la extensión.
+const vault = await startBrowserVault({ core, onPendingChange: () => pintar(vault.listPending()) })
 
-// 1) Abrir un emparejamiento y mostrar el QR/JSON al dispositivo a enrolar:
-const { qr } = vault.startPairing({ label: 'mi-agente' })
-// El dispositivo (p. ej. @dotrino/identity#enrollDevice) consume `qr`, GENERA un
-// código aleatorio y lo MUESTRA (no lo envía).
+// Emparejar: abrir una invitación y aprobar TECLEANDO el código que muestra el aparato.
+const { qr } = await vault.startPairing({ label: 'mi-agente' })
+// await vault.approve(deviceId, codigoTipeado)
 
-// 2) Cuando el dispositivo pide acceso, aparece en la lista de pendientes:
-vault.onPendingChange(() => {
-  for (const { deviceId } of vault.listPending()) {
-    // Un humano LEE el código del dispositivo y lo TIPEA aquí:
-    // await vault.approve(deviceId, codigoTipeado)
-  }
-})
-
-// 3) Máquinas ya enroladas / revocar:
-const machines = await vault.listMachines()   // [{ sub, deviceId, label, exp, nonce, scope }]
-// await vault.revoke(nonce)
-
-vault.close()
+await vault.close()
 ```
+
+Devuelve el mismo objeto que el núcleo del binario (cajones, aprobaciones, inicios de
+sesión, bloqueados, revocar…) más `approve(deviceId, code)`, `reject`, `listMachines`,
+`revokeDevice(sub)` y `close()`. La consola que corre en ese mismo navegador la administra
+con el protocolo de la consola remota, por un camino local (`core.setSelfVault`).
+
+Opciones: `proxyUrl`, `makeClient` (quién crea el cliente del proxio; obligatorio en un
+contexto sin `import()`), `opaque` (el servidor de OPAQUE si el del paquete no carga),
+`servePasswords: false` (las contraseñas las atiende quien monta la bóveda, con la política
+del núcleo: `passwordsNeedApproval`, `approvePasswordRequest`), `legacyLogins`, `log`.
+
+`startDeviceVault(identity, opts)` (el mostrador anterior, la mitad del protocolo) se
+conserva solo para `dotrino-passmanager serve` y desaparecerá.
 
 ## Credenciales del vault en vez del `.env` (Node)
 
@@ -315,7 +315,7 @@ quien llama. Lo preferible es instalar los servicios como usuario, que no necesi
 
 ## API
 
-`startDeviceVault(identity, { proxyUrl? }) → Promise<handle>`
+`startDeviceVault(identity, { proxyUrl? }) → Promise<handle>` — el mostrador anterior, solo para `dotrino-passmanager serve`. Para una bóveda de navegador, `startBrowserVault` (arriba).
 
 - `startPairing({ scope?, ttlMs?, label?, mode?, account? }) → { qr, expiresInMs }`
 - `stopPairing(token)`
