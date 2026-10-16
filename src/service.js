@@ -93,7 +93,11 @@ const guiDomain = () => `gui/${process.getuid?.() ?? 501}`
 
 const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-/** El LaunchAgent: lo arranca al entrar y lo relanza si se cae (no si se para a propósito). */
+/**
+ * El LaunchAgent: lo arranca al entrar y lo relanza siempre que se va, como `Restart=always`
+ * de systemd. Hace falta también cuando sale bien: tras instalar la versión nueva, la bóveda
+ * se va para que el agente arranque la nueva. Para pararla de verdad, `autostart off`.
+ */
 export function launchAgentPlist ({ cmd, args }, log = daemonLogFile()) {
   const argv = [cmd, ...args].map((a) => `    <string>${xml(a)}</string>`).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -109,10 +113,7 @@ ${argv}
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
+  <true/>
   <key>StandardOutPath</key>
   <string>${xml(log)}</string>
   <key>StandardErrorPath</key>

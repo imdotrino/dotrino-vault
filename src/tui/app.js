@@ -216,10 +216,11 @@ function offerUpdate (term, st) {
   setConfirm(st, { text: i.updateOffer(r.version, VERSION), onYes: () => installUpdate(term, st, r) })
 }
 
-async function installUpdate (term, st, release, { install = up.installUserRelease, userInstall = up.isUserInstall } = {}) {
+async function installUpdate (term, st, release, { install = (rel) => up.installRelease(rel), userInstall = up.canSelfUpdate } = {}) {
   const i = L(st)
-  // Solo la instalación de usuario se puede cambiar desde aquí. Un paquete del sistema es
-  // de root: no se pide la contraseña por dentro, se dice el comando.
+  // Solo una instalación que puede cambiarse sola (la de usuario de Linux, el instalador de
+  // Windows, la app de macOS) se cambia desde aquí. Un paquete del sistema es de root: no se
+  // pide la contraseña por dentro, se dice el comando.
   if (!userInstall()) { flash(st, i.updateNeedsCommand, 'warn'); return }
   const r = await guard(term, st, i.updateInstalling(release.version), () => install(release))
   if (!r.ok) return
@@ -228,6 +229,9 @@ async function installUpdate (term, st, release, { install = up.installUserRelea
     flash(st, i.updateNoteFailed(e.message), 'warn')
   }
   st.update = { installed: r.v.version }
+  // WINDOWS: el instalador ya corre; cierra la bóveda y esta pantalla (son el mismo .exe), las
+  // cambia y vuelve a arrancar la bóveda. La ventana vuelve sola. No hay nada que preguntar.
+  if (r.v.then === 'exit' && process.platform === 'win32') { flash(st, i.updateWindowsInstalling(r.v.version), 'warn'); return }
   // Reiniciar se PREGUNTA: cierra las bóvedas abiertas y corta lo que estén haciendo los
   // aparatos. Si dices que no, el servicio se reinicia solo en un par de minutos.
   setConfirm(st, {

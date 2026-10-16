@@ -1855,7 +1855,7 @@ async function cmdUpdate (args = []) {
       : 'Esta bóveda se actualiza sola, sin pedir aprobación.')
     return
   }
-  const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease } = await import('./update.js')
+  const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease, installKind, installRelease } = await import('./update.js')
   const soloMirar = args.includes('--check')
 
   process.stdout.write('Mirando qué hay publicado… ')
@@ -1873,6 +1873,38 @@ async function cmdUpdate (args = []) {
   }
   console.log('%sHay %s y esta es la %s.%s', B, r.version, VERSION, Z)
   if (soloMirar) { console.log('Tráela con:  dotrino-vault update'); return }
+
+  // WINDOWS Y macOS: el instalador nuevo (Windows) o la app entera (macOS), verificados.
+  const kind = installKind()
+  if (kind === 'inno' || kind === 'app') {
+    process.stdout.write('Bajando y comprobando la firma… ')
+    const res = await installRelease(r, { kind })
+    if (!res.ok) {
+      console.log('')
+      console.error('%sNO se instala nada.%s %s', R, Z, res.reason)
+      if (res.file) console.error('El archivo quedó en %s, sin tocar nada.', res.file)
+      process.exit(1)
+    }
+    console.log('firmada por el release de %s ✓', 'imdotrino/dotrino-vault')
+    await noteUpdated(res.version)
+    if (kind === 'inno') {
+      // El instalador cierra la bóveda (y este mismo comando: es el mismo .exe), la cambia y
+      // la vuelve a arrancar. Aquí no queda nada que esperar.
+      console.log('Instalando la %s: la bóveda se cierra un momento y vuelve sola.', res.version)
+      return
+    }
+    // macOS: la app nueva ya está en su sitio; falta reiniciar la que corre.
+    const s = ipcRead(stateFile, null)
+    if (s && alive(s.pid)) {
+      const { restartDaemonService } = await import('./service.js')
+      try { await restartDaemonService({ pid: s.pid, alive: () => alive(s.pid) }) } catch (e) {
+        console.error('Instalada, pero no se pudo reiniciar: %s', e.message)
+        process.exit(1)
+      }
+      await waitForService(res.version)
+    } else console.log('Instalada la %s.', res.version)
+    return
+  }
 
   // Instalación de usuario: se verifica y se instala aquí mismo, sin sudo.
   if (isUserInstall()) {

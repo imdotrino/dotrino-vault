@@ -25,7 +25,7 @@ import { parseInvite } from '../lib/src/invite.js'
 import { scopeToCaps, scopeToCn } from '../lib/src/enroll.js'
 import { capScope } from '@dotrino/identity/acta'
 import { watchBinary } from './selfupdate.js'
-import { latestRelease, isNewer, CHECK_EVERY_MS, isUserInstall, installUserRelease } from './update.js'
+import { latestRelease, isNewer, CHECK_EVERY_MS, installKind, installRelease } from './update.js'
 import { VERSION } from './version.js'
 import { readSettings } from './settings.js'
 import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo, readRootTold, writeRootTold, shouldTellRoot } from './updateApproval.js'
@@ -1157,9 +1157,18 @@ export async function runDaemon () {
     }
     const conAvisos = quienAprueba.filter((a) => a.notifiedAt).length
 
-    // INSTALADA COMO PAQUETE DEL SISTEMA (.deb o .rpm en /usr/bin): el binario es de root y este
-    // proceso no puede tocarlo. Se dice, con las dos salidas, y no se intenta nada.
-    if (!isUserInstall()) {
+    // CÓMO SE INSTALÓ decide si puede instalar ella misma (update.js, `installKind`): la de
+    // usuario de Linux, el instalador de Windows y la app de macOS, sí. Por npm, Docker o un
+    // checkout se actualiza por su propia vía: se dice en el log y nada más (no es «hace
+    // falta root», y avisar eso al teléfono sería mentirle).
+    const kind = installKind()
+    if (kind === 'other') {
+      if (avisadoOtra !== r.version) { avisadoOtra = r.version; console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · update it the way you installed it (npm, Docker, git)`) }
+      return
+    }
+    // INSTALADA COMO PAQUETE DEL SISTEMA (.deb o .rpm en /usr/bin, o una app en una carpeta
+    // que no es tuya): este proceso no puede tocarla. Se dice, con las salidas, y no se intenta nada.
+    if (kind === 'system') {
       console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · installed as a system package, so it cannot update itself: \`dotrino-vault update\` (needs sudo), or move to a user install with the tarball's install.sh`)
       // …Y SE LE DICE A QUIEN APRUEBA, en todos los perfiles (dueño, 2026-10-08: «si se
       // requiere root por algún motivo, simplemente se notifica al aprobador que hay
@@ -1235,7 +1244,7 @@ export async function runDaemon () {
       }
       clearAsked(dir)
       if (pedidoSinRespuesta) { pedidoSinRespuesta = null; writeState() }
-      const res = await installUserRelease(r, { log: (m) => console.log(m) })
+      const res = await installRelease(r, { log: (m) => console.log(m), kind, pid: process.pid })
       if (!res.ok) {
         // Lo que NO cuadra no se instala, y se dice por qué: el archivo queda a mano.
         console.log(`[vault] update to ${r.version} NOT installed: ${res.reason}${res.file ? ` (file left at ${res.file})` : ''}`)
@@ -1252,7 +1261,12 @@ export async function runDaemon () {
       try { ipcWrite(updatedFile, { v: 1, from: daemonVersion, to: r.version, at: Date.now() }) } catch (e) {
         console.log(`[vault] update: ${r.version} installed, but the note to tell the approvers could not be written: ${e.message}`)
       }
-      if (vigia) {
+      // Windows y macOS: hay que irse YA. En Windows el instalador cierra la bóveda y la vuelve
+      // a arrancar; en macOS la levanta launchd o el relanzador que dejó la instalación.
+      if (res.then === 'exit') {
+        console.log(`[vault] update: ${r.version} installed · leaving so the new one starts`)
+        shutdown(`updated to ${r.version}`)
+      } else if (vigia) {
         console.log(`[vault] update: ${r.version} installed · restarting now to run it`)
         shutdown(`updated to ${r.version}`)
       } else {
@@ -1263,6 +1277,7 @@ export async function runDaemon () {
     } finally { actualizando = false }
   }
   let actualizando = false
+  let avisadoOtra = null
   let aprobada = null
   let avisandoRoot = null
 

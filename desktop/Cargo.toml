@@ -15,9 +15,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt"] }
 
-# Windows: el idioma de la interfaz (no hay LANG).
+# Windows: el idioma de la interfaz (no hay LANG) y volver a abrirse tras actualizar.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
+windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_System_Recovery"] }
 
 # La elige el destino en `build.rs` (las dependencias de build se eligen por la máquina que
 # compila, y el .exe se compila también desde Linux).

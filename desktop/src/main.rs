@@ -47,6 +47,12 @@ fn main() -> iced::Result {
         start_daemon_detached();
         return Ok(());
     }
+    // Windows: al actualizarse, el instalador cierra esta ventana (usa los mismos archivos) y,
+    // por estar registrada, la vuelve a abrir cuando termina.
+    #[cfg(windows)]
+    unsafe {
+        windows_sys::Win32::System::Recovery::RegisterApplicationRestart(std::ptr::null(), 0);
+    }
     let icon = window::icon::from_file_data(ICON_PNG, None).ok();
     iced::application(App::boot, App::update, App::view)
         .title(App::title)

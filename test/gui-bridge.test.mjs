@@ -103,12 +103,12 @@ test('el puente: sin daemon enseña la pantalla de arrancarlo, y al cerrarse la 
   assert.deepEqual(lines.at(-1), { t: 'bye', relaunch: false })
 })
 
-test('macOS: el LaunchAgent arranca el daemon al entrar y lo relanza si se cae', () => {
+test('macOS: el LaunchAgent arranca el daemon al entrar y lo relanza siempre que se va', () => {
   const plist = service.launchAgentPlist({ cmd: '/Applications/Dotrino Vault.app/Contents/MacOS/dotrino-vaultd', args: [] }, '/tmp/v & log')
   assert.match(plist, /<string>com\.dotrino\.vault<\/string>/)
   assert.match(plist, /<string>\/Applications\/Dotrino Vault\.app\/Contents\/MacOS\/dotrino-vaultd<\/string>/)
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/)
-  assert.match(plist, /<key>SuccessfulExit<\/key>\s*<false\/>/)
+  assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/, 'también tras salir bien: así arranca la versión nueva')
   assert.match(plist, /\/tmp\/v &amp; log/, 'escapa el XML')
 })
 

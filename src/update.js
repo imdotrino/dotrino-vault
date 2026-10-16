@@ -12,7 +12,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { latestVersion, isNewer, CHECK_EVERY_MS } from '@dotrino/update'
 import { pickAsset, download, verifyArtifact as verify, fetchVerified } from '@dotrino/update/fetch'
 import { VERSION } from './version.js'
@@ -136,4 +136,144 @@ async function instalarDesde (work, pick, release, { binDir, log, fetchVerifiedI
     fs.renameSync(tmp, path.join(binDir, name))
   }
   return { ok: true, version: release.version }
+}
+
+// ------------------------- Windows y macOS ---------------------------------
+
+/**
+ * CÓMO ESTÁ INSTALADO ESTE BINARIO, y por tanto si puede actualizarse solo (CONVENCIONES §15).
+ *
+ *   'user'    Linux, instalación de usuario (`~/.local/share/dotrino/bin`): cambia sus binarios.
+ *   'inno'    Windows, el instalador por usuario (`unins000.exe` al lado): corre el instalador
+ *             nuevo en silencio, que cierra la bóveda, la reemplaza y la vuelve a arrancar.
+ *   'app'     macOS, dentro de `Dotrino Vault.app` en una carpeta que se puede escribir: se
+ *             cambia la app entera (nunca un binario suelto: la app es un conjunto firmado).
+ *   'system'  un paquete de root (.deb/.rpm), o una app en una carpeta que no es tuya.
+ *   'other'   npm, Docker, un checkout: se actualiza por su propia vía.
+ */
+export function installKind ({ platform = process.platform, execPath = process.execPath, home = os.homedir(), exists = fs.existsSync, writable = canWrite } = {}) {
+  const sea = /^dotrino-vaultd(\.exe)?$/.test(path.basename(execPath))
+  if (!sea) return 'other'
+  if (platform === 'linux') return isUserInstall(execPath, home) ? 'user' : execPath.startsWith('/usr/') ? 'system' : 'other'
+  if (platform === 'win32') return exists(path.join(path.dirname(execPath), 'unins000.exe')) ? 'inno' : 'other'
+  if (platform === 'darwin') {
+    const app = appBundleOf(execPath)
+    if (!app) return 'other'
+    return writable(path.dirname(app)) ? 'app' : 'system'
+  }
+  return 'other'
+}
+
+/** ¿Puede este binario instalar él mismo la versión nueva? */
+export const canSelfUpdate = (opts) => ['user', 'inno', 'app'].includes(installKind(opts))
+
+/** `/Applications/Dotrino Vault.app` a partir de su `Contents/MacOS/dotrino-vaultd`. */
+export function appBundleOf (execPath) {
+  const m = /^(.*\.app)\/Contents\/MacOS\/dotrino-vaultd$/.exec(execPath)
+  return m ? m[1] : null
+}
+
+function canWrite (dir) { try { fs.accessSync(dir, fs.constants.W_OK); return true } catch { return false } }
+
+/** Carpeta de trabajo de las descargas: la de los datos de Dotrino del usuario, no `/tmp`. */
+function updateWorkDir (platform = process.platform) {
+  if (platform === 'win32') return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Dotrino', 'update')
+  return path.join(os.homedir(), '.local', 'share', 'dotrino', 'update')
+}
+
+/**
+ * INSTALA la versión nueva por la vía de este sistema. Lo que se baja se verifica contra la
+ * atestación del release antes de tocar nada; si no cuadra, no se toca nada y se dice.
+ *
+ * `then` dice qué tiene que hacer quien llamó:
+ *   'watch'  Linux: el binario cambió en su sitio; el vigilante (o systemd) lo reinicia.
+ *   'exit'   el proceso que corre la bóveda tiene que irse YA. En Windows el instalador lo
+ *            cierra y lo vuelve a arrancar; en macOS lo levanta launchd o el relanzador.
+ *
+ * @returns {Promise<{ok:true, version:string, then:'watch'|'exit'} | {ok:false, code?:string, reason:string, file?:string}>}
+ */
+export async function installRelease (release, { log = () => {}, kind = installKind(), fetchVerifiedImpl = fetchVerified, run = spawnDetached, execPath = process.execPath, pid = null } = {}) {
+  if (kind === 'user') {
+    const r = await installUserRelease(release, { log, fetchVerifiedImpl })
+    return r.ok ? { ...r, then: 'watch' } : r
+  }
+  if (kind === 'inno') return installWindows(release, { log, fetchVerifiedImpl, run })
+  if (kind === 'app') return installMac(release, { log, fetchVerifiedImpl, run, execPath, pid })
+  return { ok: false, code: 'CANNOT_SELF_UPDATE', reason: kind === 'system' ? 'installed as a system package (root): update it with the system installer' : 'not installed with an installer: update it the way you installed it (npm, Docker…)' }
+}
+
+function spawnDetached (cmd, args, { log } = {}) {
+  const child = spawn(cmd, args, { detached: true, windowsHide: true, stdio: 'ignore' })
+  child.on('error', (e) => log?.(`[vault] update: could not start ${cmd}: ${e.message}`))
+  child.unref()
+}
+
+/** Baja y verifica un archivo del release a una carpeta propia (que se vacía antes). */
+async function bajarVerificado (release, re, { log, fetchVerifiedImpl, work }) {
+  const pick = pickAsset(release.assets, [{ kind: 'asset', re }])
+  if (!pick.ok) return pick
+  fs.rmSync(work, { recursive: true, force: true })
+  fs.mkdirSync(work, { recursive: true, mode: 0o700 })
+  const got = await fetchVerifiedImpl(pick.asset, { repo: REPO, product: 'dotrino-vault', version: VERSION, dir: work })
+  if (got.ok) log(`[vault] update: ${pick.asset.name} verified against its attestation`)
+  return got
+}
+
+/**
+ * WINDOWS: el instalador nuevo, en silencio. Es lo único que puede cambiar los archivos: un
+ * .exe en marcha no se sobrescribe. El instalador cierra lo que los usa (la bóveda, y la
+ * ventana si está abierta), los reemplaza y vuelve a arrancar la bóveda (`--start-daemon`).
+ * Las tareas elegidas al instalar (arrancar al iniciar sesión) se conservan.
+ */
+async function installWindows (release, { log, fetchVerifiedImpl, run }) {
+  const work = updateWorkDir('win32')
+  const got = await bajarVerificado(release, /-windows-x64-setup\.exe$/, { log, fetchVerifiedImpl, work })
+  if (!got.ok) return got
+  run(got.file, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/FORCECLOSEAPPLICATIONS', `/LOG=${path.join(work, 'setup.log')}`], { log })
+  log(`[vault] update: installer for ${release.version} started; it restarts the vault when it finishes`)
+  return { ok: true, version: release.version, then: 'exit' }
+}
+
+/**
+ * macOS: la app entera. Se descomprime al lado de la actual (misma carpeta, así el cambio es
+ * un renombrado y no una copia a medias), se aparta la vieja, se pone la nueva y se borra la
+ * vieja. Lo que está corriendo sigue con su copia hasta que se reinicia.
+ *
+ * Quien la levanta: launchd si la bóveda corre como agente (KeepAlive); si corre suelta, un
+ * relanzador que espera a que este proceso se vaya y arranca el binario nuevo.
+ */
+async function installMac (release, { log, fetchVerifiedImpl, run, execPath, pid }) {
+  const app = appBundleOf(execPath)
+  if (!app) return { ok: false, code: 'CANNOT_SELF_UPDATE', reason: 'not running from Dotrino Vault.app' }
+  const work = updateWorkDir('darwin')
+  const got = await bajarVerificado(release, /-macos-universal\.zip$/, { log, fetchVerifiedImpl, work })
+  if (!got.ok) return got
+  const parent = path.dirname(app)
+  const stage = path.join(parent, `.dotrino-vault-update-${process.pid}`)
+  fs.rmSync(stage, { recursive: true, force: true })
+  try {
+    try { execFileSync('ditto', ['-x', '-k', got.file, stage], { stdio: ['ignore', 'ignore', 'pipe'] }) } catch (e) {
+      return { ok: false, code: 'UNPACK_FAILED', reason: `could not unpack the release: ${String(e.stderr || e.message).trim().split('\n').slice(-2).join(' · ')}` }
+    }
+    const nueva = path.join(stage, 'Dotrino Vault.app')
+    if (!fs.existsSync(path.join(nueva, 'Contents', 'MacOS', 'dotrino-vaultd'))) return { ok: false, code: 'BAD_ARCHIVE', reason: 'the archive has no Dotrino Vault.app inside' }
+    const vieja = `${app}.old-${process.pid}`
+    fs.renameSync(app, vieja)
+    try { fs.renameSync(nueva, app) } catch (e) {
+      fs.renameSync(vieja, app) // se deja como estaba
+      return { ok: false, code: 'SWAP_FAILED', reason: `could not put the new app in place: ${e.message}` }
+    }
+    fs.rmSync(vieja, { recursive: true, force: true })
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true })
+    fs.rmSync(work, { recursive: true, force: true })
+  }
+  // Suelta (sin launchd): el relanzador espera a que `pid` se vaya y arranca el nuevo.
+  if (pid && process.env.XPC_SERVICE_NAME !== 'com.dotrino.vault') {
+    const bin = path.join(app, 'Contents', 'MacOS', 'dotrino-vaultd')
+    const logFile = path.join(os.homedir(), '.local', 'share', 'dotrino', 'vault', 'daemon.log')
+    run('/bin/sh', ['-c', 'while kill -0 "$1" 2>/dev/null; do sleep 0.5; done; exec "$2" >>"$3" 2>&1', 'relaunch', String(pid), bin, logFile], { log })
+  }
+  log(`[vault] update: ${release.version} installed in ${app}`)
+  return { ok: true, version: release.version, then: 'exit' }
 }
