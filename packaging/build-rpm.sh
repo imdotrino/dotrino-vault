@@ -20,7 +20,7 @@ command -v rpmbuild >/dev/null 2>&1 || { echo "ERROR: rpmbuild not found (Debian
 # 1. binario autosuficiente (Node embebido), de ESTA versión — misma comprobación que el .deb
 BUILT="$(cat "$DIST/.built-version" 2>/dev/null || echo '')"
 if [ ! -f "$DIST/dotrino-vaultd" ] || [ "$BUILT" != "$VER" ]; then
-  echo "==> el binario de dist/ es «${BUILT:-ninguno}» y toca «$VER»: reconstruyéndolo (build.sh)…"
+  echo "==> el binario de dist/ es «${BUILT:-ninguno}» y toca «${VER}»: reconstruyéndolo (build.sh)…"
   bash "$ROOT/packaging/build.sh"
 fi
 

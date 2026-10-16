@@ -23,7 +23,7 @@ VER="$(node -p "require('$ROOT/package.json').version")"
 # dice una cosa y hace otra, que es la peor forma de fallar (parece desplegado).
 BUILT="$(cat "$DIST/.built-version" 2>/dev/null || echo '')"
 if [ ! -f "$DIST/dotrino-vaultd" ] || [ "$BUILT" != "$VER" ]; then
-  echo "==> el binario de dist/ es «${BUILT:-ninguno}» y toca «$VER»: reconstruyéndolo (build.sh)…"
+  echo "==> el binario de dist/ es «${BUILT:-ninguno}» y toca «${VER}»: reconstruyéndolo (build.sh)…"
   bash "$ROOT/packaging/build.sh"
 fi
 

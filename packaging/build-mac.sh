@@ -46,13 +46,13 @@ JSON
 fetch_node () { # $1 = arm64 | x64
   local d="node-$NODE_VER-darwin-$1"
   if [ ! -x "$WORK/$d/bin/node" ]; then
-    echo "  → bajando $d…" >&2
+    echo "  → bajando ${d}…" >&2
     curl -fsSL "https://nodejs.org/dist/$NODE_VER/$d.tar.gz" | tar -xz -C "$WORK"
   fi
   echo "$WORK/$d/bin/node"
 }
 
-echo "  → generando blob SEA con node $NODE_VER…"
+echo "  → generando blob SEA con node ${NODE_VER}…"
 "$(fetch_node "$HOST_ARCH")" --experimental-sea-config "$WORK/sea-config.json"
 
 SLICES=()

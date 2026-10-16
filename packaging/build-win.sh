@@ -57,13 +57,13 @@ if [ ! -x "$WORK/$LNODE/bin/node" ]; then
   echo "  → bajando $LNODE (para generar el blob con la misma versión)…"
   curl -fsSL "https://nodejs.org/dist/$NODE_VER/$LNODE.tar.xz" | tar -xJ -C "$WORK"
 fi
-echo "  → generando blob SEA con node $NODE_VER…"
+echo "  → generando blob SEA con node ${NODE_VER}…"
 "$WORK/$LNODE/bin/node" --experimental-sea-config "$WORK/sea-config.json"
 
 # --- 2. node.exe oficial de Windows ------------------------------------------
 ZIPNAME="node-$NODE_VER-win-x64"
 if [ ! -f "$WORK/$ZIPNAME/node.exe" ]; then
-  echo "  → bajando $ZIPNAME…"
+  echo "  → bajando ${ZIPNAME}…"
   curl -fsSL -o "$WORK/node.zip" "https://nodejs.org/dist/$NODE_VER/$ZIPNAME.zip"
   unzip -q "$WORK/node.zip" -d "$WORK"
 fi
