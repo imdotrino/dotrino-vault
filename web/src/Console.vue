@@ -1172,7 +1172,7 @@ async function connect (qr, mode = 'join') {
     // averiguar qué pasó. Sin él, un emparejamiento fallido no dejaba rastro en ninguna
     // parte —en la app de Dotrino la consola del WebView va al registro del sistema, y
     // aun así no había nada que leer— y el diagnóstico salía a base de adivinar.
-    console.error('[pair] falló el emparejamiento:', mode, e?.code || '', e?.message || e)
+    console.error('[pair] pairing failed:', mode, e?.code || '', e?.message || e)
     pairError.value = t.value.pair_fail + (e?.message || e)
   } finally {
     off?.(); pairing.value = false; pairCode.value = ''

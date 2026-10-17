@@ -459,11 +459,11 @@ test('una envoltura solo se AÑADE: un servicio no puede pisar la de otro', asyn
   const wrap = { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' }
 
   assert.equal(s.putWrap('ns:proxy', gen, 'newcomer', wrap), true, 'añadir al que no tenía, sí')
-  assert.throws(() => s.putWrap('ns:proxy', gen, 'newcomer', wrap), /ya tiene envoltura/,
+  assert.throws(() => s.putWrap('ns:proxy', gen, 'newcomer', wrap), /already has a wrap/,
     'pisar la que ya está, NO')
-  assert.throws(() => s.putWrap('ns:proxy', gen, 'A', wrap), /ya tiene envoltura/,
+  assert.throws(() => s.putWrap('ns:proxy', gen, 'A', wrap), /already has a wrap/,
     'y menos la de otro miembro del cajón')
-  assert.throws(() => s.putWrap('ns:proxy', 99, 'other', wrap), /no existe la generación/)
+  assert.throws(() => s.putWrap('ns:proxy', 99, 'other', wrap), /does not exist/)
   assert.throws(() => s.putWrap('ns:proxy', gen, 'other', { epk: 'x' }), /mal formada/)
 })
 
