@@ -2305,6 +2305,226 @@ async function cmdTui () {
   await runTui()
 }
 
+// ---------------------------------------------------------------------------
+// EL RESPALDO (`docs/respaldo.md`): un archivo cifrado con una contraseña propia con los
+// valores de los cajones y las contraseñas. Las llaves no van: son de cada aparato.
+//
+// Las dos puntas son de bóveda ABIERTA. El archivo lo cierra el daemon, así que lo que
+// llega aquí ya va cifrado; y al importar, lo que se enseña son nombres y estados.
+// ---------------------------------------------------------------------------
+
+const DEVICE_ID_RE = /^[0-9A-F]{4}-[0-9A-F]{4}$/i
+
+/** Cómo se llama un cajón para quien lee. */
+function drawerName (owner, device) {
+  if (owner === 'passwords') return 'contraseñas'
+  if (owner === 'ns:@me') return '@me (tu perfil)'
+  if (owner.startsWith('ns:')) return owner.slice(3)
+  const d = device || {}
+  return `aparato ${d.id || pubkeyId(owner.slice(4))}${d.label ? ' (' + d.label + ')' : ''}`
+}
+
+/**
+ * De lo que escribe quien usa el comando al nombre del cajón. `devices`: `[{id, owner}]`
+ * para traducir un ID de aparato. Lo que no se reconoce se queda como está y lo rechaza
+ * la bóveda con su nombre (`NO_SUCH_DRAWER`), en vez de adivinar.
+ */
+function drawerArg (word, devices = []) {
+  const w = String(word)
+  if (/^(contrase(n|ñ)as|passwords)$/i.test(w)) return 'passwords'
+  if (w === '@me' || w === 'perfil' || w === 'ns:@me') return 'ns:@me'
+  if (w.startsWith('ns:') || w.startsWith('dev:')) return w
+  if (DEVICE_ID_RE.test(w)) return devices.find((d) => d.id === w.toUpperCase())?.owner || `dev:?${w.toUpperCase()}`
+  return 'ns:' + w
+}
+
+/** Una orden de respaldo al daemon, y su respuesta (o su error, con código). */
+async function backupRequest (req, { timeoutMs = 120_000 } = {}) {
+  const s = requireDaemon()
+  const listFile = path.join(dataDir(), 'secrets-list.json')
+  const id = crypto.randomBytes(8).toString('hex')
+  try { fs.rmSync(listFile, { force: true }) } catch (_) {}
+  writeReq('secret-request.json', { ...req, id })
+  writeReq('dump-request.json', {})
+  sendSignal(s.pid, 'SIGUSR2')
+  for (let i = 0; i < timeoutMs / 100; i++) {
+    await sleep(100)
+    const d = ipcRead(listFile, null)
+    if (!d?.at) continue
+    try { fs.rmSync(listFile, { force: true }) } catch (_) {}
+    assertOpen(d)
+    if (d.backup?.id === id) return d.backup
+    if (d.secretError?.id === id) throw Object.assign(new Error(d.secretError.error), d.secretError)
+  }
+  throw Object.assign(new Error('the daemon did not reply'), { code: 'NO_REPLY' })
+}
+
+function backupFail (e) {
+  const msg = {
+    VAULT_LOCKED: 'La bóveda está cerrada. Ábrela con:  dotrino-vault unlock',
+    WRONG_PASSWORD: 'Esa contraseña no abre este respaldo.',
+    NOT_A_BACKUP: 'Ese archivo no es un respaldo de la bóveda.',
+    BACKUP_CORRUPT: 'El respaldo está dañado: no se puede leer.',
+    WEAK_PASSWORD: 'La contraseña del respaldo tiene que tener al menos 12 caracteres.',
+    NO_SUCH_DRAWER: `No existe ese cajón: ${(e.missing || []).join(', ')}. Míralos con:  dotrino-vault backup list`,
+    NO_REPLY: 'El daemon no respondió.'
+  }[e.code]
+  console.error(msg || `No se pudo: ${e.message}`)
+  process.exit(1)
+}
+
+async function askBackupPassword ({ twice }) {
+  let pwd
+  try {
+    pwd = await askPassword('Contraseña del respaldo: ')
+    if (twice) {
+      if (pwd.length < 12) { console.error('Tiene que tener al menos 12 caracteres. Varias palabras al azar funcionan bien.'); process.exit(1) }
+      const again = await askPassword('Repítela: ')
+      if (again !== pwd) { console.error('No coinciden.'); process.exit(1) }
+    }
+  } catch (_) {
+    console.error('Hace falta un terminal para escribir la contraseña del respaldo.')
+    process.exit(1)
+  }
+  if (!pwd) { console.error('Cancelado.'); process.exit(1) }
+  return pwd
+}
+
+async function cmdBackup (rest) {
+  const [sub, ...args] = rest
+  const flag = (name) => { const i = args.indexOf(name); if (i < 0) return null; const v = args[i + 1]; args.splice(i, 2); return v }
+  const has = (name) => { const i = args.indexOf(name); if (i < 0) return false; args.splice(i, 1); return true }
+
+  if (sub === 'list') {
+    const r = await backupRequest({ op: 'backup-drawers' }).catch(backupFail)
+    if (!r.drawers.length) { console.log('No hay nada que respaldar todavía.'); return }
+    console.log('\n%sCajones%s\n', B, Z)
+    for (const d of r.drawers) console.log('  %s  %s', drawerName(d.owner, d.device).padEnd(36), `${d.count} ${d.owner === 'passwords' ? 'entrada(s)' : 'valor(es)'}`)
+    console.log('\nTodo:          dotrino-vault backup export')
+    console.log('Solo algunos:  dotrino-vault backup export proxy @me contrasenas <ID>\n')
+    return
+  }
+
+  if (sub === 'export') {
+    let out = flag('-o') || flag('--out')
+    let selected = null
+    if (args.length) {
+      const known = (await backupRequest({ op: 'backup-drawers' }).catch(backupFail)).drawers
+        .filter((d) => d.device).map((d) => ({ id: d.device.id, owner: d.owner }))
+      selected = args.map((a) => drawerArg(a, known))
+    }
+    if (!out) out = `dotrino-vault-backup-${new Date().toISOString().slice(0, 10)}.json`
+    if (fs.existsSync(out)) { console.error('%s ya existe. Elige otro nombre con:  -o <archivo>', out); process.exit(1) }
+    const backupPassword = await askBackupPassword({ twice: true })
+    const r = await backupRequest({ op: 'backup-export', drawers: selected, backupPassword }).catch(backupFail)
+    fs.writeFileSync(out, JSON.stringify(r.file, null, 2) + '\n', { mode: 0o600 })
+    console.log('\nRespaldo guardado en %s%s%s\n', B, out, Z)
+    for (const d of r.summary.drawers) console.log('  %s  %d', drawerName(d.owner, d.device).padEnd(36), d.count)
+    if (r.summary.passwordsUnreadable) {
+      console.log('\n%s¡OJO!%s %d contraseña(s) NO entran en el respaldo: se guardaron antes de que existiera', B, Z, r.summary.passwordsUnreadable)
+      console.log('la copia de recuperación. Ábrelas una vez desde un aparato con «contraseñas» y repite el respaldo.')
+    }
+    if (r.summary.passwordFieldsWithheld) {
+      console.log('\n%s¡OJO!%s %d campo(s) de contraseñas no se pudieron abrir y faltan en el respaldo.', B, Z, r.summary.passwordFieldsWithheld)
+    }
+    console.log('\nLa contraseña del respaldo no se puede recuperar. Sin ella el archivo no se abre.\n')
+    return
+  }
+
+  if (sub === 'import') {
+    const onConflict = flag('--on-conflict')
+    if (onConflict && onConflict !== 'keep' && onConflict !== 'replace') {
+      console.error('--on-conflict es keep (conserva lo de aquí) o replace (gana el respaldo).'); process.exit(2)
+    }
+    const yes = has('--yes') || has('-y')
+    const maps = []
+    for (let a; (a = flag('--as'));) maps.push(a)
+    const [file, ...wanted] = args
+    if (!file) { console.error('Uso:  dotrino-vault backup import <archivo> [cajón…] [--as <de>=<a>] [--on-conflict keep|replace]'); process.exit(2) }
+    let sealed
+    try { sealed = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (e) { console.error('No se pudo leer %s: %s', file, e.message); process.exit(1) }
+    const backupPassword = await askBackupPassword({ twice: false })
+
+    // Primero lo que trae el respaldo, para poder nombrar sus cajones (y sus aparatos).
+    const all = (await backupRequest({ op: 'backup-plan', file: sealed, backupPassword }).catch(backupFail)).plan
+    const fromDevices = all.drawers.filter((d) => d.label?.id).map((d) => ({ id: d.label.id, owner: d.from }))
+    const drawers = wanted.length ? wanted.map((w) => drawerArg(w, fromDevices)) : null
+    const map = {}
+    for (const m of maps) {
+      const [from, to] = m.split('=')
+      if (!from || !to) { console.error('--as va así:  --as proxy=proxy-nuevo  (o --as <ID>=<ID> para un aparato)'); process.exit(2) }
+      const target = DEVICE_ID_RE.test(to) ? `dev:${(await findMember(to)).pub}` : drawerArg(to)
+      map[drawerArg(from, fromDevices)] = target
+    }
+
+    const plan = (await backupRequest({ op: 'backup-plan', file: sealed, backupPassword, drawers, map }).catch(backupFail)).plan
+    const label = { new: 'nuevo', same: 'igual', conflict: 'CHOCA' }
+    console.log('')
+    for (const d of plan.drawers) {
+      const dest = d.from === d.to ? drawerName(d.to, d.label) : `${drawerName(d.from, d.label)} → ${drawerName(d.to)}`
+      if (d.status === 'no-device') { console.log('%s%s%s  no entra: ese aparato no está en esta cuenta (muévelo con --as <ID>=<ID>)', B, dest, Z); continue }
+      console.log('%s%s%s', B, dest, Z)
+      for (const it of d.items) console.log('  %s %s', (label[it.status] || it.status).padEnd(7), it.title ? `${it.title}${it.username ? ' · ' + it.username : ''}` : it.key)
+    }
+    const c = plan.counts
+    console.log('\n%d nuevo(s) · %d igual(es) · %d choque(s)%s\n', c.new, c.same, c.conflict, c.skipped ? ` · ${c.skipped} sin destino` : '')
+
+    // LOS CHOQUES: o los decide la bandera, o se preguntan uno a uno. Sin terminal y sin
+    // bandera se para: decidir por defecto sería pisar (o perder) algo sin que nadie lo vea.
+    const decisions = {}
+    if (c.conflict && !onConflict) {
+      if (!process.stdin.isTTY) {
+        console.error('Hay choques y no dijiste qué hacer. Repite con  --on-conflict keep  (conserva lo de aquí)')
+        console.error('o  --on-conflict replace  (gana el respaldo). No se importó nada.')
+        process.exit(1)
+      }
+      let forAll = null
+      for (const d of plan.drawers) {
+        for (const it of d.items) {
+          if (it.status !== 'conflict') continue
+          if (!forAll) {
+            const name = it.title ? `${it.title}${it.username ? ' · ' + it.username : ''}` : it.key
+            const a = (await askText(`${drawerName(d.to, d.label)} · ${name}: [c]onservar lo de aquí, [r]eemplazar, [C]/[R] todos los demás: `)).trim()
+            if (a === 'C') forAll = 'keep'
+            else if (a === 'R') forAll = 'replace'
+            else if (a === 'c' || a === 'r') { decisions[`${d.to} ${it.key}`] = a === 'c' ? 'keep' : 'replace'; continue }
+            else { console.error('Cancelado. No se importó nada.'); process.exit(1) }
+          }
+          decisions[`${d.to} ${it.key}`] = forAll
+        }
+      }
+    }
+    if (!c.new && !Object.values(decisions).includes('replace') && onConflict !== 'replace') { console.log('No hay nada que importar.'); return }
+    if (!yes) {
+      const a = (await askText('¿Importar? [s/N] ')).trim().toLowerCase()
+      if (a !== 's' && a !== 'si' && a !== 'sí') { console.log('No se importó nada.'); return }
+    }
+    let r
+    try {
+      r = await backupRequest({ op: 'backup-import', file: sealed, backupPassword, drawers, map, onConflict, decisions })
+    } catch (e) {
+      if (e.code === 'BACKUP_CONFLICTS') {
+        // La bóveda cambió entre el plan y el sí: hay un choque que no estaba.
+        console.error('Apareció un choque nuevo mientras decidías (la bóveda cambió). No se importó nada; repite la orden.')
+        process.exit(1)
+      }
+      backupFail(e)
+    }
+    console.log('\nImportado: %d escrito(s), %d conservado(s), %d ya igual(es).', r.result.written, r.result.kept, r.result.same)
+    for (const k of r.result.keptPrivate) console.log('  %s · %s se queda privada: aquí ya era privada.', drawerName(k.drawer), k.key)
+    console.log('')
+    return
+  }
+
+  console.error(`Uso:
+  dotrino-vault backup list                          qué cajones hay
+  dotrino-vault backup export [cajón…] [-o archivo]  todo, o solo esos cajones
+  dotrino-vault backup import <archivo> [cajón…] [--as <de>=<a>] [--on-conflict keep|replace] [--yes]
+
+  Un cajón es el nombre de un scope (proxy), @me (tu perfil), contrasenas, o el ID de un aparato.`)
+  process.exit(2)
+}
+
 function help () {
   console.log(`dotrino-vault — control del certificador personal
 
@@ -2369,6 +2589,17 @@ function help () {
                                     privada, y una privada NO se vuelve pública.
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
+  backup list         qué cajones hay para respaldar (nombres y cuántos valores)
+  backup export [cajón…] [-o archivo]
+                      un archivo cifrado con una contraseña propia, con los valores de
+                      TODOS los cajones o solo de los que digas (proxy, @me, contrasenas,
+                      el ID de un aparato). Las llaves no van: son de cada aparato.
+                      Bóveda abierta
+  backup import <archivo> [cajón…] [--as <de>=<a>] [--on-conflict keep|replace] [--yes]
+                      lo trae a esta bóveda y lo vuelve a sellar con sus llaves. Primero
+                      enseña qué es nuevo, qué es igual y qué choca; un choque se decide
+                      (conservar o reemplazar) o no se importa nada. --as mueve un cajón a
+                      otro nombre o a otro aparato. Bóveda abierta
   join <invitación> [--name <n>] [--kms <config.json>]
                       ESTA bóveda ENTRA en la cuenta de otra (el papel contrario a pair).
                       Entra con su propia llave, así que después se le puede dar +sella
@@ -2575,6 +2806,7 @@ export async function runCtl (argv) {
     case 'logins': return cmdLogins(rest)
     case 'update': return cmdUpdate(rest)
     case 'secret': return cmdSecret(rest)
+    case 'backup': return cmdBackup(rest)
     // `approval` se quitó el 2026-09-01 (ahora es el permiso `unattended`), pero la ruta se
     // quedó apuntando a una función que ya no existía: reventaba con un ReferenceError. Se
     // rechaza en voz alta, igual que `caps +approval`.

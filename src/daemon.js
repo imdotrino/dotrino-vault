@@ -31,6 +31,7 @@ import { readSettings } from './settings.js'
 import { approversOfAll, firstYes, readAsked, writeAsked, clearAsked, shouldAsk, resultOfNo, readRootTold, writeRootTold, shouldTellRoot } from './updateApproval.js'
 import { UPDATE_TTL_MS } from '../lib/src/core/approvals.js'
 import crypto from 'node:crypto'
+import { sealBackup, openBackup } from '../lib/src/core/backup.js'
 
 const readJsonSafe = (f) => ipcRead(f, null)
 const rm = (f) => { try { fs.rmSync(f, { force: true }) } catch (_) {} }
@@ -366,6 +367,12 @@ export async function runDaemon () {
   let lastSecretValue = null
   /** Y las versiones anteriores que se acaban de pedir. Mismo camino, mismo volcado. */
   let lastSecretHistory = null
+  /**
+   * Lo que contestó la última orden de RESPALDO (`dotrino-vault backup`). Mismo camino que
+   * `lastSecretValue`. Lo que viaja nunca es un valor en claro: el respaldo sale YA CIFRADO
+   * con su contraseña, y el plan de importar lleva nombres y estados, no valores.
+   */
+  let lastBackup = null
   // ENTRAR CON USUARIO Y CONTRASEÑA, desde esta máquina (`dotrino-vault logins`).
   //
   // La respuesta NO se llama `logins.json`: ese nombre ya es el almacén del escritorio en
@@ -802,6 +809,26 @@ export async function runDaemon () {
             const value = await vault.revealSecret(sec.owner, sec.key, ak)
             lastSecretValue = { owner: sec.owner, key: sec.key, value }
           }
+          // EL RESPALDO. Bóveda abierta (lo comprueba la bóveda) y la contraseña del RESPALDO,
+          // que no es la del perfil: con ella se cierra el archivo aquí mismo, para que lo que
+          // salga de este proceso ya vaya cifrado.
+          else if (sec.op === 'backup-drawers') {
+            lastBackup = { op: sec.op, id: sec.id || null, drawers: await vault.backupDrawers() }
+          } else if (sec.op === 'backup-export') {
+            const { payload, summary } = await vault.exportBackup({ drawers: sec.drawers || null, adminKey: ak })
+            lastBackup = { op: sec.op, id: sec.id || null, file: await sealBackup(payload, sec.backupPassword), summary }
+            console.log('[vault] backup exported: %d drawer(s)', summary.drawers.length)
+          } else if (sec.op === 'backup-plan' || sec.op === 'backup-import') {
+            const payload = await openBackup(sec.file, sec.backupPassword)
+            const opts = { drawers: sec.drawers || null, map: sec.map || {}, adminKey: ak }
+            if (sec.op === 'backup-plan') {
+              lastBackup = { op: sec.op, id: sec.id || null, plan: await vault.planBackupImport(payload, opts) }
+            } else {
+              const result = await vault.importBackup(payload, { ...opts, onConflict: sec.onConflict || null, decisions: sec.decisions || {} })
+              lastBackup = { op: sec.op, id: sec.id || null, result }
+              console.log('[vault] backup imported: %d value(s) written, %d kept', result.written, result.kept)
+            }
+          }
           // Qué versiones anteriores hay (sin valores: son sobres).
           else if (sec.op === 'history') {
             lastSecretHistory = { owner: sec.owner || null, key: sec.key || null, items: vault.secretHistory(sec.owner || null, sec.key || null) }
@@ -818,7 +845,11 @@ export async function runDaemon () {
         } catch (e) {
           lastSecretError = {
             error: e.message,
-            code: e.code || (/wrong password/i.test(e.message) ? 'WRONG_PASSWORD' : 'SECRET_FAILED')
+            code: e.code || (/wrong password/i.test(e.message) ? 'WRONG_PASSWORD' : 'SECRET_FAILED'),
+            // Los choques de una importación viajan con el error: son lo que hay que decidir.
+            ...(e.conflicts ? { conflicts: e.conflicts } : {}),
+            ...(e.missing ? { missing: e.missing } : {}),
+            ...(sec.op?.startsWith('backup-') ? { op: sec.op, id: sec.id || null } : {})
           }
           console.error('[vault] secret failed:', e.message)
         } finally { wipe(ak) }
@@ -928,11 +959,13 @@ export async function runDaemon () {
           incomplete: await t.vault.incompleteMembers(),
           ...(lastSecretError ? { secretError: lastSecretError } : {}),
           ...(lastSecretValue ? { revealed: lastSecretValue } : {}),
-          ...(lastSecretHistory ? { history: lastSecretHistory } : {})
+          ...(lastSecretHistory ? { history: lastSecretHistory } : {}),
+          ...(lastBackup ? { backup: lastBackup } : {})
         })
         lastSecretError = null
         lastSecretValue = null
         lastSecretHistory = null
+        lastBackup = null
         ipcWrite(devFile, { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.listDevices()) })
         // Acta del perfil: quién es del perfil y qué puede hacer cada uno (`members`/`caps`).
         try { ipcWrite(path.join(dir, 'acta.json'), { v: 1, at: Date.now(), req: reqId, profile: t.id, ...(await t.vault.profileMembers()), blocked: t.vault.listBlocked?.() || [] }) } catch (_) {}
