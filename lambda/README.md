@@ -34,8 +34,15 @@ dejaría la cuenta ilegible en el siguiente arranque en frío.
 - ningún objeto del almacén lleva el secreto en claro;
 - dos escritores sobre el mismo perfil: el segundo choca y lo del primero se conserva.
 
-**No probado en AWS todavía.** Tampoco el `If-Match` del borrado en S3 (`DeleteObject`): la
-subida condicional sí es de S3 desde 2024; la del borrado hay que confirmarla.
+**En AWS (2026-10-17, us-east-1, Node 22, 1024 MB):** el primer arranque crea el perfil y
+lo sube (10 archivos); un contenedor nuevo lo baja de S3 y abre la MISMA bóveda (mismo id).
+Todos los archivos llegan cifrados (`DOTRINO-ATREST-v1`) salvo los que van en claro a
+propósito: `atrest.json`, `atrest.kek` y `key.json` (solo la llave pública del dueño del
+directorio). Tiempos: arranque en frío ~2,5 s (incluye conectar al proxio), en caliente
+~50 ms dentro de la función y ~0,4 s de punta a punta.
+
+Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`). La subida condicional sí
+es de S3 desde 2024.
 
 ## Lo que falta (en este orden)
 
@@ -66,6 +73,9 @@ subida condicional sí es de S3 desde 2024; la del borrado hay que confirmarla.
 - Rol: `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` sobre el prefijo, y
   `kms:Encrypt`/`kms:Decrypt` sobre esa llave. Nada más.
 - **Concurrencia reservada: 1.** Dos contenedores a la vez se pisarían el perfil; la
-  escritura condicional lo para, pero mejor que no pase.
+  escritura condicional lo para, pero mejor que no pase. **En una cuenta nueva no se puede**:
+  el límite de la cuenta es 10 y AWS exige dejar 10 sin reservar. Hay que pedir el aumento
+  de cuota (Service Quotas → Lambda → Concurrent executions); mientras, protege solo la
+  escritura condicional.
 - Function URL con `AuthType: NONE`: la puerta es el cert de cada mensaje, como en el
   proxio. Alcanzar la URL no autoriza nada.
