@@ -629,6 +629,54 @@ export async function revealSecret (owner, key, profile, password) {
   return d.revealed.value
 }
 
+// ---------------------------------------------------------------------------
+// EL RESPALDO (`docs/respaldo.md`). Lo usan la CLI (`dotrino-vault backup`) y la TUI.
+//
+// Bóveda abierta, y la contraseña del RESPALDO (no la del perfil) viaja en la petición, que
+// el daemon borra al leerla. Lo que vuelve nunca es un valor en claro: el archivo ya
+// cifrado, o el plan con nombres y estados.
+// ---------------------------------------------------------------------------
+
+/**
+ * Una orden de respaldo y su respuesta. Se reconoce la nuestra por el `id` de la petición
+ * (`backup.id` o `secretError.id`), no por el del volcado: el error de otra orden no es el
+ * nuestro. Hasta dos minutos: exportar abre cada valor y deriva la contraseña.
+ */
+export async function backupOp (req, profile, { timeoutMs = 120_000 } = {}) {
+  requireAlive()
+  rm(F.secretsList)
+  const id = await writeReq(F.secretReq, req, profile)
+  await writeReq(F.dumpReq, {}, profile)
+  signalOrCleanup('SIGUSR2', [F.secretReq, F.dumpReq])
+  for (let i = 0; i < timeoutMs / 100; i++) {
+    await sleep(100)
+    const d = read(F.secretsList, null)
+    if (!d?.at) continue
+    rm(F.secretsList)
+    assertOpen(d)
+    if (d.backup?.id === id) return d.backup
+    if (d.secretError?.id === id) throw Object.assign(new Error(d.secretError.error), d.secretError)
+  }
+  throw coded('the daemon did not reply', 'NO_REPLY')
+}
+
+/** Los cajones que hay: `[{ owner, count, device? }]`. */
+export async function backupDrawers (profile) {
+  return (await backupOp({ op: 'backup-drawers' }, profile)).drawers
+}
+/** Exporta (todo con `drawers = null`). Devuelve `{ file, summary }`; `file` ya va cifrado. */
+export async function backupExport (drawers, backupPassword, profile) {
+  return backupOp({ op: 'backup-export', drawers: drawers || null, backupPassword }, profile)
+}
+/** El plan de importar: qué es nuevo, igual o choca. No escribe nada. */
+export async function backupPlan (file, backupPassword, { drawers = null, map = {} } = {}, profile) {
+  return (await backupOp({ op: 'backup-plan', file, backupPassword, drawers, map }, profile)).plan
+}
+/** Importa. Con un choque sin decidir lanza `BACKUP_CONFLICTS` y no escribe nada. */
+export async function backupImport (file, backupPassword, { drawers = null, map = {}, onConflict = null, decisions = {} } = {}, profile) {
+  return (await backupOp({ op: 'backup-import', file, backupPassword, drawers, map, onConflict, decisions }, profile)).result
+}
+
 /** SALDA lo que quedó a deber (heredar lo viejo, rotar de verdad). Pide la contraseña. */
 export function settleSecrets (profile, password) {
   return secretOp({ op: 'settle', ...(password ? { password } : {}) }, profile, () => {})

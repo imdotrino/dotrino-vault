@@ -68,7 +68,10 @@ test('dentro de una bóveda, las pestañas; con una pregunta abierta, la pregunt
   assert.deepEqual(vm.tabs.map((x) => x.key), ['devices', 'secrets', 'logins', 'me'])
   assert.equal(vm.tabs.find((x) => x.active).key, 'devices')
   const q = viewModel(estado({ input: { label: 'Nombre', hint: 'h', mask: true, value: '', file: true } }), t)
-  assert.deepEqual(q.input, { label: 'Nombre', hint: 'h', mask: true, value: '', file: true })
+  assert.deepEqual(q.input, { label: 'Nombre', hint: 'h', mask: true, value: '', file: true, save: false })
+  // `save`: el archivo se ELIGE PARA GUARDAR (el respaldo), y la ventana abre el diálogo de guardar.
+  const g = viewModel(estado({ input: { label: 'Guardar en', value: '/tmp/r.json', file: true, save: true } }), t)
+  assert.equal(g.input.save, true)
   assert.deepEqual(q.help, [])
   const c = viewModel(estado({ confirm: { text: '¿Seguro?', defaultYes: false } }), t)
   assert.deepEqual(c.confirm, { text: '¿Seguro?', defaultYes: false })

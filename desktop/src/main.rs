@@ -125,6 +125,9 @@ struct InputReq {
     value: String,
     #[serde(default)]
     file: bool,
+    /// El archivo se elige para GUARDAR (el respaldo): diálogo de guardar, no de abrir.
+    #[serde(default)]
+    save: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
@@ -214,6 +217,7 @@ enum Message {
     InputSubmit,
     InputCancel,
     PickFile,
+    PickSave(String),
     FilePicked(Option<String>),
     Confirm(bool),
     Mode(theme::Mode),
@@ -382,6 +386,22 @@ impl App {
                             .pick_file()
                             .await
                             .map(|f| f.path().to_string_lossy().into_owned())
+                    },
+                    Message::FilePicked,
+                );
+            }
+            Message::PickSave(suggested) => {
+                return Task::perform(
+                    async move {
+                        let path = std::path::Path::new(&suggested);
+                        let mut d = rfd::AsyncFileDialog::new();
+                        if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                            d = d.set_directory(dir);
+                        }
+                        if let Some(name) = path.file_name() {
+                            d = d.set_file_name(name.to_string_lossy());
+                        }
+                        d.save_file().await.map(|f| f.path().to_string_lossy().into_owned())
                     },
                     Message::FilePicked,
                 );
@@ -720,7 +740,14 @@ impl App {
                 .padding(10)
                 .size(15);
             let mut btns = row![].spacing(8);
-            if inp.file {
+            if inp.file && inp.save {
+                btns = btns.push(
+                    button(text(if es() { "Guardar como…" } else { "Save as…" }).size(14))
+                        .padding([7, 14])
+                        .style(move |_, st| ghost(pal, st))
+                        .on_press(Message::PickSave(self.input_value.clone())),
+                );
+            } else if inp.file {
                 btns = btns.push(
                     button(text(if es() { "Elegir archivo…" } else { "Choose file…" }).size(14))
                         .padding([7, 14])

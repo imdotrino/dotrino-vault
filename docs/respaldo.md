@@ -7,9 +7,10 @@
 > abiertas»* y *«el proceso de backup debe ser de todo o solo por cajón: de repente quiero
 > mover un cajón de un vault a otro»*.
 
-Implementado en `lib/src/core/backup.js` (el archivo, el plan y los choques), en
-`lib/src/core/vault.js` (`backupDrawers`, `exportBackup`, `planBackupImport`, `importBackup`) y
-en el CLI (`dotrino-vault backup`). Uso: wiki, *Bóveda → Respaldo*.
+Implementado en `lib/src/core/backup.js` (el archivo, el plan y los choques, exportado como
+`@dotrino/vault/backup`), en `lib/src/core/vault.js` (`backupDrawers`, `exportBackup`,
+`planBackupImport`, `importBackup`), en el CLI (`dotrino-vault backup`) y en la TUI (tecla `o` en
+Bóvedas), que la ventana de escritorio pinta igual. Uso: wiki, *Bóveda → Respaldo*.
 
 ## 1. Qué lleva y qué no
 
@@ -118,6 +119,9 @@ sin poder leer nada.
   copia de recuperación no la abre la bóveda, y no entra en el respaldo. El resumen lo cuenta
   (`passwordsUnreadable`) y el CLI lo avisa. Se arregla abriéndola una vez desde un aparato con
   `passwords`.
-- **Las tres versiones.** El núcleo es el mismo en las tres, pero de momento solo el binario
-  tiene la orden (`dotrino-vault backup`). La pantalla de la pestaña y la de la extensión están
-  pendientes (`three-versions.md`).
+- **Las tres versiones.** El núcleo es el mismo en las tres. El binario lo tiene en el CLI, la
+  TUI y la ventana; la pestaña y la extensión, en su pantalla (`three-versions.md`).
+- **En la pestaña, solo la consola.** El iframe de identidad atiende a cualquier
+  `*.dotrino.com`, y quien exporta elige la contraseña del respaldo: sería poder leerlo todo.
+  Por eso los métodos de respaldo del iframe solo contestan al origen de la consola
+  (`vault.dotrino.com`, y los de desarrollo).

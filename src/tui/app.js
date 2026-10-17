@@ -30,6 +30,8 @@
  * que entrar antes), el candado es `k` (la `l` es el idioma) y la contraseña `c`.
  */
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { parseEnvInput } from '../../lib/src/envtext.js'
 import { createTerm, widthOf, makeTheme } from './term.js'
@@ -1338,6 +1340,15 @@ async function onKeyProfiles (term, st, key) {
     st.sel.settings = 0
     st.scroll.settings = { value: 0 }
     st.screen = 'settings'
+  } else if (ch === 'o' && cur) { // el respaldo: exportar e importar, con la bóveda abierta
+    await ensureUnlocked(term, st, cur, async (p = cur) => {
+      if (!p.current) {
+        const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
+        if (!r.ok) return
+        await refreshAll(term, st)
+      }
+      await openBackup(term, st)
+    })
   } else if (ch === 'y' && cur) { // las llaves: con qué se abre la bóveda
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       st.doorsFor = p.id
@@ -2427,6 +2438,280 @@ async function onConfirmKey (st, key) {
   }
 }
 
+// -------------------------------- respaldo ---------------------------------
+//
+// EL RESPALDO (`docs/respaldo.md`): un archivo cifrado con una contraseña propia, con los
+// valores de los cajones elegidos (o de todos). Exportar e importar son de bóveda ABIERTA,
+// así que se entra con `ensureUnlocked`. Importar pasa por un PLAN: se ve qué es nuevo, qué
+// es igual y qué choca, y no se escribe nada hasta decidir cada choque.
+
+const BACKUP_PWD_MIN = 12
+const drawerTitle = (i, owner, device) => owner === 'passwords'
+  ? i.bkPasswords
+  : owner === 'ns:@me' ? i.bkProfile
+    : owner.startsWith('ns:') ? owner.slice(3)
+      : i.bkDevice(device?.id || owner.slice(4, 12), device?.label || null)
+
+/** El nombre por defecto del archivo: en la carpeta personal, con la fecha. */
+const defaultBackupPath = () => path.join(os.homedir(), `dotrino-vault-backup-${new Date().toISOString().slice(0, 10)}.json`)
+
+function backupRows (st, t) {
+  const i = L(st)
+  const b = st.backup
+  if (!b) return [{ text: t.muted(' —'), sel: false }]
+  const rows = [{ text: ' ' + t.bold(i.bkExportTitle), sel: false }]
+  if (!b.drawers.length) rows.push({ text: t.muted('   ' + i.bkNothing), sel: false })
+  for (const d of b.drawers) {
+    const on = b.chosen.has(d.owner)
+    rows.push({
+      text: `   ${on ? t.accent('[x]') : '[ ]'} ${drawerTitle(i, d.owner, d.device)}   ${t.muted(i.bkCount(d.count, d.owner === 'passwords'))}`,
+      sel: true,
+      meta: { owner: d.owner }
+    })
+  }
+  rows.push({ text: '', sel: false })
+  rows.push({ text: t.muted('   ' + (b.chosen.size ? i.bkSomeChosen(b.chosen.size) : i.bkAllChosen)), sel: false })
+  rows.push({ text: t.muted('   ' + i.bkNoKeys), sel: false })
+  return rows
+}
+
+const conflictsOf = (plan) => plan.drawers.flatMap((d) => d.items.filter((it) => it.status === 'conflict').map((it) => `${d.to} ${it.key}`))
+
+function backupPlanRows (st, t) {
+  const i = L(st)
+  const bp = st.backupPlan
+  if (!bp) return [{ text: t.muted(' —'), sel: false }]
+  const rows = [{ text: ' ' + t.bold(i.bkPlanFrom(path.basename(bp.path))), sel: false }]
+  const conflicts = conflictsOf(bp.plan)
+  if (conflicts.length) {
+    const all = new Set(conflicts.map((r) => bp.decisions[r]))
+    const label = all.size === 1 && all.has('keep') ? i.bkKeep : all.size === 1 && all.has('replace') ? i.bkReplace : i.bkMixed
+    rows.push({ text: ` ${t.bold(i.bkAllConflicts)}: ${t.accent(label)}`, sel: true, meta: { all: true } })
+  }
+  for (const d of bp.plan.drawers) {
+    const name = d.from === d.to ? drawerTitle(i, d.to, d.label) : `${drawerTitle(i, d.from, d.label)} → ${drawerTitle(i, d.to, null)}`
+    rows.push({ text: '', sel: false })
+    if (d.status !== 'ok') {
+      rows.push({ text: ` ${t.bold(name)}  ${t.warn(i.bkNoDevice)}`, sel: true, meta: { drawer: d.from } })
+      continue
+    }
+    rows.push({ text: ` ${t.bold(name)}`, sel: true, meta: { drawer: d.from } })
+    for (const it of d.items) {
+      const what = it.title ? `${it.title}${it.username ? ' · ' + it.username : ''}` : it.key
+      if (it.status !== 'conflict') {
+        rows.push({ text: `   ${t.muted((it.status === 'new' ? i.bkNew : i.bkSame).padEnd(10))} ${what}`, sel: false })
+        continue
+      }
+      const ref = `${d.to} ${it.key}`
+      const dec = bp.decisions[ref]
+      const decTxt = dec === 'keep' ? i.bkKeep : dec === 'replace' ? i.bkReplace : t.warn(i.bkUndecided)
+      rows.push({ text: `   ${t.warn(i.bkConflict.padEnd(10))} ${what}   → ${decTxt}`, sel: true, meta: { ref } })
+    }
+  }
+  const c = bp.plan.counts
+  rows.push({ text: '', sel: false })
+  rows.push({ text: t.muted('   ' + i.bkCounts(c.new, c.same, c.conflict, c.skipped)), sel: false })
+  return rows
+}
+
+/** Abre la pantalla de respaldo de la bóveda activa: carga qué cajones hay. */
+async function openBackup (term, st) {
+  const i = L(st)
+  const r = await guard(term, st, i.bkLoading, () => vc.backupDrawers(activeId(st)))
+  if (!r.ok) return
+  st.backup = { drawers: r.v, chosen: new Set() }
+  st.sel.backup = 0
+  st.scroll.backup = { value: 0 }
+  st.screen = 'backup'
+}
+
+/** Pide la contraseña del respaldo (dos veces al exportar) y sigue con ella. */
+function askBackupPassword (st, { twice }, done) {
+  const i = L(st)
+  setInput(st, {
+    label: i.bkPassword,
+    hint: twice ? i.bkPasswordHint : '',
+    mask: true,
+    onSubmit: async (pwd) => {
+      st.input = null
+      if (!pwd) return
+      if (twice && pwd.length < BACKUP_PWD_MIN) { flash(st, i.bkPasswordShort, 'danger'); return }
+      if (!twice) { await done(pwd); return }
+      setInput(st, {
+        label: i.repeatPassword,
+        mask: true,
+        onSubmit: async (again) => {
+          st.input = null
+          if (again !== pwd) { flash(st, i.passwordMismatch, 'danger'); return }
+          await done(pwd)
+        },
+        onCancel: () => { st.input = null }
+      })
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
+function backupErr (e, st) {
+  const i = L(st)
+  return ({
+    VAULT_LOCKED: i.errProfileLocked,
+    NOT_A_BACKUP: i.bkNotABackup,
+    BACKUP_CORRUPT: i.bkCorrupt,
+    WRONG_PASSWORD: i.bkWrongPassword,
+    BACKUP_CONFLICTS: i.bkConflictsAppeared
+  })[e?.code] || humanErr(e, st)
+}
+/** `guard`, con los errores del respaldo dichos en su idioma. */
+async function backupGuard (term, st, msg, fn) {
+  st.busy = msg
+  render(term, st)
+  try { const v = await fn(); st.busy = null; return { ok: true, v } } catch (e) { st.busy = null; flash(st, backupErr(e, st), 'danger'); return { ok: false, e } }
+}
+
+async function onKeyBackup (term, st, key) {
+  const i = L(st)
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  const b = st.backup
+  if (key.name === 'escape' || ch === 'b' || !b) { st.screen = 'profiles'; st.backup = null; return true }
+  const selectable = backupRows(st, makeTheme()).filter((r) => r.sel)
+  if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) { moveSel(st, key, 'backup', selectable.length); return true }
+  const cur = selectable[Math.min(st.sel.backup || 0, selectable.length - 1)]?.meta
+  if ((key.name === 'enter' || (key.name === 'char' && key.ch === ' ')) && cur?.owner) {
+    if (b.chosen.has(cur.owner)) b.chosen.delete(cur.owner)
+    else b.chosen.add(cur.owner)
+    return true
+  }
+  if (ch === 'g') {
+    if (!b.drawers.length) { flash(st, i.bkNothing, 'warn'); return true }
+    setInput(st, {
+      label: i.bkSaveTo,
+      hint: i.bkSaveToHint,
+      value: defaultBackupPath(),
+      file: true,
+      save: true,
+      onSubmit: async (raw) => {
+        st.input = null
+        const out = raw.trim()
+        if (!out) return
+        if (fs.existsSync(out)) { flash(st, i.bkExists(out), 'danger'); return }
+        askBackupPassword(st, { twice: true }, async (pwd) => {
+          const r = await backupGuard(term, st, i.bkExporting, () => vc.backupExport(b.chosen.size ? [...b.chosen] : null, pwd, activeId(st)))
+          if (!r.ok) return
+          try { fs.writeFileSync(out, JSON.stringify(r.v.file, null, 2) + '\n', { mode: 0o600 }) } catch (e) { flash(st, i.bkWriteFailed(e.message), 'danger'); return }
+          const s = r.v.summary
+          if (s.passwordsUnreadable) flash(st, i.bkSavedButMissing(out, s.passwordsUnreadable), 'warn')
+          else flash(st, i.bkSaved(out, s.drawers.length))
+        })
+      },
+      onCancel: () => { st.input = null }
+    })
+    return true
+  }
+  if (ch === 'i') {
+    setInput(st, {
+      label: i.bkOpenFile,
+      hint: i.bkOpenFileHint,
+      file: true,
+      onSubmit: async (raw) => {
+        st.input = null
+        const where = raw.trim()
+        if (!where) return
+        let file
+        try { file = JSON.parse(fs.readFileSync(where, 'utf8')) } catch (e) { flash(st, i.bkReadFailed(where), 'danger'); return }
+        askBackupPassword(st, { twice: false }, async (pwd) => {
+          const r = await backupGuard(term, st, i.bkPlanning, () => vc.backupPlan(file, pwd, {}, activeId(st)))
+          if (!r.ok) return
+          st.backupPlan = { path: where, file, pwd, plan: r.v, map: {}, decisions: {} }
+          st.sel.backupplan = 0
+          st.scroll.backupplan = { value: 0 }
+          st.screen = 'backupplan'
+        })
+      },
+      onCancel: () => { st.input = null }
+    })
+    return true
+  }
+  return true
+}
+
+/** Rehace el plan (tras mover un cajón), conservando lo que ya se había decidido. */
+async function replanBackup (term, st) {
+  const i = L(st)
+  const bp = st.backupPlan
+  const r = await backupGuard(term, st, i.bkPlanning, () => vc.backupPlan(bp.file, bp.pwd, { map: bp.map }, activeId(st)))
+  if (!r.ok) return
+  bp.plan = r.v
+  const valid = new Set(conflictsOf(bp.plan))
+  for (const k of Object.keys(bp.decisions)) if (!valid.has(k)) delete bp.decisions[k]
+}
+
+async function onKeyBackupPlan (term, st, key) {
+  const i = L(st)
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  const bp = st.backupPlan
+  const leave = () => { st.backupPlan = null; st.screen = st.backup ? 'backup' : 'profiles' }
+  if (key.name === 'escape' || ch === 'b' || !bp) { leave(); return true }
+  const selectable = backupPlanRows(st, makeTheme()).filter((r) => r.sel)
+  if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) { moveSel(st, key, 'backupplan', selectable.length); return true }
+  const cur = selectable[Math.min(st.sel.backupplan || 0, selectable.length - 1)]?.meta
+  const next = (d) => (d === 'keep' ? 'replace' : 'keep')
+  if (key.name === 'enter' || (key.name === 'char' && key.ch === ' ')) {
+    if (cur?.ref) bp.decisions[cur.ref] = next(bp.decisions[cur.ref])
+    else if (cur?.all) {
+      const refs = conflictsOf(bp.plan)
+      const to = refs.every((r) => bp.decisions[r] === 'keep') ? 'replace' : 'keep'
+      for (const r of refs) bp.decisions[r] = to
+    }
+    return true
+  }
+  if (ch === 'm' && cur?.drawer) {
+    const from = cur.drawer
+    if (from === 'passwords') { flash(st, i.bkCantMovePasswords, 'warn'); return true }
+    setInput(st, {
+      label: i.bkMoveTo(drawerTitle(i, from, null)),
+      hint: i.bkMoveToHint,
+      onSubmit: async (raw) => {
+        st.input = null
+        const w = raw.trim()
+        if (!w) return
+        let to
+        if (/^[0-9A-F]{4}-[0-9A-F]{4}$/i.test(w)) {
+          const m = (st.members || []).find((x) => x.id === w.toUpperCase())
+          if (!m) { flash(st, i.bkNoSuchDevice(w), 'danger'); return }
+          to = 'dev:' + m.pub
+        } else if (NS_RE.test(w)) to = 'ns:' + w
+        else { flash(st, i.bkBadTarget, 'danger'); return }
+        if (to === from) delete bp.map[from]
+        else bp.map[from] = to
+        await replanBackup(term, st)
+      },
+      onCancel: () => { st.input = null }
+    })
+    return true
+  }
+  if (ch === 'g') {
+    const undecided = conflictsOf(bp.plan).filter((r) => !bp.decisions[r])
+    if (undecided.length) { flash(st, i.bkStillUndecided(undecided.length), 'warn'); return true }
+    const writes = bp.plan.counts.new + Object.values(bp.decisions).filter((d) => d === 'replace').length
+    if (!writes) { flash(st, i.bkNothingToImport, 'warn'); return true }
+    setConfirm(st, {
+      text: i.bkConfirm(writes),
+      onYes: async () => {
+        const r = await backupGuard(term, st, i.bkImporting, () => vc.backupImport(bp.file, bp.pwd, { map: bp.map, decisions: bp.decisions }, activeId(st)))
+        if (!r.ok) return
+        flash(st, i.bkImported(r.v.written, r.v.kept, r.v.keptPrivate?.length || 0))
+        leave()
+        await refreshAll(term, st)
+        if (st.backup) await openBackup(term, st)
+      },
+      onNo: () => {}
+    })
+    return true
+  }
+  return true
+}
+
 // --------------------------------- render ----------------------------------
 
 // Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
@@ -2453,7 +2738,9 @@ const helpSegs = (i, screen, st = {}) => {
     join: i.helpJoin,
     me: i.helpMe,
     caps: i.helpCaps,
-    devvars: i.helpDevVars
+    devvars: i.helpDevVars,
+    backup: i.helpBackup,
+    backupplan: i.helpBackupPlan
   }[screen] || []
   if (typeof segs !== 'function') return segs
   // El aparato señalado ahora mismo: `e variables` solo tiene sentido en un servicio (es
@@ -2488,7 +2775,9 @@ const title = (i, screen) => ({
   paircaps: i.titlePairCaps,
   join: i.titleJoin,
   caps: i.titleCaps,
-  devvars: i.titleDevVars
+  devvars: i.titleDevVars,
+  backup: i.titleBackup,
+  backupplan: i.titleBackupPlan
 })[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
@@ -2627,6 +2916,8 @@ function render (term, st) {
   else if (st.screen === 'doors') body = renderList(doorRows(st, t), st.sel.doors || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'settings') body = renderList(settingsRows(st, t), st.sel.settings || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'backup') body = renderList(backupRows(st, t), st.sel.backup || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'backupplan') body = renderList(backupPlanRows(st, t), st.sel.backupplan || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = scrollBody(pb, contentH, scrollRef)
@@ -2669,7 +2960,9 @@ const LIST_SCREENS = {
   pairmode: [pairModeRows, 'pairmode'],
   doors: [doorRows, 'doors'],
   settings: [settingsRows, 'settings'],
-  paircaps: [pairCapsRows, 'paircaps']
+  paircaps: [pairCapsRows, 'paircaps'],
+  backup: [backupRows, 'backup'],
+  backupplan: [backupPlanRows, 'backupplan']
 }
 
 /**
@@ -2738,7 +3031,7 @@ export function viewModel (st, t) {
   else if (st.flash) vm.status = { text: st.flash.text, kind: st.flash.kind || 'ok' }
   if (st.input) {
     const inp = st.input
-    vm.input = { label: inp.label || '', hint: inp.hint || '', mask: !!inp.mask, value: inp.value || '', file: !!inp.file }
+    vm.input = { label: inp.label || '', hint: inp.hint || '', mask: !!inp.mask, value: inp.value || '', file: !!inp.file, save: !!inp.save }
   } else if (st.confirm) vm.confirm = { text: st.confirm.text, defaultYes: !!st.confirm.defaultYes }
   else vm.help = helpSegs(i, st.screen, st)
   return vm
@@ -2951,6 +3244,8 @@ export async function handleKey (term, st, key) {
   if (st.screen === 'doors') return onKeyDoors(term, st, key)
   if (st.screen === 'settings') return onKeySettings(term, st, key)
   if (st.screen === 'paircaps') return onKeyPairCaps(term, st, key)
+  if (st.screen === 'backup') return onKeyBackup(term, st, key)
+  if (st.screen === 'backupplan') return onKeyBackupPlan(term, st, key)
   if (st.screen === 'pairing') return onKeyPairing(term, st, key)
   if (st.screen === 'join') return onKeyJoin(term, st, key)
   return true
@@ -3013,4 +3308,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, resetToque: () => { ultimoToque = 0 } }
+export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { ultimoToque = 0 } }

@@ -41,6 +41,7 @@ import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
 import { COMM_CN } from '../lib/src/core/commKey.js'
 import { machineLine } from '@dotrino/identity/machine'
+import * as vc from './vaultControl.js'
 
 const dir = dataDir()
 const stateFile = path.join(dir, 'state.json')
@@ -2338,25 +2339,10 @@ function drawerArg (word, devices = []) {
   return 'ns:' + w
 }
 
-/** Una orden de respaldo al daemon, y su respuesta (o su error, con código). */
-async function backupRequest (req, { timeoutMs = 120_000 } = {}) {
-  const s = requireDaemon()
-  const listFile = path.join(dataDir(), 'secrets-list.json')
-  const id = crypto.randomBytes(8).toString('hex')
-  try { fs.rmSync(listFile, { force: true }) } catch (_) {}
-  writeReq('secret-request.json', { ...req, id })
-  writeReq('dump-request.json', {})
-  sendSignal(s.pid, 'SIGUSR2')
-  for (let i = 0; i < timeoutMs / 100; i++) {
-    await sleep(100)
-    const d = ipcRead(listFile, null)
-    if (!d?.at) continue
-    try { fs.rmSync(listFile, { force: true }) } catch (_) {}
-    assertOpen(d)
-    if (d.backup?.id === id) return d.backup
-    if (d.secretError?.id === id) throw Object.assign(new Error(d.secretError.error), d.secretError)
-  }
-  throw Object.assign(new Error('the daemon did not reply'), { code: 'NO_REPLY' })
+/** Una orden de respaldo al daemon: la misma pieza que usa la TUI (`vaultControl.js`). */
+function backupRequest (req) {
+  requireDaemon()
+  return vc.backupOp(req, PROFILE || undefined)
 }
 
 function backupFail (e) {
@@ -2367,7 +2353,9 @@ function backupFail (e) {
     BACKUP_CORRUPT: 'El respaldo está dañado: no se puede leer.',
     WEAK_PASSWORD: 'La contraseña del respaldo tiene que tener al menos 12 caracteres.',
     NO_SUCH_DRAWER: `No existe ese cajón: ${(e.missing || []).join(', ')}. Míralos con:  dotrino-vault backup list`,
-    NO_REPLY: 'El daemon no respondió.'
+    NO_REPLY: 'El daemon no respondió.',
+    DAEMON_DOWN: 'El servicio de la bóveda no está corriendo.',
+    PROFILE_LOCKED: 'Perfil bloqueado. Ábrelo con:  dotrino-vault unlock'
   }[e.code]
   console.error(msg || `No se pudo: ${e.message}`)
   process.exit(1)
