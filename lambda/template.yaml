@@ -11,13 +11,19 @@
 # El bucket y la llave se QUEDAN aunque se borre la pila (`DeletionPolicy: Retain`): son la
 # cuenta. Borrar la pila por error no puede llevársela.
 #
-# UNA PILA, UNA BÓVEDA, y se pueden tener todas las que se quiera en la misma cuenta: cada
-# nombre sale del NOMBRE DE LA PILA (único en la cuenta y la región) o lo pone AWS. El nombre
-# de la pila es también el de la función, así que no puede pasar de 64 caracteres.
+# UNA BÓVEDA POR NOMBRE (`Name`), y se pueden tener todas las que se quiera en la misma
+# cuenta. Los nombres de lo que importa salen de ese nombre de forma DETERMINISTA —el bucket,
+# la función, el alias de la llave—: el mismo nombre da siempre los mismos recursos, y dos
+# nombres no se pisan. Lo interno (los roles, el secreto de un solo uso) lo nombra AWS.
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Dotrino Vault __VERSION__ in a Lambda (proof of concept)
 
 Parameters:
+  Name:
+    Type: String
+    Default: vault
+    Description: this vault's name (up to 20 characters). Same name, same resources; another name, another vault in the same account.
+    AllowedPattern: '[a-z0-9][a-z0-9-]{0,19}'
   AdminUser:
     Type: String
     Default: admin
@@ -52,6 +58,9 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      # La región va en el nombre porque los buckets son globales: el mismo `Name` en otra
+      # región es otra bóveda.
+      BucketName: !Sub dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}
       VersioningConfiguration: { Status: Enabled }
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -64,7 +73,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      Description: !Sub dotrino-vault (lambda, ${AWS::StackName}) wraps the disk key
+      Description: !Sub dotrino-vault (lambda, ${Name}) wraps the disk key
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
@@ -77,7 +86,7 @@ Resources:
   DiskKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: !Sub alias/${AWS::StackName}
+      AliasName: !Sub alias/dotrino-vault-${Name}
       TargetKeyId: !Ref DiskKey
 
   # La contraseña del primer administrador, solo hasta el primer arranque: la bóveda la usa
@@ -85,7 +94,7 @@ Resources:
   AdminSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Description: !Sub dotrino-vault ${AWS::StackName} first admin password (erased after first start)
+      Description: !Sub dotrino-vault ${Name} first admin password (erased after first start)
       SecretString: !Sub '{"password":"${AdminPassword}"}'
 
   # ---- el código: se baja de la release y se comprueba antes de usarlo -----------------
@@ -171,7 +180,7 @@ Resources:
               # Al despertarla, la función se invoca a sí misma en modo asíncrono.
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}'
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dotrino-vault-${Name}'
               - Effect: Allow
                 Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
                 Resource: !Ref AdminSecret
@@ -179,7 +188,7 @@ Resources:
   Function:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Ref AWS::StackName
+      FunctionName: !Sub dotrino-vault-${Name}
       Runtime: nodejs22.x
       Handler: lambda/handler.handler
       Code:

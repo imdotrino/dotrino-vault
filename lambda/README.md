@@ -16,10 +16,11 @@ proxio ──POST /wake?k=…──▶ Function URL ──▶ Lambda ──(invo
 1. Baja `dotrino-vault-lambda-<versión>.yaml` de la
    [release](https://github.com/imdotrino/dotrino-vault/releases/latest).
 2. CloudFormation → **Crear pila** → sube ese archivo.
-3. Ponle **nombre a la pila** (es también el de la función: 64 caracteres como mucho) y la
-   **contraseña del administrador** (12 o más), y créala. Pide `CAPABILITY_IAM`: crea dos
-   roles. **Cada pila es una bóveda distinta**: se pueden crear varias en la misma cuenta,
-   porque todo lo demás lo nombra AWS o sale del nombre de la pila.
+3. Pon el **nombre** de la bóveda (`Name`) y la **contraseña del administrador** (12 o más),
+   y créala. Pide `CAPABILITY_IAM`: crea dos roles. **Cada nombre es una bóveda**: se pueden
+   tener varias en la misma cuenta, y el mismo nombre da siempre los mismos recursos
+   (`dotrino-vault-<nombre>-<cuenta>-<región>`, `dotrino-vault-<nombre>`,
+   `alias/dotrino-vault-<nombre>`).
 4. En **Outputs** sale `Login`: `admin@AB12-CD34-EF56`. Entra con esa dirección y la
    contraseña desde **«Iniciar sesión»** en cualquier app de Dotrino o en la terminal.
 
@@ -30,7 +31,7 @@ La plantilla trae ya la URL del código y su **hash**: la pila baja el zip de la
 comprueba y solo entonces lo usa. La contraseña pasa por Secrets Manager hasta el primer
 arranque; la bóveda la usa para el registro (OPAQUE: no la guarda) y reescribe el secreto.
 
-Desde un checkout, sin release: `lambda/deploy.sh <pila>` (arma el zip, lo sube a un
+Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
 
 ## Cómo funciona
@@ -76,3 +77,6 @@ secreto de despertar (`.wake`) va cerrado por KMS.
 4. **Dos proxios**: el timbre vive en el nodo donde se registró. Si el mensaje entra por el
    otro, la federación lo lleva al home, que es el que despierta.
 5. Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`), que usa el cerrojo.
+6. **Volver a crear una pila borrada con el mismo nombre choca**: el bucket y la llave se
+   quedaron (son la cuenta) y el nombre del bucket ya existe. Falta un parámetro para adoptar
+   el bucket y la llave que quedaron en vez de crearlos.
