@@ -21,3 +21,4 @@ lib/package-lock.json
 
 # tokens de publicación a npm — NUNCA commitear
 **/.npmrc
+lambda/build/

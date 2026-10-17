@@ -1,0 +1,254 @@
+# Dotrino Vault en una AWS Lambda (prueba de concepto). Ver README.md.
+#
+# Se despliega en cualquier cuenta de AWS con esta plantilla y nada más: CloudFormation →
+# Crear pila → subir este archivo. La plantilla de cada release (dotrino-vault-lambda-
+# <versión>.yaml) trae ya la URL del código y su hash; la función se baja el zip de la
+# release de GitHub, comprueba el hash y solo entonces lo usa.
+#
+# Al crearse, la bóveda nace con un usuario administrador (el usuario y la contraseña de los
+# parámetros). La dirección para entrar —admin@AB12-CD34-EF56— sale en los Outputs.
+#
+# El bucket y la llave se QUEDAN aunque se borre la pila (`DeletionPolicy: Retain`): son la
+# cuenta. Borrar la pila por error no puede llevársela.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dotrino Vault __VERSION__ in a Lambda (proof of concept)
+
+Parameters:
+  Name:
+    Type: String
+    Default: vault
+    Description: short name for this vault (bucket, key alias, function)
+    AllowedPattern: '[a-z0-9-]{1,30}'
+  AdminUser:
+    Type: String
+    Default: admin
+    AllowedPattern: '[a-z0-9][a-z0-9._-]{0,31}'
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    Description: the first administrator's password (12+ characters, no quotes or backslashes). It is used once and then erased from AWS.
+    AllowedPattern: '[^"\\]+'
+  ProxyUrl:
+    Type: String
+    Default: wss://proxy.dotrino.com
+  ReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: 1 keeps two containers from running at once. 0 leaves it unset (a new account cannot reserve below 10 unreserved); the session lock in S3 covers it.
+  CodeUrl:
+    Type: String
+    Default: __CODE_URL__
+  CodeSha256:
+    Type: String
+    Default: __CODE_SHA256__
+    AllowedPattern: '[0-9a-f]{64}'
+
+Conditions:
+  Reserve: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+
+Resources:
+  ProfileBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub dotrino-vault-${Name}-${AWS::AccountId}
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  DiskKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub dotrino-vault (lambda, ${Name}) wraps the disk key
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: account
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+
+  DiskKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/dotrino-vault-${Name}
+      TargetKeyId: !Ref DiskKey
+
+  # La contraseña del primer administrador, solo hasta el primer arranque: la bóveda la usa
+  # para darlo de alta (OPAQUE, no la guarda) y reescribe este secreto.
+  AdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Sub dotrino-vault ${Name} first admin password (erased after first start)
+      SecretString: !Sub '{"password":"${AdminPassword}"}'
+
+  # ---- el código: se baja de la release y se comprueba antes de usarlo -----------------
+  CodeFetcherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: code
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: s3:PutObject, Resource: !Sub '${ProfileBucket.Arn}/code/*' }
+
+  CodeFetcher:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Timeout: 120
+      MemorySize: 512
+      Role: !GetAtt CodeFetcherRole.Arn
+      Code:
+        ZipFile: |
+          const crypto = require('crypto')
+          const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
+          async function answer (e, status, reason, data) {
+            await fetch(e.ResponseURL, { method: 'PUT', headers: { 'content-type': '' }, body: JSON.stringify({
+              Status: status, Reason: String(reason).slice(0, 1000), PhysicalResourceId: e.PhysicalResourceId || 'code',
+              StackId: e.StackId, RequestId: e.RequestId, LogicalResourceId: e.LogicalResourceId, Data: data || {} }) })
+          }
+          exports.handler = async (e) => {
+            if (e.RequestType === 'Delete') return answer(e, 'SUCCESS', 'nothing to do')
+            try {
+              const p = e.ResourceProperties
+              const r = await fetch(p.Url)
+              if (!r.ok) throw new Error('download failed: HTTP ' + r.status + ' ' + p.Url)
+              const body = Buffer.from(await r.arrayBuffer())
+              const sha = crypto.createHash('sha256').update(body).digest('hex')
+              if (sha !== p.Sha256) throw new Error('the code does not match its hash: got ' + sha + ', expected ' + p.Sha256)
+              const key = 'code/dotrino-vault-lambda-' + sha + '.zip'
+              await new S3Client({}).send(new PutObjectCommand({ Bucket: p.Bucket, Key: key, Body: body }))
+              await answer(e, 'SUCCESS', 'ok', { Key: key })
+            } catch (err) { await answer(e, 'FAILED', err.message) }
+          }
+
+  Code:
+    Type: Custom::DotrinoVaultCode
+    Properties:
+      ServiceToken: !GetAtt CodeFetcher.Arn
+      Url: !Ref CodeUrl
+      Sha256: !Ref CodeSha256
+      Bucket: !Ref ProfileBucket
+
+  # ---- la bóveda ----------------------------------------------------------------------
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: vault
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub '${ProfileBucket.Arn}/vault/*'
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ProfileBucket.Arn
+                Condition: { StringLike: { 's3:prefix': ['vault/*'] } }
+              - Effect: Allow
+                Action: [kms:Encrypt, kms:Decrypt]
+                Resource: !GetAtt DiskKey.Arn
+              # Al despertarla, la función se invoca a sí misma en modo asíncrono.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dotrino-vault-${Name}'
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+                Resource: !Ref AdminSecret
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub dotrino-vault-${Name}
+      Runtime: nodejs22.x
+      Handler: lambda/handler.handler
+      Code:
+        S3Bucket: !Ref ProfileBucket
+        S3Key: !GetAtt Code.Key
+      MemorySize: 1024
+      # El máximo de Lambda: una sesión dura hasta que pasan 60 s sin mensajes, o hasta poco
+      # antes de este tope (ver `lambda/session.mjs`).
+      Timeout: 900
+      Role: !GetAtt Role.Arn
+      ReservedConcurrentExecutions: !If [Reserve, !Ref ReservedConcurrency, !Ref AWS::NoValue]
+      Environment:
+        Variables:
+          DOTRINO_VAULT_BUCKET: !Ref ProfileBucket
+          DOTRINO_VAULT_PREFIX: vault/
+          DOTRINO_KMS_KEY_ID: !GetAtt DiskKey.Arn
+          DOTRINO_PROXY_URL: !Ref ProxyUrl
+
+  # Una sesión que falla no se repite sola: la siguiente la dispara el próximo mensaje.
+  AsyncConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref Function
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Function.Arn
+      # La puerta es el secreto de la URL de despertar, que solo conocen la bóveda y el
+      # proxio. Lo demás contesta 404.
+      AuthType: NONE
+
+  UrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  UrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
+
+  # El primer arranque: nace la cuenta, se registra la URL de despertar en el proxio y se da
+  # de alta al administrador. Devuelve su dirección.
+  FirstStart:
+    Type: Custom::DotrinoVaultFirstStart
+    DependsOn: [UrlPermission, UrlInvokePermission, AsyncConfig]
+    Properties:
+      ServiceToken: !GetAtt Function.Arn
+      FunctionUrl: !GetAtt FunctionUrl.FunctionUrl
+      AdminUser: !Ref AdminUser
+      AdminSecretArn: !Ref AdminSecret
+      CodeKey: !GetAtt Code.Key
+
+Outputs:
+  Login:
+    Description: enter with this address and the admin password, from "Sign in" in any Dotrino app
+    Value: !GetAtt FirstStart.Login
+  Url:
+    Value: !GetAtt FunctionUrl.FunctionUrl
+  Bucket:
+    Value: !Ref ProfileBucket

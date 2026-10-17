@@ -1,81 +1,76 @@
 # La bóveda en una AWS Lambda (prueba de concepto)
 
-Una bóveda que **atiende peticiones** en vez de quedarse conectada al proxio. El objetivo
-es correrla en una Lambda: sin máquina encendida, y pagando solo por uso.
+Una bóveda que **no vive conectada**: duerme hasta que alguien la necesita. El proxio la
+despierta, ella trabaja por WebSocket como cualquier bóveda y se apaga sola cuando deja de
+haber trabajo. Sin máquina encendida, y pagando solo los segundos que trabaja.
 
 ```
-servicio ──POST──▶ Function URL / API Gateway ──▶ Lambda (sin VPC)
-                                                   ├─ núcleo de la bóveda (src/vault.js)
-                                                   ├─ perfil: S3, reflejado en /tmp
-                                                   └─ llave del disco: KMS
+proxio ──POST /wake?k=…──▶ Function URL ──▶ Lambda ──(invocación asíncrona)──▶ sesión
+   ▲                                                                            │
+   └──────────── WebSocket: identify, lo encolado, todo lo demás ───────────────┘
+                 perfil en S3 (reflejado en /tmp) · llave del disco en KMS
 ```
 
-## Cómo está hecho
+## Desplegar (cualquier cuenta de AWS)
+
+1. Baja `dotrino-vault-lambda-<versión>.yaml` de la
+   [release](https://github.com/imdotrino/dotrino-vault/releases/latest).
+2. CloudFormation → **Crear pila** → sube ese archivo.
+3. Pon el **nombre**, la **contraseña del administrador** (12 caracteres o más) y crea la
+   pila. Pide `CAPABILITY_IAM`: crea dos roles.
+4. En **Outputs** sale `Login`: `admin@AB12-CD34-EF56`. Entra con esa dirección y la
+   contraseña desde **«Iniciar sesión»** en cualquier app de Dotrino o en la terminal.
+
+Ese usuario es un aparato más de la cuenta, con firma, lee, guarda, admin y aprueba. Desde
+dentro se le cambian los permisos, se añaden aparatos o se quita.
+
+La plantilla trae ya la URL del código y su **hash**: la pila baja el zip de la release, lo
+comprueba y solo entonces lo usa. La contraseña pasa por Secrets Manager hasta el primer
+arranque; la bóveda la usa para el registro (OPAQUE: no la guarda) y reescribe el secreto.
+
+Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
+bucket de trabajo y despliega la misma plantilla).
+
+## Cómo funciona
 
 | Pieza | Qué hace |
 |---|---|
-| `lib/src/httpdesk.js` | El cliente. Con `DOTRINO_VAULT_URL` puesto, `@dotrino/vault/service` habla con la bóveda por HTTP, sin pasar por el proxio y **sin repliegue**: si el mostrador falla, se dice. |
-| `lambda/desk.mjs` | El mostrador. Baja el perfil del almacén, arranca **la misma bóveda del binario** sobre ese directorio y pasa cada mensaje por `vault.localChannel`: el mismo enrutador y las mismas comprobaciones (cert + acta) que por el proxio. Después de cada petición sube lo que cambió. |
-| `lambda/mirror.mjs` | El reflejo directorio ⇄ S3, con escrituras condicionales por `ETag`: dos escritores no se pisan, el segundo choca (`store-conflict`). |
-| `lambda/handler.mjs` | El handler de la Lambda. |
+| `template.yaml` | La pila entera: bucket del perfil, llave de KMS, secreto del admin, el que baja el código, rol, función (15 min de tope), Function URL y el primer arranque. El bucket y la llave se quedan aunque se borre la pila: son la cuenta. |
+| `handler.mjs` | `POST /wake?k=…` comprueba el secreto, se invoca a sí misma en asíncrono y contesta 202 al instante. `{kind:'session'}` es la sesión. El recurso personalizado de CloudFormation es el primer arranque. |
+| `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario**, subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. |
+| `mirror.mjs` | El reflejo directorio ⇄ S3 con escrituras condicionales por `ETag`, y el cerrojo (`.lease`, vence solo si el contenedor muere). |
+| `bootstrap.mjs` | El primer administrador (`createPasswordLogin`, el mismo camino que `dotrino-vault logins add`). |
+| `build.sh` | El zip (reproducible) y la plantilla con la URL y el hash puestos. Lo corre `release.yml`. |
 
-Lo que llega a S3 va **cifrado**: la bóveda cifra en reposo cada archivo con una llave que
-envuelve KMS (`packaging/kms-aws.mjs`, sin SDK). Un perfil nuevo **no nace** sin servicio de
-llaves: en una Lambda la «máquina» cambia con cada contenedor, y una llave derivada de ella
-dejaría la cuenta ilegible en el siguiente arranque en frío.
+**El despertar** lo hace el proxio (`websocket-proxy` ≥ 1.7.0): la bóveda registra su URL al
+identificarse (`registerWake`, `@dotrino/proxy-client` ≥ 0.38.0), firmada con su llave de
+comunicación y con el acta. El registro es **permanente** y es de la cuenta. La despiertan:
+
+- un mensaje para la cuenta sin nadie suyo conectado (se encola y se entrega al identificarse);
+- listar el canal de la cuenta vacío: es lo que hace **«Iniciar sesión»**, que espera hasta
+  30 s a que la bóveda se anuncie.
+
+Lo que hay en S3 va **cifrado** (`DOTRINO-ATREST-v1`), salvo `atrest.json`, `atrest.kek` y
+`key.json` (solo la llave pública del dueño del directorio), que van en claro a propósito. El
+secreto de despertar (`.wake`) va cerrado por KMS.
 
 ## Probado
 
-`test/lambda-desk.e2e.test.mjs`, en local, con un proxio de verdad y un KMS de mentira:
+- `test/lambda-session.e2e.test.mjs`, en local con un proxio de verdad: el primer arranque
+  crea el admin; con la bóveda dormida, admin entra con su contraseña, el canal vacío la
+  despierta y sale con su certificado y sus permisos; sin mensajes se apaga sola; volver a
+  desplegar no cambia la contraseña; el cerrojo deja una sesión a la vez y vence solo.
+- En AWS (2026-10-17, us-east-1), la versión anterior por HTTP: arranque en frío desde S3 con
+  la misma bóveda, todo cifrado. ~2,5 s en frío.
 
-- un servicio enrolado lee sus secretos por HTTP;
-- se tira el directorio local, se arranca en frío desde el almacén, y el servicio sigue
-  leyendo;
-- ningún objeto del almacén lleva el secreto en claro;
-- dos escritores sobre el mismo perfil: el segundo choca y lo del primero se conserva.
+## Lo que falta
 
-**En AWS (2026-10-17, us-east-1, Node 22, 1024 MB):** el primer arranque crea el perfil y
-lo sube (10 archivos); un contenedor nuevo lo baja de S3 y abre la MISMA bóveda (mismo id).
-Todos los archivos llegan cifrados (`DOTRINO-ATREST-v1`) salvo los que van en claro a
-propósito: `atrest.json`, `atrest.kek` y `key.json` (solo la llave pública del dueño del
-directorio). Tiempos: arranque en frío ~2,5 s (incluye conectar al proxio), en caliente
-~50 ms dentro de la función y ~0,4 s de punta a punta.
-
-Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`). La subida condicional sí
-es de S3 desde 2024.
-
-## Lo que falta (en este orden)
-
-1. **Lo que se contesta después.** Por HTTP solo vuelve la primera respuesta. Una
-   aprobación (el sí del teléfono), un aviso de cambio o el resultado de enrolar llegan
-   más tarde y no tienen por dónde volver. Enrolar hoy va por el proxio.
-2. **Despertar la Lambda desde el proxio.** Los aparatos hablan por pubkey; para que
-   lleguen aquí, el proxio tiene que entregar por HTTP lo que va a esta bóveda (cambio en
-   `websocket-proxy` y `@dotrino/proxy-client`).
-3. **El arranque en frío se conecta al proxio** (`startVault` hace `identify`). Sirve para
-   avisar al teléfono, pero cuesta tiempo en cada frío, y entre peticiones la conexión
-   muere congelada.
-4. **Lo que el núcleo hace por reloj** (barrer pedidos vencidos, agrupar avisos) no corre
-   con la función congelada. Un cron de EventBridge, o hacerlo al entrar cada petición.
-5. **Lo que se escribe después de contestar** se sube con la siguiente petición; si el
-   contenedor muere antes, se pierde.
-6. **La maestra queda bajo la llave de KMS**, sin contraseña del perfil: quien controle la
-   cuenta de AWS y su KMS puede abrirla. Falta pasar la contraseña por petición para las
-   dos cosas que la necesitan (firmar el acta, regenerar sobres).
-
-## Desplegar (cuando toque)
-
-- Runtime Node 22. El SDK de S3 (`@aws-sdk/client-s3`) ya viene en el runtime.
-- Zip con `bin/ src/ lib/src/ vendor/ packaging/kms-aws.mjs lambda/ node_modules/`
-  (producción) y handler `lambda/handler.handler`.
-- Variables: `DOTRINO_VAULT_BUCKET`, `DOTRINO_VAULT_PREFIX` (opcional), `DOTRINO_KMS_KEY_ID`,
-  `DOTRINO_PROXY_URL` (opcional).
-- Rol: `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` sobre el prefijo, y
-  `kms:Encrypt`/`kms:Decrypt` sobre esa llave. Nada más.
-- **Concurrencia reservada: 1.** Dos contenedores a la vez se pisarían el perfil; la
-  escritura condicional lo para, pero mejor que no pase. **En una cuenta nueva no se puede**:
-  el límite de la cuenta es 10 y AWS exige dejar 10 sin reservar. Hay que pedir el aumento
-  de cuota (Service Quotas → Lambda → Concurrent executions); mientras, protege solo la
-  escritura condicional.
-- Function URL con `AuthType: NONE`: la puerta es el cert de cada mensaje, como en el
-  proxio. Alcanzar la URL no autoriza nada.
+1. **Concurrencia reservada en 1**: una cuenta nueva no puede (límite 10, AWS exige dejar 10
+   libres). Hay que pedir el aumento de cuota; mientras, el cerrojo lo cubre.
+2. **Lo que la bóveda hace por reloj** (barrer pedidos vencidos, avisos agrupados) solo corre
+   mientras hay sesión.
+3. **La maestra queda bajo la llave de KMS**, sin contraseña del perfil: quien controle la
+   cuenta de AWS y su KMS puede abrirla.
+4. **Dos proxios**: el timbre vive en el nodo donde se registró. Si el mensaje entra por el
+   otro, la federación lo lleva al home, que es el que despierta.
+5. Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`), que usa el cerrojo.

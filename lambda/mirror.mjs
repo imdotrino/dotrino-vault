@@ -21,6 +21,11 @@
  *   get(name)                        → { body: Buffer, etag }
  *   put(name, body, { ifMatch, ifNoneMatch }) → etag nueva; un choque LANZA con code 'store-conflict'
  *   remove(name, { ifMatch })
+ *
+ * UNA SESIÓN A LA VEZ: el CERROJO. Antes de bajar el perfil, la sesión pone `.lease` con
+ * escritura condicional, y lo quita después de la última subida. Si otra lo tiene, esta no
+ * arranca: la bóveda ya está despierta. El cerrojo vence solo (`exp`), porque un contenedor
+ * que muere a mitad no puede quitarlo, y una bóveda que no vuelve a abrir nunca es peor.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -58,6 +63,8 @@ export function createMirror ({ store, dir }) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       known.clear()
       for (const { name } of await store.list()) {
+        // Lo que empieza por punto no es del perfil: el cerrojo y el secreto de despertar.
+        if (name.startsWith('.')) continue
         const { body, etag } = await store.get(name)
         const file = path.join(dir, ...name.split('/'))
         fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
@@ -89,6 +96,33 @@ export function createMirror ({ store, dir }) {
       return touched
     }
   }
+}
+
+/** El cerrojo de la sesión. No es parte del perfil: no se baja ni se sube con él. */
+export const LEASE = '.lease'
+
+/**
+ * Pone el cerrojo, o LANZA `lease-busy` si otra sesión lo tiene y no ha vencido. Devuelve
+ * con qué quitarlo.
+ */
+export async function acquireLease (store, { owner, ttlMs, now = Date.now } = {}) {
+  const body = () => Buffer.from(JSON.stringify({ owner, exp: now() + ttlMs }))
+  let etag
+  try {
+    etag = await store.put(LEASE, body(), { ifNoneMatch: '*' })
+  } catch (e) {
+    if (e.code !== 'store-conflict') throw e
+    const cur = await store.get(LEASE)
+    let exp = 0
+    try { exp = JSON.parse(cur.body.toString('utf8')).exp } catch (_) {}
+    if (typeof exp === 'number' && exp > now()) {
+      throw Object.assign(new Error('another session holds the vault'), { code: 'lease-busy' })
+    }
+    // Vencido: la sesión que lo puso murió sin quitarlo. Se toma con el ETag que se vio, para
+    // que dos que lleguen a la vez no se lo queden las dos.
+    etag = await store.put(LEASE, body(), { ifMatch: cur.etag })
+  }
+  return { release: () => store.remove(LEASE, { ifMatch: etag }) }
 }
 
 /** Un almacén en memoria, con las mismas reglas de ETag que S3. Para las pruebas. */
@@ -173,4 +207,4 @@ export async function s3Store ({ bucket, prefix = '', region = process.env.AWS_R
   }
 }
 
-export default { createMirror, memoryStore, s3Store }
+export default { createMirror, acquireLease, memoryStore, s3Store, LEASE }

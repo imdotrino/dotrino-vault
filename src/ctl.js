@@ -1706,21 +1706,12 @@ async function cmdLogins (rest) {
         if (a[0] === '+') caps.add(cap); else caps.delete(cap)
       }
       const label = nombre.join(' ').trim() || 'equipo prestado'
-      const { client: opaqueClient } = await import('@dotrino/opaque')
-      const { makeDeviceKey, makeDeviceEncKey } = await import('@dotrino/identity/capabilities')
-      const { sealDeviceKeys } = await import('../lib/src/passwordLogins.js')
+      const { createPasswordLogin } = await import('../lib/src/passwordLogins.js')
       const password = await askNewPassword(user)
-
-      const start = opaqueClient.registrationStart({ password })
-      const begun = await loginsRequest('register-begin', { user, request: start.request })
-      // La bóveda contesta con su mitad; el registro se termina AQUÍ, con la contraseña.
-      const fin = opaqueClient.registrationFinish({ state: start.state, response: begun.response, password })
-      // Las llaves del aparato NACEN en esta terminal y salen de aquí ya cerradas.
-      const device = await makeDeviceKey({ label })
-      const enc = await makeDeviceEncKey()
-      const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
-      const r = await loginsRequest('register-finish', {
-        user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps: [...caps]
+      const r = await createPasswordLogin({
+        user, password, label, caps: [...caps],
+        begin: (req) => loginsRequest('register-begin', req),
+        finish: (req) => loginsRequest('register-finish', req)
       })
       const { loginAddress } = await import('../lib/src/passwordLogins.js')
       console.log('\nListo. Se entra con esta dirección y esa contraseña:')

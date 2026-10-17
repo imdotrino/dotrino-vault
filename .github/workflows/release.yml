@@ -94,6 +94,12 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq rpm
           bash packaging/build-rpm.sh
 
+      # LA BÓVEDA EN UNA LAMBDA (lambda/README.md): el zip del código y la plantilla de
+      # CloudFormation que lo apunta, con la URL de esta release y el hash ya puestos. Quien
+      # despliega solo sube la plantilla; la pila baja el zip y lo comprueba.
+      - name: La Lambda (zip + plantilla)
+        run: bash lambda/build.sh
+
       # SBOM: la lista de lo que va dentro. Deja de ser opcional con el CRA y es lo primero
       # que pide un comprador corporativo.
       - name: SBOM (CycloneDX)
@@ -112,6 +118,8 @@ jobs:
             dist/*.rpm
             dist/*.tar.gz
             dist/*-sbom.cdx.json
+            dist/dotrino-vault-lambda-*.zip
+            dist/dotrino-vault-lambda-*.yaml
 
       # PUBLICACIÓN DE CONFIANZA: sin token, en ningún sitio.
       #
@@ -182,6 +190,8 @@ jobs:
             dist/*.rpm
             dist/*.tar.gz
             dist/*-sbom.cdx.json
+            dist/dotrino-vault-lambda-*.zip
+            dist/dotrino-vault-lambda-*.yaml
           generate_release_notes: true
 
       # ⚠️ Este paso necesita que `@dotrino/env` tenga declarada la PUBLICACIÓN DE CONFIANZA

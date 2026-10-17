@@ -1,6 +1,6 @@
 [package]
 name = "dotrino-vault-desktop"
-version = "0.162.3"
+version = "0.163.0"
 edition = "2024"
 description = "Dotrino Vault: the control window of your vault (Linux, macOS, Windows). Same screens as the terminal one."
 license = "MIT"
