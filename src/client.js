@@ -11,7 +11,7 @@
  * estrictamente (firmado por la maestra que vio en el QR, y para SU clave) antes de
  * guardarlo. La maestra nunca sale del vault.
  */
-import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey, signWithDevice, verifyDeviceSig, makePairingCode, commitCode, pubkeyId } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, importDeviceEncKey, signWithDevice, verifyDeviceSig, makePairingCode, commitCode, keyLabel } from '@dotrino/identity/capabilities'
 import { myContentKey, encryptWithCek, decryptWithKeyring } from '@dotrino/identity/content'
 // Con qué se juzga lo que devuelve la bóveda (papel + acta): la regla del pilar, una sola.
 import { checkVaultReply } from '@dotrino/identity/acta'
@@ -65,7 +65,7 @@ export async function enroll ({ qr, label = '', dir, onChallenge, approveTimeout
     // La llave de CIFRADO del aparato: con su pública en el acta, la bóveda le envuelve la
     // clave de contenido al admitirlo. Sin ella no podría usar el almacén, que solo entra cifrado.
     const enc = await makeDeviceEncKey()
-    const myDeviceId = (await pubkeyId(device.publickey)).slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2')
+    const myDeviceId = await keyLabel(device.publickey)
     // ESTE dispositivo genera el código y lo MUESTRA; solo viaja su COMPROMISO. El vault
     // lo aprende cuando un humano lo tipea, y solo firma el cert si el compromiso coincide.
     const code = makePairingCode()

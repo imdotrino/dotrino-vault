@@ -26,7 +26,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import tty from 'node:tty'
 import crypto from 'node:crypto'
-import { pubkeyId } from '@dotrino/identity/capabilities'
+import { pubkeyId, keyLabel } from '@dotrino/identity/capabilities'
 import { dataDir } from './paths.js'
 // EL CANAL LOCAL VA CIFRADO (ver `ipc.js`): por aquí salen la contraseña y los valores.
 import { ipcRead, ipcWrite } from './ipc.js'
@@ -133,10 +133,8 @@ function requireDaemon () {
   if (!alive(s.pid)) { console.error('El daemon no está corriendo. Arráncalo: %s', START_HINT); process.exit(1) }
   return s
 }
-function deviceIdOf (sub) {
-  // mismo formato que el daemon: 8 hex agrupados AB12-CD34
-  return pubkeyId(sub).then((id) => id.slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2'))
-}
+// mismo formato que el daemon: AB12-CD34
+const deviceIdOf = keyLabel
 
 /** Lo que dijo un aprobador sobre sus avisos, para enseñarlo. No decide nada. */
 function avisosTxt (notifiedAt) {

@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { WebSocketProxyClient } from '@dotrino/proxy-client'
-import { signWithDevice, verifyDeviceSig, verifyChain, pubkeyId } from '@dotrino/identity/capabilities'
+import { signWithDevice, verifyDeviceSig, verifyChain, pubkeyId, keyLabel } from '@dotrino/identity/capabilities'
 import { verifyActa, memberCan, memberCanReadSecrets, sealKeyAt, sealersOf } from '@dotrino/identity/acta'
 import { MSG, secretsScope, isValidSecretsNs } from '../lib/src/protocol.js'
 import { FRESH_WINDOW_MS } from '../lib/src/enroll.js'
@@ -156,7 +156,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
       { code: 'replica-not-enrolled' })
   }
   const url = proxyUrl || link.proxy || process.env.PROXY_URL || 'wss://proxy.dotrino.com'
-  const id = (await pubkeyId(link.device.publickey)).slice(0, 8).toUpperCase().replace(/(.{4})(.{4})/, '$1-$2')
+  const id = await keyLabel(link.device.publickey)
 
   const firmar = (data) => signWithDevice({ privateJwk: link.device.privateJwk, data })
   // CONTESTAR es por la CONEXIÓN (`send`) y no por la llave (`sendByPubkey`): `from` es el
