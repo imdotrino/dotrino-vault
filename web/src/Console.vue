@@ -199,6 +199,43 @@ const T = {
     lg_t: 'Entrar con usuario y contraseña',
     lg_b: 'Un aparato de tu cuenta que se abre escribiendo una dirección y una contraseña, sin tener que conectar nada. Sirve para entrar desde un equipo prestado. Su llave vive aquí, cerrada con algo que solo sale de esa contraseña.',
     lg_none: 'No hay ninguno.',
+    bk_t: 'Respaldo',
+    bk_b: 'Un archivo cifrado con una contraseña que eliges tú, con lo que guarda esta bóveda: las variables de cada cajón, tu perfil y tus contraseñas. Las llaves no van. Sirve de copia y para mover un cajón a otra bóveda.',
+    bk_all: 'Sin marcar ninguno, se exportan todos.',
+    bk_some: (n) => n === 1 ? 'Se exporta el cajón marcado.' : `Se exportan los ${n} cajones marcados.`,
+    bk_none: 'No hay nada que respaldar todavía.',
+    bk_passwords: 'contraseñas',
+    bk_profile: '@me (tu perfil)',
+    bk_device: (id, label) => `aparato ${id}${label ? ' (' + label + ')' : ''}`,
+    bk_pass: 'Contraseña del respaldo',
+    bk_pass2: 'Repítela',
+    bk_short: 'Tiene que tener al menos 12 caracteres. Varias palabras al azar funcionan bien.',
+    bk_export: 'Exportar',
+    bk_exporting: 'Exportando…',
+    bk_saved: (f) => `Descargado: ${f}. La contraseña no se puede recuperar.`,
+    bk_saved_missing: (f, n) => `Descargado ${f}, pero ${n} contraseña(s) no entraron: ábrelas una vez desde un aparato con «contraseñas» y repite.`,
+    bk_file: 'Archivo del respaldo',
+    bk_plan: 'Ver qué trae',
+    bk_opening: 'Abriendo…',
+    bk_all_conflicts: 'Todos los choques:',
+    bk_keep: 'Conservar lo de aquí',
+    bk_replace: 'Reemplazar',
+    bk_no_device: 'no entra: ese aparato no está en esta cuenta',
+    bk_move_ph: 'otro scope, o el ID de un aparato',
+    bk_move: 'Mover',
+    bk_status: { new: 'nuevo', same: 'igual', conflict: 'choca' },
+    bk_counts: (c) => `${c.new} nuevo(s) · ${c.same} igual(es) · ${c.conflict} choque(s)${c.skipped ? ` · ${c.skipped} sin destino` : ''}`,
+    bk_undecided: (n) => `Falta decidir ${n} choque(s)`,
+    bk_import: 'Importar',
+    bk_importing: 'Importando…',
+    bk_imported: (w, k, p) => `Importado: ${w} escrito(s), ${k} conservado(s)${p ? ` · ${p} se quedan privadas` : ''}.`,
+    bk_no_such_device: (id) => `No hay ningún aparato ${id} en esta cuenta.`,
+    bk_bad_target: 'Usa el nombre de un scope ([a-z0-9-]) o el ID de un aparato.',
+    bk_err_locked: 'La bóveda está cerrada: ábrela para exportar o importar.',
+    bk_err_password: 'Esa contraseña no abre este respaldo.',
+    bk_err_not_backup: 'Ese archivo no es un respaldo de la bóveda.',
+    bk_err_corrupt: 'El respaldo está dañado: no se puede leer.',
+    bk_err_changed: 'La bóveda cambió y apareció un choque nuevo. No se importó nada: vuelve a ver qué trae.',
     lg_user: 'Usuario', lg_user_ph: 'ana',
     lg_label: 'Para qué equipo', lg_label_ph: 'el cyber de la esquina',
     lg_pass: 'Contraseña', lg_pass2: 'Repítela',
@@ -423,6 +460,43 @@ const T = {
     lg_t: 'Sign in with a username and password',
     lg_b: 'A device of your account that opens by typing an address and a password, with nothing to connect. It is how you sign in from a borrowed computer. Its key lives here, sealed with something only that password produces.',
     lg_none: 'There are none.',
+    bk_t: 'Backup',
+    bk_b: 'A file encrypted with a password you choose, with what this vault keeps: the variables of each drawer, your profile and your passwords. Keys do not go. It works as a copy and to move a drawer to another vault.',
+    bk_all: 'With none marked, all of them are exported.',
+    bk_some: (n) => n === 1 ? 'The marked drawer is exported.' : `The ${n} marked drawers are exported.`,
+    bk_none: 'There is nothing to back up yet.',
+    bk_passwords: 'passwords',
+    bk_profile: '@me (your profile)',
+    bk_device: (id, label) => `device ${id}${label ? ' (' + label + ')' : ''}`,
+    bk_pass: 'Backup password',
+    bk_pass2: 'Repeat it',
+    bk_short: 'It must be at least 12 characters. A few random words work well.',
+    bk_export: 'Export',
+    bk_exporting: 'Exporting…',
+    bk_saved: (f) => `Downloaded: ${f}. The password cannot be recovered.`,
+    bk_saved_missing: (f, n) => `Downloaded ${f}, but ${n} password(s) did not go in: open them once from a device with «passwords» and repeat.`,
+    bk_file: 'Backup file',
+    bk_plan: 'See what it brings',
+    bk_opening: 'Opening…',
+    bk_all_conflicts: 'All conflicts:',
+    bk_keep: 'Keep what is here',
+    bk_replace: 'Replace',
+    bk_no_device: 'does not go in: that device is not in this account',
+    bk_move_ph: 'another scope, or a device ID',
+    bk_move: 'Move',
+    bk_status: { new: 'new', same: 'same', conflict: 'conflict' },
+    bk_counts: (c) => `${c.new} new · ${c.same} same · ${c.conflict} conflict(s)${c.skipped ? ` · ${c.skipped} without a destination` : ''}`,
+    bk_undecided: (n) => `${n} conflict(s) still undecided`,
+    bk_import: 'Import',
+    bk_importing: 'Importing…',
+    bk_imported: (w, k, p) => `Imported: ${w} written, ${k} kept${p ? ` · ${p} stay private` : ''}.`,
+    bk_no_such_device: (id) => `There is no device ${id} in this account.`,
+    bk_bad_target: 'Use a scope name ([a-z0-9-]) or a device ID.',
+    bk_err_locked: 'The vault is locked: open it to export or import.',
+    bk_err_password: 'That password does not open this backup.',
+    bk_err_not_backup: 'That file is not a vault backup.',
+    bk_err_corrupt: 'The backup is damaged: it cannot be read.',
+    bk_err_changed: 'The vault changed and a new conflict showed up. Nothing was imported: look at what it brings again.',
     lg_user: 'Username', lg_user_ph: 'ana',
     lg_label: 'For which computer', lg_label_ph: 'the cybercafé downstairs',
     lg_pass: 'Password', lg_pass2: 'Again',
@@ -1239,7 +1313,7 @@ async function refreshSelf () {
   try {
     self.value = await id.value.selfVaultStatus()
     selfPending.value = self.value.running ? await id.value.selfVaultPending() : []
-    if (self.value.running) await refreshLogins()
+    if (self.value.running) { await refreshLogins(); await refreshBackup() }
   } catch (_) {}
 }
 /**
@@ -1346,6 +1420,119 @@ const lgPasswd = (user) => run('lg-pw-' + user, async () => {
   lgOld.value = ''; lgNew.value = ''; lgPasswdFor.value = ''
   await refreshLogins()
 })
+
+// ---------- EL RESPALDO de la bóveda que es este navegador ----------
+// Todo pasa por el iframe de identidad (`selfVaultBackup*`), que solo atiende a esta consola.
+// Lo que llega aquí es el archivo YA CIFRADO, o el plan con nombres y estados.
+const bkDrawers = ref([])
+const bkChosen = ref([])
+const bkPass = ref('')
+const bkPass2 = ref('')
+const bkMsg = ref(null)
+const bkFile = ref(null)
+const bkFileName = ref('')
+const bkInPass = ref('')
+const bkPlan = ref(null)
+const bkMap = ref({})
+const bkMoveTo = ref({})
+const bkDecisions = ref({})
+const bkInMsg = ref(null)
+
+const bkName = (owner, device) => owner === 'passwords'
+  ? t.value.bk_passwords
+  : owner === 'ns:@me' ? t.value.bk_profile
+    : owner.startsWith('ns:') ? owner.slice(3)
+      : t.value.bk_device(device?.id || owner.slice(4, 12), device?.label || null)
+const bkToggle = (owner) => {
+  bkChosen.value = bkChosen.value.includes(owner) ? bkChosen.value.filter((o) => o !== owner) : [...bkChosen.value, owner]
+}
+const bkConflicts = computed(() => (bkPlan.value?.drawers || [])
+  .flatMap((d) => d.items.filter((i) => i.status === 'conflict').map((i) => d.to + ' ' + i.key)))
+const bkUndecided = computed(() => bkConflicts.value.filter((r) => !bkDecisions.value[r]).length)
+const bkDecide = (to, key, how) => { bkDecisions.value = { ...bkDecisions.value, [to + ' ' + key]: how } }
+const bkDecideAll = (how) => { bkDecisions.value = Object.fromEntries(bkConflicts.value.map((r) => [r, how])) }
+
+/** Los errores del respaldo, en el idioma de la pantalla. */
+const bkErr = (e) => ({
+  VAULT_LOCKED: t.value.bk_err_locked,
+  WRONG_PASSWORD: t.value.bk_err_password,
+  NOT_A_BACKUP: t.value.bk_err_not_backup,
+  BACKUP_CORRUPT: t.value.bk_err_corrupt,
+  WEAK_PASSWORD: t.value.bk_short,
+  BACKUP_CONFLICTS: t.value.bk_err_changed
+})[e?.code] || e?.message || String(e)
+
+async function refreshBackup () {
+  try { bkDrawers.value = await id.value.selfVaultBackupDrawers() } catch (_) { bkDrawers.value = [] }
+}
+
+async function bkExport () {
+  bkMsg.value = null
+  if (bkPass.value.length < 12) { bkMsg.value = { kind: 'bad', text: t.value.bk_short }; return }
+  if (bkPass.value !== bkPass2.value) { bkMsg.value = { kind: 'bad', text: t.value.lg_mismatch }; return }
+  busy.value = 'bk-export'
+  try {
+    const r = await id.value.selfVaultBackupExport({ drawers: bkChosen.value.length ? bkChosen.value : null, password: bkPass.value })
+    const name = `dotrino-vault-backup-${new Date().toISOString().slice(0, 10)}.json`
+    const url = URL.createObjectURL(new Blob([JSON.stringify(r.file, null, 2) + '\n'], { type: 'application/json' }))
+    const a = Object.assign(document.createElement('a'), { href: url, download: name })
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+    bkPass.value = ''; bkPass2.value = ''
+    bkMsg.value = r.summary?.passwordsUnreadable
+      ? { kind: 'bad', text: t.value.bk_saved_missing(name, r.summary.passwordsUnreadable) }
+      : { kind: 'ok', text: t.value.bk_saved(name) }
+  } catch (e) { bkMsg.value = { kind: 'bad', text: bkErr(e) } }
+  finally { busy.value = '' }
+}
+
+async function bkPick (ev) {
+  bkPlan.value = null; bkDecisions.value = {}; bkMap.value = {}; bkInMsg.value = null
+  const f = ev.target.files?.[0]
+  if (!f) { bkFile.value = null; return }
+  try { bkFile.value = JSON.parse(await f.text()); bkFileName.value = f.name } catch (_) {
+    bkFile.value = null
+    bkInMsg.value = { kind: 'bad', text: t.value.bk_err_not_backup }
+  }
+}
+
+async function bkPlanIt () {
+  bkInMsg.value = null
+  busy.value = 'bk-plan'
+  try {
+    bkPlan.value = await id.value.selfVaultBackupPlan({ file: bkFile.value, password: bkInPass.value, map: bkMap.value })
+    const valid = new Set(bkConflicts.value)
+    bkDecisions.value = Object.fromEntries(Object.entries(bkDecisions.value).filter(([k]) => valid.has(k)))
+  } catch (e) { bkPlan.value = null; bkInMsg.value = { kind: 'bad', text: bkErr(e) } }
+  finally { busy.value = '' }
+}
+
+async function bkMove (from) {
+  const w = String(bkMoveTo.value[from] || '').trim()
+  if (!w) { const m = { ...bkMap.value }; delete m[from]; bkMap.value = m; return bkPlanIt() }
+  let to
+  if (/^[0-9A-F]{4}-[0-9A-F]{4}$/i.test(w)) {
+    const m = members.value.find((x) => x.id === w.toUpperCase())
+    if (!m) { bkInMsg.value = { kind: 'bad', text: t.value.bk_no_such_device(w) }; return }
+    to = 'dev:' + m.pub
+  } else if (/^[a-z0-9-]{1,32}$/.test(w)) to = 'ns:' + w
+  else { bkInMsg.value = { kind: 'bad', text: t.value.bk_bad_target }; return }
+  bkMap.value = { ...bkMap.value, [from]: to }
+  await bkPlanIt()
+}
+
+async function bkImport () {
+  bkInMsg.value = null
+  busy.value = 'bk-import'
+  try {
+    const r = await id.value.selfVaultBackupImport({ file: bkFile.value, password: bkInPass.value, map: bkMap.value, decisions: bkDecisions.value })
+    bkInMsg.value = { kind: 'ok', text: t.value.bk_imported(r.written, r.kept, r.keptPrivate?.length || 0) }
+    bkPlan.value = null; bkDecisions.value = {}; bkInPass.value = ''
+    await refreshBackup()
+    await refresh()
+  } catch (e) { bkInMsg.value = { kind: 'bad', text: bkErr(e) } }
+  finally { busy.value = '' }
+}
 
 const selfApprove = (deviceId) => run('sa-' + deviceId, async () => {
   await id.value.selfVaultApprove(deviceId, selfCode.value.trim())
@@ -2490,6 +2677,71 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <Vault :lang="lang" :identity="id" />
       </template>
 
+      <!-- EL RESPALDO (dotrino-vault/docs/respaldo.md). Pantalla administrativa: cajones,
+           contraseña y botones. Solo cuando la bóveda es ESTE aparato, y con la bóveda
+           abierta: lo comprueba el núcleo. El archivo lo cierra el iframe de identidad. -->
+      <template v-if="vaultAt === 'self'">
+        <h2>
+          {{ t.bk_t }}
+          <button type="button" class="i" data-testid="info-backup" :aria-expanded="info === 'backup'"
+                  :aria-label="t.info_label" @click="toggleInfo('backup')">i</button>
+        </h2>
+        <p v-if="info === 'backup'" class="muted info-panel">{{ t.bk_b }}</p>
+
+        <div class="lg-form" data-testid="bk-export">
+          <p class="muted">{{ bkChosen.length ? t.bk_some(bkChosen.length) : t.bk_all }}</p>
+          <p v-if="!bkDrawers.length" class="muted" data-testid="bk-none">{{ t.bk_none }}</p>
+          <div class="caps">
+            <button v-for="d in bkDrawers" :key="d.owner" class="cap" :class="{ on: bkChosen.includes(d.owner) }"
+                    data-testid="bk-drawer" :data-owner="d.owner" @click="bkToggle(d.owner)">
+              {{ bkName(d.owner, d.device) }} · {{ d.count }}
+            </button>
+          </div>
+          <label>{{ t.bk_pass }}<input v-model="bkPass" type="password" autocomplete="new-password" data-testid="bk-pass" /></label>
+          <label>{{ t.bk_pass2 }}<input v-model="bkPass2" type="password" autocomplete="new-password" data-testid="bk-pass2" /></label>
+          <button class="btn" :disabled="!bkDrawers.length || !bkPass || busy === 'bk-export'"
+                  data-testid="bk-do-export" @click="bkExport">{{ busy === 'bk-export' ? t.bk_exporting : t.bk_export }}</button>
+          <p v-if="bkMsg" :class="['muted', bkMsg.kind]" data-testid="bk-msg">{{ bkMsg.text }}</p>
+        </div>
+
+        <div class="lg-form" data-testid="bk-import">
+          <label>{{ t.bk_file }}<input type="file" accept=".json,application/json" data-testid="bk-file" @change="bkPick" /></label>
+          <label>{{ t.bk_pass }}<input v-model="bkInPass" type="password" autocomplete="off" data-testid="bk-in-pass" /></label>
+          <button class="btn ghost" :disabled="!bkFile || !bkInPass || busy === 'bk-plan'"
+                  data-testid="bk-do-plan" @click="bkPlanIt">{{ busy === 'bk-plan' ? t.bk_opening : t.bk_plan }}</button>
+
+          <template v-if="bkPlan">
+            <div v-if="bkConflicts.length" class="row">
+              <span class="muted">{{ t.bk_all_conflicts }}</span>
+              <button class="btn ghost sm" data-testid="bk-all-keep" @click="bkDecideAll('keep')">{{ t.bk_keep }}</button>
+              <button class="btn ghost sm" data-testid="bk-all-replace" @click="bkDecideAll('replace')">{{ t.bk_replace }}</button>
+            </div>
+            <div v-for="d in bkPlan.drawers" :key="d.from" class="bk-drawer" data-testid="bk-plan-drawer">
+              <strong>{{ d.from === d.to ? bkName(d.to, d.label) : bkName(d.from, d.label) + ' → ' + bkName(d.to) }}</strong>
+              <span v-if="d.status !== 'ok'" class="bad"> · {{ t.bk_no_device }}</span>
+              <span v-if="d.from !== 'passwords'" class="row bk-move">
+                <input v-model="bkMoveTo[d.from]" :placeholder="t.bk_move_ph" autocomplete="off" />
+                <button class="btn ghost sm" :disabled="busy === 'bk-plan'" @click="bkMove(d.from)">{{ t.bk_move }}</button>
+              </span>
+              <div v-for="it in d.items" :key="it.key" class="row bk-item" data-testid="bk-item" :data-status="it.status">
+                <span :class="it.status === 'conflict' ? 'bad' : 'muted'">{{ t.bk_status[it.status] }}</span>
+                <span>{{ it.title ? it.title + (it.username ? ' · ' + it.username : '') : it.key }}</span>
+                <template v-if="it.status === 'conflict'">
+                  <button class="cap" :class="{ on: bkDecisions[d.to + ' ' + it.key] === 'keep' }"
+                          data-testid="bk-keep" @click="bkDecide(d.to, it.key, 'keep')">{{ t.bk_keep }}</button>
+                  <button class="cap" :class="{ on: bkDecisions[d.to + ' ' + it.key] === 'replace' }"
+                          data-testid="bk-replace" @click="bkDecide(d.to, it.key, 'replace')">{{ t.bk_replace }}</button>
+                </template>
+              </div>
+            </div>
+            <p class="muted">{{ t.bk_counts(bkPlan.counts) }}</p>
+            <button class="btn" :disabled="bkUndecided > 0 || busy === 'bk-import'" data-testid="bk-do-import"
+                    @click="bkImport">{{ bkUndecided ? t.bk_undecided(bkUndecided) : (busy === 'bk-import' ? t.bk_importing : t.bk_import) }}</button>
+          </template>
+          <p v-if="bkInMsg" :class="['muted', bkInMsg.kind]" data-testid="bk-in-msg">{{ bkInMsg.text }}</p>
+        </div>
+      </template>
+
       <!-- LO QUE PIDE «administra» EN EL CERT: las variables de las aplicaciones y,
            al final, conectar otro aparato a la bóveda. -->
       <template v-if="canAdmin">
@@ -2672,6 +2924,9 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .caps { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
 .cap { font-size: 12px; border-radius: 999px; padding: 4px 10px; border: 1px solid var(--dt-line); background: transparent; color: var(--dt-accent); cursor: pointer; }
 .cap.on { background: var(--dt-accent-soft); color: var(--dt-accent); border-color: var(--dt-accent); }
+.bk-drawer { margin: 10px 0; }
+.bk-item { gap: 8px; align-items: center; flex-wrap: wrap; padding-left: 12px; }
+.bk-move input { max-width: 220px; }
 .cap.changed { border-style: dashed; border-color: var(--dt-busy); }
 .capsbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px; border: 1px dashed var(--dt-busy); border-radius: 10px; }
 .cap:disabled { cursor: default; opacity: .75; }

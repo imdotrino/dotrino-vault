@@ -67,7 +67,7 @@ aparece en la ventana sin tocarla, y no hay manera de que una tenga algo que la 
 | Anunciar la versión (`@dotrino/compat`) | `vaultd` | `vault` (versión de la librería) | `vault` |
 | Bitácora encadenada | sí | sí (en IndexedDB) | sí |
 | Réplicas (empujar a otra bóveda) | sí | sí (el núcleo lo hace; nadie configura una réplica desde el navegador todavía) | igual |
-| Respaldo cifrado con contraseña: exportar todo o por cajón, importar con choques (`exportBackup`, `importBackup`, [`respaldo.md`](./respaldo.md)) | sí (`dotrino-vault backup`) | el núcleo lo hace; falta la pantalla | igual |
+| Respaldo cifrado con contraseña: exportar todo o por cajón, importar con choques (`exportBackup`, `importBackup`, [`respaldo.md`](./respaldo.md)) | sí (`dotrino-vault backup`, la TUI con `o` y la ventana) | sí, en la consola (solo desde `vault.dotrino.com`) | sí, en la pestaña de bóveda; **sin las contraseñas del gestor**, que viven en el worker con su propia copia de recuperación |
 
 ## Lo que NO es igual, y por qué
 
@@ -96,11 +96,10 @@ todavía no enseña:
   show/history/revert`): la consola remota no lo tiene a propósito, y la pestaña administra por
   ese protocolo. En la TUI es local.
 - **Listar y cortar concesiones** (`grants`) desde la pantalla.
-- **Exportar e importar un respaldo** (`dotrino-vault backup`): el núcleo ya tiene
-  `backupDrawers`, `exportBackup`, `planBackupImport` e `importBackup`, y el archivo se cifra con
-  `@dotrino/passmanager`, que corre igual en el navegador. Falta la pantalla en la pestaña y en
-  la extensión: elegir cajones, la contraseña, descargar el archivo, y al importar el plan con
-  los choques para decidir uno a uno.
+- **Las contraseñas de la extensión en el respaldo.** La extensión respalda sus cajones, pero no
+  sus contraseñas: las guarda el worker, con su propia copia de recuperación, y la bóveda de la
+  pestaña no las ve. Hace falta que el worker exporte e importe las suyas con la misma pieza
+  (`exportPasswordEntries` / `importPasswordEntries`).
 - **La pantalla de administración de la extensión** (aparatos, cajones, bloqueados): la
   extensión tiene su propia identidad, distinta de la de `id.dotrino.com`, así que
   `vault.dotrino.com` no la administra. El núcleo ya responde a la consola remota; falta la
