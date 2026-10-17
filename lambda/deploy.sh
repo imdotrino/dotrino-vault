@@ -3,16 +3,19 @@
 # Quien despliega una release no necesita esto: sube la plantilla de la release en la consola
 # de CloudFormation (ver README.md).
 #
-#   lambda/deploy.sh <nombre> [--concurrency N] [--proxy wss://…]
+#   lambda/deploy.sh <pila> [--concurrency N] [--proxy wss://…]
+#
+# <pila> es el nombre de la pila de CloudFormation y de la función (64 caracteres como mucho).
+# Cada pila es una bóveda distinta: se pueden tener varias en la misma cuenta.
 #
 # Pide la contraseña del administrador la primera vez (no se queda en ningún archivo). Las
 # credenciales y la región salen del entorno, normalmente de la bóveda:
-#   dotrino-env run --ns aws-<cuenta> -- env AWS_REGION=us-east-1 lambda/deploy.sh <nombre>
+#   dotrino-env run --ns aws-<cuenta> -- env AWS_REGION=us-east-1 lambda/deploy.sh <pila>
 #
 # El zip se sube a un bucket de trabajo (`dotrino-vault-dev-<cuenta>-<región>`) y la pila lo
 # baja de ahí por una URL firmada de una hora, igual que bajaría el de una release.
 set -euo pipefail
-NAME=${1:?usage: lambda/deploy.sh <name> [--concurrency N] [--proxy URL]}; shift
+STACK=${1:?usage: lambda/deploy.sh <stack> [--concurrency N] [--proxy URL]}; shift
 CONCURRENCY=0; PROXY=wss://proxy.dotrino.com
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -28,7 +31,6 @@ REPO=$(cd "$HERE/.." && pwd)
 V=$(node -p "require('$REPO/package.json').version")
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 DEV=dotrino-vault-dev-$ACCOUNT-$AWS_REGION
-STACK=dotrino-vault-$NAME
 
 aws s3api head-bucket --bucket "$DEV" 2>/dev/null || aws s3 mb "s3://$DEV" >/dev/null
 bash "$HERE/build.sh" "placeholder" >/dev/null
@@ -49,7 +51,7 @@ TPL=$(mktemp); sed -e "s#__VERSION__#$V-dev#" "$HERE/template.yaml" > "$TPL"
 # parámetro y CloudFormation conserva el anterior.
 [ "${PASS[0]}" = "AdminPassword=UsePreviousValue" ] && PASS=()
 aws cloudformation deploy --stack-name "$STACK" --template-file "$TPL" --capabilities CAPABILITY_IAM \
-  --parameter-overrides Name="$NAME" ProxyUrl="$PROXY" ReservedConcurrency="$CONCURRENCY" CodeUrl="$URL" CodeSha256="$SHA" "${PASS[@]}" \
+  --parameter-overrides ProxyUrl="$PROXY" ReservedConcurrency="$CONCURRENCY" CodeUrl="$URL" CodeSha256="$SHA" "${PASS[@]}" \
   --no-fail-on-empty-changeset
 rm -f "$TPL"
 aws cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text

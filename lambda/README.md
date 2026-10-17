@@ -16,8 +16,10 @@ proxio ──POST /wake?k=…──▶ Function URL ──▶ Lambda ──(invo
 1. Baja `dotrino-vault-lambda-<versión>.yaml` de la
    [release](https://github.com/imdotrino/dotrino-vault/releases/latest).
 2. CloudFormation → **Crear pila** → sube ese archivo.
-3. Pon el **nombre**, la **contraseña del administrador** (12 caracteres o más) y crea la
-   pila. Pide `CAPABILITY_IAM`: crea dos roles.
+3. Ponle **nombre a la pila** (es también el de la función: 64 caracteres como mucho) y la
+   **contraseña del administrador** (12 o más), y créala. Pide `CAPABILITY_IAM`: crea dos
+   roles. **Cada pila es una bóveda distinta**: se pueden crear varias en la misma cuenta,
+   porque todo lo demás lo nombra AWS o sale del nombre de la pila.
 4. En **Outputs** sale `Login`: `admin@AB12-CD34-EF56`. Entra con esa dirección y la
    contraseña desde **«Iniciar sesión»** en cualquier app de Dotrino o en la terminal.
 
@@ -28,7 +30,7 @@ La plantilla trae ya la URL del código y su **hash**: la pila baja el zip de la
 comprueba y solo entonces lo usa. La contraseña pasa por Secrets Manager hasta el primer
 arranque; la bóveda la usa para el registro (OPAQUE: no la guarda) y reescribe el secreto.
 
-Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
+Desde un checkout, sin release: `lambda/deploy.sh <pila>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
 
 ## Cómo funciona
