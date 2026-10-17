@@ -9,7 +9,9 @@
 # parámetros). La dirección para entrar —admin@AB12-CD34-EF56— sale en los Outputs.
 #
 # El bucket y la llave se QUEDAN aunque se borre la pila (`DeletionPolicy: Retain`): son la
-# cuenta. Borrar la pila por error no puede llevársela.
+# cuenta. Borrar la pila por error no puede llevársela. Para volver a montarla, se crea la pila
+# con el mismo `Name` y la llave en `ExistingKeyArn`: entonces no crea ni bucket ni llave, usa
+# los que quedaron.
 #
 # UNA BÓVEDA POR NOMBRE (`Name`), y se pueden tener todas las que se quiera en la misma
 # cuenta. Los nombres de lo que importa salen de ese nombre de forma DETERMINISTA —el bucket,
@@ -41,6 +43,11 @@ Parameters:
     Type: Number
     Default: 0
     Description: 1 keeps two containers from running at once. 0 leaves it unset (a new account cannot reserve below 10 unreserved); the session lock in S3 covers it.
+  ExistingKeyArn:
+    Type: String
+    Default: ''
+    Description: empty for a new vault. To bring back one whose stack was deleted, the ARN of its KMS key (the bucket comes from Name).
+    AllowedPattern: '(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36})?'
   CodeUrl:
     Type: String
     Default: __CODE_URL__
@@ -51,10 +58,12 @@ Parameters:
 
 Conditions:
   Reserve: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+  New: !Equals [!Ref ExistingKeyArn, '']
 
 Resources:
   ProfileBucket:
     Type: AWS::S3::Bucket
+    Condition: New
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -70,6 +79,7 @@ Resources:
 
   DiskKey:
     Type: AWS::KMS::Key
+    Condition: New
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -87,7 +97,7 @@ Resources:
     Type: AWS::KMS::Alias
     Properties:
       AliasName: !Sub alias/dotrino-vault-${Name}
-      TargetKeyId: !Ref DiskKey
+      TargetKeyId: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
 
   # La contraseña del primer administrador, solo hasta el primer arranque: la bóveda la usa
   # para darlo de alta (OPAQUE, no la guarda) y reescribe este secreto.
@@ -111,7 +121,7 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - { Effect: Allow, Action: s3:PutObject, Resource: !Sub '${ProfileBucket.Arn}/code/*' }
+              - { Effect: Allow, Action: s3:PutObject, Resource: !Join ['', [!If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}'], '/code/*']] }
 
   CodeFetcher:
     Type: AWS::Lambda::Function
@@ -151,7 +161,7 @@ Resources:
       ServiceToken: !GetAtt CodeFetcher.Arn
       Url: !Ref CodeUrl
       Sha256: !Ref CodeSha256
-      Bucket: !Ref ProfileBucket
+      Bucket: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
 
   # ---- la bóveda ----------------------------------------------------------------------
   Role:
@@ -169,14 +179,14 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
-                Resource: !Sub '${ProfileBucket.Arn}/vault/*'
+                Resource: !Join ['', [!If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}'], '/vault/*']]
               - Effect: Allow
                 Action: s3:ListBucket
-                Resource: !GetAtt ProfileBucket.Arn
+                Resource: !If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
                 Condition: { StringLike: { 's3:prefix': ['vault/*'] } }
               - Effect: Allow
                 Action: [kms:Encrypt, kms:Decrypt]
-                Resource: !GetAtt DiskKey.Arn
+                Resource: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
               # Al despertarla, la función se invoca a sí misma en modo asíncrono.
               - Effect: Allow
                 Action: lambda:InvokeFunction
@@ -192,7 +202,7 @@ Resources:
       Runtime: nodejs22.x
       Handler: lambda/handler.handler
       Code:
-        S3Bucket: !Ref ProfileBucket
+        S3Bucket: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
         S3Key: !GetAtt Code.Key
       MemorySize: 1024
       # El máximo de Lambda: una sesión dura hasta que pasan 60 s sin mensajes, o hasta poco
@@ -202,9 +212,9 @@ Resources:
       ReservedConcurrentExecutions: !If [Reserve, !Ref ReservedConcurrency, !Ref AWS::NoValue]
       Environment:
         Variables:
-          DOTRINO_VAULT_BUCKET: !Ref ProfileBucket
+          DOTRINO_VAULT_BUCKET: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
           DOTRINO_VAULT_PREFIX: vault/
-          DOTRINO_KMS_KEY_ID: !GetAtt DiskKey.Arn
+          DOTRINO_KMS_KEY_ID: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
           DOTRINO_PROXY_URL: !Ref ProxyUrl
 
   # Una sesión que falla no se repite sola: la siguiente la dispara el próximo mensaje.
@@ -258,4 +268,7 @@ Outputs:
   Url:
     Value: !GetAtt FunctionUrl.FunctionUrl
   Bucket:
-    Value: !Ref ProfileBucket
+    Value: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
+  KeyArn:
+    Description: keep it; with it a deleted stack comes back (ExistingKeyArn)
+    Value: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]

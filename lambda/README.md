@@ -34,6 +34,14 @@ arranque; la bóveda la usa para el registro (OPAQUE: no la guarda) y reescribe 
 Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
 
+## Volver a montar una pila borrada
+
+El bucket y la llave **se quedan** al borrar la pila: son la cuenta. Crear otra con el mismo
+`Name` chocaría con el bucket, así que se le dice que los use: el ARN de la llave va en
+**`ExistingKeyArn`** (sale en los Outputs como `KeyArn`; apúntalo) y el bucket sale del
+nombre. La bóveda vuelve con su perfil y sus usuarios; la contraseña del administrador no se
+toca. Desde un checkout: `lambda/deploy.sh <nombre> --key <arn>`.
+
 ## Cómo funciona
 
 | Pieza | Qué hace |
@@ -77,6 +85,3 @@ secreto de despertar (`.wake`) va cerrado por KMS.
 4. **Dos proxios**: el timbre vive en el nodo donde se registró. Si el mensaje entra por el
    otro, la federación lo lleva al home, que es el que despierta.
 5. Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`), que usa el cerrojo.
-6. **Volver a crear una pila borrada con el mismo nombre choca**: el bucket y la llave se
-   quedaron (son la cuenta) y el nombre del bucket ya existe. Falta un parámetro para adoptar
-   el bucket y la llave que quedaron en vez de crearlos.
