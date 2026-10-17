@@ -43,7 +43,10 @@ const sesion = (opts = {}) => runSession({
 before(async () => {
   process.env.NODE_ENV = 'test'
   process.env.PROXY_DB_FILE = ':memory:'
-  process.env.DOTRINO_KEK_CMD = FAKE_KMS
+  // El KMS de mentira por el mismo camino que el de AWS (`node <script>`): así no depende de
+  // que el archivo tenga permiso de ejecución, que git no guarda en todos los discos.
+  process.env.DOTRINO_KMS_KEY_ID = 'test'
+  process.env.DOTRINO_KMS_SCRIPT = FAKE_KMS
   process.env.DOTRINO_VAULT_NOTICE_MS = '150'
   proxy = require(proxyServerPath)
   proxyUrl = `ws://127.0.0.1:${await proxy.start(0)}`
@@ -64,7 +67,8 @@ before(async () => {
 })
 
 after(async () => {
-  delete process.env.DOTRINO_KEK_CMD
+  delete process.env.DOTRINO_KMS_KEY_ID
+  delete process.env.DOTRINO_KMS_SCRIPT
   await Promise.allSettled(sesiones)
   await new Promise((resolve) => server?.close(resolve))
   try { await proxy?.stop() } catch (_) {}
