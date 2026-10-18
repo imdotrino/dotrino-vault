@@ -13,6 +13,7 @@ import {
   signDelegationWith, verifyDelegation
 } from '@dotrino/identity/capabilities'
 import { createEnrollDesk } from '../lib/src/enroll.js'
+import { fromMyVault } from '../lib/src/service.js'
 
 /** Identidad mínima que firma de verdad (cert real, verificable con verifyDelegation). */
 async function fakeIdentity () {
@@ -44,10 +45,11 @@ async function fakeIdentity () {
       issued.push({ nonce: cert.nonce, sub, scope, iat, seq: cert.seq, label })
       return { cert }
     },
+    // Firma como la maestra de verdad (`signWithDevice`, canónico): el aparato verifica el
+    // reto y los errores con `verifyDeviceSig`, y una firma de otra forma no le vale.
     async signData (data) {
-      const bytes = new TextEncoder().encode(JSON.stringify(data))
-      const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: { name: 'SHA-256' } }, pair.privateKey, bytes)
-      return { signature: Buffer.from(new Uint8Array(sig)).toString('base64'), publickey: iss }
+      const privateJwk = await crypto.subtle.exportKey('jwk', pair.privateKey)
+      return { ...(await signWithDevice({ privateJwk, data })), publickey: iss }
     },
     async listDelegations () { return { issued, revoked: [] } },
     async revokeDelegation (nonce) { return { ok: true, nonce } }
@@ -165,9 +167,16 @@ test('token/sesión que no son de este emparejamiento', async () => {
   const { desk, sent } = await mount()
   const { qr } = await desk.startPairing()
 
+  // Un token que esta bóveda no abrió NO se contesta: lo abrió otra bóveda de la cuenta y
+  // un «no» de esta le ganaría a la respuesta buena (el iPhone tumbaba las altas, 2026-10-18).
+  const before = sent.length
   const foreign = await deviceEnroll({ ...qr, token: 'otro-token' })
-  await desk.handleEnroll('tok-1', foreign.payload)
-  assert.match(sent.at(-1).error, /pairing token/)
+  const r = await desk.handleEnroll('tok-1', foreign.payload)
+  assert.equal(r.ignored, true)
+  assert.equal(sent.length, before, 'no contesta nada')
+  const h = await desk.handleHello('tok-1', { sn: 'otro-sn' })
+  assert.equal(h.ignored, true)
+  assert.equal(sent.length, before, 'tampoco al hello')
 
   const badSn = await deviceEnroll({ ...qr, sn: 'otro-sn' })
   await desk.handleEnroll('tok-1', badSn.payload)
@@ -180,7 +189,7 @@ test('rechazar: el dispositivo se entera y deja de estar pendiente', async () =>
   const { payload } = await deviceEnroll(qr)
   await desk.handleEnroll('tok-1', payload)
 
-  const r = desk.reject(desk.listPending()[0].deviceId)
+  const r = await desk.reject(desk.listPending()[0].deviceId)
   assert.equal(r.ok, true)
   assert.equal(sent.at(-1).type, 'vault.error')
   assert.equal(desk.listPending().length, 0)
@@ -324,4 +333,39 @@ test('permisos al emparejar: uno que no existe se rechaza al abrir, no al aproba
   await assert.rejects(() => desk.startPairing({ caps: ['sign', 'volar'] }), (e) => e.code === 'bad-caps')
   await assert.rejects(() => desk.startPairing({ caps: ['secrets'] }), (e) => e.code === 'bad-caps', 'el cajón no es un permiso: lo abre el nombre del servicio')
   await assert.rejects(() => desk.startPairing({ caps: [] }), (e) => e.code === 'empty-scope')
+})
+
+/**
+ * EL RETO Y LOS ERRORES VAN FIRMADOS CON LA MAESTRA Y ATADOS A LA SESIÓN (2026-10-18). Lo que
+ * va a la cuenta lo reciben todas sus bóvedas, y sin esto un `vault.error` de cualquiera
+ * tumbaba el alta: el aparato solo obedece lo que `fromMyVault` verifica.
+ */
+test('el reto y los errores llevan la firma de la maestra y el sn; el aparato descarta lo demás', async () => {
+  const { desk, sent, identity } = await mount()
+  const { qr } = await desk.startPairing()
+  const { payload } = await deviceEnroll(qr)
+  await desk.handleEnroll('tok-1', payload)
+  const { to: _to, ...reto } = sent.at(-1) // el transporte de mentira apunta el destinatario aparte
+  assert.equal(reto.type, 'vault.enroll.challenge')
+  assert.equal(reto.signed.sn, qr.sn)
+  assert.equal(reto.signed.iss, identity.iss)
+  assert.equal(reto.signed.type, reto.type)
+  assert.equal(await fromMyVault(reto, qr), true)
+  // Otra sesión, otra bóveda, o sin firma: no vale.
+  assert.equal(await fromMyVault(reto, { ...qr, sn: 'otra' }), false)
+  assert.equal(await fromMyVault({ ...reto, vsig: undefined }, qr), false)
+  const otra = await fakeIdentity()
+  assert.equal(await fromMyVault(reto, { ...qr, iss: otra.iss }), false)
+  // Manipulado: la firma deja de cuadrar.
+  assert.equal(await fromMyVault({ ...reto, signed: { ...reto.signed, deviceId: 'XXXX-YYYY' } }, qr), false)
+  // Cambiar el tipo por fuera del bloque firmado tampoco cuela.
+  assert.equal(await fromMyVault({ ...reto, type: 'vault.error' }, qr), false)
+  // Un error de la bóveda también va firmado.
+  const badSn = await deviceEnroll({ ...qr, sn: 'otro-sn' })
+  await desk.handleEnroll('tok-1', badSn.payload)
+  const { to: _to2, ...err } = sent.at(-1)
+  assert.equal(err.type, 'vault.error')
+  assert.equal(await fromMyVault(err, { ...qr, sn: 'otro-sn' }), true)
+  // Y un error que fabrique cualquiera, sin la maestra, no pasa.
+  assert.equal(await fromMyVault({ type: 'vault.error', error: 'x', signed: { type: 'vault.error', error: 'x', sn: qr.sn, iss: identity.iss, ts: 1 } }, qr), false)
 })

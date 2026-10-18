@@ -192,9 +192,10 @@ test('RENEW: una petición vieja se rechaza por `ts` (anti-replay)', async () =>
 test('HELLO: el QR corto obtiene la llave, y fuera de un emparejamiento no hay respuesta', async () => {
   const { identity, client, vault } = await mount()
 
+  const antes = client.sent.length
   client.emit('message', 'tok-dev', { type: 'vault.hello', sn: 'inventado' })
   await new Promise((r) => setTimeout(r, 40))
-  assert.equal(client.sent.at(-1).type, 'vault.error', 'sin sesión abierta no se contesta quién eres')
+  assert.equal(client.sent.length, antes, 'una invitación que esta bóveda no abrió no se contesta (la abrió otra de la cuenta)')
 
   const { qr } = await vault.startPairing({ label: 'cel' })
   assert.ok(qr.sn, 'el QR corto trae el nonce de sesión')
