@@ -76,8 +76,10 @@ secreto de despertar (`.wake`) va cerrado por KMS.
 
 ## Lo que falta
 
-1. **Concurrencia reservada en 1**: una cuenta nueva no puede (límite 10, AWS exige dejar 10
-   libres). Hay que pedir el aumento de cuota; mientras, el cerrojo lo cubre.
+1. **Sin concurrencia reservada, y no hace falta**: dos sesiones a la vez las impide el cerrojo
+   (`.lease`). `ReservedConcurrency` es opcional: solo aparta un hueco para la bóveda en una
+   cuenta cuyas otras Lambdas puedan ocupar todo su límite (una cuenta nueva no puede
+   reservar: AWS exige dejar 10 libres).
 2. **Lo que la bóveda hace por reloj** (barrer pedidos vencidos, avisos agrupados) solo corre
    mientras hay sesión.
 3. **La maestra queda bajo la llave de KMS**, sin contraseña del perfil: quien controle la
