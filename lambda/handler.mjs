@@ -91,33 +91,27 @@ async function answerStack (event, status, { reason = '', data = {} } = {}) {
 
 /**
  * AL CREAR LA PILA: la primera sesión, sin esperar mensajes (`idleMs: 0`). Nace la cuenta, se
- * registra la URL de despertar y se da de alta al administrador. La contraseña se lee de
- * Secrets Manager y, una vez usada, se reescribe el secreto para que no quede en AWS.
+ * registra la URL de despertar y se da de alta al administrador con la contraseña que trae la
+ * pila (un parámetro NoEcho). Solo se usa la primera vez: con el administrador ya dado de alta,
+ * `ensureAdmin` no la pide.
  */
 async function onStack (event, context) {
   if (event.RequestType === 'Delete') return answerStack(event, 'SUCCESS')
   try {
     const p = event.ResourceProperties || {}
     const { ensureAdmin } = await import('./bootstrap.mjs')
-    const { SecretsManagerClient, GetSecretValueCommand, PutSecretValueCommand } = await import('@aws-sdk/client-secrets-manager')
-    const sm = new SecretsManagerClient({})
-    let used = false
     const { ready } = await session(context, {
       wakeBase: p.FunctionUrl, idleMs: 0,
       onReady: (vault) => ensureAdmin(vault, {
         user: p.AdminUser || 'admin',
         password: async () => {
-          const s = await sm.send(new GetSecretValueCommand({ SecretId: p.AdminSecretArn }))
-          const pwd = JSON.parse(s.SecretString || '{}').password
-          if (!pwd) throw Object.assign(new Error('the admin password was already used or is empty: the admin user already exists or must be created by hand'), { code: 'no-admin-password' })
-          used = true
-          return pwd
+          if (!p.AdminPassword) throw Object.assign(new Error('no admin password in the stack: the admin user must be created by hand'), { code: 'no-admin-password' })
+          return p.AdminPassword
         }
       })
     })
-    if (used) await sm.send(new PutSecretValueCommand({ SecretId: p.AdminSecretArn, SecretString: JSON.stringify({ used: true }) }))
     console.log(`[vault-lambda] admin ${ready.created ? 'created' : 'already there'}: ${ready.address}`)
-    await answerStack(event, 'SUCCESS', { data: { Login: ready.address } })
+    await answerStack(event, 'SUCCESS', { data: { Login: ready.address, Account: ready.account } })
   } catch (e) {
     console.error(`[vault-lambda] first start failed: ${e.code || ''} ${e.message}`)
     await answerStack(event, 'FAILED', { reason: `${e.code || 'error'}: ${e.message}` })

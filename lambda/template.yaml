@@ -34,7 +34,7 @@ Parameters:
     Type: String
     NoEcho: true
     MinLength: 12
-    Description: the first administrator's password (12+ characters, no quotes or backslashes). It is used once and then erased from AWS.
+    Description: the first administrator's password (12+ characters, no quotes or backslashes). It is used once, at the first start; change it after signing in.
     AllowedPattern: '[^"\\]+'
   ProxyUrl:
     Type: String
@@ -48,6 +48,11 @@ Parameters:
     Default: ''
     Description: empty for a new vault. To bring back one whose stack was deleted, the ARN of its KMS key (the bucket comes from Name).
     AllowedPattern: '(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36})?'
+  SharedKeyArn:
+    Type: String
+    Default: ''
+    Description: empty gives this vault its own KMS key ($1/month). The ARN of a key shared by several vaults of this account makes each vault use it only for itself (the vault name goes in the encryption context, and the role can use the key with nothing else).
+    AllowedPattern: '(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36})?'
   CodeUrl:
     Type: String
     Default: __CODE_URL__
@@ -59,6 +64,8 @@ Parameters:
 Conditions:
   Reserve: !Not [!Equals [!Ref ReservedConcurrency, 0]]
   New: !Equals [!Ref ExistingKeyArn, '']
+  Shared: !Not [!Equals [!Ref SharedKeyArn, '']]
+  CreateKey: !And [!Condition New, !Not [!Condition Shared]]
 
 Resources:
   ProfileBucket:
@@ -79,7 +86,7 @@ Resources:
 
   DiskKey:
     Type: AWS::KMS::Key
-    Condition: New
+    Condition: CreateKey
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -95,17 +102,10 @@ Resources:
 
   DiskKeyAlias:
     Type: AWS::KMS::Alias
+    Condition: CreateKey
     Properties:
       AliasName: !Sub alias/dotrino-vault-${Name}
-      TargetKeyId: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
-
-  # La contraseña del primer administrador, solo hasta el primer arranque: la bóveda la usa
-  # para darlo de alta (OPAQUE, no la guarda) y reescribe este secreto.
-  AdminSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Description: !Sub dotrino-vault ${Name} first admin password (erased after first start)
-      SecretString: !Sub '{"password":"${AdminPassword}"}'
+      TargetKeyId: !GetAtt DiskKey.Arn
 
   # ---- el código: se baja de la release y se comprueba antes de usarlo -----------------
   CodeFetcherRole:
@@ -184,16 +184,16 @@ Resources:
                 Action: s3:ListBucket
                 Resource: !If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
                 Condition: { StringLike: { 's3:prefix': ['vault/*'] } }
+              # Con la llave COMPARTIDA, cada bóveda solo puede usarla con su propio nombre en el
+              # contexto: el sobre de otra bóveda no se abre con este rol.
               - Effect: Allow
                 Action: [kms:Encrypt, kms:Decrypt]
-                Resource: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
+                Resource: !If [Shared, !Ref SharedKeyArn, !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]]
+                Condition: !If [Shared, { StringEquals: { 'kms:EncryptionContext:vault': !Ref Name } }, !Ref AWS::NoValue]
               # Al despertarla, la función se invoca a sí misma en modo asíncrono.
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dotrino-vault-${Name}'
-              - Effect: Allow
-                Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
-                Resource: !Ref AdminSecret
 
   Function:
     Type: AWS::Lambda::Function
@@ -214,7 +214,8 @@ Resources:
         Variables:
           DOTRINO_VAULT_BUCKET: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
           DOTRINO_VAULT_PREFIX: vault/
-          DOTRINO_KMS_KEY_ID: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
+          DOTRINO_KMS_KEY_ID: !If [Shared, !Ref SharedKeyArn, !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]]
+          DOTRINO_KMS_CONTEXT_VAULT: !If [Shared, !Ref Name, !Ref AWS::NoValue]
           DOTRINO_PROXY_URL: !Ref ProxyUrl
 
   # Una sesión que falla no se repite sola: la siguiente la dispara el próximo mensaje.
@@ -258,17 +259,23 @@ Resources:
       ServiceToken: !GetAtt Function.Arn
       FunctionUrl: !GetAtt FunctionUrl.FunctionUrl
       AdminUser: !Ref AdminUser
-      AdminSecretArn: !Ref AdminSecret
+      # Directa, sin Secrets Manager ($0,40/mes por bóveda): es un parámetro NoEcho, así que
+      # CloudFormation la enseña tapada, y solo sirve para el PRIMER alta (después, ensureAdmin
+      # no la vuelve a pedir). El administrador la cambia al entrar.
+      AdminPassword: !Ref AdminPassword
       CodeKey: !GetAtt Code.Key
 
 Outputs:
   Login:
     Description: enter with this address and the admin password, from "Sign in" in any Dotrino app
     Value: !GetAtt FirstStart.Login
+  Account:
+    Description: the account's full fingerprint (64 hex), what signed requests from this account are checked against
+    Value: !GetAtt FirstStart.Account
   Url:
     Value: !GetAtt FunctionUrl.FunctionUrl
   Bucket:
     Value: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
   KeyArn:
-    Description: keep it; with it a deleted stack comes back (ExistingKeyArn)
-    Value: !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]
+    Description: keep it; with it a deleted stack comes back (ExistingKeyArn, or SharedKeyArn if it is shared)
+    Value: !If [Shared, !Ref SharedKeyArn, !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]]

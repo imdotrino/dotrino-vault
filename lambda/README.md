@@ -28,8 +28,14 @@ Ese usuario es un aparato más de la cuenta, con firma, lee, guarda, admin y apr
 dentro se le cambian los permisos, se añaden aparatos o se quita.
 
 La plantilla trae ya la URL del código y su **hash**: la pila baja el zip de la release, lo
-comprueba y solo entonces lo usa. La contraseña pasa por Secrets Manager hasta el primer
-arranque; la bóveda la usa para el registro (OPAQUE: no la guarda) y reescribe el secreto.
+comprueba y solo entonces lo usa. La contraseña es un parámetro oculto (NoEcho) que el primer
+arranque usa para el registro (OPAQUE: la bóveda no la guarda); después no se vuelve a leer.
+Cámbiala al entrar.
+
+**Varias bóvedas, una llave** (`SharedKeyArn`): una llave de KMS cuesta $1/mes. Con el ARN de
+una llave compartida la pila no crea la suya; el nombre de la bóveda va en el contexto de
+cifrado y su rol solo puede usar la llave con ese nombre, así que una bóveda no abre el sobre
+de otra. Es lo que usan las bóvedas alojadas de `dotrino-accounts`.
 
 Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
@@ -46,7 +52,7 @@ toca. Desde un checkout: `lambda/deploy.sh <nombre> --key <arn>`.
 
 | Pieza | Qué hace |
 |---|---|
-| `template.yaml` | La pila entera: bucket del perfil, llave de KMS, secreto del admin, el que baja el código, rol, función (15 min de tope), Function URL y el primer arranque. El bucket y la llave se quedan aunque se borre la pila: son la cuenta. |
+| `template.yaml` | La pila entera: bucket del perfil, llave de KMS (o la compartida), el que baja el código, rol, función (15 min de tope), Function URL y el primer arranque. El bucket y la llave se quedan aunque se borre la pila: son la cuenta. |
 | `handler.mjs` | `POST /wake?k=…` comprueba el secreto, se invoca a sí misma en asíncrono y contesta 202 al instante. `{kind:'session'}` es la sesión. El recurso personalizado de CloudFormation es el primer arranque. |
 | `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario**, subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. |
 | `mirror.mjs` | El reflejo directorio ⇄ S3 con escrituras condicionales por `ETag`, y el cerrojo (`.lease`, vence solo si el contenedor muere). |

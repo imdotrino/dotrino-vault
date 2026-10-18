@@ -11,6 +11,7 @@
  * La contraseña no la guarda la bóveda (OPAQUE): la usa para el registro y la olvida.
  */
 import { createPasswordLogin, loginAddress, accountFingerprint } from '../lib/src/passwordLogins.js'
+import { pubkeyId } from '@dotrino/identity/capabilities'
 
 /** Lo que tiene el primer administrador. El dueño los cambia después, desde dentro. */
 export const ADMIN_CAPS = ['sign', 'read', 'store', 'admin', 'approve']
@@ -22,17 +23,22 @@ export const ADMIN_CAPS = ['sign', 'read', 'store', 'admin', 'approve']
  *
  * @param {object} vault
  * @param {{ user: string, password: () => Promise<string> }} opts  la contraseña se pide solo si hace falta
- * @returns {Promise<{ address: string, created: boolean }>}
+ * `account` es la huella ENTERA de la cuenta (`pubkeyId(profileId)`, 64 hex): la que comprueba
+ * `verifySignedFor`. La dirección solo lleva un trozo, y con un trozo no se ata nada a una cuenta.
+ *
+ * @returns {Promise<{ address: string, account: string, created: boolean }>}
  */
 export async function ensureAdmin (vault, { user = 'admin', password }) {
   const fp = await accountFingerprint(vault.identity)
-  if (vault.listLogins().some((l) => l.user === user)) return { address: loginAddress(user, fp), created: false }
+  const pid = (await vault.identity.profileActa()).acta.profileId
+  const account = await pubkeyId(pid)
+  if (vault.listLogins().some((l) => l.user === user)) return { address: loginAddress(user, fp), account, created: false }
   const r = await createPasswordLogin({
     user, password: await password(), label: 'admin', caps: ADMIN_CAPS,
     begin: (req) => vault.loginRegisterBegin(req),
     finish: (req) => vault.loginRegisterFinish(req)
   })
-  return { address: loginAddress(user, r.fingerprint || fp), created: true }
+  return { address: loginAddress(user, r.fingerprint || fp), account, created: true }
 }
 
 export default { ensureAdmin, ADMIN_CAPS }

@@ -15,6 +15,9 @@
  * Configuración (variables de entorno):
  *   · `DOTRINO_KMS_KEY_ID`  (obligatoria)  id, ARN o `alias/loquesea`
  *   · `AWS_REGION`          (obligatoria)
+ *   · `DOTRINO_KMS_CONTEXT_VAULT`  el nombre de la bóveda, cuando la llave es COMPARTIDA entre
+ *     varias: va en el contexto de cifrado, y el rol de cada una solo puede usar la llave con
+ *     el suyo. Sin ella el contexto es el de siempre (una llave por bóveda).
  *   · credenciales, por orden: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
  *     (+`AWS_SESSION_TOKEN`), o el ROL de la instancia por IMDSv2 — que es lo que se usa
  *     en EC2 y lo que hay que preferir: sin secretos en el disco ni en el `docker run`.
@@ -34,6 +37,7 @@ import https from 'node:https'
 const MODO = process.argv[2]
 const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION
 const KEY_ID = process.env.DOTRINO_KMS_KEY_ID
+const CONTEXT = { app: 'dotrino-vault', use: 'atrest', ...(process.env.DOTRINO_KMS_CONTEXT_VAULT ? { vault: process.env.DOTRINO_KMS_CONTEXT_VAULT } : {}) }
 
 const muere = (m) => { process.stderr.write('kms-aws: ' + m + '\n'); process.exit(2) }
 if (MODO !== 'wrap' && MODO !== 'unwrap') muere('uso: kms-aws.mjs wrap|unwrap')
@@ -150,13 +154,13 @@ try {
     const r = await kms('Encrypt', {
       KeyId: KEY_ID,
       Plaintext: entrada,
-      EncryptionContext: { app: 'dotrino-vault', use: 'atrest' }
+      EncryptionContext: CONTEXT
     })
     process.stdout.write(r.CiphertextBlob)
   } else {
     const r = await kms('Decrypt', {
       CiphertextBlob: entrada,
-      EncryptionContext: { app: 'dotrino-vault', use: 'atrest' }
+      EncryptionContext: CONTEXT
     })
     process.stdout.write(r.Plaintext)
   }

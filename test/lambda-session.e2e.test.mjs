@@ -83,6 +83,8 @@ test('la bóveda dormida se despierta para que entre el administrador, y se vuel
   assert.equal(reason, 'idle')
   assert.equal(ready.created, true)
   assert.match(ready.address, /^admin@[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/)
+  assert.match(ready.account, /^[0-9a-f]{64}$/)
+  assert.ok(ready.account.toUpperCase().startsWith(ready.address.slice(6).replace(/-/g, '')))
   assert.ok(store.objects.has('.wake'), 'el secreto de despertar quedó guardado')
   assert.equal(store.objects.has('.lease'), false, 'y el cerrojo, quitado')
 
