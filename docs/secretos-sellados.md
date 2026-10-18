@@ -653,7 +653,7 @@ claro**. Es como apareció `profiles.json.pre041.bak`, un respaldo que una versi
 dejó en texto plano **con el verificador de la contraseña dentro**, meses después de que
 su migración terminara.
 
-Y hay un smoke que lo afirma sobre una bóveda de verdad: `dotrino-test/smoke/reposo.mjs`
+Y hay un smoke que lo afirma sobre una bóveda de verdad: `dotrino-test/smoke/at-rest.mjs`
 la hace trabajar, le recorre el disco entero y busca el valor, la contraseña y cualquier
 `"d":` de un JWK por todos los bytes.
 
@@ -692,7 +692,7 @@ Son tres cerrojos, y ninguno es un accidente:
 Y tampoco entra por las otras dos puertas: `adminDevices` exige `!m.cn` (ella lleva uno) y
 `cosealerMembers` exige `sealer` + `encPub` (no tiene ninguno de los dos).
 
-Comprobado, no razonado: `smoke/reposo.mjs` crea un cajón llamado **`vault`** —su propio
+Comprobado, no razonado: `smoke/at-rest.mjs` crea un cajón llamado **`vault`** —su propio
 `cn`— y afirma que su llave no aparece en **ninguna** envoltura de **ningún** cajón.
 
 ### 9.3. La bóveda CERRADA, medida (2026-09-02, vaultd 0.93)

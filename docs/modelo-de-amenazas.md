@@ -131,9 +131,9 @@ Cada invariante tiene un test. Esto es lo que se puede enseñar, no lo que se pu
 |---|---|
 | La maestra **no firma** con el perfil cerrado: no está en memoria ni en el disco | `multiprofile.e2e` → *con el profile locked* |
 | `unlock` **abre de verdad** o deja el perfil cerrado — nunca «abierto» sin estarlo | `multiprofile.e2e` → *con la maestra sellada, reiniciar…* y *una contraseña MALA…* |
-| La llave de comunicación **no recibe sobres**, ni con un cajón llamado como su `cn` | `smoke/reposo` → *un cajón llamado `vault`…* · `llave-de-transporte-sin-sobres` |
+| La llave de comunicación **no recibe sobres**, ni con un cajón llamado como su `cn` | `smoke/at-rest.mjs` → *un cajón llamado `vault`…* · `llave-de-transporte-sin-sobres` |
 | La llave que firma lo servido **no es miembro**: no hay camino por el que reciba nada | `llave-de-transporte-sin-sobres` → *quien firma no está entre quienes reciben* |
-| **Nada en claro en el disco**, ni el valor ni la contraseña ni un JWK privado | `smoke/reposo` (9 escenarios) |
+| **Nada en claro en el disco**, ni el valor ni la contraseña ni un JWK privado | `smoke/at-rest.mjs` (9 escenarios) |
 | Tocar el pasado de la bitácora **rompe la cadena** y se ve dónde | `bitacora-encadenada` (5 casos, uno afirma la limitación) |
 | Un servicio **no ve el inventario** de aparatos | `secrets.e2e` |
 | Quien administra **no puede ver un valor a distancia**: la operación no existe | `secrets.e2e` |
