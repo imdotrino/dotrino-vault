@@ -2,6 +2,9 @@
 import { ref, computed, markRaw, onMounted } from 'vue'
 import Console from './Console.vue'
 import Hosted from './Hosted.vue'
+import Admin from './Admin.vue'
+import { listAgentsByLabel } from '@dotrino/remote-agent/discover'
+import { identityOptions } from './identity.js'
 import { noPayments } from '@dotrino/support/policy'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
@@ -11,7 +14,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_hosted: 'En la nube', nav_docs: 'Documentación', nav_home: 'Inicio',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_hosted: 'En la nube', nav_admin: 'Administrar', nav_docs: 'Documentación', nav_home: 'Inicio',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -140,7 +143,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_hosted: 'In the cloud', nav_docs: 'Docs', nav_home: 'Home',
+    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_hosted: 'In the cloud', nav_admin: 'Manage', nav_docs: 'Docs', nav_home: 'Home',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -379,6 +382,7 @@ function routeNow () {
   else if (/\/approvals$/.test(p)) view.value = 'approvals'
   else if (/\/vault$/.test(p)) view.value = 'vault'
   else if (/\/hosted$/.test(p)) view.value = 'hosted'
+  else if (/\/admin$/.test(p)) view.value = 'admin'
   else view.value = 'home'
 }
 routeNow()
@@ -409,7 +413,7 @@ function goTo (id, ev) {
 
 function go (v, ev) {
   ev?.preventDefault()
-  const path = { vault: '/vault', approvals: '/approvals', hosted: '/hosted' }[v] || '/'
+  const path = { vault: '/vault', approvals: '/approvals', hosted: '/hosted', admin: '/admin' }[v] || '/'
   history.pushState(null, '', path)
   routeNow()
 }
@@ -424,12 +428,31 @@ window.addEventListener('popstate', routeNow)
 const topbar = ref(null)
 const onTopbarLang = (e) => { if (e.detail?.lang) setLang(e.detail.lang) }
 
+/**
+ * `/admin` (la administración de `dotrino-accounts`) existe solo para una cuenta cuyo acta tiene
+ * un servicio `accounts`: la de Dotrino. Para cualquier otra no sale ni el enlace. Se mira en el
+ * acta (los miembros con cajón `accounts`), que no toca la red de nadie; qué contesta cada uno
+ * y quién puede administrar lo deciden la página y el servicio.
+ */
+const identity = ref(null)
+const accountsAgents = ref([])
+async function findAccountsAgents (id) {
+  try {
+    accountsAgents.value = (await listAgentsByLabel(id)).filter((m) => m.cn === 'accounts')
+  } catch (e) {
+    // Sin acta no se sabe si hay servicios: no se enseña el enlace, y se dice en la consola.
+    console.warn(`[admin] could not read the account record: ${e.code || ''} ${e.message}`)
+  }
+}
+
 onMounted(async () => {
   document.documentElement.lang = lang.value
   try {
     const { Identity } = await import('@dotrino/identity')
-    if (topbar.value) topbar.value.identity = markRaw(await Identity.connect())
-  } catch (_) { /* sin identidad el botón sigue estando: abre y ofrece crearla */ }
+    identity.value = markRaw(await Identity.connect(identityOptions()))
+    if (topbar.value) topbar.value.identity = identity.value
+  } catch (_) { /* sin identidad el botón sigue estando: abre y ofrece crearla */ return }
+  if (!nativeApp) await findAccountsAgents(identity.value)
 })
 </script>
 
@@ -452,12 +475,15 @@ onMounted(async () => {
       <a href="/vault" data-testid="nav-vault" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
       <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
       <a v-if="!nativeApp" href="/hosted" data-testid="nav-hosted" :class="{ on: view === 'hosted' }" @click="go('hosted', $event)">{{ t.nav_hosted }}</a>
+      <a v-if="accountsAgents.length" href="/admin" data-testid="nav-admin" :class="{ on: view === 'admin' }" @click="go('admin', $event)">{{ t.nav_admin }}</a>
       <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
 
     <main>
       <Hosted v-if="view === 'hosted'" :lang="lang" />
+      <Admin v-else-if="view === 'admin' && accountsAgents.length" :lang="lang" :identity="identity" :members="accountsAgents" />
+      <template v-else-if="view === 'admin'"></template>
       <Console v-else-if="view === 'vault' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
       <template v-else>
       <!-- HERO -->

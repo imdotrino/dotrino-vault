@@ -17,6 +17,7 @@
     "@dotrino/passmanager": "0.18.4",
     "@dotrino/proxy-client": "0.39.0",
     "@dotrino/qr": "0.2.1",
+    "@dotrino/remote-agent": "0.23.1",
     "@dotrino/store": "0.12.3",
     "@dotrino/support": "0.10.0",
     "@dotrino/theme": "0.1.0",

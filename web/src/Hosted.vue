@@ -47,7 +47,7 @@ const T = {
     mine: 'Tus réplicas',
     none: 'Todavía no tienes ninguna.',
     replica: (d) => d ? `Réplica ${d}` : 'Réplica',
-    status: { ACTIVE: 'Activa', APPROVAL_PENDING: 'Esperando a PayPal', SUSPENDED: 'Pago pendiente', CANCELLED: 'Cancelada', EXPIRED: 'Vencida' },
+    status: { ACTIVE: 'Activa', APPROVAL_PENDING: 'Esperando a PayPal', SUSPENDED: 'Pago pendiente', CANCELLED: 'Cancelada', EXPIRED: 'Vencida', COMP: 'Sin cargo' },
     stack: { creating: 'creándose', failed: 'no se pudo crear', deleted: 'borrada' },
     in_account: 'en tu cuenta',
     on: 'encendida', off: 'apagada',
@@ -56,6 +56,7 @@ const T = {
     failed: 'No se pudo crear. Se canceló y se te devuelve lo cobrado.',
     enroll_h: 'Añádela a tu cuenta',
     enroll_before: (d) => `Si no la añades antes del ${d}, se cancela y se te devuelve lo cobrado.`,
+    enroll_before_comp: (d) => `Si no la añades antes del ${d}, se borra.`,
     enroll_here: 'Sacar la invitación en este navegador',
     enroll_paste: 'O, en la máquina de tu bóveda, ejecuta esto y pega aquí lo que imprime:',
     enroll_placeholder: 'La invitación',
@@ -99,7 +100,7 @@ const T = {
     mine: 'Your replicas',
     none: 'You do not have any yet.',
     replica: (d) => d ? `Replica ${d}` : 'Replica',
-    status: { ACTIVE: 'Active', APPROVAL_PENDING: 'Waiting for PayPal', SUSPENDED: 'Payment pending', CANCELLED: 'Cancelled', EXPIRED: 'Expired' },
+    status: { ACTIVE: 'Active', APPROVAL_PENDING: 'Waiting for PayPal', SUSPENDED: 'Payment pending', CANCELLED: 'Cancelled', EXPIRED: 'Expired', COMP: 'No charge' },
     stack: { creating: 'being created', failed: 'could not be created', deleted: 'deleted' },
     in_account: 'in your account',
     on: 'on', off: 'off',
@@ -108,6 +109,7 @@ const T = {
     failed: 'It could not be created. It was cancelled and you get your money back.',
     enroll_h: 'Add it to your account',
     enroll_before: (d) => `If you do not add it before ${d}, it is cancelled and you get your money back.`,
+    enroll_before_comp: (d) => `If you do not add it before ${d}, it is deleted.`,
     enroll_here: 'Get the invitation in this browser',
     enroll_paste: 'Or, on your vault\'s machine, run this and paste what it prints:',
     enroll_placeholder: 'The invitation',
@@ -299,7 +301,7 @@ onMounted(async () => {
           <p v-if="s.stack === 'creating'" class="muted" data-testid="hosted-creating">{{ t.creating }}</p>
           <p v-else-if="s.stack === 'failed'" class="notice error">{{ t.failed }}</p>
 
-          <div v-if="s.stack === 'ready' && !s.enrolled && s.status === 'ACTIVE'" class="enroll" data-testid="hosted-enroll">
+          <div v-if="s.stack === 'ready' && !s.enrolled && (s.status === 'ACTIVE' || s.status === 'COMP')" class="enroll" data-testid="hosted-enroll">
             <h3>{{ t.enroll_h }}</h3>
             <template v-if="codes[s.id]">
               <p><strong>{{ t.code_h }}</strong></p>
@@ -323,7 +325,7 @@ onMounted(async () => {
               <input class="inv" v-model="invitation[s.id]" :placeholder="t.enroll_placeholder" data-testid="hosted-invitation" />
               <button class="btn" :disabled="!!busy || !(invitation[s.id] || '').trim()" @click="enroll(s, false)" data-testid="hosted-enroll-go">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_go }}</button>
             </p>
-            <p v-if="s.enrollBefore" class="warn">{{ t.enroll_before(fmtWhen(s.enrollBefore)) }}</p>
+            <p v-if="s.enrollBefore" class="warn">{{ (s.status === 'COMP' ? t.enroll_before_comp : t.enroll_before)(fmtWhen(s.enrollBefore)) }}</p>
           </div>
 
           <p v-if="s.status === 'ACTIVE' || s.status === 'SUSPENDED'" class="row">
