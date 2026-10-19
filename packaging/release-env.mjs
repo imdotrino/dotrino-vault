@@ -8,7 +8,7 @@
  * `^0.33.2` mientras `lib` iba por 0.60.2. Como en semver `0.x` el caret no cruza
  * la minor, `npm i -g @dotrino/env` instalaba un cliente de veintisiete versiones
  * atrás. El síntoma no fue un fallo de instalación sino algo peor: enrolar contra
- * un vault al día devolvía `invalid cert: no-acta`, porque ese cliente es anterior
+ * un vault al día devolvía `invalid cert: no-record`, porque ese cliente es anterior
  * al acta de perfil y no sabe con qué juzgar el certificado.
  *
  * Nada de esto se arregla bumpeando el número una vez: vuelve a pasar a la próxima

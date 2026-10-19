@@ -166,7 +166,7 @@ jobs:
       # publicado pedía `^0.33.2` mientras `lib` iba por 0.60.2, y como en `0.x` el caret
       # no cruza la minor, `npm i -g @dotrino/env` instalaba un cliente veintisiete
       # versiones atrás. El síntoma no era un fallo al instalar sino algo peor: enrolar
-      # contra un vault al día devolvía `invalid cert: no-acta`.
+      # contra un vault al día devolvía `invalid cert: no-record`.
       #
       # Publicarlo a mano «en la misma tanda» ya estaba escrito en el checklist y aun así
       # pasó, así que el número deja de estar en manos de nadie: el script lo deriva de
