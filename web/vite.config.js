@@ -61,6 +61,7 @@ const commitMeta = {
 //    a propósito: dentro de un QR cada carácter se paga en módulos, y los módulos son
 //    filas y columnas de terminal (`lib/src/invite.js`).
 //  · `approvals/index.html` — los pedidos de aprobación (el aviso del teléfono abre aquí).
+//  · `hosted/index.html` — la bóveda en la nube: contratarla y ver las tuyas. PayPal vuelve aquí.
 //  · `404.html` — red de seguridad para cualquier otra ruta: Pages lo devuelve y la app
 //    enruta en el cliente. Es también lo que recoge a `/devices` y `/dispositivos`, las
 //    direcciones de las dos etapas anteriores, retiradas a mano del dueño el 2026-08-26:
@@ -70,7 +71,7 @@ const spaFallback = {
   name: 'spa-404',
   closeBundle () {
     try { copyFileSync('dist/index.html', 'dist/404.html') } catch (_) {}
-    for (const ruta of ['vault', 'd', 'approvals']) {
+    for (const ruta of ['vault', 'd', 'approvals', 'hosted']) {
       try {
         mkdirSync('dist/' + ruta, { recursive: true })
         copyFileSync('dist/index.html', `dist/${ruta}/index.html`)

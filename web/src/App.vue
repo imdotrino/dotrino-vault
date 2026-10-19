@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, markRaw, onMounted } from 'vue'
 import Console from './Console.vue'
+import Hosted from './Hosted.vue'
+import { noPayments } from '@dotrino/support/policy'
 
 const GITHUB = 'https://github.com/imdotrino/dotrino-vault'
 const RELEASES = GITHUB + '/releases/latest'
@@ -9,7 +11,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_docs: 'Documentación', nav_home: 'Inicio',
+    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_hosted: 'En la nube', nav_docs: 'Documentación', nav_home: 'Inicio',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -138,7 +140,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_docs: 'Docs', nav_home: 'Home',
+    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_hosted: 'In the cloud', nav_docs: 'Docs', nav_home: 'Home',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -364,6 +366,8 @@ function copy (text, key) {
    se atienden. Lo que sí sigue entrando por donde sea es la INVITACIÓN: viaja en el
    #fragment y se atiende antes de mirar la ruta, así que un enlace guardado con la forma
    larga sigue emparejando. Y el #fragment nunca llega al servidor. */
+// Dentro de una app nativa no se vende nada (CONVENCIONES §16.5, iOS y Android): ni el enlace.
+const nativeApp = noPayments()
 const view = ref('home')
 function routeNow () {
   const p = location.pathname.replace(/\/+$/, '')
@@ -374,6 +378,7 @@ function routeNow () {
   if (/\/d$/.test(p) || invited) view.value = 'pair'
   else if (/\/approvals$/.test(p)) view.value = 'approvals'
   else if (/\/vault$/.test(p)) view.value = 'vault'
+  else if (/\/hosted$/.test(p)) view.value = 'hosted'
   else view.value = 'home'
 }
 routeNow()
@@ -404,7 +409,7 @@ function goTo (id, ev) {
 
 function go (v, ev) {
   ev?.preventDefault()
-  const path = { vault: '/vault', approvals: '/approvals' }[v] || '/'
+  const path = { vault: '/vault', approvals: '/approvals', hosted: '/hosted' }[v] || '/'
   history.pushState(null, '', path)
   routeNow()
 }
@@ -446,12 +451,14 @@ onMounted(async () => {
       <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
       <a href="/vault" data-testid="nav-vault" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
       <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
+      <a v-if="!nativeApp" href="/hosted" data-testid="nav-hosted" :class="{ on: view === 'hosted' }" @click="go('hosted', $event)">{{ t.nav_hosted }}</a>
       <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
       <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
     </dotrino-topbar>
 
     <main>
-      <Console v-if="view === 'vault' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
+      <Hosted v-if="view === 'hosted'" :lang="lang" />
+      <Console v-else-if="view === 'vault' || view === 'pair' || view === 'approvals'" :lang="lang" :mode="view === 'pair' ? 'pair' : view === 'approvals' ? 'approvals' : 'console'" />
       <template v-else>
       <!-- HERO -->
       <section class="hero">

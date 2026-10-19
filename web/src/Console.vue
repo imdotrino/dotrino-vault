@@ -31,6 +31,7 @@ import { machineLine } from '@dotrino/identity/machine'
 import { qrSvg } from '@dotrino/qr/svg'
 import { scanFrame, scanImageFile } from '@dotrino/qr'
 import Vars from './Vars.vue'
+import { identityOptions } from './identity.js'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
 
 /**
@@ -595,23 +596,6 @@ const T = {
   }
 }
 const t = computed(() => T[props.lang] || T.es)
-
-/**
- * En desarrollo se puede apuntar la identidad a un iframe LOCAL con `?vault=<url>`, para
- * poder probar la consola entera sin salir de la máquina.
- *
- * Solo se acepta si esta página se está sirviendo desde localhost. Es importante: sin ese
- * cerrojo, un enlace del tipo `vault.dotrino.com/vault?vault=…` podría apuntar tu
- * identidad a un iframe ajeno, que es exactamente el ataque que este proyecto evita.
- */
-function identityOptions () {
-  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
-  if (!local) return {}
-  // En localhost usamos el iframe de `/id/` (vite sirve @dotrino/identity con
-  // proxy-client actualizado). `?vault=` sigue valiendo para apuntar a otro sitio.
-  const url = new URLSearchParams(location.search).get('vault') || `${location.origin}/id/`
-  return { vaultUrl: url }
-}
 
 const id = ref(null)
 const loading = ref(true)
