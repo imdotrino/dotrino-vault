@@ -37,6 +37,12 @@ una llave compartida la pila no crea la suya; el nombre de la bóveda va en el c
 cifrado y su rol solo puede usar la llave con ese nombre, así que una bóveda no abre el sobre
 de otra. Es lo que usan las bóvedas alojadas de `dotrino-accounts`.
 
+**Límite de permisos** (`PermissionsBoundary`): vacío en tu propia cuenta. Con el ARN de una
+política de IAM, los dos roles de la pila la llevan como límite: no pueden hacer más de lo que
+ella dice, tenga lo que tenga dentro su política. Así se le puede dar a quien crea la pila
+permiso para crear roles **solo con ese límite**, que es como `dotrino-accounts` crea las bóvedas
+alojadas sin poder fabricar un rol con más permisos.
+
 Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
 

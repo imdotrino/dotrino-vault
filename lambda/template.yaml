@@ -53,6 +53,11 @@ Parameters:
     Default: ''
     Description: empty gives this vault its own KMS key ($1/month). The ARN of a key shared by several vaults of this account makes each vault use it only for itself (the vault name goes in the encryption context, and the role can use the key with nothing else).
     AllowedPattern: '(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36})?'
+  PermissionsBoundary:
+    Type: String
+    Default: ''
+    Description: empty in your own account. The ARN of an IAM policy puts it as the permissions boundary of both roles, so whoever creates the stack can be allowed to create only roles that cannot do more than that (it is how Dotrino creates the hosted vaults).
+    AllowedPattern: '(arn:aws[a-z-]*:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+)?'
   CodeUrl:
     Type: String
     Default: __CODE_URL__
@@ -66,6 +71,7 @@ Conditions:
   New: !Equals [!Ref ExistingKeyArn, '']
   Shared: !Not [!Equals [!Ref SharedKeyArn, '']]
   CreateKey: !And [!Condition New, !Not [!Condition Shared]]
+  Bounded: !Not [!Equals [!Ref PermissionsBoundary, '']]
 
 Resources:
   ProfileBucket:
@@ -115,6 +121,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      PermissionsBoundary: !If [Bounded, !Ref PermissionsBoundary, !Ref AWS::NoValue]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
       Policies:
         - PolicyName: code
@@ -171,6 +178,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      PermissionsBoundary: !If [Bounded, !Ref PermissionsBoundary, !Ref AWS::NoValue]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
       Policies:
         - PolicyName: vault
