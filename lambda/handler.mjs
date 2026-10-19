@@ -1,11 +1,14 @@
 /**
  * LA BÓVEDA EN UNA AWS LAMBDA (prueba de concepto). Ver `README.md`.
  *
- * Corre en uno de dos modos (`DOTRINO_VAULT_MODE`, el parámetro `Mode` de la pila):
+ * Corre en uno de tres modos (`DOTRINO_VAULT_MODE`, el parámetro `Mode` de la pila):
  *
  *   · `vault`: una cuenta entera, con su primer administrador.
  *   · `replica`: el replicador (`src/replica.js`) de una cuenta que ya existe. No tiene
  *     maestra, no abre nada y entra al acta con la invitación de su dueño.
+ *   · `join`: una SEGUNDA BÓVEDA de una cuenta que ya existe (la de $5 de `dotrino-accounts`).
+ *     Tiene maestra y sella, entra con la invitación de su dueño, y la maestra va sellada con
+ *     la contraseña que él puso (`lock.mjs`): cerrada sirve, y se abre desde su consola.
  *
  * Lo que atiende:
  *
@@ -14,13 +17,14 @@
  *     esperando una sesión que puede durar minutos.
  *   · `{ kind: 'session' }` (esa invocación asíncrona): una sesión (`./session.mjs`).
  *   · el recurso personalizado de CloudFormation: el primer arranque.
- *   · solo `replica`, y solo quien puede invocar la función (la cuenta de AWS que la creó):
- *     `{ kind: 'enroll', invitation }` lanza el alta y devuelve el código que el dueño aprueba
- *     en su bóveda; `{ kind: 'status' }` dice si ya está enrolada.
+ *   · solo `replica` y `join`, y solo quien puede invocar la función (la cuenta de AWS que la
+ *     creó): `{ kind: 'enroll', invitation }` lanza el alta y devuelve el código que el dueño
+ *     aprueba en su bóveda —en `join`, antes, `{ ek, salt, … }` para la contraseña, que vuelve
+ *     sellada con `{ kind: 'enroll-door', req, enc }`—; `{ kind: 'status' }` dice si ya está.
  *
  * Variables de entorno (las pone la plantilla):
  *
- *   DOTRINO_VAULT_MODE     `vault` (por defecto) o `replica`
+ *   DOTRINO_VAULT_MODE     `vault` (por defecto), `replica` o `join`
  *   DOTRINO_VAULT_BUCKET   el bucket del perfil
  *   DOTRINO_VAULT_PREFIX   prefijo dentro del bucket (por defecto `vault/`)
  *   DOTRINO_KMS_KEY_ID     la llave de KMS que envuelve la del disco
@@ -55,14 +59,14 @@ async function store () {
   return s3Store({ bucket, prefix: process.env.DOTRINO_VAULT_PREFIX ?? 'vault/' })
 }
 
-async function session (context, { wakeBase, idleMs, onReady } = {}) {
+async function session (context, { wakeBase, idleMs, onReady, lock = null } = {}) {
   const { runSession, vaultStarter, replicaStarter } = await import('./session.mjs')
   const fs = await import('node:fs')
   // Un contenedor que ya atendió una sesión tiene el perfil viejo en /tmp: se empieza de cero.
   fs.rmSync(DIR, { recursive: true, force: true })
   const start = MODE === 'replica'
     ? replicaStarter({ runReplica: (await import('../src/replica.js')).runReplica })
-    : vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady })
+    : vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady, locked: MODE === 'join', lock })
   return runSession({
     store: await store(), dir: DIR, start,
     proxyUrl: process.env.DOTRINO_PROXY_URL || undefined,
@@ -74,8 +78,24 @@ async function session (context, { wakeBase, idleMs, onReady } = {}) {
   })
 }
 
-const replicaOnly = () => {
-  if (MODE !== 'replica') throw Object.assign(new Error(`this function runs a ${MODE}, not a replica`), { code: 'not-a-replica' })
+/** Solo lo que entra en una cuenta ajena tiene alta: la réplica y la segunda bóveda. */
+const enrollable = () => {
+  if (MODE !== 'replica' && MODE !== 'join') throw Object.assign(new Error(`this function runs a ${MODE}: it does not join an account`), { code: 'not-enrollable' })
+}
+
+/** Espera en `PAIRING_FILE` lo que la alta deje para `req` y cumpla `ready`. */
+async function waitPairing (st, req, ready, waitMs) {
+  const { PAIRING_FILE } = await import('./session.mjs')
+  const until = Date.now() + waitMs
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    let got = null
+    try { got = JSON.parse((await st.get(PAIRING_FILE)).body.toString('utf8')) } catch (e) { if (e.code !== 'ENOENT' && e.name !== 'NoSuchKey') throw e }
+    if (got?.req !== req) continue
+    if (got.error) return { ok: false, error: got.error, message: got.message || '' }
+    if (ready(got)) return { ok: true, got }
+  }
+  return null
 }
 
 /**
@@ -84,10 +104,9 @@ const replicaOnly = () => {
  * la réplica deje su código en el almacén.
  */
 async function onEnroll (event, context) {
-  replicaOnly()
+  enrollable()
   const invitation = typeof event.invitation === 'string' ? event.invitation.trim() : ''
   if (!invitation) return { ok: false, error: 'no-invitation' }
-  const { PAIRING_FILE } = await import('./session.mjs')
   const st = await store()
   const req = context.awsRequestId
   const { LambdaClient, InvokeCommand } = await import('@aws-sdk/client-lambda')
@@ -96,52 +115,96 @@ async function onEnroll (event, context) {
     InvocationType: 'Event',
     Payload: Buffer.from(JSON.stringify({ kind: 'enroll-run', invitation, req }))
   }))
-  const until = Date.now() + CODE_WAIT_MS
-  while (Date.now() < until) {
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    let got = null
-    try { got = JSON.parse((await st.get(PAIRING_FILE)).body.toString('utf8')) } catch (e) { if (e.code !== 'ENOENT' && e.name !== 'NoSuchKey') throw e }
-    if (got?.req !== req) continue
-    if (got.error) return { ok: false, error: got.error, message: got.message || '' }
-    return { ok: true, deviceId: got.deviceId, code: got.code }
+  // La segunda bóveda pide antes la contraseña: devuelve con qué derivarla y a qué sellarla.
+  if (MODE === 'join') {
+    const r = await waitPairing(st, req, (got) => got.phase === 'door', CODE_WAIT_MS)
+    if (!r) return { ok: false, error: 'no-door', message: 'the vault did not get ready for the password in time' }
+    if (!r.ok) return r
+    const { ek, salt, N, r: rr, p, len } = r.got
+    return { ok: true, req, door: { ek, salt, N, r: rr, p, len } }
   }
-  return { ok: false, error: 'no-code', message: 'the replica did not get a code from the vault in time' }
+  const r = await waitPairing(st, req, (got) => !!got.code, CODE_WAIT_MS)
+  if (!r) return { ok: false, error: 'no-code', message: 'the replica did not get a code from the vault in time' }
+  if (!r.ok) return r
+  return { ok: true, deviceId: r.got.deviceId, code: r.got.code }
+}
+
+/**
+ * LA CONTRASEÑA DE LA SEGUNDA BÓVEDA, sellada a la efímera del alta (`{ kind:'enroll-door',
+ * req, enc }`). Quien la trae no puede leerla. Se deja donde la espera el alta y se devuelve
+ * el código que el dueño teclea en su bóveda.
+ */
+async function onEnrollDoor (event) {
+  if (MODE !== 'join') throw Object.assign(new Error(`this function runs a ${MODE}: it takes no password`), { code: 'not-join' })
+  const req = typeof event.req === 'string' ? event.req : ''
+  if (!req || !event.enc) return { ok: false, error: 'bad-door' }
+  const { DOOR_FILE } = await import('./session.mjs')
+  const st = await store()
+  await st.put(DOOR_FILE, Buffer.from(JSON.stringify({ req, enc: event.enc, ts: Date.now() })))
+  const r = await waitPairing(st, req, (got) => !!got.code, CODE_WAIT_MS)
+  if (!r) return { ok: false, error: 'no-code', message: 'the vault did not get a code in time' }
+  if (!r.ok) return r
+  return { ok: true, deviceId: r.got.deviceId, code: r.got.code }
 }
 
 /** El alta de verdad: espera la aprobación del dueño y luego el primer empujón de su bóveda. */
 async function onEnrollRun (event, context) {
-  replicaOnly()
-  const { enrollReplica, PAIRING_FILE } = await import('./session.mjs')
-  const { enrollWithVault } = await import('../lib/src/service.js')
-  const { openReplicaStore, REPLICA_SCOPE } = await import('../src/replica.js')
-  const { keyLabel } = await import('@dotrino/identity/capabilities')
+  enrollable()
+  const { enrollReplica, enrollJoin, PAIRING_FILE } = await import('./session.mjs')
   const fs = await import('node:fs')
   const st = await store()
   fs.rmSync(DIR, { recursive: true, force: true })
   const deadline = Date.now() + context.getRemainingTimeInMillis() - END_MARGIN_MS
+  const account = process.env.DOTRINO_REPLICA_OWNER || ''
+  let lock = null
   try {
-    await enrollReplica({ store: st, dir: DIR, invitation: event.invitation, account: process.env.DOTRINO_REPLICA_OWNER || '', req: event.req, deadline: deadline - FIRST_PUSH_IDLE_MS - 15_000, owner: context.awsRequestId, enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log: console.log })
+    if (MODE === 'join') {
+      const { nodePlatform } = await import('../src/platform.js')
+      const { parseInvite } = await import('../lib/src/invite.js')
+      const { makeEphemeralKey, openSealed } = await import('../lib/src/sealed.js')
+      const r = await enrollJoin({
+        store: st, dir: DIR, invitation: event.invitation, account, req: event.req,
+        deadline: deadline - FIRST_PUSH_IDLE_MS - 15_000, owner: context.awsRequestId,
+        openIdentity: ({ dir, openKey }) => nodePlatform(dir).openIdentity({ openKey: openKey ? () => openKey() : null, log: console.log }),
+        parseInvite, makeEphemeralKey, openSealed, log: console.log
+      })
+      lock = r.lock
+    } else {
+      const { enrollWithVault } = await import('../lib/src/service.js')
+      const { openReplicaStore, REPLICA_SCOPE } = await import('../src/replica.js')
+      const { keyLabel } = await import('@dotrino/identity/capabilities')
+      await enrollReplica({ store: st, dir: DIR, invitation: event.invitation, account, req: event.req, deadline: deadline - FIRST_PUSH_IDLE_MS - 15_000, owner: context.awsRequestId, enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log: console.log })
+    }
   } catch (e) {
-    console.error(`[vault-lambda] replica enrollment failed: ${e.code || ''} ${e.message}`)
+    console.error(`[vault-lambda] enrollment failed: ${e.code || ''} ${e.message}`)
     // Quien espera el código tiene que enterarse de que no va a llegar, y por qué.
     await st.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req: event.req, error: e.code || 'enroll-failed', message: e.message, ts: Date.now() })))
     return { ok: false, error: e.code || 'enroll-failed' }
   }
   // Ya está en el acta: una sesión corta para recibir el primer empujón y registrar el timbre.
+  // La segunda bóveda la hace con el candado que acaba de nacer, todavía abierto: es el
+  // momento de absorber el acta donde la admitieron y estrenar su llave de comunicación.
   let wakeBase = null
   try { wakeBase = (await st.get(URL_FILE)).body.toString('utf8').trim() || null } catch (e) { if (e.code !== 'ENOENT' && e.name !== 'NoSuchKey') throw e }
-  const r = await session(context, { wakeBase, idleMs: FIRST_PUSH_IDLE_MS })
-  return { ok: true, reason: r.reason }
+  try {
+    const r = await session(context, { wakeBase, idleMs: FIRST_PUSH_IDLE_MS, lock })
+    return { ok: true, reason: r.reason }
+  } finally { lock?.close() }
 }
 
 async function onStatus () {
-  replicaOnly()
-  const { replicaStatus } = await import('./session.mjs')
-  const { openReplicaStore } = await import('../src/replica.js')
-  const { keyLabel } = await import('@dotrino/identity/capabilities')
+  enrollable()
   const fs = await import('node:fs')
   const dir = '/tmp/dotrino-vault/status'
   fs.rmSync(dir, { recursive: true, force: true })
+  if (MODE === 'join') {
+    const { joinStatus } = await import('./session.mjs')
+    const { nodePlatform } = await import('../src/platform.js')
+    return { ok: true, ...(await joinStatus({ store: await store(), dir, openIdentity: ({ dir: d }) => nodePlatform(d).openIdentity({ log: () => {} }) })) }
+  }
+  const { replicaStatus } = await import('./session.mjs')
+  const { openReplicaStore } = await import('../src/replica.js')
+  const { keyLabel } = await import('@dotrino/identity/capabilities')
   return { ok: true, ...(await replicaStatus({ store: await store(), dir, openReplicaStore, keyLabel })) }
 }
 
@@ -183,15 +246,15 @@ async function answerStack (event, status, { reason = '', data = {} } = {}) {
  * timbre). En modo `vault`, además, la primera sesión, sin esperar mensajes (`idleMs: 0`): nace
  * la cuenta, se registra la URL de despertar y se da de alta al administrador con la contraseña
  * que trae la pila (un parámetro NoEcho). Solo se usa la primera vez: con el administrador ya
- * dado de alta, `ensureAdmin` no la pide. En modo `replica` no nace nada.
+ * dado de alta, `ensureAdmin` no la pide. En `replica` y `join` no nace nada: entran en la cuenta de su dueño con el alta.
  */
 async function onStack (event, context) {
   if (event.RequestType === 'Delete') return answerStack(event, 'SUCCESS')
   try {
     const p = event.ResourceProperties || {}
     if (p.FunctionUrl) await (await store()).put(URL_FILE, Buffer.from(p.FunctionUrl))
-    if (MODE === 'replica') {
-      console.log('[vault-lambda] replica: waiting for its owner to enroll it')
+    if (MODE === 'replica' || MODE === 'join') {
+      console.log(`[vault-lambda] ${MODE}: waiting for its owner to enroll it`)
       return answerStack(event, 'SUCCESS')
     }
     const { ensureAdmin } = await import('./bootstrap.mjs')
@@ -222,6 +285,7 @@ export async function handler (event, context) {
   }
   try {
     if (event?.kind === 'enroll') return await onEnroll(event, context)
+    if (event?.kind === 'enroll-door') return await onEnrollDoor(event)
     if (event?.kind === 'enroll-run') return await onEnrollRun(event, context)
     if (event?.kind === 'status') return await onStatus()
   } catch (e) {

@@ -21,6 +21,7 @@ import { createMirror, acquireLease } from './mirror.mjs'
 import { configFromEnv, probe as probeKek, writeConfig as writeKekConfig, CONFIG_FILE } from '../src/atrest.js'
 import { runStep } from '../lib/src/kek.js'
 import { PAIRING_TTL_MS } from '../lib/src/enroll.js'
+import { openLock } from './lock.mjs'
 
 /** Sin mensajes durante esto, la sesión termina (decidido por el dueño, 2026-10-17). */
 export const IDLE_MS = 60_000
@@ -79,8 +80,31 @@ export function sameSecret (a, b) {
  * `{ ready, busy(), close() }`: `busy()` dice que hay algo vivo en memoria que se perdería al
  * apagarse.
  */
-export const vaultStarter = ({ startVault, onReady = null }) => async ({ dir, proxyUrl, wakeUrl, onActivity, log, push }) => {
-  const vault = await startVault({ dir, proxyUrl, log, platform: { wakeUrl, onActivity } })
+export const vaultStarter = ({ startVault, onReady = null, locked = false, lock: given = null }) => async ({ dir, proxyUrl, wakeUrl, onActivity, log, push }) => {
+  // LA BÓVEDA ALOJADA (`join`) TIENE CANDADO, y sin él no arranca: su maestra va sellada con la
+  // contraseña del cliente y no hay otra puerta (`lock.mjs`). `lock` es el que ya está abierto
+  // (la sesión que sigue al alta); si no, nace cerrado.
+  const lock = locked ? (given || openLock(dir)) : null
+  if (lock && !lock.exists()) throw Object.assign(new Error('this vault has no lock: refusing to keep its master key under the key service only'), { code: 'no-lock' })
+  let vault = null
+  const lockOpts = lock
+    ? {
+        openKey: lock.openKey,
+        isLocked: lock.isLocked,
+        hasPassword: () => true,
+        hasSecondary: () => true,
+        secondaryParams: lock.params,
+        // Abrir es el «abrir a distancia» de siempre: la derivada desenvuelve `K` y la maestra
+        // sube a memoria. Si no sube, se vuelve a cerrar: un candado que dice «abierto» sin
+        // la maestra en memoria hace fallar lo demás en otro sitio.
+        openWithSecondary: async (derived) => {
+          const r = lock.open(derived)
+          try { await vault.takeMasterKey() } catch (e) { lock.close(); throw new Error(`opened the lock but not the master key: ${e.message}`) }
+          return r
+        }
+      }
+    : {}
+  vault = await startVault({ dir, proxyUrl, log, platform: { wakeUrl, onActivity }, ...lockOpts })
   await push()
   const ready = onReady ? await onReady(vault) : null
   return {
@@ -88,7 +112,7 @@ export const vaultStarter = ({ startVault, onReady = null }) => async ({ dir, pr
     // Un emparejamiento esperando su código o un pedido esperando al aprobador no son
     // inactividad: apagarse ahí los perdería, porque viven en memoria.
     busy: () => vault.listPending().length > 0 || vault.listApprovals().length > 0,
-    close: () => vault.close()
+    close: () => { try { vault.close() } finally { lock?.close() } }
   }
 }
 
@@ -211,6 +235,112 @@ export async function enrollReplica ({ store, dir, invitation, account, req, dea
   }
 }
 
+/** Dónde deja el cliente (por `accounts`) la derivada sellada de su contraseña. */
+export const DOOR_FILE = '.door'
+
+/**
+ * EL ALTA DE LA BÓVEDA ALOJADA (`join`): una segunda bóveda de la cuenta del cliente, con su
+ * propia maestra, que entra en el acta con su invitación y sella (`sella`). DISENO §5 de
+ * `dotrino-accounts`.
+ *
+ * Lo único nuevo respecto de la réplica es que la maestra NACE SELLADA: no toca el disco en
+ * claro ni un instante. Por eso el orden:
+ *
+ *   1. efímera en memoria y `{ ek, salt, params }` en `PAIRING_FILE` (`phase: 'door'`);
+ *   2. el navegador deriva la contraseña y sella `{ nonce: req, key }` a `ek`; llega en
+ *      `DOOR_FILE` (lo deja `accounts`, que no puede leerlo);
+ *   3. se abre, nace el candado (`lock.json`) y SOLO ENTONCES la identidad, con `openKey`;
+ *   4. `join` a la cuenta, comprobando que es la que pagó (`account`): el código va a
+ *      `PAIRING_FILE` y el cliente lo teclea en su bóveda.
+ *
+ * Si algo falla, se va todo lo que nació aquí: una bóveda a medias en el almacén haría que el
+ * siguiente intento dijera «ya está dada de alta».
+ *
+ * @returns {Promise<{ lock: object, deviceId: string, seq: number }>}  el candado sigue ABIERTO
+ */
+export async function enrollJoin ({ store, dir, invitation, account, req, deadline, owner = 'enroll', openIdentity, parseInvite, makeEphemeralKey, openSealed, log = () => {} }) {
+  if (!invitation) throw Object.assign(new Error('enrollJoin: no invitation'), { code: 'no-invitation' })
+  if (!account) throw Object.assign(new Error('enrollJoin: no account to join'), { code: 'no-account' })
+  const qr = typeof invitation === 'string' ? parseInvite(invitation) : invitation
+  if (!qr?.sn) throw Object.assign(new Error('that does not look like a vault invitation'), { code: 'bad-invitation' })
+  const lease = await takeLease(store, { owner, deadline })
+  const mirror = createMirror({ store, dir })
+  let before = null
+  let lock = null
+  let identity = null
+  try {
+    const pulled = await mirror.pull()
+    ensureKekConfig(dir, pulled)
+    lock = openLock(dir)
+    if (lock.exists() || fs.existsSync(path.join(dir, 'identity.json'))) throw Object.assign(new Error('this vault already belongs to an account'), { code: 'already-enrolled' })
+    before = new Set(fs.readdirSync(dir))
+
+    const eph = await makeEphemeralKey()
+    const { newSalt, SCRYPT } = await import('./lock.mjs')
+    const salt = newSalt()
+    await store.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req, phase: 'door', ek: eph.ek, salt, ...SCRYPT, ts: Date.now() })))
+    log('[vault-lambda] waiting for the password key')
+
+    const until = Math.min(deadline, Date.now() + PAIRING_TTL_MS)
+    let door = null
+    while (!door) {
+      if (Date.now() >= until) throw Object.assign(new Error('the password key did not arrive in time'), { code: 'no-door' })
+      await sleep(500)
+      let got = null
+      try { got = JSON.parse((await store.get(DOOR_FILE)).body.toString('utf8')) } catch (e) { if (e.code !== 'ENOENT' && e.name !== 'NoSuchKey') throw e }
+      if (got?.req === req) door = got
+    }
+    try { await store.remove(DOOR_FILE) } catch (_) {}
+    let payload = null
+    try { payload = await openSealed({ privateKey: eph.privateKey, enc: door.enc }) } catch (_) { payload = null }
+    // EL NONCE VA DENTRO: un sobre de otra alta no sirve para esta.
+    if (!payload || payload.nonce !== req || typeof payload.key !== 'string') throw Object.assign(new Error('the password key does not check out'), { code: 'bad-door' })
+    const derived = Uint8Array.from(Buffer.from(payload.key, 'base64'))
+    try { lock.create({ salt, derived }) } finally { derived.fill(0) }
+
+    identity = await openIdentity({ dir, openKey: lock.openKey })
+    // Nació para entrar en la cuenta de otro: sin la marca, `join` se negaría a cambiar su acta.
+    await identity.prepareForAdoption()
+    const off = identity.onVault((e) => {
+      if (e?.phase !== 'challenge' || !e.code) return
+      log(`[vault-lambda] vault ${e.deviceId}: waiting for code ${e.code} to be approved on the owner's vault`)
+      store.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req, deviceId: e.deviceId, code: e.code, ts: Date.now() })))
+        .catch((err) => log(`[vault-lambda] could not leave the pairing code: ${err.message}`))
+    })
+    let r
+    try { r = await identity.enrollDevice(qr, { label: 'bóveda en la nube', join: 'current', account }) } finally { off?.() }
+    const mine = await identity.myMembership()
+    await mirror.push()
+    log(`[vault-lambda] joined the account (record #${mine.seq}) as ${mine.id}`)
+    return { lock, deviceId: mine.id, seq: mine.seq }
+  } catch (e) {
+    lock?.close()
+    if (before) {
+      for (const name of fs.readdirSync(dir)) if (!before.has(name)) fs.rmSync(path.join(dir, name), { recursive: true, force: true })
+    }
+    throw e
+  } finally {
+    try { identity?.destroy?.() } catch (_) {}
+    try { await mirror.push() } finally { await lease.release() }
+  }
+}
+
+/**
+ * Si la bóveda alojada ya está en la cuenta y por qué acta va. Solo lee, y con la maestra
+ * CERRADA: abre la identidad sin `openKey` (lo que pide es público: la llave y el acta).
+ */
+export async function joinStatus ({ store, dir, openIdentity }) {
+  const mirror = createMirror({ store, dir })
+  const pulled = await mirror.pull()
+  if (!pulled || !openLock(dir).exists() || !fs.existsSync(path.join(dir, 'identity.json'))) return { enrolled: false, deviceId: null, seq: 0 }
+  ensureKekConfig(dir, pulled)
+  const identity = await openIdentity({ dir, openKey: null })
+  try {
+    const mine = await identity.myMembership()
+    return { enrolled: !!mine.inProfile, deviceId: mine.id, seq: mine.seq, sealer: !!mine.isMaster }
+  } finally { try { identity.destroy?.() } catch (_) {} }
+}
+
 /** Si la réplica está enrolada y por qué acta va. Solo lee. */
 export async function replicaStatus ({ store, dir, openReplicaStore, keyLabel }) {
   const mirror = createMirror({ store, dir })
@@ -222,4 +352,4 @@ export async function replicaStatus ({ store, dir, openReplicaStore, keyLabel })
   return { enrolled: true, deviceId: await keyLabel(rs.link.device.publickey), seq: rs.seq }
 }
 
-export default { runSession, vaultStarter, replicaStarter, enrollReplica, replicaStatus, wakeSecret, sameSecret, IDLE_MS, WAKE_FILE, PAIRING_FILE }
+export default { runSession, vaultStarter, replicaStarter, enrollReplica, enrollJoin, joinStatus, replicaStatus, wakeSecret, sameSecret, IDLE_MS, WAKE_FILE, PAIRING_FILE, DOOR_FILE }

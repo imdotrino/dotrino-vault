@@ -1,0 +1,152 @@
+/**
+ * LA SEGUNDA BÓVEDA QUE DUERME (`lambda/`, modo `join`; `dotrino-accounts/docs/DISENO.md` §5).
+ *
+ * Proxio real (repo hermano `dotrino-proxy`), una bóveda real como la del cliente, almacén en
+ * memoria y KMS de mentira. Lo que tiene que pasar:
+ *
+ *   1. antes de nacer pide la contraseña: da `{ ek, salt, params }`, y la derivada llega
+ *      sellada a esa efímera;
+ *   2. entra en la cuenta con la invitación y el código del dueño, y SELLA;
+ *   3. su maestra nunca está en claro en el almacén: sin la contraseña no se abre, ni con KMS;
+ *   4. con la contraseña se abre (la misma derivada que manda la consola), con otra no;
+ *   5. con la invitación de OTRA cuenta no enseña código, y no deja nada a medias.
+ */
+import { test, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import { runSession, vaultStarter, enrollJoin, joinStatus, PAIRING_FILE, DOOR_FILE } from '../lambda/session.mjs'
+import { openLock, LOCK_FILE } from '../lambda/lock.mjs'
+import { memoryStore } from '../lambda/mirror.mjs'
+import { encodeInvite, parseInvite } from '../lib/src/invite.js'
+import { makeEphemeralKey, openSealed, seal } from '../lib/src/sealed.js'
+
+const require = createRequire(import.meta.url)
+const here = path.dirname(fileURLToPath(import.meta.url))
+const proxyServerPath = path.join(here, '..', '..', 'dotrino-proxy', 'server.js')
+const FAKE_KMS = path.join(here, 'fixtures', 'fake-kms.mjs')
+const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), name))
+const log = process.env.VAULT_LOG ? console.error : () => {}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const PASSWORD = 'caballo grapa batería correcta'
+
+let proxy, proxyUrl, vault, otra, startVault, nodePlatform, pubkeyId, cuenta
+const store = memoryStore()
+
+const openIdentity = ({ dir, openKey }) => nodePlatform(dir).openIdentity({ openKey: openKey ? () => openKey() : null, log })
+const invitar = async (v) => encodeInvite((await v.startPairing({ scope: ['vault:sign'], caps: ['sign', 'read', 'store', 'sealer'], label: 'bóveda en la nube' })).qr)
+const alta = (invitation, req, account = cuenta) => enrollJoin({
+  store, dir: tmp('join-alta-'), invitation, account, req, deadline: Date.now() + 60_000,
+  openIdentity, parseInvite, makeEphemeralKey, openSealed, log
+})
+
+async function pairing (req, ready) {
+  for (let i = 0; i < 200; i++) {
+    const o = store.objects.get(PAIRING_FILE)
+    const got = o && JSON.parse(o.body.toString('utf8'))
+    if (got?.req === req && (got.error || ready(got))) return got
+    await sleep(100)
+  }
+  throw new Error('nothing in the pairing file for ' + req)
+}
+
+/** Lo que hace el navegador: deriva AQUÍ y sella a la efímera. */
+async function mandarContrasena (req, door, password = PASSWORD) {
+  const key = crypto.scryptSync(password, Buffer.from(door.salt, 'base64'), door.len, { N: door.N, r: door.r, p: door.p })
+  const enc = await seal({ ek: door.ek, payload: { nonce: req, key: key.toString('base64') } })
+  await store.put(DOOR_FILE, Buffer.from(JSON.stringify({ req, enc })))
+  return new Uint8Array(key)
+}
+
+before(async () => {
+  process.env.NODE_ENV = 'test'
+  process.env.PROXY_DB_FILE = ':memory:'
+  process.env.DOTRINO_KMS_KEY_ID = 'test'
+  process.env.DOTRINO_KMS_SCRIPT = FAKE_KMS
+  proxy = require(proxyServerPath)
+  proxyUrl = `ws://127.0.0.1:${await proxy.start(0)}`
+  ;({ startVault } = await import('../src/vault.js'))
+  ;({ nodePlatform } = await import('../src/platform.js'))
+  ;({ pubkeyId } = await import('@dotrino/identity/keyid'))
+  vault = await startVault({ dir: tmp('join-cuenta-'), proxyUrl, log })
+  otra = await startVault({ dir: tmp('join-otra-'), proxyUrl, log })
+  cuenta = await pubkeyId((await vault.startPairing({ scope: ['vault:sign'], label: 'solo para leer la cuenta' })).qr.iss)
+})
+
+after(async () => {
+  delete process.env.DOTRINO_KMS_KEY_ID
+  delete process.env.DOTRINO_KMS_SCRIPT
+  try { vault?.close() } catch (_) {}
+  try { otra?.close() } catch (_) {}
+  try { await proxy?.stop() } catch (_) {}
+})
+
+test('con la invitación de otra cuenta no hay código, y no queda nada a medias', async () => {
+  const r = alta(await invitar(otra), 'req-otra')
+  const door = await pairing('req-otra', (g) => g.phase === 'door')
+  await mandarContrasena('req-otra', door)
+  await assert.rejects(r, (e) => e.code === 'wrong-account')
+  const nombres = [...store.objects.keys()]
+  assert.ok(!nombres.includes(LOCK_FILE) && !nombres.includes('identity.json'), `quedó algo del alta fallida: ${nombres.join(', ')}`)
+})
+
+let derivada = null
+test('nace sellada, entra en la cuenta con el código del dueño y sella', async () => {
+  const r = alta(await invitar(vault), 'req-1')
+  const door = await pairing('req-1', (g) => g.phase === 'door')
+  assert.ok(door.ek && door.salt && door.N, 'pide la contraseña antes de nacer')
+  derivada = await mandarContrasena('req-1', door)
+  const pend = await pairing('req-1', (g) => !!g.code)
+  assert.ok(pend.code, pend.message || 'el código para teclear en la bóveda')
+  await vault.approveDevice(pend.code)
+  const { lock, deviceId } = await r
+  lock.close()
+  assert.equal(deviceId, pend.deviceId)
+
+  const st = await joinStatus({ store, dir: tmp('join-estado-'), openIdentity })
+  assert.equal(st.enrolled, true)
+  assert.equal(st.sealer, true, 'entró con `sella`')
+})
+
+test('la maestra no se abre sin la contraseña: ni con el almacén y KMS en la mano', async () => {
+  const dir = tmp('join-ladron-')
+  for (const [name, o] of store.objects) {
+    if (name.startsWith('.')) continue
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+    fs.writeFileSync(path.join(dir, name), o.body)
+  }
+  const id = await openIdentity({ dir, openKey: null })
+  try {
+    assert.equal(id.masterLocked ?? (await id.isMasterLocked?.()), true)
+    await assert.rejects(id.signData({ hola: 1 }), 'sin la maestra no firma')
+  } finally { id.destroy?.() }
+})
+
+test('la sesión arranca cerrada; con la derivada se abre, con otra no', async () => {
+  const dir = tmp('join-sesion-')
+  const lock = openLock(dir)
+  const r = await runSession({
+    store, dir, proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({
+      startVault, locked: true, lock,
+      onReady: async (v) => {
+        const cerrada = await v.takeMasterKey()
+        const mala = (() => { try { lock.open(new Uint8Array(32)); return 'abrió' } catch (e) { return e.code } })()
+        lock.open(derivada)
+        const abierta = await v.takeMasterKey()
+        return { cerrada, mala, abierta }
+      }
+    })
+  })
+  assert.equal(r.ready.cerrada.locked, true, 'nace cerrada en cada sesión')
+  assert.equal(r.ready.mala, 'WRONG_PASSWORD')
+  assert.equal(r.ready.abierta.locked, false, 'la derivada de su contraseña la abre')
+})
+
+test('una bóveda ya dada de alta no se vuelve a dar de alta', async () => {
+  await assert.rejects(alta(await invitar(vault), 'req-2'), (e) => e.code === 'already-enrolled')
+})

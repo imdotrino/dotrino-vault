@@ -78,13 +78,40 @@ El bucket y la llave **se quedan** al borrar la pila: son la cuenta. Crear otra 
 nombre. La bóveda vuelve con su perfil y sus usuarios; la contraseña del administrador no se
 toca. Desde un checkout: `lambda/deploy.sh <nombre> --key <arn>`.
 
+## Modo segunda bóveda (`Mode: join`)
+
+Una **segunda bóveda** de una cuenta que ya tienes: tiene maestra propia y **sella** el acta
+(`../docs/replicas.md` §1.bis), así que la cuenta puede admitir aparatos y cambiar permisos aunque
+tu otra bóveda no exista. Es lo que vende `dotrino-accounts` por $5 (`dotrino-accounts/docs/
+DISENO.md` §5).
+
+**Su maestra va sellada con una contraseña tuya**, puesta al darla de alta (`lock.mjs`): KMS
+cifra el disco, pero sin la contraseña no se abre. Cerrada sirve (se identifica, reparte sobres);
+lo que necesita la maestra contesta `vault-locked`, y se abre desde tu consola con el «abrir a
+distancia» de siempre (`../docs/abrir-a-distancia.md`): la consola deriva aquí la contraseña y
+manda solo la derivada, sellada a una llave efímera. Abierta lo está **mientras dura la sesión**.
+
+1. Crea la pila con `Mode: join`, sin `AdminPassword` y con **`Owner`**, como la réplica.
+2. En tu bóveda: `dotrino-vault pair --scope sella,firma,lee,guarda --quiet`.
+3. Invoca la función con `{ "kind": "enroll", "invitation": "<invitación>" }`: contesta
+   `{ req, door: { ek, salt, N, r, p, len } }`. La maestra todavía no existe.
+4. Deriva `scrypt(contraseña, salt, N, r, p, len)` y séllala a `ek` (`seal` de
+   `@dotrino/vault/sealed`, con `{ nonce: req, key }`). Invoca `{ "kind": "enroll-door", req,
+   enc }`: contesta `{ deviceId, code }`. Ahora nace la maestra, ya sellada.
+5. En tu bóveda: `dotrino-vault approve <código>`.
+
+Igual que la réplica: **solo entra en la cuenta `Owner`** (`wrong-account` antes del código), no
+es multiperfil (`already-enrolled`), y un alta que falla no deja nada en el bucket. La contraseña
+**no se recupera**: si se pierde, esa bóveda no vuelve a sellar y la quitas desde la otra.
+
 ## Cómo funciona
 
 | Pieza | Qué hace |
 |---|---|
 | `template.yaml` | La pila entera: bucket del perfil, llave de KMS (o la compartida), el que baja el código, rol, función (15 min de tope), Function URL y el primer arranque. El bucket y la llave se quedan aunque se borre la pila: son la cuenta. |
 | `handler.mjs` | `POST /wake?k=…` comprueba el secreto, se invoca a sí misma en asíncrono y contesta 202 al instante. `{kind:'session'}` es la sesión. El recurso personalizado de CloudFormation es el primer arranque. |
-| `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario** (o el mismo replicador), subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. También el alta de una réplica (`enrollReplica`) y su estado. |
+| `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario** (o el mismo replicador), subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. También el alta de una réplica (`enrollReplica`) o de una segunda bóveda (`enrollJoin`), y su estado. |
+| `lock.mjs` | El candado de la segunda bóveda: `lock.json` (la llave del perfil envuelta con la derivada de la contraseña, cifrado además con KMS) y el freno de intentos, los mismos que la contraseña del admin de escritorio (`../src/adminDoor.js`). |
 | `mirror.mjs` | El reflejo directorio ⇄ S3 con escrituras condicionales por `ETag`, y el cerrojo (`.lease`, vence solo si el contenedor muere). |
 | `bootstrap.mjs` | El primer administrador (`createPasswordLogin`, el mismo camino que `dotrino-vault logins add`). |
 | `build.sh` | El zip (reproducible) y la plantilla con la URL y el hash puestos. Lo corre `release.yml`. |
@@ -103,6 +130,10 @@ secreto de despertar (`.wake`) va cerrado por KMS.
 
 ## Probado
 
+- `test/lambda-join.e2e.test.mjs`: la segunda bóveda pide la contraseña antes de nacer, entra
+  con el código del dueño y sella; su maestra no se abre con el bucket y KMS en la mano; la
+  sesión arranca cerrada y se abre con la derivada, no con otra; con la invitación de otra
+  cuenta no hay código y no queda nada a medias.
 - `test/lambda-session.e2e.test.mjs`, en local con un proxio de verdad: el primer arranque
   crea el admin; con la bóveda dormida, admin entra con su contraseña, el canal vacío la
   despierta y sale con su certificado y sus permisos; sin mensajes se apaga sola; volver a
@@ -118,8 +149,9 @@ secreto de despertar (`.wake`) va cerrado por KMS.
    reservar: AWS exige dejar 10 libres).
 2. **Lo que la bóveda hace por reloj** (barrer pedidos vencidos, avisos agrupados) solo corre
    mientras hay sesión.
-3. **La maestra queda bajo la llave de KMS**, sin contraseña del perfil: quien controle la
-   cuenta de AWS y su KMS puede abrirla.
+3. **En modo `vault` la maestra queda bajo la llave de KMS**, sin contraseña del perfil: quien
+   controle la cuenta de AWS y su KMS puede abrirla. En modo `join` va sellada con la contraseña
+   del cliente; mientras está abierta (una sesión), está en la memoria de la Lambda.
 4. **Dos proxios**: el timbre vive en el nodo donde se registró. Si el mensaje entra por el
    otro, la federación lo lleva al home, que es el que despierta.
 5. Sin confirmar: el `If-Match` del borrado en S3 (`DeleteObject`), que usa el cerrojo.

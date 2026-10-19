@@ -776,7 +776,8 @@ const CAP_BY_WORD = {
   firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
   // `sella`: SELLAR EL ACTA. Es lo que convierte a otra bóveda en respaldo de esta —
   // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
-  // quien manda sigue mandando. Como `administra`, no se empareja: se concede aquí.
+  // quien manda sigue mandando. Se concede con `caps` o al emparejar (`pair --scope sella,…`,
+  // que es como entra la bóveda alojada de `dotrino-accounts`).
   sella: 'sealer', sealer: 'sealer',
   // `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No
   // tiene maestra y no puede abrir nada. A diferencia de `sella`, SÍ se empareja.

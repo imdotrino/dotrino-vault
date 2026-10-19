@@ -29,12 +29,12 @@ Parameters:
   Mode:
     Type: String
     Default: vault
-    AllowedValues: [vault, replica]
-    Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md).
+    AllowedValues: [vault, replica, join]
+    Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md). join is a second vault of an account you already have - it has its own master key, sealed with a password you set when it joins, and seals the record (dotrino-accounts/docs/DISENO.md section 5).
   Owner:
     Type: String
     Default: ''
-    Description: replica mode only, and required there - the account it may join (pubkeyId of that profile's key, 64 hex). It refuses an invitation from any other account before showing its code.
+    Description: replica and join modes only, and required there - the account it may join (pubkeyId of that profile's key, 64 hex). It refuses an invitation from any other account before showing its code.
     AllowedPattern: '([0-9a-f]{64})?'
   AdminUser:
     Type: String
@@ -82,6 +82,11 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref Owner, '']]
         AssertDescription: a replica needs Owner, the account it may join
+  JoinHasOwner:
+    RuleCondition: !Equals [!Ref Mode, join]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref Owner, '']]
+        AssertDescription: a second vault needs Owner, the account it may join
 
 Conditions:
   Reserve: !Not [!Equals [!Ref ReservedConcurrency, 0]]
@@ -279,8 +284,8 @@ Resources:
       InvokedViaFunctionUrl: true
 
   # El primer arranque. En modo `vault`: nace la cuenta, se registra la URL de despertar en el
-  # proxio y se da de alta al administrador; devuelve su dirección. En modo `replica` no nace
-  # nada: se apunta la URL de la función y la réplica espera a que su dueño la enrole.
+  # proxio y se da de alta al administrador; devuelve su dirección. En `replica` y `join` no nace
+  # nada: se apunta la URL de la función y espera a que su dueño la enrole.
   FirstStart:
     Type: Custom::DotrinoVaultFirstStart
     DependsOn: [UrlPermission, UrlInvokePermission, AsyncConfig]

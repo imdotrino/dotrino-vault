@@ -27,6 +27,7 @@ import { dataDir, ensureDir, readJson, writeJson } from './paths.js'
 import { atRestFor, migrateFile, kekFor, encryptText, decryptText } from './atrest.js'
 import { probe as probeKek, writeConfig as writeKekConfig, configFromEnv } from './atrest.js'
 import { keyDirName, keyOwnerOf } from './keyowner.js'
+import { SCRYPT, wrapKey, unwrapKey, checkTries } from './adminDoor.js'
 
 const REGISTRY = 'profiles.json'
 const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
@@ -39,7 +40,7 @@ const PWD_ITER = 300000 // PBKDF2 del verificador v1 (heredado); v2 usa scrypt
  *
  * Por eso también se le mandan al admin (`secondaryParams`) en vez de que los copie.
  */
-export const SCRYPT = Object.freeze({ N: 16384, r: 8, p: 1, len: 32 })
+export { SCRYPT }
 const MAX_NAME = 40
 /**
  * Lo MÍNIMO que se acepta al poner una contraseña.
@@ -62,7 +63,6 @@ const PWD_MIN = 12
  * bueno) la alargaba sin llegar a comprobarse: la bóveda quedaba cerrada para su dueño.
  * El freno tiene que estorbar a una RÁFAGA, no a quien vuelve al día siguiente.
  */
-const TRIES_FORGET_MS = 15 * 60 * 1000
 
 /**
  * BLOQUEO AUTOMÁTICO. Cuánto aguanta abierto el candado sin que nadie lo use.
@@ -353,17 +353,8 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
    * «se volvió a pedir la contraseña porque sí».
    */
   function throttle (p) {
-    let tries = p.tries || { n: 0, at: 0 }
-    if (tries.at && Date.now() - tries.at > TRIES_FORGET_MS) {
-      tries = { n: 0, at: 0 }
-      if (p.tries) { delete p.tries; save() }
-    }
-    const waitMs = tries.n >= 5 ? Math.min(2 ** (tries.n - 4) * 1000, 5 * 60 * 1000) : 0
-    const left = tries.at + waitMs - Date.now()
-    if (left > 0) {
-      throw Object.assign(new Error(`too many tries: wait ${Math.ceil(left / 1000)} s`),
-        { code: 'TOO_MANY_TRIES', waitSec: Math.ceil(left / 1000) })
-    }
+    const { tries, reset } = checkTries(p.tries)
+    if (reset) { delete p.tries; save() }
     return tries
   }
 
@@ -874,7 +865,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       if (!key) throw Object.assign(new Error('open the profile first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
       if (!(derived instanceof Uint8Array) || derived.length !== 32) throw new Error('the admin key must be 32 bytes')
       const salt = p.kdf2?.salt || b64(crypto.getRandomValues(new Uint8Array(32)))
-      p.kdf2 = { v: 1, salt, wrapped: encryptText(b64(key), Buffer.from(derived)) }
+      p.kdf2 = { v: 1, salt, wrapped: wrapKey(key, derived) }
       save()
       return { ok: true }
     },
@@ -901,9 +892,8 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       const p = assertExists(id)
       if (!p.kdf2?.wrapped) throw Object.assign(new Error('this profile has no admin password'), { code: 'NO_SECONDARY' })
       const tries = throttle(p)
-      let key = null
-      try { key = Buffer.from(decryptText(p.kdf2.wrapped, Buffer.from(derived)), 'base64') } catch (_) { key = null }
-      if (!key || key.length !== 32) {
+      const key = unwrapKey(p.kdf2.wrapped, derived)
+      if (!key) {
         p.tries = { n: tries.n + 1, at: Date.now() }
         save()
         throw Object.assign(new Error('wrong admin password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
@@ -911,7 +901,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       delete p.tries
       save()
       open(id)
-      keys.set(id, new Uint8Array(key))
+      keys.set(id, key)
       return { ok: true, locked: false }
     },
 
