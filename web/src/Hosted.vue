@@ -64,6 +64,7 @@ const T = {
     code_h: 'Aprueba este código en tu bóveda',
     code_cli: (c) => `dotrino-vault approve ${c}`,
     code_here: 'Este navegador es tu bóveda: apruébalo en «Mi bóveda».',
+    self_starting: 'Tu bóveda está arrancando…',
     code_wait: 'Cuando lo apruebes, aquí saldrá «en tu cuenta». La invitación vale 5 minutos: si caduca, saca otra.',
     copy: 'Copiar', copied: 'Copiado',
     cancel: 'Cancelar', cancel_sure: 'Seguirá encendida hasta el fin de lo pagado y después se apagará.', cancel_yes: 'Sí, cancelar', keep_it: 'No',
@@ -107,6 +108,7 @@ const T = {
     code_h: 'Approve this code on your vault',
     code_cli: (c) => `dotrino-vault approve ${c}`,
     code_here: 'This browser is your vault: approve it in «My vault».',
+    self_starting: 'Your vault is starting…',
     code_wait: 'Once you approve it, it will say «in your account» here. The invitation lasts 5 minutes: if it expires, get another one.',
     copy: 'Copy', copied: 'Copied',
     cancel: 'Cancel', cancel_sure: 'It stays on until the end of what you paid and then turns off.', cancel_yes: 'Yes, cancel', keep_it: 'No',
@@ -144,15 +146,24 @@ const notice = ref(null) // { kind: 'ok' | 'error', text }
 // ----- el perfil: todo lo que se pide va firmado por él -----
 const identity = ref(null)
 const hasProfile = ref(true)
-const selfVault = ref(false) // ¿este navegador ES la bóveda de la cuenta?
+// ¿Este navegador ES la bóveda de la cuenta? `enabled` lo dice el ajuste; `running`, si ya
+// arrancó. Arranca después de que la página pregunte, así que mientras esté encendida y sin
+// arrancar se vuelve a mirar: leerlo una vez dejaba el botón fuera para siempre.
+const selfVault = ref({ enabled: false, running: false })
+let selfTimer = null
+async function refreshSelfVault () {
+  clearTimeout(selfTimer)
+  try { selfVault.value = await identity.value.selfVaultStatus() } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; return }
+  if (selfVault.value.enabled && !selfVault.value.running) selfTimer = setTimeout(refreshSelfVault, 1000)
+}
 async function connect () {
   try {
     const id = markRaw(await Identity.connect(identityOptions()))
     const chain = await id.sealerChain()
     if (!Array.isArray(chain) || !chain.length) { hasProfile.value = false; return }
     identity.value = id
-    try { selfVault.value = !!(await id.selfVaultStatus())?.running } catch (_) {}
-  } catch (_) { hasProfile.value = false }
+  } catch (_) { hasProfile.value = false; return }
+  await refreshSelfVault()
 }
 const signed = (fields) => signedFor(identity.value, { aud: AUD, fields: { v: FORMAT_V, ...fields } })
 
@@ -188,7 +199,7 @@ async function loadMine () {
   // Mientras algo está en marcha (creándose, o esperando a que apruebes el código) se mira solo.
   if (mine.value.some((s) => s.stack === 'creating' || (s.stack === 'ready' && !s.enrolled && codes.value[s.id]))) timer = setTimeout(loadMine, 5000)
 }
-onBeforeUnmount(() => clearTimeout(timer))
+onBeforeUnmount(() => { clearTimeout(timer); clearTimeout(selfTimer) })
 
 async function enroll (s, fromHere) {
   busy.value = 'enroll:' + s.id
@@ -266,13 +277,14 @@ onMounted(async () => {
               <p><strong>{{ t.code_h }}</strong></p>
               <p class="row"><code class="code" data-testid="hosted-code">{{ codes[s.id] }}</code>
                 <button class="btn btn-ghost small" @click="copy('code-' + s.id, codes[s.id])">{{ copied === 'code-' + s.id ? t.copied : t.copy }}</button></p>
-              <p v-if="selfVault" class="muted"><a href="/vault">{{ t.code_here }}</a></p>
+              <p v-if="selfVault.enabled" class="muted"><a href="/vault">{{ t.code_here }}</a></p>
               <p v-else class="row"><code>{{ t.code_cli(codes[s.id]) }}</code>
                 <button class="btn btn-ghost small" @click="copy('cli-' + s.id, t.code_cli(codes[s.id]))">{{ copied === 'cli-' + s.id ? t.copied : t.copy }}</button></p>
               <p class="muted">{{ t.code_wait }}</p>
             </template>
-            <p v-if="selfVault" class="row">
-              <button class="btn btn-primary" :disabled="!!busy" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
+            <p v-if="selfVault.enabled" class="row">
+              <button class="btn btn-primary" :disabled="!!busy || !selfVault.running" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
+              <span v-if="!selfVault.running" class="muted">{{ t.self_starting }}</span>
             </p>
             <p class="muted">{{ t.enroll_paste }}</p>
             <p class="row"><code>{{ PAIR_CMD }}</code>
