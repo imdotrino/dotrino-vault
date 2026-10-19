@@ -20,6 +20,7 @@ import crypto from 'node:crypto'
 import { createMirror, acquireLease } from './mirror.mjs'
 import { configFromEnv, probe as probeKek, writeConfig as writeKekConfig, CONFIG_FILE } from '../src/atrest.js'
 import { runStep } from '../lib/src/kek.js'
+import { PAIRING_TTL_MS } from '../lib/src/enroll.js'
 
 /** Sin mensajes durante esto, la sesión termina (decidido por el dueño, 2026-10-17). */
 export const IDLE_MS = 60_000
@@ -185,7 +186,9 @@ export async function enrollReplica ({ store, dir, invitation, req, deadline, ow
       // Sin llave de cifrado en el acta no hay a dónde envolverle un sobre: repartir no puede
       // convertirse en leer (`src/replica.js`).
       withEncKey: false,
-      approveTimeoutMs: Math.max(0, deadline - Date.now()),
+      // No más de lo que dura la invitación: pasado eso la bóveda ya no la aprueba, y esperar el
+      // resto de la función solo tenía el cerrojo tomado y no dejaba probar con otra.
+      approveTimeoutMs: Math.max(0, Math.min(PAIRING_TTL_MS, deadline - Date.now())),
       onCode: ({ deviceId, code }) => {
         log(`[vault-lambda] replica ${deviceId}: waiting for code ${code} to be approved on the vault`)
         store.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req, deviceId, code, ts: Date.now() })))

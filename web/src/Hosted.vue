@@ -75,7 +75,8 @@ const T = {
       unreachable: 'No hay conexión con el servicio. Inténtalo de nuevo.',
       'enroll-failed': 'La invitación no sirvió (caducada o ya usada). Saca otra.',
       'no-code': 'La réplica no recibió respuesta de tu bóveda. ¿Está encendida? Saca otra invitación.',
-      'already-enrolled': 'Esta réplica ya está en tu cuenta.'
+      'already-enrolled': 'Esta réplica ya está en tu cuenta.',
+      'lease-busy': 'La réplica sigue esperando la invitación anterior. Inténtalo de nuevo en unos minutos.'
     },
   },
   en: {
@@ -119,7 +120,8 @@ const T = {
       unreachable: 'No connection to the service. Try again.',
       'enroll-failed': 'The invitation did not work (expired or already used). Get another one.',
       'no-code': 'The replica got no answer from your vault. Is it on? Get another invitation.',
-      'already-enrolled': 'This replica is already in your account.'
+      'already-enrolled': 'This replica is already in your account.',
+      'lease-busy': 'The replica is still waiting on the previous invitation. Try again in a few minutes.'
     },
   },
 }
