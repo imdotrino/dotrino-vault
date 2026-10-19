@@ -384,7 +384,10 @@ function routeNow () {
   else if (/\/hosted$/.test(p)) view.value = 'hosted'
   else if (/\/admin$/.test(p)) view.value = 'admin'
   else view.value = 'home'
+  if (view.value === 'admin' && adminChecked) leaveAdminIfNothing()
 }
+/** Ya se sabe si la cuenta tiene servicio `accounts` (o que no se pudo saber). */
+let adminChecked = false
 routeNow()
 /**
  * Baja a una sección SIN tocar el hash.
@@ -443,6 +446,14 @@ async function findAccountsAgents (id) {
     // Sin acta no se sabe si hay servicios: no se enseña el enlace, y se dice en la consola.
     console.warn(`[admin] could not read the account record: ${e.code || ''} ${e.message}`)
   }
+  leaveAdminIfNothing()
+}
+/** `/admin` sin servicio que administrar no es una página vacía: se vuelve a la portada. */
+function leaveAdminIfNothing () {
+  adminChecked = true
+  if (view.value !== 'admin' || accountsAgents.value.length) return
+  history.replaceState(null, '', '/')
+  routeNow()
 }
 
 onMounted(async () => {
@@ -451,8 +462,9 @@ onMounted(async () => {
     const { Identity } = await import('@dotrino/identity')
     identity.value = markRaw(await Identity.connect(identityOptions()))
     if (topbar.value) topbar.value.identity = identity.value
-  } catch (_) { /* sin identidad el botón sigue estando: abre y ofrece crearla */ return }
+  } catch (_) { /* sin identidad el botón sigue estando: abre y ofrece crearla */ leaveAdminIfNothing(); return }
   if (!nativeApp) await findAccountsAgents(identity.value)
+  else leaveAdminIfNothing()
 })
 </script>
 
