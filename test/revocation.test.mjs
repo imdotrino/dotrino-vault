@@ -73,3 +73,9 @@ test('sin llave del aparato no hay a quién avisar', () => {
   assert.equal(shouldNotifyRevoked({ ...base, pubkey: null, members: [] }), false)
   assert.equal(shouldNotifyRevoked({ ...base, pubkey: '', members: [] }), false)
 })
+
+test('papel del modelo viejo y fuera del acta: se le avisa (si no, se quedaba con la cuenta abierta)', () => {
+  assert.equal(isStalePaper('legacy-cert-retired'), true)
+  assert.equal(shouldNotifyRevoked({ ...base, reason: 'legacy-cert-retired', members: [] }), true)
+  assert.equal(shouldNotifyRevoked({ ...base, reason: 'legacy-cert-retired', members: [{ pub: base.pubkey }] }), false)
+})
