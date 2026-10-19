@@ -94,5 +94,5 @@ test('una renuncia que no quita nada no se honra', () => {
   const absorbe = cuerpo.indexOf('absorbRenounce(')
   assert.notEqual(mira, -1, 'hay que mirar lo que el miembro tiene HOY')
   assert.ok(mira < absorbe, 'se absorbe antes de comprobar que hay algo que quitar')
-  assert.match(cuerpo, /sin-acta/, 'y sin acta no se aplica nada')
+  assert.match(cuerpo, /no-record/, 'y sin acta no se aplica nada')
 })

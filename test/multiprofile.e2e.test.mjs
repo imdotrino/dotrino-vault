@@ -358,7 +358,7 @@ test('pedidos con la bóveda cerrada: sin `approve` en el acta se dice ESO; con 
 
   const ask = (dev) => requestApproval({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, op: 'approvals' })
   await assert.rejects(() => ask(sin), (e) => {
-    assert.match(e.message, /unauthorized: acta/)
+    assert.match(e.message, /unauthorized: record/)
     assert.doesNotMatch(e.message, /locked|scope/)
     return true
   })

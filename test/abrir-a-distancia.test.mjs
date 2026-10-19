@@ -59,8 +59,8 @@ test('la efímera se tira ANTES de usarla: un segundo intento no tiene con qué'
   const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   const cuerpo = src.slice(i, i + 2000)
-  const saca = cuerpo.indexOf("aperturas.get('pendiente')")
-  const borra = cuerpo.indexOf("aperturas.delete('pendiente')")
+  const saca = cuerpo.indexOf("aperturas.get('pending')")
+  const borra = cuerpo.indexOf("aperturas.delete('pending')")
   const abre = cuerpo.indexOf('openSealed(')
   assert.ok(saca < borra && borra < abre,
     'se borra antes de abrir: si se borrara después, un fallo dejaría la llave viva')

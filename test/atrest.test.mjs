@@ -35,11 +35,11 @@ test('migrar un archivo en claro: queda cifrado y se puede leer', () => {
   const d = tmp()
   const f = path.join(d, 'identity.json')
   fs.writeFileSync(f, '{"hola":"mundo"}')
-  assert.equal(migrateFile(f, machineKey(d)), 'migrado')
+  assert.equal(migrateFile(f, machineKey(d)), 'migrated')
   const raw = fs.readFileSync(f, 'utf8')
   assert.ok(isEncrypted(raw))
   assert.ok(!raw.includes('mundo'))
-  assert.equal(migrateFile(f, machineKey(d)), 'ya-cifrado', 'migrar dos veces no rompe nada')
+  assert.equal(migrateFile(f, machineKey(d)), 'already-encrypted', 'migrar dos veces no rompe nada')
 
   const ar = atRestFor(d)
   assert.equal(ar.decrypt(raw), '{"hola":"mundo"}')
@@ -49,7 +49,7 @@ test('migrar un archivo en claro: queda cifrado y se puede leer', () => {
 
 test('sin archivo no hay nada que migrar', () => {
   const d = tmp()
-  assert.equal(migrateFile(path.join(d, 'no-existe.json'), machineKey(d)), 'sin-archivo')
+  assert.equal(migrateFile(path.join(d, 'no-existe.json'), machineKey(d)), 'no-file')
   fs.rmSync(d, { recursive: true, force: true })
 })
 

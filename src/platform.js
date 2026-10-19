@@ -116,7 +116,7 @@ export function nodePlatform (dir) {
       // antes de reemplazar); el resto lo hace su propio almacén al abrirse.
       try {
         const r = migrateFile(path.join(dir, 'identity.json'), kekFor(dir))
-        if (r === 'migrado') log('[vault] identity encrypted at rest (bound to this machine)')
+        if (r === 'migrated') log('[vault] identity encrypted at rest (bound to this machine)')
       } catch (e) { log('[vault] could not encrypt the identity at rest:', e.message) }
       /**
        * EL CANDADO DE LA MAESTRA. La mitad privada se guarda sellada con la llave que sale de

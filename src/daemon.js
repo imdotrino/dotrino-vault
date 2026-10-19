@@ -409,7 +409,7 @@ export async function runDaemon () {
     if (typeof avatar !== 'string' || !avatar) return null
     const m = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(avatar)
     if (!m) return { type: null, bytes: avatar.length }
-    return { type: m[1] || 'desconocido', bytes: Math.floor(m[2].length * 3 / 4) }
+    return { type: m[1] || null, bytes: Math.floor(m[2].length * 3 / 4) }
   }
 
   /**

@@ -80,7 +80,7 @@ test('juntar dos es unir: la misma entrada no se guarda dos veces', async () => 
   assert.equal((await s.add(r)).ok, true)
   const otra = await s.add(r)
   assert.equal(otra.ok, false)
-  assert.equal(otra.reason, 'ya-estaba', 'que dos aparatos se cuenten lo mismo es lo normal, no un fallo')
+  assert.equal(otra.reason, 'already-present', 'que dos aparatos se cuenten lo mismo es lo normal, no un fallo')
   assert.equal(s.count, 1)
 })
 
