@@ -94,6 +94,7 @@ const T = {
     ring_bad: 'No se pudieron activar los avisos aquí:',
     anySite: 'cualquier sitio',
     noIdentity: 'Hace falta tu perfil de Dotrino. Créalo y vuelve.',
+    notInOwnProfile: 'Este navegador no está entre los aparatos de tu perfil.',
   },
   en: {
     pwTitle: 'Choose the password for your passwords',
@@ -138,6 +139,7 @@ const T = {
     ring_bad: 'Notices could not be turned on here:',
     anySite: 'any site',
     noIdentity: 'Your Dotrino profile is needed. Create it and come back.',
+    notInOwnProfile: "This browser is not among your profile's devices.",
   },
 }
 const t = (k, ...a) => {
@@ -466,7 +468,9 @@ async function arrancar () {
     // excluye de los destinatarios (una bóveda no se envuelve a sí misma) y lo que firma.
     const yo = await identity.profileMembers()
     miPub = (yo?.members || []).find((m) => m.isMe)?.pub
-    if (!miPub) throw new Error('este navegador no está en el acta de su propio perfil')
+    if (!miPub) {
+      throw Object.assign(new Error('this browser is not in the record of its own profile'), { code: 'not-in-own-profile' })
+    }
 
     // LA BÓVEDA: guarda sobres y comprueba lo que se puede comprobar SIN llave — que los
     // destinatarios son exactamente los del acta, que está la copia de recuperación, y que
@@ -565,7 +569,7 @@ async function arrancar () {
     await refresh()
     ready.value = true
   } catch (e) {
-    error.value = e?.message || String(e)
+    error.value = e?.code === 'not-in-own-profile' ? t('notInOwnProfile') : (e?.message || String(e))
   }
 }
 
