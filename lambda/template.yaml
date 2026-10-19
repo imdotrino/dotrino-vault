@@ -31,6 +31,11 @@ Parameters:
     Default: vault
     AllowedValues: [vault, replica]
     Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md).
+  Owner:
+    Type: String
+    Default: ''
+    Description: replica mode only, and required there - the account it may join (pubkeyId of that profile's key, 64 hex). It refuses an invitation from any other account before showing its code.
+    AllowedPattern: '([0-9a-f]{64})?'
   AdminUser:
     Type: String
     Default: admin
@@ -70,6 +75,13 @@ Parameters:
     Type: String
     Default: __CODE_SHA256__
     AllowedPattern: '[0-9a-f]{64}'
+
+Rules:
+  ReplicaHasOwner:
+    RuleCondition: !Equals [!Ref Mode, replica]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref Owner, '']]
+        AssertDescription: a replica needs Owner, the account it may join
 
 Conditions:
   Reserve: !Not [!Equals [!Ref ReservedConcurrency, 0]]
@@ -232,6 +244,7 @@ Resources:
           DOTRINO_KMS_CONTEXT_VAULT: !If [Shared, !Ref Name, !Ref AWS::NoValue]
           DOTRINO_PROXY_URL: !Ref ProxyUrl
           DOTRINO_VAULT_MODE: !Ref Mode
+          DOTRINO_REPLICA_OWNER: !Ref Owner
 
   # Una sesión que falla no se repite sola: la siguiente la dispara el próximo mensaje.
   AsyncConfig:

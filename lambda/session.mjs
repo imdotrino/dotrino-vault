@@ -168,10 +168,15 @@ export const PAIRING_FILE = '.pairing'
  *
  * Una réplica ya enrolada no se vuelve a enrolar: se dice y se para.
  *
+ * Y SOLO ENTRA EN LA CUENTA QUE LA PAGÓ (`account`: `pubkeyId` de la llave de ese perfil, con
+ * el que nace la pila). La bóveda manda en el reto la cadena que prueba de qué cuenta es, y si
+ * es otra no se enseña ningún código (`wrong-account`): no hay nada que aprobar.
+ *
  * @returns {Promise<{ device: string, deviceId: string }>}
  */
-export async function enrollReplica ({ store, dir, invitation, req, deadline, owner = 'enroll', enrollWithVault, openReplicaStore, keyLabel, scope, log = () => {} }) {
+export async function enrollReplica ({ store, dir, invitation, account, req, deadline, owner = 'enroll', enrollWithVault, openReplicaStore, keyLabel, scope, log = () => {} }) {
   if (!invitation) throw Object.assign(new Error('enrollReplica: no invitation'), { code: 'no-invitation' })
+  if (!account) throw Object.assign(new Error('enrollReplica: no account to join'), { code: 'no-account' })
   const lease = await takeLease(store, { owner, deadline })
   const mirror = createMirror({ store, dir })
   try {
@@ -189,6 +194,7 @@ export async function enrollReplica ({ store, dir, invitation, req, deadline, ow
       // No más de lo que dura la invitación: pasado eso la bóveda ya no la aprueba, y esperar el
       // resto de la función solo tenía el cerrojo tomado y no dejaba probar con otra.
       approveTimeoutMs: Math.max(0, Math.min(PAIRING_TTL_MS, deadline - Date.now())),
+      account,
       onCode: ({ deviceId, code }) => {
         log(`[vault-lambda] replica ${deviceId}: waiting for code ${code} to be approved on the vault`)
         store.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req, deviceId, code, ts: Date.now() })))

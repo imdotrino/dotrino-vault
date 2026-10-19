@@ -52,7 +52,8 @@ Una **réplica** de una cuenta que ya tienes, en vez de una cuenta nueva: no tie
 abre nada y entra al acta **sin llave de cifrado** (`../docs/replicas.md` §8.bis). Hace que la
 cuenta conteste con tu bóveda apagada. Es lo que vende `dotrino-accounts` como réplica alojada.
 
-1. Crea la pila con `Mode: replica` (sin `AdminPassword`). No nace nada: espera a su dueño.
+1. Crea la pila con `Mode: replica`, sin `AdminPassword` y con **`Owner`**: la cuenta en la que
+   puede entrar (`pubkeyId` de la llave del perfil, 64 hex). No nace nada: espera a su dueño.
 2. En tu bóveda: `dotrino-vault pair --scope replica --quiet` (la invitación vale 5 minutos).
 3. Invoca la función con `{ "kind": "enroll", "invitation": "<invitación>" }`: contesta
    `{ deviceId, code }`.
@@ -60,8 +61,14 @@ cuenta conteste con tu bóveda apagada. Es lo que vende `dotrino-accounts` como 
    registra su **timbre**, que es de SU llave (`websocket-proxy` ≥ 1.8.0): lo que un servicio
    le escribe cuando la bóveda no contesta la despierta.
 
-`{ "kind": "status" }` dice si está enrolada y por qué acta va. Una réplica enrolada no se
-vuelve a enrolar; si el alta no llegó a aprobarse, se repite con otra invitación.
+**Solo entra en la cuenta `Owner`.** La bóveda manda en el reto del alta su cadena de
+selladoras, y la raíz la firma la llave del perfil. Si la cuenta es otra, la réplica no enseña
+ningún código y contesta `wrong-account`: no hay nada que aprobar. Una bóveda anterior a vault
+0.95.0 no manda la cadena, y la réplica tampoco entra (actualízala).
+
+`{ "kind": "status" }` dice si está enrolada y por qué acta va. **Una réplica enrolada no se
+vuelve a enrolar** (`already-enrolled`): no es multiperfil. Si el alta no llegó a aprobarse,
+se repite con otra invitación.
 
 ## Volver a montar una pila borrada
 

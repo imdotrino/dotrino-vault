@@ -31,7 +31,7 @@ const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), name))
 const log = process.env.VAULT_LOG ? console.error : () => {}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-let proxy, proxyUrl, server, wakeBase, vault, runReplica, openReplicaStore, REPLICA_SCOPE, keyLabel, enrollWithVault
+let proxy, proxyUrl, server, wakeBase, vault, runReplica, openReplicaStore, REPLICA_SCOPE, keyLabel, enrollWithVault, pubkeyId
 const store = memoryStore()
 const sesiones = []
 
@@ -49,9 +49,11 @@ before(async () => {
   proxyUrl = `ws://127.0.0.1:${await proxy.start(0)}`
   ;({ runReplica, openReplicaStore, REPLICA_SCOPE } = await import('../src/replica.js'))
   ;({ keyLabel } = await import('@dotrino/identity/capabilities'))
+  ;({ pubkeyId } = await import('@dotrino/identity/keyid'))
   ;({ enrollWithVault } = await import('../lib/src/service.js'))
   const { startVault } = await import('../src/vault.js')
   vault = await startVault({ dir: tmp('replica-cuenta-'), proxyUrl, log })
+  cuenta = await pubkeyId((await vault.startPairing({ scope: ['vault:replica'], label: 'solo para leer la cuenta' })).qr.iss)
 
   server = http.createServer((req, res) => {
     req.resume()
@@ -75,10 +77,15 @@ after(async () => {
   try { await proxy?.stop() } catch (_) {}
 })
 
-const enroll = (invitation, req) => enrollReplica({
-  store, dir: tmp('replica-alta-'), invitation, req, deadline: Date.now() + 30_000,
+const enroll = (invitation, req, account) => enrollReplica({
+  store, dir: tmp('replica-alta-'), invitation, account, req, deadline: Date.now() + 30_000,
   enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log
 })
+
+// La cuenta de la bóveda de prueba: el `iss` de su QR, que en una cuenta nacida en esa bóveda
+// es la llave de la cuenta. Se lee una vez: cada `startPairing` deja sin valor al anterior.
+let cuenta = null
+const cuentaDeLaBoveda = async () => cuenta
 
 async function codeFor (req) {
   for (let i = 0; i < 100; i++) {
@@ -93,7 +100,7 @@ async function codeFor (req) {
 test('la réplica entra con la invitación y el código del dueño, recibe el acta, y su llave la despierta', async () => {
   // 1. El dueño saca la invitación en su bóveda; la réplica la canjea y deja su código.
   const { qr } = await vault.startPairing({ scope: ['vault:replica'], label: 'réplica en la nube' })
-  const alta = enroll(encodeInvite(qr), 'req-1')
+  const alta = enroll(encodeInvite(qr), 'req-1', await cuentaDeLaBoveda())
   const pend = await codeFor('req-1')
   assert.match(pend.deviceId, /^[0-9A-F]{4}-[0-9A-F]{4}$/)
   assert.ok(pend.code, 'el código para teclear en la bóveda')
@@ -130,5 +137,17 @@ test('la réplica entra con la invitación y el código del dueño, recibe el ac
 
 test('una réplica enrolada no se vuelve a enrolar', async () => {
   const { qr } = await vault.startPairing({ scope: ['vault:replica'], label: 'otra' })
-  await assert.rejects(enroll(encodeInvite(qr), 'req-2'), (e) => e.code === 'already-enrolled')
+  await assert.rejects(enroll(encodeInvite(qr), 'req-2', await cuentaDeLaBoveda()), (e) => e.code === 'already-enrolled')
+})
+
+test('la réplica solo entra en la cuenta que la pagó: con otra no enseña código', async () => {
+  const otro = memoryStore()
+  const { qr } = await vault.startPairing({ scope: ['vault:replica'], label: 'pagada por otra cuenta' })
+  await assert.rejects(enrollReplica({
+    store: otro, dir: tmp('replica-otra-'), invitation: encodeInvite(qr), account: 'a'.repeat(64), req: 'req-3',
+    deadline: Date.now() + 30_000, enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log
+  }), (e) => e.code === 'wrong-account')
+  assert.equal(otro.objects.get(PAIRING_FILE), undefined, 'no dejó ningún código que aprobar')
+  const st = await replicaStatus({ store: otro, dir: tmp('replica-estado-'), openReplicaStore, keyLabel })
+  assert.equal(st.enrolled, false, 'no se quedó con nada')
 })

@@ -65,6 +65,12 @@ const T = {
     code_cli: (c) => `dotrino-vault approve ${c}`,
     code_approve: 'Aprobarlo',
     self_starting: 'Tu bóveda está arrancando…',
+    self_error: {
+      'not-sealer': 'Este navegador no puede ser la bóveda de la cuenta abierta aquí: entraste con usuario y contraseña. Usa la invitación de tu bóveda.',
+      'no-record': 'Esta cuenta todavía no tiene acta: abre tu perfil una vez.',
+      'profile-changed': 'Cambió la cuenta abierta en esta pestaña. Recárgala.'
+    },
+    self_error_other: 'Tu bóveda no arrancó en este navegador.',
     code_wait: 'Cuando lo apruebes, aquí saldrá «en tu cuenta». La invitación vale 5 minutos: si caduca, saca otra.',
     copy: 'Copiar', copied: 'Copiado',
     cancel: 'Cancelar', cancel_sure: 'Seguirá encendida hasta el fin de lo pagado y después se apagará.', cancel_yes: 'Sí, cancelar', keep_it: 'No',
@@ -76,7 +82,8 @@ const T = {
       'enroll-failed': 'La invitación no sirvió (caducada o ya usada). Saca otra.',
       'no-code': 'La réplica no recibió respuesta de tu bóveda. ¿Está encendida? Saca otra invitación.',
       'already-enrolled': 'Esta réplica ya está en tu cuenta.',
-      'lease-busy': 'La réplica sigue esperando la invitación anterior. Inténtalo de nuevo en unos minutos.'
+      'lease-busy': 'La réplica sigue esperando la invitación anterior. Inténtalo de nuevo en unos minutos.',
+      'wrong-account': 'Esa invitación es de otra cuenta. La réplica solo entra en la cuenta con la que la compraste.'
     },
   },
   en: {
@@ -110,6 +117,12 @@ const T = {
     code_cli: (c) => `dotrino-vault approve ${c}`,
     code_approve: 'Approve it',
     self_starting: 'Your vault is starting…',
+    self_error: {
+      'not-sealer': 'This browser cannot be the vault of the account open here: you signed in with a username and password. Use your vault\'s invitation.',
+      'no-record': 'This account has no record yet: open your profile once.',
+      'profile-changed': 'The account open in this tab changed. Reload it.'
+    },
+    self_error_other: 'Your vault did not start in this browser.',
     code_wait: 'Once you approve it, it will say «in your account» here. The invitation lasts 5 minutes: if it expires, get another one.',
     copy: 'Copy', copied: 'Copied',
     cancel: 'Cancel', cancel_sure: 'It stays on until the end of what you paid and then turns off.', cancel_yes: 'Yes, cancel', keep_it: 'No',
@@ -121,7 +134,8 @@ const T = {
       'enroll-failed': 'The invitation did not work (expired or already used). Get another one.',
       'no-code': 'The replica got no answer from your vault. Is it on? Get another invitation.',
       'already-enrolled': 'This replica is already in your account.',
-      'lease-busy': 'The replica is still waiting on the previous invitation. Try again in a few minutes.'
+      'lease-busy': 'The replica is still waiting on the previous invitation. Try again in a few minutes.',
+      'wrong-account': 'That invitation is from another account. The replica only joins the account you bought it with.'
     },
   },
 }
@@ -156,7 +170,8 @@ let selfTimer = null
 async function refreshSelfVault () {
   clearTimeout(selfTimer)
   try { selfVault.value = await identity.value.selfVaultStatus() } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; return }
-  if (selfVault.value.enabled && !selfVault.value.running) selfTimer = setTimeout(refreshSelfVault, 1000)
+  // Si no arrancó y dijo por qué, no hay nada que esperar: se enseña.
+  if (selfVault.value.enabled && !selfVault.value.running && !selfVault.value.error) selfTimer = setTimeout(refreshSelfVault, 1000)
 }
 async function connect () {
   try {
@@ -298,7 +313,8 @@ onMounted(async () => {
             </template>
             <p v-if="selfVault.enabled" class="row">
               <button class="btn btn-primary" :disabled="!!busy || !selfVault.running" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
-              <span v-if="!selfVault.running" class="muted">{{ t.self_starting }}</span>
+              <span v-if="!selfVault.running && selfVault.error" class="muted" data-testid="hosted-self-error">{{ t.self_error[selfVault.error.code] || t.self_error_other }}</span>
+              <span v-else-if="!selfVault.running" class="muted">{{ t.self_starting }}</span>
             </p>
             <p class="muted">{{ t.enroll_paste }}</p>
             <p class="row"><code>{{ PAIR_CMD }}</code>

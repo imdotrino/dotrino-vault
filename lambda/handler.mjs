@@ -120,7 +120,7 @@ async function onEnrollRun (event, context) {
   fs.rmSync(DIR, { recursive: true, force: true })
   const deadline = Date.now() + context.getRemainingTimeInMillis() - END_MARGIN_MS
   try {
-    await enrollReplica({ store: st, dir: DIR, invitation: event.invitation, req: event.req, deadline: deadline - FIRST_PUSH_IDLE_MS - 15_000, owner: context.awsRequestId, enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log: console.log })
+    await enrollReplica({ store: st, dir: DIR, invitation: event.invitation, account: process.env.DOTRINO_REPLICA_OWNER || '', req: event.req, deadline: deadline - FIRST_PUSH_IDLE_MS - 15_000, owner: context.awsRequestId, enrollWithVault, openReplicaStore, keyLabel, scope: REPLICA_SCOPE, log: console.log })
   } catch (e) {
     console.error(`[vault-lambda] replica enrollment failed: ${e.code || ''} ${e.message}`)
     // Quien espera el código tiene que enterarse de que no va a llegar, y por qué.
