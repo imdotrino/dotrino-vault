@@ -229,40 +229,37 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 
         <template v-if="a.rows">
           <p v-if="!a.rows.length" class="muted" data-testid="admin-none">{{ t.none }}</p>
-          <div v-else class="scroll">
-            <table data-testid="admin-table">
-              <thead><tr><th v-for="(h, k) in t.col" :key="k">{{ h }}</th></tr></thead>
-              <tbody>
-                <tr v-for="r in a.rows" :key="r.id" :data-sub-id="r.id" data-testid="admin-row">
-                  <td><code :title="r.account">{{ short(r.account, 12) }}</code></td>
-                  <td><code :title="r.id">{{ short(r.id) }}</code></td>
-                  <td>{{ t.status[r.status] || r.status }}</td>
-                  <td><span :title="r.note || ''">{{ t.stack[r.stack] || r.stack }}</span><template v-if="r.vault"><br><code class="muted">{{ r.vault }}</code></template></td>
-                  <td>{{ r.enrolled ? t.enrolled : t.not_enrolled }}<template v-if="r.device"><br><code>{{ r.device }}</code></template></td>
-                  <td>{{ r.on ? t.on : t.off }}<span v-if="r.adminOn !== null" class="muted"> · {{ t.forced }}</span></td>
-                  <td>{{ r.paidThrough ? fmtDate(r.paidThrough) : '—' }}</td>
-                  <td>{{ r.refund ? (t.refund[r.refund] || r.refund) : '—' }}</td>
-                  <td><code v-if="r.paypalId">{{ r.paypalId }}</code><template v-else>—</template></td>
-                  <td class="actions">
-                    <template v-if="a.confirm && a.confirm.id === r.id">
-                      <span class="warn">{{ a.confirm.op === 'refund' ? t.refund_sure : t.remove_sure }}</span>
-                      <button class="btn btn-primary small" :disabled="!!a.busy" @click="a.confirm.op === 'refund' ? refund(a, r) : remove(a, r)" data-testid="admin-confirm-yes">{{ t.yes }}</button>
-                      <button class="btn btn-ghost small" :disabled="!!a.busy" @click="a.confirm = null" data-testid="admin-confirm-no">{{ t.no }}</button>
-                    </template>
-                    <template v-else>
-                      <template v-if="r.stack === 'ready'">
-                        <button v-if="r.on" class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, false)" data-testid="admin-turn-off">{{ t.turn_off }}</button>
-                        <button v-else class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, true)" data-testid="admin-turn-on">{{ t.turn_on }}</button>
-                        <button v-if="r.adminOn !== null" class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, null)" data-testid="admin-release">{{ t.release }}</button>
-                      </template>
-                      <button class="btn btn-ghost small" :disabled="!!a.busy || !r.paypalId" @click="a.confirm = { id: r.id, op: 'refund' }" data-testid="admin-refund">{{ t.refund_btn }}</button>
-                      <button class="btn btn-ghost small" :disabled="!!a.busy || r.stack === 'deleted' || r.stack === 'none'" @click="a.confirm = { id: r.id, op: 'remove' }" data-testid="admin-remove">{{ t.remove_btn }}</button>
-                    </template>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <ul v-else class="subs" data-testid="admin-table">
+            <li v-for="r in a.rows" :key="r.id" class="sub" :data-sub-id="r.id" data-testid="admin-row">
+              <dl class="fields">
+                <div><dt>{{ t.col.account }}</dt><dd><code :title="r.account">{{ short(r.account, 12) }}</code></dd></div>
+                <div><dt>{{ t.col.id }}</dt><dd><code :title="r.id">{{ short(r.id) }}</code></dd></div>
+                <div><dt>{{ t.col.status }}</dt><dd>{{ t.status[r.status] || r.status }}</dd></div>
+                <div><dt>{{ t.col.stack }}</dt><dd><span :title="r.note || ''">{{ t.stack[r.stack] || r.stack }}</span><code v-if="r.vault" class="muted"> {{ r.vault }}</code></dd></div>
+                <div><dt>{{ t.col.device }}</dt><dd>{{ r.enrolled ? t.enrolled : t.not_enrolled }}<code v-if="r.device"> {{ r.device }}</code></dd></div>
+                <div><dt>{{ t.col.power }}</dt><dd>{{ r.on ? t.on : t.off }}<span v-if="r.adminOn !== null" class="muted"> · {{ t.forced }}</span></dd></div>
+                <div><dt>{{ t.col.paid }}</dt><dd>{{ r.paidThrough ? fmtDate(r.paidThrough) : '—' }}</dd></div>
+                <div><dt>{{ t.col.refund }}</dt><dd>{{ r.refund ? (t.refund[r.refund] || r.refund) : '—' }}</dd></div>
+                <div><dt>{{ t.col.paypal }}</dt><dd><code v-if="r.paypalId">{{ r.paypalId }}</code><template v-else>—</template></dd></div>
+              </dl>
+              <div class="actions">
+                <template v-if="a.confirm && a.confirm.id === r.id">
+                  <span class="warn">{{ a.confirm.op === 'refund' ? t.refund_sure : t.remove_sure }}</span>
+                  <button class="btn btn-primary small" :disabled="!!a.busy" @click="a.confirm.op === 'refund' ? refund(a, r) : remove(a, r)" data-testid="admin-confirm-yes">{{ t.yes }}</button>
+                  <button class="btn btn-ghost small" :disabled="!!a.busy" @click="a.confirm = null" data-testid="admin-confirm-no">{{ t.no }}</button>
+                </template>
+                <template v-else>
+                  <template v-if="r.stack === 'ready'">
+                    <button v-if="r.on" class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, false)" data-testid="admin-turn-off">{{ t.turn_off }}</button>
+                    <button v-else class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, true)" data-testid="admin-turn-on">{{ t.turn_on }}</button>
+                    <button v-if="r.adminOn !== null" class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, null)" data-testid="admin-release">{{ t.release }}</button>
+                  </template>
+                  <button class="btn btn-ghost small" :disabled="!!a.busy || !r.paypalId" @click="a.confirm = { id: r.id, op: 'refund' }" data-testid="admin-refund">{{ t.refund_btn }}</button>
+                  <button class="btn btn-ghost small" :disabled="!!a.busy || r.stack === 'deleted' || r.stack === 'none'" @click="a.confirm = { id: r.id, op: 'remove' }" data-testid="admin-remove">{{ t.remove_btn }}</button>
+                </template>
+              </div>
+            </li>
+          </ul>
 
           <h3>{{ t.add_h }}</h3>
           <p class="row">
@@ -288,10 +285,11 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 .dot::before { content: '●'; margin-right: 4px; color: var(--muted); }
 .dot.on::before { color: var(--dt-success, #2e7d32); }
 .dot.off::before { color: var(--dt-danger, #b3261e); }
-.scroll { overflow-x: auto; margin: 10px 0; }
-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-th { font-weight: 700; white-space: nowrap; }
-.actions { display: flex; gap: 6px; flex-wrap: wrap; min-width: 220px; }
+.subs { list-style: none; margin: 10px 0; padding: 0; }
+.sub { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 16px; margin: 0; font-size: .9rem; }
+.fields dt { font-size: .75rem; font-weight: 700; color: var(--muted); }
+.fields dd { margin: 0; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .inp { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg, transparent); color: inherit; font-family: monospace; }
 </style>
