@@ -63,7 +63,7 @@ const T = {
     enrolling: 'Pidiendo el alta…',
     code_h: 'Aprueba este código en tu bóveda',
     code_cli: (c) => `dotrino-vault approve ${c}`,
-    code_here: 'Este navegador es tu bóveda: apruébalo en «Mi bóveda».',
+    code_approve: 'Aprobarlo',
     self_starting: 'Tu bóveda está arrancando…',
     code_wait: 'Cuando lo apruebes, aquí saldrá «en tu cuenta». La invitación vale 5 minutos: si caduca, saca otra.',
     copy: 'Copiar', copied: 'Copiado',
@@ -107,7 +107,7 @@ const T = {
     enrolling: 'Asking to join…',
     code_h: 'Approve this code on your vault',
     code_cli: (c) => `dotrino-vault approve ${c}`,
-    code_here: 'This browser is your vault: approve it in «My vault».',
+    code_approve: 'Approve it',
     self_starting: 'Your vault is starting…',
     code_wait: 'Once you approve it, it will say «in your account» here. The invitation lasts 5 minutes: if it expires, get another one.',
     copy: 'Copy', copied: 'Copied',
@@ -216,6 +216,17 @@ async function enroll (s, fromHere) {
   } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = '' }
 }
 
+// Si la bóveda es ESTE navegador, el código pendiente vive en esta pestaña (la que tiene la
+// bóveda), y «Mi bóveda» abierta en otra no lo ve: se aprueba aquí, con el mismo código.
+async function approveHere (s) {
+  busy.value = 'approve:' + s.id
+  notice.value = null
+  try {
+    await identity.value.selfVaultApprove(s.device, codes.value[s.id])
+    await loadMine()
+  } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = '' }
+}
+
 async function cancel (s) {
   busy.value = 'cancel'
   try {
@@ -277,7 +288,8 @@ onMounted(async () => {
               <p><strong>{{ t.code_h }}</strong></p>
               <p class="row"><code class="code" data-testid="hosted-code">{{ codes[s.id] }}</code>
                 <button class="btn btn-ghost small" @click="copy('code-' + s.id, codes[s.id])">{{ copied === 'code-' + s.id ? t.copied : t.copy }}</button></p>
-              <p v-if="selfVault.enabled" class="muted"><a href="/vault">{{ t.code_here }}</a></p>
+              <p v-if="selfVault.running && s.device" class="row">
+                <button class="btn btn-primary" :disabled="!!busy" @click="approveHere(s)" data-testid="hosted-approve-here">{{ t.code_approve }}</button></p>
               <p v-else class="row"><code>{{ t.code_cli(codes[s.id]) }}</code>
                 <button class="btn btn-ghost small" @click="copy('cli-' + s.id, t.code_cli(codes[s.id]))">{{ copied === 'cli-' + s.id ? t.copied : t.copy }}</button></p>
               <p class="muted">{{ t.code_wait }}</p>
