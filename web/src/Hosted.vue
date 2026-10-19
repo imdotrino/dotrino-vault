@@ -1,25 +1,27 @@
 <script setup>
 /**
- * LA BÓVEDA EN LA NUBE (`/hosted`): contratarla, activarla y ver o cancelar las tuyas.
+ * LA RÉPLICA EN LA NUBE (`/hosted`): contratarla, enrolarla en tu cuenta y ver o cancelar las
+ * tuyas (`dotrino-accounts/docs/DISENO.md` §8.bis y §9).
  *
- * Es una pantalla administrativa (CONVENCIONES §5.1): precio, un botón y tus suscripciones; lo
- * que explica va en el wiki. Habla con `accounts.dotrino.com` (`dotrino-accounts`), que cobra
- * con PayPal y crea la bóveda en AWS:
+ * Es una pantalla administrativa (CONVENCIONES §5.1): precio, un botón y tus réplicas; lo que
+ * explica va en el wiki. Habla con `accounts.dotrino.com` (`dotrino-accounts`), que cobra con
+ * PayPal y crea la réplica en AWS. TODO va firmado por tu perfil (`signedFor` del pilar): la
+ * réplica es de tu cuenta desde la compra, y se administra desde aquí sin cambiar de perfil.
  *
- *   1. «Contratar» pide la suscripción y se va a PayPal. Lo que identifica la compra (`id` y
- *      `claim`) se queda en esta pestaña (sessionStorage): solo quien compró ve la activación.
- *   2. PayPal vuelve aquí con `?sub=<id>`. Se confirma, y mientras la bóveda se crea (unos
- *      minutos) se pregunta cada pocos segundos.
- *   3. Lista: se enseña la dirección para «Iniciar sesión» y el código de activación, que es la
- *      contraseña de la primera vez.
+ *   1. «Contratar» pide la suscripción (firmada) y se va a PayPal. PayPal vuelve con `?sub=`.
+ *   2. Se confirma y la réplica se crea VACÍA (tarda un par de minutos).
+ *   3. Se enrola con una INVITACIÓN de tu bóveda: la saca este navegador si él es tu bóveda, o
+ *      la pegas desde la máquina donde corre (`dotrino-vault pair --scope replica --quiet`). La
+ *      réplica pide el alta y aquí sale el código, que apruebas en tu bóveda. Va después del
+ *      pago porque una invitación caduca a los 5 minutos.
  *
- * Lo tuyo (ver y cancelar) va firmado por tu perfil (`signedFor` del pilar): no hay cuenta ni
- * contraseña aparte en Dotrino. Dentro de una app nativa no se vende nada (`noPayments`).
+ * Dentro de una app nativa no se vende nada (`noPayments`).
  */
 import { ref, computed, onMounted, onBeforeUnmount, markRaw } from 'vue'
 import { Identity } from '@dotrino/identity'
 import { signedFor } from '@dotrino/identity/assertion'
 import { noPayments } from '@dotrino/support/policy'
+import { encodeInvite } from '../../lib/src/invite.js'
 import { identityOptions } from './identity.js'
 
 const props = defineProps({ lang: { type: String, default: 'es' } })
@@ -27,67 +29,96 @@ const props = defineProps({ lang: { type: String, default: 'es' } })
 const ACCOUNTS = (import.meta.env.VITE_ACCOUNTS_URL || 'https://accounts.dotrino.com').replace(/\/$/, '')
 const AUD = 'https://accounts.dotrino.com'
 const FORMAT_V = 1
-const PENDING_KEY = 'vault.hosted.pending'
+const PRODUCT = 'replica'
 const WIKI = { es: 'https://wiki.dotrino.com/vault/nube/', en: 'https://wiki.dotrino.com/en/vault/nube/' }
+const PAIR_CMD = 'dotrino-vault pair --scope replica --quiet'
 
 const T = {
   es: {
-    title: 'Bóveda en la nube',
-    lead: 'Tu bóveda siempre localizable, sin tener una computadora encendida.',
+    title: 'Réplica en la nube',
+    lead: 'Tu cuenta contesta aunque tu bóveda esté apagada.',
     price: (p) => `US$ ${p.subtotal} al mes + IVA (US$ ${p.total} en total). Se renueva sola cada mes y la cancelas cuando quieras.`,
     buy: 'Contratar con PayPal',
     buying: 'Abriendo PayPal…',
-    native: 'La bóveda en la nube se contrata desde el navegador, en vault.dotrino.com/hosted.',
+    native: 'La réplica en la nube se contrata desde el navegador, en vault.dotrino.com/hosted.',
     howto: 'Cómo funciona',
+    no_profile: 'Abre o crea tu perfil para contratar y ver tus réplicas.',
     back_working: 'Confirmando el pago…',
-    creating: 'Estamos creando tu bóveda. Tarda unos minutos; puedes dejar esta pestaña abierta.',
-    ready: 'Tu bóveda está lista.',
-    login: 'Para entrar, abre «Iniciar sesión» en el menú del perfil y escribe:',
-    address: 'Dirección',
-    code: 'Código de activación (es tu contraseña la primera vez)',
-    keep: 'Guárdalo ahora: esta pantalla solo lo enseña en esta pestaña. Cámbialo después de entrar.',
-    copy: 'Copiar', copied: 'Copiado',
-    failed: 'No pudimos crear la bóveda. No se te cobrará el mes siguiente.',
-    pending: 'PayPal todavía no confirma el pago. Si lo aprobaste, espera un momento.',
-    lost: 'Esta compra no se empezó en esta pestaña, así que no podemos enseñarte su activación aquí.',
-    mine: 'Tus bóvedas en la nube',
+    mine: 'Tus réplicas',
     none: 'Todavía no tienes ninguna.',
-    no_profile: 'Abre o crea tu perfil para ver tus bóvedas en la nube.',
+    replica: (d) => d ? `Réplica ${d}` : 'Réplica',
     status: { ACTIVE: 'Activa', APPROVAL_PENDING: 'Esperando a PayPal', SUSPENDED: 'Pago pendiente', CANCELLED: 'Cancelada', EXPIRED: 'Vencida' },
+    stack: { creating: 'creándose', failed: 'no se pudo crear', deleted: 'borrada' },
+    in_account: 'en tu cuenta',
     on: 'encendida', off: 'apagada',
     paid_through: (d) => `pagada hasta el ${d}`,
-    cancel: 'Cancelar', cancel_sure: 'Seguirá encendida hasta el fin de lo pagado y después se apagará; lo guardado no se borra.', cancel_yes: 'Sí, cancelar', keep_it: 'No',
+    creating: 'Se está creando. Tarda un par de minutos.',
+    failed: 'No se pudo crear. Se canceló y se te devuelve lo cobrado.',
+    enroll_h: 'Añádela a tu cuenta',
+    enroll_before: (d) => `Si no la añades antes del ${d}, se cancela y se te devuelve lo cobrado.`,
+    enroll_here: 'Sacar la invitación en este navegador',
+    enroll_paste: 'O, en la máquina de tu bóveda, ejecuta esto y pega aquí lo que imprime:',
+    enroll_placeholder: 'La invitación',
+    enroll_go: 'Añadir',
+    enrolling: 'Pidiendo el alta…',
+    code_h: 'Aprueba este código en tu bóveda',
+    code_cli: (c) => `dotrino-vault approve ${c}`,
+    code_here: 'Este navegador es tu bóveda: apruébalo en «Mi bóveda».',
+    code_wait: 'Cuando lo apruebes, aquí saldrá «en tu cuenta». La invitación vale 5 minutos: si caduca, saca otra.',
+    copy: 'Copiar', copied: 'Copiado',
+    cancel: 'Cancelar', cancel_sure: 'Seguirá encendida hasta el fin de lo pagado y después se apagará.', cancel_yes: 'Sí, cancelar', keep_it: 'No',
     error: 'Algo falló. Inténtalo de nuevo.',
-    errors: { 'payments-unavailable': 'Ahora mismo no se puede contratar. Inténtalo más tarde.', 'payment-declined': 'PayPal no aceptó esa forma de pago. Elige otra.', unreachable: 'No hay conexión con el servicio. Inténtalo de nuevo.' },
+    errors: {
+      'payments-unavailable': 'Ahora mismo no se puede contratar. Inténtalo más tarde.',
+      'payment-declined': 'PayPal no aceptó esa forma de pago. Elige otra.',
+      unreachable: 'No hay conexión con el servicio. Inténtalo de nuevo.',
+      'enroll-failed': 'La invitación no sirvió (caducada o ya usada). Saca otra.',
+      'no-code': 'La réplica no recibió respuesta de tu bóveda. ¿Está encendida? Saca otra invitación.',
+      'already-enrolled': 'Esta réplica ya está en tu cuenta.'
+    },
   },
   en: {
-    title: 'Vault in the cloud',
-    lead: 'Your vault always reachable, without a computer on.',
+    title: 'Replica in the cloud',
+    lead: 'Your account answers even with your vault off.',
     price: (p) => `US$ ${p.subtotal} a month + VAT (US$ ${p.total} in total). It renews every month and you cancel whenever you want.`,
     buy: 'Subscribe with PayPal',
     buying: 'Opening PayPal…',
-    native: 'The vault in the cloud is subscribed from the browser, at vault.dotrino.com/hosted.',
+    native: 'The replica in the cloud is subscribed from the browser, at vault.dotrino.com/hosted.',
     howto: 'How it works',
+    no_profile: 'Open or create your profile to subscribe and see your replicas.',
     back_working: 'Confirming the payment…',
-    creating: 'We are creating your vault. It takes a few minutes; you can leave this tab open.',
-    ready: 'Your vault is ready.',
-    login: 'To get in, open «Sign in» in the profile menu and type:',
-    address: 'Address',
-    code: 'Activation code (your password the first time)',
-    keep: 'Save it now: this screen only shows it in this tab. Change it after signing in.',
-    copy: 'Copy', copied: 'Copied',
-    failed: 'We could not create the vault. You will not be charged next month.',
-    pending: 'PayPal has not confirmed the payment yet. If you approved it, wait a moment.',
-    lost: 'This purchase was not started in this tab, so we cannot show its activation here.',
-    mine: 'Your vaults in the cloud',
+    mine: 'Your replicas',
     none: 'You do not have any yet.',
-    no_profile: 'Open or create your profile to see your vaults in the cloud.',
+    replica: (d) => d ? `Replica ${d}` : 'Replica',
     status: { ACTIVE: 'Active', APPROVAL_PENDING: 'Waiting for PayPal', SUSPENDED: 'Payment pending', CANCELLED: 'Cancelled', EXPIRED: 'Expired' },
+    stack: { creating: 'being created', failed: 'could not be created', deleted: 'deleted' },
+    in_account: 'in your account',
     on: 'on', off: 'off',
     paid_through: (d) => `paid until ${d}`,
-    cancel: 'Cancel', cancel_sure: 'It stays on until the end of what you paid and then turns off; nothing stored is deleted.', cancel_yes: 'Yes, cancel', keep_it: 'No',
+    creating: 'It is being created. It takes a couple of minutes.',
+    failed: 'It could not be created. It was cancelled and you get your money back.',
+    enroll_h: 'Add it to your account',
+    enroll_before: (d) => `If you do not add it before ${d}, it is cancelled and you get your money back.`,
+    enroll_here: 'Get the invitation in this browser',
+    enroll_paste: 'Or, on your vault\'s machine, run this and paste what it prints:',
+    enroll_placeholder: 'The invitation',
+    enroll_go: 'Add',
+    enrolling: 'Asking to join…',
+    code_h: 'Approve this code on your vault',
+    code_cli: (c) => `dotrino-vault approve ${c}`,
+    code_here: 'This browser is your vault: approve it in «My vault».',
+    code_wait: 'Once you approve it, it will say «in your account» here. The invitation lasts 5 minutes: if it expires, get another one.',
+    copy: 'Copy', copied: 'Copied',
+    cancel: 'Cancel', cancel_sure: 'It stays on until the end of what you paid and then turns off.', cancel_yes: 'Yes, cancel', keep_it: 'No',
     error: 'Something went wrong. Try again.',
-    errors: { 'payments-unavailable': 'You cannot subscribe right now. Try later.', 'payment-declined': 'PayPal did not accept that payment method. Pick another one.', unreachable: 'No connection to the service. Try again.' },
+    errors: {
+      'payments-unavailable': 'You cannot subscribe right now. Try later.',
+      'payment-declined': 'PayPal did not accept that payment method. Pick another one.',
+      unreachable: 'No connection to the service. Try again.',
+      'enroll-failed': 'The invitation did not work (expired or already used). Get another one.',
+      'no-code': 'The replica got no answer from your vault. Is it on? Get another invitation.',
+      'already-enrolled': 'This replica is already in your account.'
+    },
   },
 }
 const t = computed(() => T[props.lang] || T.es)
@@ -107,81 +138,88 @@ async function api (method, path, body) {
 const errorText = (e) => t.value.errors[e?.code] || t.value.error
 
 const price = ref(null)
-const busy = ref(false)
+const busy = ref('')
 const notice = ref(null) // { kind: 'ok' | 'error', text }
 
-// ----- comprar -----
-async function buy () {
-  busy.value = true
-  notice.value = null
-  try {
-    const r = await api('POST', '/subscribe')
-    try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ id: r.id, claim: r.claim })) } catch (_) {}
-    location.href = r.approveUrl
-  } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; busy.value = false }
-}
-
-// ----- la vuelta de PayPal y la activación -----
-const purchase = ref(null) // la vista de la compra de esta pestaña (lo que da `confirm` / `status`)
-let timer = null
-async function finishPurchase () {
-  const sub = new URLSearchParams(location.search).get('sub')
-  if (!sub) return
-  history.replaceState(null, '', location.pathname)
-  let pending = null
-  try { pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null') } catch (_) {}
-  if (!pending || pending.id !== sub) { notice.value = { kind: 'error', text: t.value.lost }; return }
-  notice.value = { kind: 'ok', text: t.value.back_working }
-  try { purchase.value = await api('POST', '/confirm', pending) } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; return }
-  notice.value = null
-  poll(pending)
-}
-function poll (pending) {
-  clearTimeout(timer)
-  const v = purchase.value
-  if (!v || v.stack !== 'creating') {
-    if (v?.stack === 'ready') loadMine()
-    return
-  }
-  timer = setTimeout(async () => {
-    try { purchase.value = await api('POST', '/status', pending) } catch (_) {}
-    poll(pending)
-  }, 5000)
-}
-onBeforeUnmount(() => clearTimeout(timer))
-
-const copied = ref('')
-async function copy (what, text) {
-  try { await navigator.clipboard.writeText(text); copied.value = what; setTimeout(() => { if (copied.value === what) copied.value = '' }, 1500) } catch (_) {}
-}
-
-// ----- lo mío, firmado por el perfil -----
+// ----- el perfil: todo lo que se pide va firmado por él -----
 const identity = ref(null)
 const hasProfile = ref(true)
-const mine = ref([])
-const cancelling = ref(null)
+const selfVault = ref(false) // ¿este navegador ES la bóveda de la cuenta?
 async function connect () {
   try {
     const id = markRaw(await Identity.connect(identityOptions()))
     const chain = await id.sealerChain()
     if (!Array.isArray(chain) || !chain.length) { hasProfile.value = false; return }
     identity.value = id
+    try { selfVault.value = !!(await id.selfVaultStatus())?.running } catch (_) {}
   } catch (_) { hasProfile.value = false }
 }
 const signed = (fields) => signedFor(identity.value, { aud: AUD, fields: { v: FORMAT_V, ...fields } })
+
+// ----- comprar -----
+async function buy () {
+  busy.value = 'buy'
+  notice.value = null
+  try {
+    const r = await api('POST', '/subscribe', { req: await signed({ op: 'subscribe', product: PRODUCT }) })
+    location.href = r.approveUrl
+  } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; busy.value = '' }
+}
+
+// ----- la vuelta de PayPal -----
+async function finishPurchase () {
+  const sub = new URLSearchParams(location.search).get('sub')
+  if (!sub || !identity.value) return
+  history.replaceState(null, '', location.pathname)
+  notice.value = { kind: 'ok', text: t.value.back_working }
+  try { await api('POST', '/confirm', { id: sub, req: await signed({ op: 'confirm', id: sub }) }); notice.value = null } catch (e) { notice.value = { kind: 'error', text: errorText(e) } }
+}
+
+// ----- las mías -----
+const mine = ref([])
+const cancelling = ref(null)
+const invitation = ref({}) // id -> lo pegado
+const codes = ref({})      // id -> el código que salió al enrolar
+let timer = null
 async function loadMine () {
   if (!identity.value) return
   try { mine.value = await api('POST', '/mine', { req: await signed({ op: 'mine' }) }) } catch (e) { notice.value = { kind: 'error', text: errorText(e) } }
+  clearTimeout(timer)
+  // Mientras algo está en marcha (creándose, o esperando a que apruebes el código) se mira solo.
+  if (mine.value.some((s) => s.stack === 'creating' || (s.stack === 'ready' && !s.enrolled && codes.value[s.id]))) timer = setTimeout(loadMine, 5000)
 }
+onBeforeUnmount(() => clearTimeout(timer))
+
+async function enroll (s, fromHere) {
+  busy.value = 'enroll:' + s.id
+  notice.value = null
+  try {
+    let inv = (invitation.value[s.id] || '').trim()
+    if (fromHere) {
+      const r = await identity.value.selfVaultPairing({ scope: ['vault:replica'], caps: ['replica'] })
+      inv = encodeInvite(r.qr)
+    }
+    const r = await api('POST', '/enroll', { id: s.id, invitation: inv, req: await signed({ op: 'enroll', id: s.id }) })
+    codes.value = { ...codes.value, [s.id]: r.code }
+    await loadMine()
+  } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = '' }
+}
+
 async function cancel (s) {
-  busy.value = true
+  busy.value = 'cancel'
   try {
     await api('POST', '/cancel', { id: s.id, req: await signed({ op: 'cancel', id: s.id }) })
     cancelling.value = null
     await loadMine()
-  } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = false }
+  } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = '' }
+}
+
+const copied = ref('')
+async function copy (what, text) {
+  try { await navigator.clipboard.writeText(text); copied.value = what; setTimeout(() => { if (copied.value === what) copied.value = '' }, 1500) } catch (_) {}
 }
 const fmtDate = (ts) => new Intl.DateTimeFormat(props.lang, { dateStyle: 'medium' }).format(new Date(ts))
+const fmtWhen = (ts) => new Intl.DateTimeFormat(props.lang, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ts))
 
 onMounted(async () => {
   if (native) return
@@ -202,50 +240,61 @@ onMounted(async () => {
     <template v-else>
       <p v-if="notice" :class="['notice', notice.kind]" role="status" data-testid="hosted-notice">{{ notice.text }}</p>
 
-      <div v-if="purchase" class="card" data-testid="hosted-purchase">
-        <p v-if="purchase.stack === 'creating'" data-testid="hosted-creating">{{ t.creating }}</p>
-        <p v-else-if="purchase.stack === 'failed'" class="notice error">{{ t.failed }}</p>
-        <p v-else-if="purchase.stack === 'none'" class="muted">{{ t.pending }}</p>
-        <template v-else-if="purchase.stack === 'ready'">
-          <p><strong>{{ t.ready }}</strong> {{ t.login }}</p>
-          <dl class="creds">
-            <dt>{{ t.address }}</dt>
-            <dd><code data-testid="hosted-login">{{ purchase.login }}</code>
-              <button class="btn btn-ghost small" @click="copy('login', purchase.login)">{{ copied === 'login' ? t.copied : t.copy }}</button></dd>
-            <template v-if="purchase.activation">
-              <dt>{{ t.code }}</dt>
-              <dd><code data-testid="hosted-code">{{ purchase.activation }}</code>
-                <button class="btn btn-ghost small" @click="copy('code', purchase.activation)">{{ copied === 'code' ? t.copied : t.copy }}</button></dd>
-            </template>
-          </dl>
-          <p v-if="purchase.activation" class="warn">{{ t.keep }}</p>
-        </template>
-      </div>
-
-      <div v-else class="card" data-testid="hosted-buy">
+      <div class="card" data-testid="hosted-buy">
         <p v-if="price" class="price" data-testid="hosted-price">{{ t.price(price) }}</p>
-        <button class="btn btn-primary" :disabled="busy || !price" @click="buy" data-testid="hosted-subscribe">{{ busy ? t.buying : t.buy }}</button>
+        <p v-if="!hasProfile" class="muted">{{ t.no_profile }}</p>
+        <button class="btn btn-primary" :disabled="!!busy || !price || !identity" @click="buy" data-testid="hosted-subscribe">{{ busy === 'buy' ? t.buying : t.buy }}</button>
       </div>
 
-      <div class="card" data-testid="hosted-mine">
+      <div v-if="identity" class="card" data-testid="hosted-mine">
         <h2>{{ t.mine }}</h2>
-        <p v-if="!hasProfile" class="muted">{{ t.no_profile }}</p>
-        <p v-else-if="!mine.length" class="muted">{{ t.none }}</p>
+        <p v-if="!mine.length" class="muted">{{ t.none }}</p>
         <article v-for="s in mine" :key="s.id" class="sub" :data-sub-id="s.id" data-testid="hosted-sub">
           <p>
-            <strong>{{ s.login || s.id.slice(0, 8) }}</strong> ·
-            {{ t.status[s.status] || s.status }} · {{ s.on ? t.on : t.off }}<template v-if="s.paidThrough"> · {{ t.paid_through(fmtDate(s.paidThrough)) }}</template>
+            <strong>{{ t.replica(s.device) }}</strong> ·
+            {{ t.status[s.status] || s.status }}
+            <template v-if="s.stack !== 'ready'"> · {{ t.stack[s.stack] || s.stack }}</template>
+            <template v-else> · {{ s.on ? t.on : t.off }}<template v-if="s.enrolled"> · <span data-testid="hosted-enrolled">{{ t.in_account }}</span></template></template>
+            <template v-if="s.paidThrough"> · {{ t.paid_through(fmtDate(s.paidThrough)) }}</template>
           </p>
+          <p v-if="s.stack === 'creating'" class="muted" data-testid="hosted-creating">{{ t.creating }}</p>
+          <p v-else-if="s.stack === 'failed'" class="notice error">{{ t.failed }}</p>
+
+          <div v-if="s.stack === 'ready' && !s.enrolled && s.status === 'ACTIVE'" class="enroll" data-testid="hosted-enroll">
+            <h3>{{ t.enroll_h }}</h3>
+            <template v-if="codes[s.id]">
+              <p><strong>{{ t.code_h }}</strong></p>
+              <p class="row"><code class="code" data-testid="hosted-code">{{ codes[s.id] }}</code>
+                <button class="btn btn-ghost small" @click="copy('code-' + s.id, codes[s.id])">{{ copied === 'code-' + s.id ? t.copied : t.copy }}</button></p>
+              <p v-if="selfVault" class="muted"><a href="/vault">{{ t.code_here }}</a></p>
+              <p v-else class="row"><code>{{ t.code_cli(codes[s.id]) }}</code>
+                <button class="btn btn-ghost small" @click="copy('cli-' + s.id, t.code_cli(codes[s.id]))">{{ copied === 'cli-' + s.id ? t.copied : t.copy }}</button></p>
+              <p class="muted">{{ t.code_wait }}</p>
+            </template>
+            <p v-if="selfVault" class="row">
+              <button class="btn btn-primary" :disabled="!!busy" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
+            </p>
+            <p class="muted">{{ t.enroll_paste }}</p>
+            <p class="row"><code>{{ PAIR_CMD }}</code>
+              <button class="btn btn-ghost small" @click="copy('pair-' + s.id, PAIR_CMD)">{{ copied === 'pair-' + s.id ? t.copied : t.copy }}</button></p>
+            <p class="row">
+              <input class="inv" v-model="invitation[s.id]" :placeholder="t.enroll_placeholder" data-testid="hosted-invitation" />
+              <button class="btn" :disabled="!!busy || !(invitation[s.id] || '').trim()" @click="enroll(s, false)" data-testid="hosted-enroll-go">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_go }}</button>
+            </p>
+            <p v-if="s.enrollBefore" class="warn">{{ t.enroll_before(fmtWhen(s.enrollBefore)) }}</p>
+          </div>
+
           <p v-if="s.status === 'ACTIVE' || s.status === 'SUSPENDED'" class="row">
             <template v-if="cancelling === s.id">
               <span class="warn">{{ t.cancel_sure }}</span>
-              <button class="btn btn-primary small" :disabled="busy" @click="cancel(s)" data-testid="hosted-cancel-yes">{{ t.cancel_yes }}</button>
+              <button class="btn btn-primary small" :disabled="!!busy" @click="cancel(s)" data-testid="hosted-cancel-yes">{{ t.cancel_yes }}</button>
               <button class="btn btn-ghost small" @click="cancelling = null">{{ t.keep_it }}</button>
             </template>
-            <button v-else class="btn btn-ghost small" :disabled="busy" @click="cancelling = s.id" data-testid="hosted-cancel">{{ t.cancel }}</button>
+            <button v-else class="btn btn-ghost small" :disabled="!!busy" @click="cancelling = s.id" data-testid="hosted-cancel">{{ t.cancel }}</button>
           </p>
         </article>
       </div>
+      <p v-else-if="!hasProfile" class="muted">{{ t.no_profile }}</p>
     </template>
   </section>
 </template>
@@ -255,10 +304,6 @@ onMounted(async () => {
 .lead { color: var(--muted); }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
 .price { font-weight: 700; }
-.creds { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }
-.creds dt { color: var(--muted); }
-.creds dd { margin: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.creds code { font-size: 1.05rem; word-break: break-all; }
 .notice { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); }
 .notice.error { border-color: var(--dt-danger, #b3261e); }
 .warn { color: var(--dt-danger, #b3261e); }
@@ -266,4 +311,8 @@ onMounted(async () => {
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .sub + .sub { border-top: 1px solid var(--line); }
 .small { padding: 6px 12px; font-size: .9rem; }
+.enroll { border: 1px dashed var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+.enroll h3 { margin: 0 0 8px; font-size: 1rem; }
+.code { font-size: 1.3rem; letter-spacing: .08em; }
+.inv { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg, transparent); color: inherit; }
 </style>
