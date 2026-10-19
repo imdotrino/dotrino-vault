@@ -731,7 +731,12 @@ test('un cert revocado deja de poder leer', async () => {
   assert.deepEqual(await fetchSecrets({ dir }), {}, 'antes de revocar, entra')
 
   await vault.revokeDevice(mio.cert.nonce)
-  await assert.rejects(fetchSecrets({ dir }), /unauthorized: revoked/)
+  // EL ERROR LLEGA FIRMADO y se obedece en el acto: un error sin firma (de otra bóveda de la
+  // cuenta, o de cualquiera) ya no corta nada, así que este tiene que verificarse — si no, se
+  // vería como `unverified-error` al agotarse el plazo.
+  const t0 = Date.now()
+  await assert.rejects(fetchSecrets({ dir }), (e) => /unauthorized: revoked/.test(e.message) && e.code !== 'unverified-error')
+  assert.ok(Date.now() - t0 < 10_000, 'no espera al plazo')
 })
 
 /**
