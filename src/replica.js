@@ -147,7 +147,7 @@ export function openReplicaStore (dir) {
  * Arranca el replicador. No crea ninguna maestra ni ningún perfil: si no está enrolado,
  * lo dice y se para. Estrenar una identidad aquí sería justo lo que no debe existir.
  */
-export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.log } = {}) {
+export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null, onActivity = null, log = console.log } = {}) {
   const store = openReplicaStore(dir)
   const link = store.link
   if (!link?.device?.privateJwk || !link?.cert || !link?.iss) {
@@ -171,6 +171,21 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   await client.identifyAs({ publickey: link.device.publickey, sign: (d) => sign(d) })
   log(`[replica] ${id} · connected to ${url}`)
   log(`[replica] record #${store.seq}${store.acta ? '' : ' · no record yet: waiting for the vault'}`)
+
+  // EL TIMBRE de una réplica que no vive conectada (la de una Lambda, `lambda/`). Es de SU
+  // llave y no de la cuenta: un servicio le escribe a esta llave cuando la bóveda no
+  // contesta, y lo encolado la despierta. El acta es lo que prueba que la llave es de la
+  // cuenta, así que sin acta todavía se registra en cuanto llegue el primer empujón.
+  let wakeRegistered = false
+  async function registerWake () {
+    if (!wakeUrl || wakeRegistered || !store.acta) return
+    try {
+      await client.registerWake({ publicKey: link.device.publickey, sign: (d) => sign(d), url: wakeUrl, acta: store.acta, self: true })
+      wakeRegistered = true
+      log('[replica] wake registered for this device key')
+    } catch (e) { log(`[replica] could not register the wake (${e.code || 'error'}): ${e.message}`) }
+  }
+  await registerWake()
 
   /**
    * UN EMPUJÓN DE LA BÓVEDA. Va firmado con la llave de sellado que el acta nombra, así
@@ -196,6 +211,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
       return log(`[replica] a push arrived with an older record (#${body.seq} < #${store.seq}): refused`)
     }
     log(`[replica] record #${store.seq} · ${Object.keys(body.bundles || {}).length} bundle(s) stored`)
+    await registerWake()
     const ack = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
     client.send(from, { type: MSG.REPLICA_ACK, body: ack, signature: (await sign(ack)).signature })
   }
@@ -279,6 +295,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   const NO_DECIDE = new Set([MSG.ENROLL, MSG.ADMIN, MSG.RENEW, MSG.RENOUNCE, MSG.SIGN, MSG.ACTA_SEALED])
 
   client.on('message', (from, p) => {
+    onActivity?.()
     const t = p?.type
     if (t === MSG.REPLICA_PUSH) return onPush(from, p).catch((e) => log('[replica] push: ' + e.message))
     if (t === MSG.SECRETS) return onSecrets(from, p).catch((e) => log('[replica] secrets: ' + e.message))

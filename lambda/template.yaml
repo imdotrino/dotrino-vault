@@ -26,6 +26,11 @@ Parameters:
     Default: vault
     Description: this vault's name (up to 20 characters). Same name, same resources; another name, another vault in the same account.
     AllowedPattern: '[a-z0-9][a-z0-9-]{0,19}'
+  Mode:
+    Type: String
+    Default: vault
+    AllowedValues: [vault, replica]
+    Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md).
   AdminUser:
     Type: String
     Default: admin
@@ -33,9 +38,9 @@ Parameters:
   AdminPassword:
     Type: String
     NoEcho: true
-    MinLength: 12
-    Description: the first administrator's password (12+ characters, no quotes or backslashes). It is used once, at the first start; change it after signing in.
-    AllowedPattern: '[^"\\]+'
+    Default: ''
+    Description: vault mode only, and required there - the first administrator's password (12+ characters, no quotes or backslashes). It is used once, at the first start; change it after signing in.
+    AllowedPattern: '([^"\\]{12,})?'
   ProxyUrl:
     Type: String
     Default: wss://proxy.dotrino.com
@@ -72,6 +77,7 @@ Conditions:
   Shared: !Not [!Equals [!Ref SharedKeyArn, '']]
   CreateKey: !And [!Condition New, !Not [!Condition Shared]]
   Bounded: !Not [!Equals [!Ref PermissionsBoundary, '']]
+  IsVault: !Equals [!Ref Mode, vault]
 
 Resources:
   ProfileBucket:
@@ -225,6 +231,7 @@ Resources:
           DOTRINO_KMS_KEY_ID: !If [Shared, !Ref SharedKeyArn, !If [New, !GetAtt DiskKey.Arn, !Ref ExistingKeyArn]]
           DOTRINO_KMS_CONTEXT_VAULT: !If [Shared, !Ref Name, !Ref AWS::NoValue]
           DOTRINO_PROXY_URL: !Ref ProxyUrl
+          DOTRINO_VAULT_MODE: !Ref Mode
 
   # Una sesión que falla no se repite sola: la siguiente la dispara el próximo mensaje.
   AsyncConfig:
@@ -258,14 +265,16 @@ Resources:
       Principal: '*'
       InvokedViaFunctionUrl: true
 
-  # El primer arranque: nace la cuenta, se registra la URL de despertar en el proxio y se da
-  # de alta al administrador. Devuelve su dirección.
+  # El primer arranque. En modo `vault`: nace la cuenta, se registra la URL de despertar en el
+  # proxio y se da de alta al administrador; devuelve su dirección. En modo `replica` no nace
+  # nada: se apunta la URL de la función y la réplica espera a que su dueño la enrole.
   FirstStart:
     Type: Custom::DotrinoVaultFirstStart
     DependsOn: [UrlPermission, UrlInvokePermission, AsyncConfig]
     Properties:
       ServiceToken: !GetAtt Function.Arn
       FunctionUrl: !GetAtt FunctionUrl.FunctionUrl
+      Mode: !Ref Mode
       AdminUser: !Ref AdminUser
       # Directa, sin Secrets Manager ($0,40/mes por bóveda): es un parámetro NoEcho, así que
       # CloudFormation la enseña tapada, y solo sirve para el PRIMER alta (después, ensureAdmin
@@ -275,11 +284,15 @@ Resources:
 
 Outputs:
   Login:
+    Condition: IsVault
     Description: enter with this address and the admin password, from "Sign in" in any Dotrino app
     Value: !GetAtt FirstStart.Login
   Account:
+    Condition: IsVault
     Description: the account's full fingerprint (64 hex), what signed requests from this account are checked against
     Value: !GetAtt FirstStart.Account
+  Mode:
+    Value: !Ref Mode
   Url:
     Value: !GetAtt FunctionUrl.FunctionUrl
   Bucket:

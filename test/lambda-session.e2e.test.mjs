@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { runSession, wakeSecret, sameSecret } from '../lambda/session.mjs'
+import { runSession, vaultStarter, wakeSecret, sameSecret } from '../lambda/session.mjs'
 import { ensureAdmin } from '../lambda/bootstrap.mjs'
 import { memoryStore, acquireLease } from '../lambda/mirror.mjs'
 
@@ -35,8 +35,8 @@ const store = memoryStore()
 const sesiones = []   // las que arrancó el despertar
 
 /** Una sesión como la de la Lambda, con un tope corto y la inactividad en 1,5 s. */
-const sesion = (opts = {}) => runSession({
-  store, dir: tmp('vault-sesion-'), startVault, proxyUrl, wakeBase,
+const sesion = ({ onReady, ...opts } = {}) => runSession({
+  store, dir: tmp('vault-sesion-'), start: vaultStarter({ startVault, onReady }), proxyUrl, wakeBase,
   deadline: Date.now() + 60_000, idleMs: 1500, log, ...opts
 })
 

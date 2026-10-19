@@ -5,8 +5,9 @@
  * (`push-subscribe` con `kind:'wake'`, websocket-proxy ≥ 1.7.0). Una sesión es:
  *
  *   1. poner el CERROJO (`.lease`): una sesión a la vez;
- *   2. bajar el perfil del almacén y arrancar la MISMA bóveda del binario (`src/vault.js`),
- *      que se conecta al proxio por WebSocket, se identifica y recibe lo encolado;
+ *   2. bajar el perfil del almacén y arrancar la MISMA bóveda del binario (`src/vault.js`) —o
+ *      el mismo replicador (`src/replica.js`)—, que se conecta al proxio por WebSocket, se
+ *      identifica y recibe lo encolado;
  *   3. atender como siempre, subiendo al almacén lo que cambie cada pocos segundos;
  *   4. apagarse cuando pasan `idleMs` sin mensajes y no queda nada esperando, o al llegar al
  *      tope de la función;
@@ -72,59 +73,144 @@ export function sameSecret (a, b) {
 }
 
 /**
+ * QUÉ ARRANCA UNA SESIÓN. La sesión es la misma para las dos (cerrojo, reflejo en el almacén,
+ * inactividad); lo que cambia es la pieza que corre dentro. Cada una devuelve
+ * `{ ready, busy(), close() }`: `busy()` dice que hay algo vivo en memoria que se perdería al
+ * apagarse.
+ */
+export const vaultStarter = ({ startVault, onReady = null }) => async ({ dir, proxyUrl, wakeUrl, onActivity, log, push }) => {
+  const vault = await startVault({ dir, proxyUrl, log, platform: { wakeUrl, onActivity } })
+  await push()
+  const ready = onReady ? await onReady(vault) : null
+  return {
+    ready,
+    // Un emparejamiento esperando su código o un pedido esperando al aprobador no son
+    // inactividad: apagarse ahí los perdería, porque viven en memoria.
+    busy: () => vault.listPending().length > 0 || vault.listApprovals().length > 0,
+    close: () => vault.close()
+  }
+}
+
+/** La réplica (`src/replica.js`): reparte lo que la bóveda ya firmó. No guarda nada en memoria. */
+export const replicaStarter = ({ runReplica }) => async ({ dir, proxyUrl, wakeUrl, onActivity, log }) => {
+  const r = await runReplica({ dir, proxyUrl, wakeUrl, onActivity, log })
+  return { ready: { publickey: r.publickey, id: r.id }, busy: () => false, close: () => r.stop() }
+}
+
+/**
  * @param {object} opts
  * @param {object} opts.store        el almacén (`./mirror.mjs`)
- * @param {string} opts.dir          el directorio local del perfil
- * @param {Function} opts.startVault `src/vault.js#startVault`
+ * @param {string} opts.dir          el directorio local
+ * @param {Function} opts.start      `vaultStarter(...)` o `replicaStarter(...)`
  * @param {string} [opts.proxyUrl]
  * @param {string} [opts.wakeBase]   la URL de la función: con ella y el secreto se arma la de despertar
  * @param {number} opts.deadline     ms epoch en que la sesión tiene que haber terminado
  * @param {number} [opts.idleMs]
- * @param {Function} [opts.onReady]  `(vault) => any` al arrancar (el alta del admin)
  * @param {string} [opts.owner]      quién tiene el cerrojo (el id de la invocación)
  * @returns {Promise<{ ready: any, reason: string }>}
  */
-export async function runSession ({ store, dir, startVault, proxyUrl, wakeBase = null, deadline, idleMs = IDLE_MS, onReady = null, owner = 'session', log = () => {} }) {
+export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null, deadline, idleMs = IDLE_MS, owner = 'session', log = () => {} }) {
   if (!Number.isFinite(deadline)) throw Object.assign(new Error('runSession: a deadline is required'), { code: 'no-deadline' })
-  const hasta = Date.now() + LEASE_WAIT_MS
-  let lease
-  for (;;) {
-    try { lease = await acquireLease(store, { owner, ttlMs: deadline - Date.now() + 60_000 }); break } catch (e) {
-      if (e.code !== 'lease-busy' || Date.now() >= hasta) throw e
-      await sleep(1000)
-    }
-  }
-  let vault = null
+  if (typeof start !== 'function') throw Object.assign(new Error('runSession: start is required'), { code: 'no-start' })
+  const lease = await takeLease(store, { owner, deadline })
+  let piece = null
   const mirror = createMirror({ store, dir })
   try {
     const pulled = await mirror.pull()
-    log(`[vault-lambda] profile pulled from the store: ${pulled} file(s)`)
+    log(`[vault-lambda] pulled from the store: ${pulled} file(s)`)
     ensureKekConfig(dir, pulled)
 
     const wakeUrl = wakeBase ? `${wakeBase.replace(/\/+$/, '')}/wake?k=${await wakeSecret(store, { create: true })}` : null
-    if (!wakeUrl) log('[vault-lambda] no function URL: the proxy will not be able to wake this vault')
+    if (!wakeUrl) log('[vault-lambda] no function URL: the proxy will not be able to wake this one')
     let last = Date.now()
-    vault = await startVault({ dir, proxyUrl, log, platform: { wakeUrl, onActivity: () => { last = Date.now() } } })
-    await mirror.push()
-    const ready = onReady ? await onReady(vault) : null
+    piece = await start({ dir, proxyUrl, wakeUrl, onActivity: () => { last = Date.now() }, log, push: () => mirror.push() })
     await mirror.push()
 
     let reason = 'idle'
     for (;;) {
       if (Date.now() >= deadline) { reason = 'deadline'; break }
-      // Un emparejamiento esperando su código o un pedido esperando al aprobador no son
-      // inactividad: apagarse ahí los perdería, porque viven en memoria.
-      const busy = vault.listPending().length > 0 || vault.listApprovals().length > 0
-      if (!busy && Date.now() - last >= idleMs) break
+      if (!piece.busy() && Date.now() - last >= idleMs) break
       await sleep(Math.min(SYNC_EVERY_MS, Math.max(0, deadline - Date.now())))
       await mirror.push()
     }
     log(`[vault-lambda] session ends (${reason})`)
-    return { ready, reason }
+    return { ready: piece.ready, reason }
   } finally {
-    try { vault?.close() } catch (_) {}
+    try { piece?.close() } catch (_) {}
     try { await mirror.push() } finally { await lease.release() }
   }
 }
 
-export default { runSession, wakeSecret, sameSecret, IDLE_MS, WAKE_FILE }
+/** El cerrojo, esperando un poco a que termine de guardarse la sesión anterior. */
+async function takeLease (store, { owner, deadline }) {
+  const hasta = Date.now() + LEASE_WAIT_MS
+  for (;;) {
+    try { return await acquireLease(store, { owner, ttlMs: deadline - Date.now() + 60_000 }) } catch (e) {
+      if (e.code !== 'lease-busy' || Date.now() >= hasta) throw e
+      await sleep(1000)
+    }
+  }
+}
+
+/** Dónde deja la réplica el código para quien lo pidió (`handler.mjs`, `{ kind:'enroll' }`). */
+export const PAIRING_FILE = '.pairing'
+
+/**
+ * EL ALTA DE LA RÉPLICA en la cuenta del cliente, con SU invitación (`docs/replicas.md` §8.bis,
+ * `dotrino-accounts/docs/DISENO.md` §9.1). Nada entra al acta sin invitación y sin que el
+ * dueño apruebe el código en su bóveda.
+ *
+ * El código se deja en el almacén (`PAIRING_FILE`) en cuanto la bóveda lo pide, para que quien
+ * lanzó el alta lo enseñe, y aquí se sigue esperando la aprobación. Va en claro a propósito:
+ * no abre nada por sí solo —solo sirve tecleado en la bóveda del dueño, que es quien decide— y
+ * quien lo lee tiene que enseñárselo a él.
+ *
+ * Una réplica ya enrolada no se vuelve a enrolar: se dice y se para.
+ *
+ * @returns {Promise<{ device: string, deviceId: string }>}
+ */
+export async function enrollReplica ({ store, dir, invitation, req, deadline, owner = 'enroll', enrollWithVault, openReplicaStore, keyLabel, scope, log = () => {} }) {
+  if (!invitation) throw Object.assign(new Error('enrollReplica: no invitation'), { code: 'no-invitation' })
+  const lease = await takeLease(store, { owner, deadline })
+  const mirror = createMirror({ store, dir })
+  try {
+    const pulled = await mirror.pull()
+    ensureKekConfig(dir, pulled)
+    const rs = openReplicaStore(dir)
+    if (rs.link) throw Object.assign(new Error('this replica is already enrolled'), { code: 'already-enrolled' })
+    const r = await enrollWithVault({
+      qr: invitation,
+      label: 'réplica en la nube',
+      expectedScope: scope,
+      // Sin llave de cifrado en el acta no hay a dónde envolverle un sobre: repartir no puede
+      // convertirse en leer (`src/replica.js`).
+      withEncKey: false,
+      approveTimeoutMs: Math.max(0, deadline - Date.now()),
+      onCode: ({ deviceId, code }) => {
+        log(`[vault-lambda] replica ${deviceId}: waiting for code ${code} to be approved on the vault`)
+        store.put(PAIRING_FILE, Buffer.from(JSON.stringify({ req, deviceId, code, ts: Date.now() })))
+          .catch((e) => log(`[vault-lambda] could not leave the pairing code: ${e.message}`))
+      }
+    })
+    rs.setLink({ device: r.device, cert: r.cert, iss: r.iss, proxy: r.proxy })
+    await mirror.push()
+    const deviceId = await keyLabel(r.device.publickey)
+    log(`[vault-lambda] replica ${deviceId} enrolled`)
+    return { device: r.device.publickey, deviceId }
+  } finally {
+    try { await mirror.push() } finally { await lease.release() }
+  }
+}
+
+/** Si la réplica está enrolada y por qué acta va. Solo lee. */
+export async function replicaStatus ({ store, dir, openReplicaStore, keyLabel }) {
+  const mirror = createMirror({ store, dir })
+  const pulled = await mirror.pull()
+  if (!pulled) return { enrolled: false, deviceId: null, seq: 0 }
+  ensureKekConfig(dir, pulled)
+  const rs = openReplicaStore(dir)
+  if (!rs.link) return { enrolled: false, deviceId: null, seq: 0 }
+  return { enrolled: true, deviceId: await keyLabel(rs.link.device.publickey), seq: rs.seq }
+}
+
+export default { runSession, vaultStarter, replicaStarter, enrollReplica, replicaStatus, wakeSecret, sameSecret, IDLE_MS, WAKE_FILE, PAIRING_FILE }

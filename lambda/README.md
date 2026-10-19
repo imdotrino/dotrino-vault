@@ -46,6 +46,23 @@ alojadas sin poder fabricar un rol con más permisos.
 Desde un checkout, sin release: `lambda/deploy.sh <nombre>` (arma el zip, lo sube a un
 bucket de trabajo y despliega la misma plantilla).
 
+## Modo réplica (`Mode: replica`)
+
+Una **réplica** de una cuenta que ya tienes, en vez de una cuenta nueva: no tiene maestra, no
+abre nada y entra al acta **sin llave de cifrado** (`../docs/replicas.md` §8.bis). Hace que la
+cuenta conteste con tu bóveda apagada. Es lo que vende `dotrino-accounts` como réplica alojada.
+
+1. Crea la pila con `Mode: replica` (sin `AdminPassword`). No nace nada: espera a su dueño.
+2. En tu bóveda: `dotrino-vault pair --scope replica --quiet` (la invitación vale 5 minutos).
+3. Invoca la función con `{ "kind": "enroll", "invitation": "<invitación>" }`: contesta
+   `{ deviceId, code }`.
+4. En tu bóveda: `dotrino-vault approve <código>`. La réplica recibe el acta y los sobres, y
+   registra su **timbre**, que es de SU llave (`websocket-proxy` ≥ 1.8.0): lo que un servicio
+   le escribe cuando la bóveda no contesta la despierta.
+
+`{ "kind": "status" }` dice si está enrolada y por qué acta va. Una réplica enrolada no se
+vuelve a enrolar; si el alta no llegó a aprobarse, se repite con otra invitación.
+
 ## Volver a montar una pila borrada
 
 El bucket y la llave **se quedan** al borrar la pila: son la cuenta. Crear otra con el mismo
@@ -60,7 +77,7 @@ toca. Desde un checkout: `lambda/deploy.sh <nombre> --key <arn>`.
 |---|---|
 | `template.yaml` | La pila entera: bucket del perfil, llave de KMS (o la compartida), el que baja el código, rol, función (15 min de tope), Function URL y el primer arranque. El bucket y la llave se quedan aunque se borre la pila: son la cuenta. |
 | `handler.mjs` | `POST /wake?k=…` comprueba el secreto, se invoca a sí misma en asíncrono y contesta 202 al instante. `{kind:'session'}` es la sesión. El recurso personalizado de CloudFormation es el primer arranque. |
-| `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario**, subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. |
+| `session.mjs` | Una sesión: cerrojo en S3, bajar el perfil, arrancar **la misma bóveda del binario** (o el mismo replicador), subir lo que cambie cada 2 s, apagarse tras **60 s sin mensajes** (o al llegar al tope) y, al final, desconectarse → subir → quitar el cerrojo. También el alta de una réplica (`enrollReplica`) y su estado. |
 | `mirror.mjs` | El reflejo directorio ⇄ S3 con escrituras condicionales por `ETag`, y el cerrojo (`.lease`, vence solo si el contenedor muere). |
 | `bootstrap.mjs` | El primer administrador (`createPasswordLogin`, el mismo camino que `dotrino-vault logins add`). |
 | `build.sh` | El zip (reproducible) y la plantilla con la URL y el hash puestos. Lo corre `release.yml`. |
