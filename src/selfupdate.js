@@ -62,15 +62,15 @@ export function shouldWatch (env = process.env, execPath = process.execPath) {
  */
 export function watchBinary ({ log = console.log, exit = (c) => process.exit(c), env = process.env, execPath = process.execPath, checkMs = CHECK_MS } = {}) {
   if (!shouldWatch(env, execPath)) return null
-  const inicial = fingerprint(execPath)
-  if (!inicial) return null
+  const initial = fingerprint(execPath)
+  if (!initial) return null
 
-  let quieto = null // huella del candidato, para exigir que se repita
+  let still = null // huella del candidato, para exigir que se repita
 
   const t = setInterval(() => {
-    const ahora = fingerprint(execPath)
-    if (!ahora || ahora === inicial) { quieto = null; return }
-    if (quieto !== ahora) { quieto = ahora; return } // primera vez que se ve: esperar
+    const now = fingerprint(execPath)
+    if (!now || now === initial) { still = null; return }
+    if (still !== now) { still = now; return } // primera vez que se ve: esperar
     clearInterval(t)
     log('[vault] the binary changed on disk: restarting to run the new version')
     // Se sale con 0 y limpiamente: systemd lo trata como una parada normal y vuelve a

@@ -283,18 +283,18 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
    * daemon. Ese es el precio, y es el mismo que ya se paga por poder sellar actas
    * estando abierta: lo que acota la exposición es el auto-candado, no el olvido.
    */
-  const llaves = new Map() // id -> Uint8Array (la llave derivada, solo si está abierto)
+  const keys = new Map() // id -> Uint8Array (la llave derivada, solo si está abierto)
   // La `K` de los perfiles SIN candado que la guardan bajo la llave de la máquina (`openKey`).
-  const porMaquina = new Map()
+  const byMachine = new Map()
 
   /** Borra el material de verdad antes de soltar la referencia. */
-  const olvidar = (id) => {
-    const k = llaves.get(id)
+  const forget = (id) => {
+    const k = keys.get(id)
     if (k) { try { k.fill(0) } catch (_) {} }
-    llaves.delete(id)
-    const m = porMaquina.get(id)
+    keys.delete(id)
+    const m = byMachine.get(id)
     if (m) { try { m.fill(0) } catch (_) {} }
-    porMaquina.delete(id)
+    byMachine.delete(id)
   }
 
   /** ¿Sigue abierto? Vence al MIRARLO, así que no hace falta ningún temporizador. */
@@ -303,7 +303,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     if (until == null) return false
     if (autoLockMs > 0 && Date.now() >= until) {
       unlocked.delete(id)
-      olvidar(id)
+      forget(id)
       // El aviso va después de borrarlo: quien lo escuche verá el perfil ya cerrado.
       try { onAutoLock?.(id) } catch (_) {}
       return false
@@ -352,7 +352,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
    * Sin código, el rechazo llegaba como un texto suelto del daemon, indistinguible de
    * «se volvió a pedir la contraseña porque sí».
    */
-  function frenar (p) {
+  function throttle (p) {
     let tries = p.tries || { n: 0, at: 0 }
     if (tries.at && Date.now() - tries.at > TRIES_FORGET_MS) {
       tries = { n: 0, at: 0 }
@@ -391,7 +391,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     } else {
       throw Object.assign(new Error('nothing to open the profile with'), { code: 'NO_CREDENTIALS' })
     }
-    const tries = frenar(p)
+    const tries = throttle(p)
     let K = null
     for (const d of cands) {
       const k = doorKey(d, { password, secret })
@@ -450,11 +450,11 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       // misma que sale en `members`. Ambiguo se rechaza, no se adivina.
       // El id que tenía antes de que la carpeta se llamara como su llave (ver
       // `ensureNamedByKey`): un cliente abierto durante la actualización sigue usándolo.
-      const viejo = data.profiles.find((p) => p.wasId && p.wasId.toLowerCase() === needle)
-      if (viejo) return viejo.id
-      const porPrefijo = data.profiles.filter((p) => p.id.toLowerCase().startsWith(needle))
-      if (porPrefijo.length === 1) return porPrefijo[0].id
-      if (porPrefijo.length > 1) throw new Error(`"${ref}" matches ${porPrefijo.length} profiles; give more of the id (dotrino-vault profile ls)`)
+      const old = data.profiles.find((p) => p.wasId && p.wasId.toLowerCase() === needle)
+      if (old) return old.id
+      const byPrefix = data.profiles.filter((p) => p.id.toLowerCase().startsWith(needle))
+      if (byPrefix.length === 1) return byPrefix[0].id
+      if (byPrefix.length > 1) throw new Error(`"${ref}" matches ${byPrefix.length} profiles; give more of the id (dotrino-vault profile ls)`)
       throw new Error('profile does not exist: ' + ref)
     },
 
@@ -603,15 +603,15 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
         try { pub = await mintKey(dir) } catch (_) { return id }
       }
       if (!pub) return id
-      const quiere = await keyDirName(pub)
-      if (quiere === id) return id
-      if (fs.existsSync(dirOf(quiere))) {
-        throw Object.assign(new Error(`cannot rename ${id}: ${quiere} already exists`), { code: 'key-exists' })
+      const wants = await keyDirName(pub)
+      if (wants === id) return id
+      if (fs.existsSync(dirOf(wants))) {
+        throw Object.assign(new Error(`cannot rename ${id}: ${wants} already exists`), { code: 'key-exists' })
       }
-      fs.renameSync(dir, dirOf(quiere))
+      fs.renameSync(dir, dirOf(wants))
       const p = find(id)
       if (p) {
-        p.id = quiere
+        p.id = wants
         // EL NOMBRE VIEJO SE RECUERDA. Quien tenía una consola o una TUI abierta durante
         // la actualización sigue pidiendo por el id de antes, y sin esto cada petición
         // suya contestaba «ese perfil no existe» —que es verdad y no ayuda nada—. Se
@@ -619,11 +619,11 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
         // reinicie, que es cuando dejará de preguntarlo.
         p.wasId = id
       }
-      if (data.current === id) data.current = quiere
-      if (unlocked.has(id)) { unlocked.set(quiere, unlocked.get(id)); unlocked.delete(id) }
-      if (llaves.has(id)) { llaves.set(quiere, llaves.get(id)); llaves.delete(id) }
+      if (data.current === id) data.current = wants
+      if (unlocked.has(id)) { unlocked.set(wants, unlocked.get(id)); unlocked.delete(id) }
+      if (keys.has(id)) { keys.set(wants, keys.get(id)); keys.delete(id) }
       save()
-      return quiere
+      return wants
     },
 
     /** Quita la marca de «nació para adoptar» (ya adoptó, o se canceló). */
@@ -652,7 +652,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       if (data.current === id) data.current = data.profiles[0].id
       save()
       unlocked.delete(id)
-      olvidar(id)
+      forget(id)
       try { fs.rmSync(dirOf(id), { recursive: true, force: true }) } catch (_) {}
       return { id, name: p.name || '' }
     },
@@ -698,7 +698,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      */
     async keyWith (id, creds = {}) {
       const p = assertExists(id)
-      if (isOpen(id) && llaves.get(id)) return new Uint8Array(llaves.get(id))
+      if (isOpen(id) && keys.get(id)) return new Uint8Array(keys.get(id))
       return new Uint8Array(await resolveK(p, normCreds(creds)))
     },
 
@@ -716,7 +716,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       open(id)
       // La llave se queda mientras el candado esté abierto: es lo que permite envolverle
       // su cajón a un servicio que se enrola AHORA, sin volver a pedir la frase.
-      llaves.set(id, new Uint8Array(K))
+      keys.set(id, new Uint8Array(K))
       K.fill(0)
       return { ok: true, locked: false }
     },
@@ -741,7 +741,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       const K = p.kdf?.salt && password
         ? new Uint8Array(scryptKey(password, p.kdf.salt))
         : new Uint8Array(crypto2.randomBytes(32))
-      llaves.set(id, K)
+      keys.set(id, K)
       open(id)
       return { K, fresh: true }
     },
@@ -749,7 +749,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     /** Deshace un `ensureKey` fresco que no llegó a tener puerta. */
     dropFreshKey (id) {
       const p = find(id)
-      if (p && !hasKey(p)) { unlocked.delete(id); olvidar(id) }
+      if (p && !hasKey(p)) { unlocked.delete(id); forget(id) }
     },
 
     /**
@@ -786,7 +786,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       save()
       // Si la llave venía de la de la máquina (perfil sin candado), ahora es la del perfil
       // ABIERTO: tiene que estar donde la busca `openKey` con el candado puesto.
-      if (!llaves.get(id)) llaves.set(id, new Uint8Array(K))
+      if (!keys.get(id)) keys.set(id, new Uint8Array(K))
       open(id)
       return publicDoor(door)
     },
@@ -867,14 +867,14 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * Es lo correcto además de lo posible: ponerla es una decisión del dueño, y el dueño
      * acaba de teclear la principal.
      */
-    setSecondary (id, derivada) {
+    setSecondary (id, derived) {
       const p = assertExists(id)
       if (!isProtected(p)) throw Object.assign(new Error('this profile has no lock: there is nothing to open remotely'), { code: 'NO_PASSWORD' })
-      const llave = api.openKey(id)
-      if (!llave) throw Object.assign(new Error('open the profile first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
-      if (!(derivada instanceof Uint8Array) || derivada.length !== 32) throw new Error('the admin key must be 32 bytes')
+      const key = api.openKey(id)
+      if (!key) throw Object.assign(new Error('open the profile first (dotrino-vault unlock)'), { code: 'PROFILE_LOCKED' })
+      if (!(derived instanceof Uint8Array) || derived.length !== 32) throw new Error('the admin key must be 32 bytes')
       const salt = p.kdf2?.salt || b64(crypto.getRandomValues(new Uint8Array(32)))
-      p.kdf2 = { v: 1, salt, wrapped: encryptText(b64(llave), Buffer.from(derivada)) }
+      p.kdf2 = { v: 1, salt, wrapped: encryptText(b64(key), Buffer.from(derived)) }
       save()
       return { ok: true }
     },
@@ -897,13 +897,13 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      *
      * Comparte el contador de `unlock` (`frenar`): probar por aquí frena allá y al revés.
      */
-    async openWithSecondary (id, derivada) {
+    async openWithSecondary (id, derived) {
       const p = assertExists(id)
       if (!p.kdf2?.wrapped) throw Object.assign(new Error('this profile has no admin password'), { code: 'NO_SECONDARY' })
-      const tries = frenar(p)
-      let llave = null
-      try { llave = Buffer.from(decryptText(p.kdf2.wrapped, Buffer.from(derivada)), 'base64') } catch (_) { llave = null }
-      if (!llave || llave.length !== 32) {
+      const tries = throttle(p)
+      let key = null
+      try { key = Buffer.from(decryptText(p.kdf2.wrapped, Buffer.from(derived)), 'base64') } catch (_) { key = null }
+      if (!key || key.length !== 32) {
         p.tries = { n: tries.n + 1, at: Date.now() }
         save()
         throw Object.assign(new Error('wrong admin password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
@@ -911,11 +911,11 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       delete p.tries
       save()
       open(id)
-      llaves.set(id, new Uint8Array(llave))
+      keys.set(id, new Uint8Array(key))
       return { ok: true, locked: false }
     },
 
-    lock (id) { assertExists(id); unlocked.delete(id); olvidar(id); return { ok: true, locked: api.isLocked(id) } },
+    lock (id) { assertExists(id); unlocked.delete(id); forget(id); return { ok: true, locked: api.isLocked(id) } },
 
     /**
      * La llave del perfil ABIERTO, o `null`. Es lo que hace que «la bóveda está abierta»
@@ -924,18 +924,18 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * tendrá que pedirla, que es exactamente el comportamiento de antes.
      */
     openKey (id) {
-      if (isOpen(id)) return llaves.get(id) || null
+      if (isOpen(id)) return keys.get(id) || null
       // SIN CANDADO PERO CON LLAVE: un perfil al que se le quitó la última puerta. Su `K` vive
       // bajo la llave de la máquina y se abre sola, como el resto del disco.
       const p = find(id)
       const m = p && !isProtected(p) ? (p.doors || []).find((d) => d.kind === 'machine') : null
       if (!m) return null
-      if (!porMaquina.has(id)) {
+      if (!byMachine.has(id)) {
         const K = Buffer.from(decryptText(m.wrapped, Buffer.from(kekFor(dirOf(id)))), 'base64')
         if (K.length !== 32) throw Object.assign(new Error('the profile key under this machine key is malformed'), { code: 'BAD_PROFILE_KEY' })
-        porMaquina.set(id, new Uint8Array(K))
+        byMachine.set(id, new Uint8Array(K))
       }
-      return porMaquina.get(id)
+      return byMachine.get(id)
     },
 
     /**

@@ -35,31 +35,31 @@ import { VERSION } from './version.js'
  * usuario. No se alcanza desde otra máquina ni desde otro usuario, así que la promesa
  * del `docker-compose` —«la bóveda no escucha nada»— sigue siendo cierta donde importa.
  */
-function openLocalDesk ({ name, onMessage, channels: canales, maxBytes: MAX_REPLY_BYTES, log }) {
+function openLocalDesk ({ name, onMessage, channels: channels, maxBytes: MAX_REPLY_BYTES, log }) {
   const socketPath = localSocketPath(name)
   let n = 0
   const server = net.createServer((sock) => {
     const id = 'local:' + (++n)
     let buf = ''
-    const enviar = (obj) => { try { sock.write(JSON.stringify(obj) + '\n') } catch (_) {} }
-    canales.set(id, enviar)
+    const send = (obj) => { try { sock.write(JSON.stringify(obj) + '\n') } catch (_) {} }
+    channels.set(id, send)
     sock.on('data', (chunk) => {
       buf += chunk
       // UN TOPE, y por lo mismo que en las respuestas: sin él, quien se conecte puede
       // hacer crecer este buffer hasta tumbar la bóveda mandando y sin saltos de línea.
-      if (buf.length > MAX_REPLY_BYTES) { buf = ''; enviar({ type: MSG.ERROR, error: 'request too big' }); return }
+      if (buf.length > MAX_REPLY_BYTES) { buf = ''; send({ type: MSG.ERROR, error: 'request too big' }); return }
       let i
       while ((i = buf.indexOf('\n')) >= 0) {
-        const linea = buf.slice(0, i); buf = buf.slice(i + 1)
-        if (!linea.trim()) continue
+        const line = buf.slice(0, i); buf = buf.slice(i + 1)
+        if (!line.trim()) continue
         let p = null
-        try { p = JSON.parse(linea) } catch (_) { enviar({ type: MSG.ERROR, error: 'malformed request' }); continue }
-        onMessage(id, p).catch((e) => enviar({ type: MSG.ERROR, error: e.message }))
+        try { p = JSON.parse(line) } catch (_) { send({ type: MSG.ERROR, error: 'malformed request' }); continue }
+        onMessage(id, p).catch((e) => send({ type: MSG.ERROR, error: e.message }))
       }
     })
-    const cerrar = () => canales.delete(id)
-    sock.on('close', cerrar)
-    sock.on('error', cerrar)
+    const close = () => channels.delete(id)
+    sock.on('close', close)
+    sock.on('error', close)
   })
   server.on('error', (e) => log('[vault] the local desk could not open (' + e.message + '): services will use the proxy'))
   // EL DIRECTORIO ES EL CONTROL, no el modo del socket.
@@ -77,10 +77,10 @@ function openLocalDesk ({ name, onMessage, channels: canales, maxBytes: MAX_REPL
   try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) } catch (_) {}
   try {
     const st = fs.statSync(dir)
-    const ajeno = typeof process.getuid === 'function' && st.uid !== process.getuid()
-    const abierto = (st.mode & 0o077) !== 0
-    if (ajeno || abierto) {
-      return log(`[vault] the local desk stays closed: ${dir} is ${ajeno ? 'owned by another user' : 'writable by others'} ` +
+    const foreign = typeof process.getuid === 'function' && st.uid !== process.getuid()
+    const isOpen = (st.mode & 0o077) !== 0
+    if (foreign || isOpen) {
+      return log(`[vault] the local desk stays closed: ${dir} is ${foreign ? 'owned by another user' : 'writable by others'} ` +
         '— services on this machine will use the proxy instead')
     }
   } catch (e) {
@@ -125,7 +125,7 @@ export function nodePlatform (dir) {
        * `openKey`: se queda bajo la llave de máquina, y la consola lo dice en voz alta.
        */
       const keyLock = {
-        seal: async (texto) => { const k = openKey?.(); return k ? encryptText(texto, k) : null },
+        seal: async (text) => { const k = openKey?.(); return k ? encryptText(text, k) : null },
         open: async (blob) => { const k = openKey?.(); if (!k) return null; try { return decryptText(blob, k) } catch (_) { return null } }
       }
       const identity = await Identity.connect({ dir, atRest: atRestFor(dir), keyLock })

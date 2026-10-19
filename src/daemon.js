@@ -62,9 +62,9 @@ function assertSingleInstance (dir) {
     const { release } = takeLock(dir)
     // Se suelta al salir por las buenas. Si el proceso muere de golpe el candado se queda,
     // y por eso caduca por latido: uno inmortal sería peor que ninguno.
-    const soltar = () => { try { release() } catch (_) {} }
-    process.once('exit', soltar)
-    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { soltar(); process.exit(0) })
+    const releaseLock = () => { try { release() } catch (_) {} }
+    process.once('exit', releaseLock)
+    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { releaseLock(); process.exit(0) })
   } catch (e) {
     if (e?.code !== 'vault-locked') throw e
     console.error('A vault is already running on this data.')
@@ -99,21 +99,21 @@ export async function runDaemon () {
   // Lo que deja quien instala una versión nueva, para que la nueva lo cuente al arrancar.
   const updatedFile = path.join(dir, 'updated.json')
   /** Los perfiles que están atendiendo ahora mismo, con su nombre para los mensajes. */
-  const perfilesEnMarcha = () => [...mgr.running.entries()].map(([id, vault]) => ({ id, vault, name: mgr.profiles.get(id)?.name || id }))
+  const runningProfiles = () => [...mgr.running.entries()].map(([id, vault]) => ({ id, vault, name: mgr.profiles.get(id)?.name || id }))
   const daemonVersion = VERSION
   /** `{ version, checkedAt }` de la última consulta que salió bien, o null si aún ninguna. */
-  let ultimaPublicada = null
+  let latestPublished = null
   /**
    * EL PEDIDO DE ACTUALIZACIÓN: `{ version, askedAt, result, approvers }`, o null. `result`
    * es `pending` mientras espera (un día) y `denied`/`expired` cuando no se aprobó — y
    * entonces no se vuelve a pedir por esa versión. Va en la foto para que `status` y la TUI
    * lo DIGAN: una bóveda que no se actualiza por esto se vería igual que una al día.
    */
-  let pedidoSinRespuesta = null
+  let unansweredRequest = null
   // Los campos de la raíz (fingerprint/iss) son los del perfil ACTIVO: los leen el
   // instalador y la web, que son anteriores al multi-perfil. La lista completa va
   // en `profiles`.
-  const ajusteActualizar = () => { try { return readSettings(dir).updateApproval } catch (_) { return null } }
+  const updateSetting = () => { try { return readSettings(dir).updateApproval } catch (_) { return null } }
   const writeState = () => {
     const cur = mgr.summary().find((p) => p.current) || {}
     ipcWrite(stateFile, {
@@ -125,11 +125,11 @@ export async function runDaemon () {
       // LO QUE HAY PUBLICADO, si se pudo mirar. Va en la foto para que `status` lo enseñe
       // sin salir a la red: una pantalla de estado tiene que contestar al instante y
       // también sin conexión.
-      ...(ultimaPublicada ? { latest: ultimaPublicada } : {}),
-      ...(pedidoSinRespuesta ? { updateAsk: pedidoSinRespuesta } : {}),
+      ...(latestPublished ? { latest: latestPublished } : {}),
+      ...(unansweredRequest ? { updateAsk: unansweredRequest } : {}),
       // Si para actualizarse pide permiso (`src/settings.js`). `null` = el ajuste no se
       // pudo leer, que `status` dice distinto de «no».
-      updateApproval: ajusteActualizar(),
+      updateApproval: updateSetting(),
       current: mgr.currentId(), profiles: mgr.summary()
     })
   }
@@ -313,10 +313,10 @@ export async function runDaemon () {
     // Un perfil nace vacío y `adopt: true`, que es la marca que deja a `joinProfile`
     // cambiar su acta recién nacida por la que traiga la otra bóveda; sin ella, unirse
     // sería pisar una cuenta con datos y se rechaza, que es lo correcto por defecto.
-    let nacido = null
+    let born = null
     try {
       const p = await mgr.add(join.name || 'cuenta de la otra bóveda', { adopt: true, kek: join.kek || null })
-      nacido = p.id
+      born = p.id
       const id = mgr.get(p.id)?.identity
       if (!id) throw new Error('no identity for the new profile')
       const off = id.onVault?.((e) => {
@@ -347,7 +347,7 @@ export async function runDaemon () {
       console.error('[vault] could not join:', e.message)
       // El perfil nació para esto y está vacío: si el intento no llegó a término se va
       // con él. Si no, cada reintento dejaba una cuenta fantasma en el conmutador.
-      if (nacido) { try { await mgr.remove(nacido) } catch (_) {} }
+      if (born) { try { await mgr.remove(born) } catch (_) {} }
       answer({ state: 'error', error: e.message })
     }
   }
@@ -393,14 +393,14 @@ export async function runDaemon () {
    * candado esconde nombres igual que con las variables—. Lo público sí: la bóveda ya se lo
    * da a cualquiera por el proxio (`profilePublic`), así que no revela nada.
    */
-  function perfilParaMostrar (vault, { conPrivados }) {
+  function profileToShow (vault, { conPrivados: withPrivate }) {
     const v = vault.profileView()
-    const lista = (s) => { if (typeof s !== 'string') return undefined; try { const a = JSON.parse(s); return Array.isArray(a) ? a : undefined } catch (_) { return undefined } }
+    const list = (s) => { if (typeof s !== 'string') return undefined; try { const a = JSON.parse(s); return Array.isArray(a) ? a : undefined } catch (_) { return undefined } }
     const { avatar, links, fields, ...rest } = v.public
-    if (!Object.keys(v.public).length && !(conPrivados && v.private.length)) return null
+    if (!Object.keys(v.public).length && !(withPrivate && v.private.length)) return null
     return {
-      ...rest, avatar: avatarInfo(avatar), links: lista(links), fields: lista(fields),
-      ...(conPrivados ? { privateKeys: v.private } : {}), updatedAt: v.updatedAt
+      ...rest, avatar: avatarInfo(avatar), links: list(links), fields: list(fields),
+      ...(withPrivate ? { privateKeys: v.private } : {}), updatedAt: v.updatedAt
     }
   }
 
@@ -615,10 +615,10 @@ export async function runDaemon () {
         // máquina y acaba de teclear la principal; cuando se USA a distancia lo hace el
         // navegador, y por eso la bóveda publica estos mismos parámetros.
         const params = mgr.profiles.secondaryParams(id, { mint: true })
-        const derivada = new Uint8Array(crypto.scryptSync(
+        const derived = new Uint8Array(crypto.scryptSync(
           String(req.password), Buffer.from(params.salt, 'base64'),
           params.len, { N: params.N, r: params.r, p: params.p }))
-        try { mgr.profiles.setSecondary(id, derivada) } finally { wipe(derivada) }
+        try { mgr.profiles.setSecondary(id, derived) } finally { wipe(derived) }
         return { done: 'contraseña del admin guardada · solo sirve desde el admin, no aquí' }
       }
       case 'admin-password-rm': {
@@ -779,8 +779,8 @@ export async function runDaemon () {
             if (!r.migrated) console.log('[vault] nothing to migrate: %s', r.reason)
             else {
               console.log('[vault] secrets SEALED (v%d -> v5). Backup left at secrets.json.v%d.bak', r.from, r.from)
-              for (const [owner, sin] of Object.entries(r.sinLlave || {})) {
-                console.log('[vault] WARNING %s: %d member(s) without an encryption key will NOT read their variables', owner, sin.length)
+              for (const [owner, without] of Object.entries(r.sinLlave || {})) {
+                console.log('[vault] WARNING %s: %d member(s) without an encryption key will NOT read their variables', owner, without.length)
               }
             }
           } else if (sec.op === 'batch') {
@@ -932,7 +932,7 @@ export async function runDaemon () {
         rm(meReqFile)
         if (meReq) {
           let me = null
-          try { me = perfilParaMostrar(t.vault, { conPrivados: false }) } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
+          try { me = profileToShow(t.vault, { conPrivados: false }) } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
           ipcWrite(meFile, { ...closed, req: meReq.id || null, me })
         }
         return
@@ -980,7 +980,7 @@ export async function runDaemon () {
         rm(meReqFile)
         try {
           const tm = resolveTarget(meReq) || { id: mgr.currentId(), vault: mgr.current() }
-          const me = perfilParaMostrar(tm.vault, { conPrivados: true })
+          const me = profileToShow(tm.vault, { conPrivados: true })
           ipcWrite(meFile, { v: 1, at: Date.now(), req: meReq.id || null, profile: tm.id, me })
         } catch (e) { console.error('[vault] could not dump the profile:', e.message) }
       }
@@ -1079,11 +1079,11 @@ export async function runDaemon () {
     const raw = process.env.DOTRINO_JOIN_FILE
       ? (() => { try { return fs.readFileSync(process.env.DOTRINO_JOIN_FILE, 'utf8') } catch (e) { console.error('[vault] could not read DOTRINO_JOIN_FILE: %s', e.message); return '' } })()
       : (process.env.DOTRINO_JOIN || '')
-    const texto = String(raw).trim()
-    if (!texto) return
+    const text = String(raw).trim()
+    if (!text) return
 
     let qr = null
-    try { qr = parseInvite(texto) } catch (_) {}
+    try { qr = parseInvite(text) } catch (_) {}
     // Lo mismo que `dotrino-vault join` (ver `ctl.js`): basta `sn` + la cita del proxio o
     // la llave. Exigir `iss` dejaba fuera a la invitación corta, que es la única que emite
     // `pair` hoy — así que este camino de despliegue no había forma de que funcionara.
@@ -1091,11 +1091,11 @@ export async function runDaemon () {
       console.error('[vault] the invitation in DOTRINO_JOIN is not valid; ignoring it')
       return
     }
-    const marca = path.join(dir, 'bootstrap.json')
-    const hecho = readJsonSafe(marca)
-    if (hecho?.sn === qr.sn) return // ya se usó: un reinicio no vuelve a pedir entrar
+    const mark = path.join(dir, 'bootstrap.json')
+    const done = readJsonSafe(mark)
+    if (done?.sn === qr.sn) return // ya se usó: un reinicio no vuelve a pedir entrar
 
-    ipcWrite(marca, { at: Date.now(), sn: qr.sn, ...(qr.iss ? { iss: qr.iss } : {}) })
+    ipcWrite(mark, { at: Date.now(), sn: qr.sn, ...(qr.iss ? { iss: qr.iss } : {}) })
     ipcWrite(path.join(dir, 'join-request.json'), {
       qr,
       label: 'bóveda',
@@ -1111,11 +1111,11 @@ export async function runDaemon () {
   // (somos un servicio de USUARIO y él corre como root), así que lo hacemos nosotros: si
   // el binario cambia en el disco, nos vamos y systemd nos levanta con el nuevo. Solo bajo
   // systemd; ver `src/selfupdate.js` para por qué eso no es negociable.
-  const vigia = watchBinary({
+  const watchdog = watchBinary({
     log: console.log,
     exit: () => shutdown('new binary installed')
   })
-  if (vigia) console.log('[vault] watching for updates: a new binary restarts the service on its own')
+  if (watchdog) console.log('[vault] watching for updates: a new binary restarts the service on its own')
 
   /**
    * ¿SALIÓ UNA VERSIÓN NUEVA? Una lectura al día, y nada más.
@@ -1134,19 +1134,19 @@ export async function runDaemon () {
    * 0.130.0 con la 0.131.0 publicada y el log no decía nada: no había forma de saber si
    * estaba al día o si no había podido preguntar.
    */
-  let ultimoFallo = null
-  const mirarRelease = async () => {
+  let lastFailure = null
+  const checkRelease = async () => {
     let r
     try { r = await latestRelease() } catch (e) { r = { ok: false, reason: e?.message || String(e) } }
     if (!r.ok) {
-      if (r.reason !== ultimoFallo) console.log(`[vault] could not check for a new version: ${r.reason} · trying again in an hour`)
-      ultimoFallo = r.reason
+      if (r.reason !== lastFailure) console.log(`[vault] could not check for a new version: ${r.reason} · trying again in an hour`)
+      lastFailure = r.reason
       // Un fallo al arrancar (la red todavía no está) no puede costar un día entero.
-      setTimeout(mirarRelease, 60 * 60_000).unref?.()
+      setTimeout(checkRelease, 60 * 60_000).unref?.()
       return
     }
-    ultimoFallo = null
-    ultimaPublicada = { version: r.version, checkedAt: Date.now() }
+    lastFailure = null
+    latestPublished = { version: r.version, checkedAt: Date.now() }
     writeState()
     if (!isNewer(r.version, daemonVersion)) return
 
@@ -1169,8 +1169,8 @@ export async function runDaemon () {
      */
     // SI EL AJUSTE NO SE PUEDE LEER, NO SE ACTUALIZA: el valor por defecto es no preguntar,
     // así que suponerlo sería saltarse la aprobación que el dueño pidió.
-    let pedirPermiso
-    try { pedirPermiso = readSettings(dir).updateApproval } catch (e) {
+    let askPermission
+    try { askPermission = readSettings(dir).updateApproval } catch (e) {
       console.log(`[vault] version ${r.version} is out, but the settings could not be read (${e?.message || e}) · not updating`)
       return
     }
@@ -1180,15 +1180,15 @@ export async function runDaemon () {
     // Y si hay que pedir y no se puede saber a quién, tampoco se actualiza: una lista vacía
     // o a medias sería «nadie aprueba, adelante», el repliegue que abre la puerta justo
     // cuando algo se rompió.
-    const enMarcha = perfilesEnMarcha()
-    let quienAprueba = []
-    if (pedirPermiso) {
-      try { quienAprueba = await approversOfAll(enMarcha) } catch (e) {
+    const inProgress = runningProfiles()
+    let whoApproves = []
+    if (askPermission) {
+      try { whoApproves = await approversOfAll(inProgress) } catch (e) {
         console.log(`[vault] version ${r.version} is out, but the approvers could not be read (${e?.message || e}) · not updating`)
         return
       }
     }
-    const conAvisos = quienAprueba.filter((a) => a.notifiedAt).length
+    const withNotices = whoApproves.filter((a) => a.notifiedAt).length
 
     // CÓMO SE INSTALÓ decide si puede instalar ella misma (update.js, `installKind`): la de
     // usuario de Linux, el instalador de Windows y la app de macOS, sí. Por npm, Docker o un
@@ -1196,7 +1196,7 @@ export async function runDaemon () {
     // falta root», y avisar eso al teléfono sería mentirle).
     const kind = installKind()
     if (kind === 'other') {
-      if (avisadoOtra !== r.version) { avisadoOtra = r.version; console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · update it the way you installed it (npm, Docker, git)`) }
+      if (warnedOther !== r.version) { warnedOther = r.version; console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · update it the way you installed it (npm, Docker, git)`) }
       return
     }
     // INSTALADA COMO PAQUETE DEL SISTEMA (.deb o .rpm en /usr/bin, o una app en una carpeta
@@ -1207,76 +1207,76 @@ export async function runDaemon () {
       // requiere root por algún motivo, simplemente se notifica al aprobador que hay
       // actualización y necesita root»). El log no lo lee nadie; el teléfono sí. UNA vez por
       // versión, apuntado para que un reinicio no lo repita (`update-root-told.json`).
-      let dicho
-      try { dicho = readRootTold(dir) } catch (e) {
+      let said
+      try { said = readRootTold(dir) } catch (e) {
         console.log(`[vault] update: whether the approvers were already told could not be read (${e?.message || e}) · not telling them again`)
         return
       }
-      if (shouldTellRoot(dicho, r.version, isNewer) && avisandoRoot !== r.version) {
-        avisandoRoot = r.version
-        contarATodos({ ev: 'update-needs-root', version: r.version, from: daemonVersion }, ({ todos, alguno }) => {
-          avisandoRoot = null
+      if (shouldTellRoot(said, r.version, isNewer) && warningRoot !== r.version) {
+        warningRoot = r.version
+        tellEveryone({ ev: 'update-needs-root', version: r.version, from: daemonVersion }, ({ todos: all, alguno: anyOne }) => {
+          warningRoot = null
           // Con que salió en algún perfil ya está dicho: repetirlo mañana a los que sí lo
           // oyeron por uno que no pudo sería timbrar de más.
-          if (todos || alguno) { try { writeRootTold(dir, { version: r.version, at: Date.now() }) } catch (e) { console.log(`[vault] update: could not note that the approvers were told: ${e.message}`) } }
+          if (all || anyOne) { try { writeRootTold(dir, { version: r.version, at: Date.now() }) } catch (e) { console.log(`[vault] update: could not note that the approvers were told: ${e.message}`) } }
           else console.log(`[vault] update: the approvers could not be told that ${r.version} needs administrator rights · it will try again on the next check`)
         })
       }
       return
     }
-    if (actualizando) return
-    actualizando = true
+    if (updating) return
+    updating = true
     try {
       // (`aprobada`: ya dijeron que sí a esta versión y la instalación falló; no se vuelve a
       // preguntar por lo que ya se aprobó, se reintenta instalar.)
-      if (quienAprueba.length && aprobada !== r.version) {
+      if (whoApproves.length && approved !== r.version) {
         // UNA VEZ POR VERSIÓN (dueño, 2026-10-08): el pedido dura un día y no se repite. Si
         // se denegó o venció, esa versión queda sin aprobar y se vuelve a preguntar solo
         // cuando salga una MÁS NUEVA. Lo preguntado se apunta al pedir y sobrevive a un
         // reinicio (`update-asked.json`); si no se puede leer, no se actualiza y se dice.
-        let preguntado
-        try { preguntado = readAsked(dir) } catch (e) {
+        let asked
+        try { asked = readAsked(dir) } catch (e) {
           console.log(`[vault] version ${r.version} is out, but what was already asked could not be read (${e?.message || e}) · not updating`)
           return
         }
-        const quienes = quienAprueba.map((a) => ({ profile: a.profile, id: a.id, label: a.label, notifiedAt: a.notifiedAt }))
-        if (!shouldAsk(preguntado, r.version, isNewer)) {
+        const whom = whoApproves.map((a) => ({ profile: a.profile, id: a.id, label: a.label, notifiedAt: a.notifiedAt }))
+        if (!shouldAsk(asked, r.version, isNewer)) {
           // Un «pendiente» que no es de este proceso es de antes de un reinicio: el pedido
           // murió con él, y nadie puede contestarlo ya.
-          if (preguntado.result === 'pending') { preguntado = { ...preguntado, result: 'expired' }; writeAsked(dir, preguntado) }
-          const nuevo = pedidoSinRespuesta?.version !== preguntado.version || pedidoSinRespuesta?.result !== preguntado.result
-          pedidoSinRespuesta = { ...preguntado, approvers: quienes }
+          if (asked.result === 'pending') { asked = { ...asked, result: 'expired' }; writeAsked(dir, asked) }
+          const newer = unansweredRequest?.version !== asked.version || unansweredRequest?.result !== asked.result
+          unansweredRequest = { ...asked, approvers: whom }
           writeState()
-          if (nuevo) console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval for ${preguntado.version} was asked on ${new Date(preguntado.askedAt).toISOString()} and not given (${preguntado.result}) · not asking again until a newer version · install it with: dotrino-vault update`)
+          if (newer) console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval for ${asked.version} was asked on ${new Date(asked.askedAt).toISOString()} and not given (${asked.result}) · not asking again until a newer version · install it with: dotrino-vault update`)
           return
         }
         const askedAt = Date.now()
         writeAsked(dir, { version: r.version, askedAt, result: 'pending' })
-        pedidoSinRespuesta = { version: r.version, askedAt, result: 'pending', approvers: quienes }
+        unansweredRequest = { version: r.version, askedAt, result: 'pending', approvers: whom }
         writeState()
-        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking ${quienAprueba.length} approver(s) across ${new Set(quienAprueba.map((a) => a.profileId)).size} profile(s), once · ${conAvisos} of them said notifications reach it`)
+        console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · asking ${whoApproves.length} approver(s) across ${new Set(whoApproves.map((a) => a.profileId)).size} profile(s), once · ${withNotices} of them said notifications reach it`)
         // Un pedido por perfil que tenga quien apruebe, a la vez. El primer sí basta, y los
         // que queden vivos en los demás se retiran (`src/updateApproval.js`).
-        const conAprobador = new Set(quienAprueba.map((a) => a.profileId))
-        const si = await firstYes(enMarcha.filter((p) => conAprobador.has(p.id)).map((p) => p.vault.askUpdateApproval({ version: r.version })))
+        const withApprover = new Set(whoApproves.map((a) => a.profileId))
+        const si = await firstYes(inProgress.filter((p) => withApprover.has(p.id)).map((p) => p.vault.askUpdateApproval({ version: r.version })))
         if (!si) {
           const result = resultOfNo(askedAt, UPDATE_TTL_MS)
           writeAsked(dir, { version: r.version, askedAt, result })
-          pedidoSinRespuesta = { version: r.version, askedAt, result, approvers: quienes }
+          unansweredRequest = { version: r.version, askedAt, result, approvers: whom }
           writeState()
           console.log(`[vault] update to ${r.version}: not approved (${result}) · it will not ask again for this version · install it with: dotrino-vault update`)
           return
         }
-        aprobada = r.version
-      } else if (quienAprueba.length) {
+        approved = r.version
+      } else if (whoApproves.length) {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · already approved: installing`)
-      } else if (pedirPermiso) {
+      } else if (askPermission) {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · approval is on but no profile has an approver: updating on its own`)
       } else {
         console.log(`[vault] version ${r.version} is out (this one is ${daemonVersion}) · updating on its own`)
       }
       clearAsked(dir)
-      if (pedidoSinRespuesta) { pedidoSinRespuesta = null; writeState() }
+      if (unansweredRequest) { unansweredRequest = null; writeState() }
       const res = await installRelease(r, { log: (m) => console.log(m), kind, pid: process.pid })
       if (!res.ok) {
         // Lo que NO cuadra no se instala, y se dice por qué: el archivo queda a mano.
@@ -1299,7 +1299,7 @@ export async function runDaemon () {
       if (res.then === 'exit') {
         console.log(`[vault] update: ${r.version} installed · leaving so the new one starts`)
         shutdown(`updated to ${r.version}`)
-      } else if (vigia) {
+      } else if (watchdog) {
         console.log(`[vault] update: ${r.version} installed · restarting now to run it`)
         shutdown(`updated to ${r.version}`)
       } else {
@@ -1307,12 +1307,12 @@ export async function runDaemon () {
       }
     } catch (e) {
       console.log(`[vault] update to ${r.version} failed: ${e.message}`)
-    } finally { actualizando = false }
+    } finally { updating = false }
   }
-  let actualizando = false
-  let avisadoOtra = null
-  let aprobada = null
-  let avisandoRoot = null
+  let updating = false
+  let warnedOther = null
+  let approved = null
+  let warningRoot = null
 
   /**
    * «ME ACTUALICÉ»: se lo cuenta a quien aprueba la versión NUEVA, ya corriendo (dueño,
@@ -1323,7 +1323,7 @@ export async function runDaemon () {
    * No se borra lo que no se pudo leer ni lo que no salió: se dice y se reintenta. Un
    * marcador de una versión ya superada sí se quita: esa noticia caducó.
    */
-  const anunciarActualizacion = () => {
+  const announceUpdate = () => {
     if (!fs.existsSync(updatedFile)) return
     const m = ipcRead(updatedFile, null)
     if (!m || typeof m.to !== 'string') { console.log('[vault] update: updated.json exists but cannot be read · the approvers were not told'); return }
@@ -1331,8 +1331,8 @@ export async function runDaemon () {
       if (isNewer(daemonVersion, m.to)) rm(updatedFile)
       return   // todavía no corre esa versión: se anuncia cuando arranque
     }
-    contarATodos({ version: m.to, from: typeof m.from === 'string' ? m.from : null }, ({ todos }) => {
-      if (todos) rm(updatedFile)
+    tellEveryone({ version: m.to, from: typeof m.from === 'string' ? m.from : null }, ({ todos: all }) => {
+      if (all) rm(updatedFile)
       else console.log('[vault] update: some approvers were not told · it will try again on the next start')
     })
   }
@@ -1342,30 +1342,30 @@ export async function runDaemon () {
    * en cuanto está identificado en el proxio: reintenta cada pocos segundos hasta que salió
    * en todos o se agotan los intentos. `alTerminar({ todos, alguno })`.
    */
-  function contarATodos (aviso, alTerminar) {
-    const hechos = new Set()
-    let intentos = 0
-    const intento = async () => {
-      intentos++
-      let falta = false
-      for (const p of perfilesEnMarcha()) {
-        if (hechos.has(p.id)) continue
-        if (!p.vault.isIdentified?.()) { falta = true; continue }
-        try { await p.vault.announceUpdate(aviso); hechos.add(p.id) } catch (e) {
-          falta = true
-          if (intentos === 1 || intentos === ANNOUNCE_TRIES) console.log(`[vault] update: profile ${p.name} could not tell its approvers yet: ${e?.message || e}`)
+  function tellEveryone (notice, onFinish) {
+    const completed = new Set()
+    let attempts = 0
+    const attempt = async () => {
+      attempts++
+      let missing = false
+      for (const p of runningProfiles()) {
+        if (completed.has(p.id)) continue
+        if (!p.vault.isIdentified?.()) { missing = true; continue }
+        try { await p.vault.announceUpdate(notice); completed.add(p.id) } catch (e) {
+          missing = true
+          if (attempts === 1 || attempts === ANNOUNCE_TRIES) console.log(`[vault] update: profile ${p.name} could not tell its approvers yet: ${e?.message || e}`)
         }
       }
-      if (!falta) return alTerminar({ todos: true, alguno: hechos.size > 0 })
-      if (intentos >= ANNOUNCE_TRIES) return alTerminar({ todos: false, alguno: hechos.size > 0 })
-      setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()
+      if (!missing) return onFinish({ todos: true, alguno: completed.size > 0 })
+      if (attempts >= ANNOUNCE_TRIES) return onFinish({ todos: false, alguno: completed.size > 0 })
+      setTimeout(attempt, ANNOUNCE_EVERY_MS).unref?.()
     }
-    setTimeout(intento, ANNOUNCE_EVERY_MS).unref?.()
+    setTimeout(attempt, ANNOUNCE_EVERY_MS).unref?.()
   }
-  anunciarActualizacion()
-  mirarRelease()
-  const relojRelease = setInterval(mirarRelease, CHECK_EVERY_MS)
-  relojRelease.unref?.()
+  announceUpdate()
+  checkRelease()
+  const releaseClock = setInterval(checkRelease, CHECK_EVERY_MS)
+  releaseClock.unref?.()
 
   console.log('[vault] servicio listo.')
   return mgr

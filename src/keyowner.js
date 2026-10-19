@@ -59,9 +59,9 @@ export function keyOwnerOf (dir) {
  */
 export function assertKeyOwnsDir (dir, pub) {
   if (!pub) return null            // sin llave todavía: no hay nada que comparar
-  const previo = keyOwnerOf(dir)
+  const prior = keyOwnerOf(dir)
 
-  if (previo && previo !== pub) {
+  if (prior && prior !== pub) {
     const e = new Error(
       'this data directory belongs to a DIFFERENT identity. Two vaults must never share one: ' +
       'each process needs its own directory, or one ends up running with the other\'s master key. ' +
@@ -71,7 +71,7 @@ export function assertKeyOwnsDir (dir, pub) {
     throw e
   }
 
-  if (!previo) {
+  if (!prior) {
     try {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
       fs.writeFileSync(path.join(dir, OWNER_FILE), JSON.stringify({ pub, at: Date.now() }, null, 2) + '\n', { mode: 0o600 })

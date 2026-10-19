@@ -18,7 +18,7 @@ test('la pantalla enseña TODOS los permisos de aparato que existen', async () =
   const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../src/tui/app.js', import.meta.url), 'utf8'))
   // Se lee el fuente porque `CAPS_ORDER` no se exporta: lo que importa no es la variable,
   // es que la lista curada de la pantalla no se quede corta.
-  const m = /const ORDEN = \[([^\]]*)\]/.exec(src)
+  const m = /const ORDER = \[([^\]]*)\]/.exec(src)
   assert.ok(m, 'la pantalla tiene que tener su orden curado')
   const orden = m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean)
   for (const cap of DEVICE_CAPS) {

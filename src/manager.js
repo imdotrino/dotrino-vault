@@ -102,8 +102,8 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       // perfiles: se le pasan las tres cosas que necesita y nada más — con qué números
       // deriva el admin, cómo se abre con la derivada, y si hay contraseña de admin puesta.
       secondaryParams: () => profiles.secondaryParams(id),
-      openWithSecondary: async (derivada) => {
-        const r = await profiles.openWithSecondary(id, derivada)
+      openWithSecondary: async (derived) => {
+        const r = await profiles.openWithSecondary(id, derived)
         // Igual que `unlock`: abrir el perfil no basta, hay que traer la maestra a memoria.
         // Sin esto el candado diría «abierto» y todo lo que la necesita fallaría en otro
         // sitio y por otro motivo, que es el fallo que ya se pagó una vez.
@@ -215,14 +215,14 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     let door
     try { door = profiles.addDoor(id, { prepared }) } catch (e) { if (fresh) profiles.dropFreshKey(id); throw e }
     if (fresh) {
-      const maquina = new Uint8Array(kekFor(profiles.dirOf(id)))
+      const machine = new Uint8Array(kekFor(profiles.dirOf(id)))
       try {
-        const r = await v.rekeySecrets?.(maquina, K)
+        const r = await v.rekeySecrets?.(machine, K)
         if (r?.rekeyed) log('[vault] secrets recovery copy moved from the machine key to the profile key')
       } catch (e) {
         // No se arrastra: abrir el perfil vuelve a intentarlo (`migrarRecuperacionALaFrase`).
         log('[vault] could not move the recovery copy to the profile key (it will be retried on unlock): %s', e.message)
-      } finally { maquina.fill(0) }
+      } finally { machine.fill(0) }
     }
     return door
   }

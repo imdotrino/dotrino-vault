@@ -130,7 +130,7 @@ test('el unlock absorbe, y renunciar no falla con la bóveda cerrada', () => {
   const i = src.indexOf('async takeMasterKey ()')
   const fin = src.indexOf('\n    },', i)
   assert.ok(i !== -1 && fin > i, 'se encuentra el cuerpo de takeMasterKey')
-  assert.match(src.slice(i, fin), /absorberSubacta\('unlock'\)/, 'abrir el perfil sella lo pendiente')
+  assert.match(src.slice(i, fin), /absorbSubacta\('unlock'\)/, 'abrir el perfil sella lo pendiente')
 
   const j = src.indexOf('async function handleRenounce')
   const cuerpo = src.slice(j, j + 5000)

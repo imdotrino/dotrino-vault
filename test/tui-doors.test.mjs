@@ -1,7 +1,7 @@
 /**
  * LA TUI Y LAS PUERTAS DEL PERFIL: ver con qué se abre cada bóveda, entrar a sus llaves, quitar
  * una con confirmación, y abrir sin llave enchufada. Sin daemon y sin YubiKey: lo que la llave
- * hace lo cubren `puertas.test.mjs` y `puertas.e2e.test.mjs`; aquí se prueba la pantalla.
+ * hace lo cubren `doors.test.mjs` y `doors.e2e.test.mjs`; aquí se prueba la pantalla.
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'

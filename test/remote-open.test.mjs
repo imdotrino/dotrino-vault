@@ -70,7 +70,7 @@ test('la derivada se borra de memoria pase lo que pase', () => {
   const src = leer('lib/src/core/vault.js')
   const i = src.indexOf('async open ({ nonce, enc, by })')
   const cuerpo = src.slice(i, i + 2000)
-  assert.match(cuerpo, /finally \{\s*derivada\.fill\(0\)/,
+  assert.match(cuerpo, /finally \{\s*derived\.fill\(0\)/,
     'vale tanto como la contraseña: no se queda en memoria ni cuando falla')
 })
 

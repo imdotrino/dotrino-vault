@@ -684,7 +684,7 @@ aislamiento entre perfiles, el freno de borrado del acta, los secretos de punta 
 punta y la precedencia del vault sobre el `.env`; también el render y el bilingüe de
 la TUI. **Tres son de extremo a extremo contra el proxy de verdad** y esperan el repo
 hermano en `../dotrino-proxy` (`secrets.e2e`, `multiprofile.e2e`,
-`pairing-cita.e2e`): no se saltan solos, así que sin ese repo al lado `npm test`
+`pairing-rendezvous.e2e`): no se saltan solos, así que sin ese repo al lado `npm test`
 falla.
 
 Etiquetar `vaultd-v<ver>` publica la imagen de Docker en GHCR. Etiquetar `v<ver>` lanza

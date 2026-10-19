@@ -7,7 +7,7 @@
  * cuentas que viven aquí decide por la máquina.
  *
  * Sin estado y sin red: recibe los perfiles en marcha y lo que cada uno sabe hacer, para
- * poder probarse sin daemon (`test/actualizar-todos-los-perfiles.test.mjs`).
+ * poder probarse sin daemon (`test/update-all-profiles.test.mjs`).
  */
 import fs from 'node:fs'
 import path from 'node:path'

@@ -18,7 +18,7 @@ import { ref, computed, watch, markRaw, onMounted, onBeforeUnmount, defineAsyncC
  *
  * Lo que sí se arregla es la VERSIÓN: iba por 0.50 con el `lib/` de este mismo repo en
  * 0.52, y nadie lo miraba porque el `package.json` no miente — dice exactamente lo viejo
- * que es. Ahora `test/web-pin-al-dia.test.mjs` no deja que se separen.
+ * que es. Ahora `test/web-pin-up-to-date.test.mjs` no deja que se separen.
  */
 import { buildSealedVar } from '@dotrino/vault/admin'
 // La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.

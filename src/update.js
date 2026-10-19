@@ -107,13 +107,13 @@ export async function installUserRelease (release, { binDir = userBinDir(), log 
   fs.rmSync(work, { recursive: true, force: true })
   fs.mkdirSync(work, { recursive: true, mode: 0o700 })
   try {
-    return await instalarDesde(work, pick, release, { binDir, log, fetchVerifiedImpl })
+    return await installFrom(work, pick, release, { binDir, log, fetchVerifiedImpl })
   } finally {
     try { fs.rmSync(work, { recursive: true, force: true }) } catch (_) {}
   }
 }
 
-async function instalarDesde (work, pick, release, { binDir, log, fetchVerifiedImpl }) {
+async function installFrom (work, pick, release, { binDir, log, fetchVerifiedImpl }) {
   const got = await fetchVerifiedImpl(pick.asset, { repo: REPO, product: 'dotrino-vault', version: VERSION, dir: work })
   if (!got.ok) return got
   log(`[vault] update: ${pick.asset.name} verified against its attestation`)
@@ -209,7 +209,7 @@ function spawnDetached (cmd, args, { log } = {}) {
 }
 
 /** Baja y verifica un archivo del release a una carpeta propia (que se vacía antes). */
-async function bajarVerificado (release, re, { log, fetchVerifiedImpl, work }) {
+async function downloadVerified (release, re, { log, fetchVerifiedImpl, work }) {
   const pick = pickAsset(release.assets, [{ kind: 'asset', re }])
   if (!pick.ok) return pick
   fs.rmSync(work, { recursive: true, force: true })
@@ -227,7 +227,7 @@ async function bajarVerificado (release, re, { log, fetchVerifiedImpl, work }) {
  */
 async function installWindows (release, { log, fetchVerifiedImpl, run }) {
   const work = updateWorkDir('win32')
-  const got = await bajarVerificado(release, /-windows-x64-setup\.exe$/, { log, fetchVerifiedImpl, work })
+  const got = await downloadVerified(release, /-windows-x64-setup\.exe$/, { log, fetchVerifiedImpl, work })
   if (!got.ok) return got
   run(got.file, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/FORCECLOSEAPPLICATIONS', `/LOG=${path.join(work, 'setup.log')}`], { log })
   log(`[vault] update: installer for ${release.version} started; it restarts the vault when it finishes`)
@@ -246,7 +246,7 @@ async function installMac (release, { log, fetchVerifiedImpl, run, execPath, pid
   const app = appBundleOf(execPath)
   if (!app) return { ok: false, code: 'CANNOT_SELF_UPDATE', reason: 'not running from Dotrino Vault.app' }
   const work = updateWorkDir('darwin')
-  const got = await bajarVerificado(release, /-macos-universal\.zip$/, { log, fetchVerifiedImpl, work })
+  const got = await downloadVerified(release, /-macos-universal\.zip$/, { log, fetchVerifiedImpl, work })
   if (!got.ok) return got
   const parent = path.dirname(app)
   const stage = path.join(parent, `.dotrino-vault-update-${process.pid}`)
@@ -255,15 +255,15 @@ async function installMac (release, { log, fetchVerifiedImpl, run, execPath, pid
     try { execFileSync('ditto', ['-x', '-k', got.file, stage], { stdio: ['ignore', 'ignore', 'pipe'] }) } catch (e) {
       return { ok: false, code: 'UNPACK_FAILED', reason: `could not unpack the release: ${String(e.stderr || e.message).trim().split('\n').slice(-2).join(' · ')}` }
     }
-    const nueva = path.join(stage, 'Dotrino Vault.app')
-    if (!fs.existsSync(path.join(nueva, 'Contents', 'MacOS', 'dotrino-vaultd'))) return { ok: false, code: 'BAD_ARCHIVE', reason: 'the archive has no Dotrino Vault.app inside' }
-    const vieja = `${app}.old-${process.pid}`
-    fs.renameSync(app, vieja)
-    try { fs.renameSync(nueva, app) } catch (e) {
-      fs.renameSync(vieja, app) // se deja como estaba
+    const newOne = path.join(stage, 'Dotrino Vault.app')
+    if (!fs.existsSync(path.join(newOne, 'Contents', 'MacOS', 'dotrino-vaultd'))) return { ok: false, code: 'BAD_ARCHIVE', reason: 'the archive has no Dotrino Vault.app inside' }
+    const oldOne = `${app}.old-${process.pid}`
+    fs.renameSync(app, oldOne)
+    try { fs.renameSync(newOne, app) } catch (e) {
+      fs.renameSync(oldOne, app) // se deja como estaba
       return { ok: false, code: 'SWAP_FAILED', reason: `could not put the new app in place: ${e.message}` }
     }
-    fs.rmSync(vieja, { recursive: true, force: true })
+    fs.rmSync(oldOne, { recursive: true, force: true })
   } finally {
     fs.rmSync(stage, { recursive: true, force: true })
     fs.rmSync(work, { recursive: true, force: true })

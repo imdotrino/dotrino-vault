@@ -1,7 +1,7 @@
 /**
  * REGRESIÓN: el enrolamiento canjea la cita UNA sola vez.
  *
- * La cita del proxio es de un solo uso — `pairing-cita.e2e` ya lo prueba del lado del
+ * La cita del proxio es de un solo uso — `pairing-rendezvous.e2e` ya lo prueba del lado del
  * protocolo (`assert.equal(other.ok, false, 'la cita tiene que quemarse al usarse')`).
  * Lo que faltaba probar es que el CLIENTE lo respete.
  *

@@ -82,11 +82,11 @@ const D = '\x1b[2m' // apagado: para el dato que acompaña sin competir con el n
  * En español, como el resto de esta CLI: con el idioma del sistema salía «Jul 29, 2026»
  * en medio de una frase en español, que es peor que cualquiera de los dos por separado.
  */
-function fechaHora (ms) {
+function dateTime (ms) {
   try { return new Date(ms).toLocaleString('es', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
   catch (_) { return '' }
 }
-function fechaCorta (ms) {
+function shortDate (ms) {
   try { return new Date(ms).toLocaleDateString('es', { year: 'numeric', month: 'short', day: 'numeric' }) }
   catch (_) { return '' }
 }
@@ -137,8 +137,8 @@ function requireDaemon () {
 const deviceIdOf = keyLabel
 
 /** Lo que dijo un aprobador sobre sus avisos, para enseñarlo. No decide nada. */
-function avisosTxt (notifiedAt) {
-  return notifiedAt ? `dijo que le llegan los avisos (${fechaCorta(notifiedAt)})` : 'no ha dicho que le lleguen los avisos'
+function noticesText (notifiedAt) {
+  return notifiedAt ? `dijo que le llegan los avisos (${shortDate(notifiedAt)})` : 'no ha dicho que le lleguen los avisos'
 }
 
 function cmdStatus () {
@@ -170,15 +170,15 @@ function cmdStatus () {
     const u = s.updateAsk
     if (u.result === 'pending') {
       console.log('    se pidió permiso para instalar la %s el %s y está esperando respuesta hasta el %s · mira Pedidos en tu teléfono',
-        u.version, fechaHora(u.askedAt), fechaHora(u.askedAt + 24 * 60 * 60 * 1000))
+        u.version, dateTime(u.askedAt), dateTime(u.askedAt + 24 * 60 * 60 * 1000))
     } else {
       console.log('    se pidió permiso para instalar la %s el %s y no se aprobó: no se vuelve a pedir · instálala con:  dotrino-vault update',
-        u.version, fechaHora(u.askedAt))
+        u.version, dateTime(u.askedAt))
     }
     // A QUIÉN SE LE PIDIÓ, y si dijo que le llegan los avisos: el que no lo ha dicho es el
     // primer sitio donde mirar cuando nadie contesta.
     for (const a of s.updateAsk.approvers || []) {
-      console.log('      %s  %s%s · %s', a.id, a.label || '(sin nombre)', a.profile ? ` [${a.profile}]` : '', avisosTxt(a.notifiedAt))
+      console.log('      %s  %s%s · %s', a.id, a.label || '(sin nombre)', a.profile ? ` [${a.profile}]` : '', noticesText(a.notifiedAt))
     }
   }
   // CÓMO SE ACTUALIZA. Va siempre, también al día: es un ajuste y se mira aquí.
@@ -205,8 +205,8 @@ function describeProfile (p) {
   // igual que «no hay nada que aprobar»: el teléfono no timbra y no hay nada que mirar.
   // `online` no viaja en las fotos de un daemon anterior, así que solo se enseña cuando el
   // dato está y dice que no.
-  const red = p.online === false ? `  ${B}⚠ sin proxio (nadie puede alcanzarla)${Z}` : ''
-  return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}${red}`
+  const network = p.online === false ? `  ${B}⚠ sin proxio (nadie puede alcanzarla)${Z}` : ''
+  return `${B}${p.name || '(sin nombre)'}${Z}  ${p.id}  ${p.fingerprint || '—'}  ${lock}${network}`
 }
 
 /** Con qué se abre un perfil, dicho corto: «contraseña o YubiKey (toque)». */
@@ -263,11 +263,11 @@ async function cmdPair (args = []) {
   // emparejaba igual y en silencio, y el aparato entraba llamándose «cli»; el error se
   // veía media hora después mirando el acta, si es que se miraba. Una opción que tecleas
   // y no hace nada es un fallo mudo, que es justo lo que aquí no se acepta.
-  const CONOCIDAS = new Set(['--admin', '--adopt', '--kms', '--name', '--new-account', '--quiet', '--scope', '--service', '--save', '--profile'])
-  const rara = args.find((a) => a.startsWith('--') && !CONOCIDAS.has(a))
-  if (rara) {
-    console.error('no existe la opción %s', rara)
-    console.error('las de `pair` son: %s', [...CONOCIDAS].join(' '))
+  const KNOWN = new Set(['--admin', '--adopt', '--kms', '--name', '--new-account', '--quiet', '--scope', '--service', '--save', '--profile'])
+  const odd = args.find((a) => a.startsWith('--') && !KNOWN.has(a))
+  if (odd) {
+    console.error('no existe la opción %s', odd)
+    console.error('las de `pair` son: %s', [...KNOWN].join(' '))
     process.exit(2)
   }
   const nIdx = args.indexOf('--name')
@@ -331,10 +331,10 @@ async function cmdPair (args = []) {
   // entra a ella; las demás no se tocan. En la TUI esto es una pregunta con sus
   // opciones; en la CLI es una bandera, para que siga sirviendo en un script.
   // `--name` lleva su valor detrás: no puede confundirse con el nombre de la cuenta.
-  const consumido = (i) => nIdx >= 0 && i === nIdx + 1
+  const consumed = (i) => nIdx >= 0 && i === nIdx + 1
   const naIdx = args.findIndex((a) => a === '--new-account')
   if (naIdx >= 0) {
-    const next = consumido(naIdx + 1) ? null : args[naIdx + 1]
+    const next = consumed(naIdx + 1) ? null : args[naIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta ${new Date().toISOString().slice(0, 10)}`
     const d = await profileRequest('add', { name, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
@@ -349,7 +349,7 @@ async function cmdPair (args = []) {
   const adIdx = args.findIndex((a) => a === '--adopt')
   const adopt = adIdx >= 0
   if (adopt) {
-    const next = consumido(adIdx + 1) ? null : args[adIdx + 1]
+    const next = consumed(adIdx + 1) ? null : args[adIdx + 1]
     const name = (next && !next.startsWith('-')) ? next : `cuenta del dispositivo`
     const d = await profileRequest('add', { name, adopt: true, ...(pairKek ? { kek: pairKek } : {}) })
     if (d.error) { console.error('%s', d.error); process.exit(1) }
@@ -472,15 +472,15 @@ async function cmdJoin (rest) {
     }
   }
   // Lo que queda tras quitar las banderas Y SUS VALORES es la invitación.
-  const consumidos = new Set()
-  for (const [i, v] of [[nIdx, name], [kIdx, kek]]) if (i >= 0) { consumidos.add(i); if (v != null) consumidos.add(i + 1) }
-  const texto = args.filter((a, i) => !consumidos.has(i) && !a.startsWith('-')).join(' ').trim()
-  if (!texto) {
+  const consumedOnes = new Set()
+  for (const [i, v] of [[nIdx, name], [kIdx, kek]]) if (i >= 0) { consumedOnes.add(i); if (v != null) consumedOnes.add(i + 1) }
+  const text = args.filter((a, i) => !consumedOnes.has(i) && !a.startsWith('-')).join(' ').trim()
+  if (!text) {
     console.error('uso: dotrino-vault join <invitación> [--name <n>] [--kms <config.json>]')
     console.error('     (la invitación es lo que imprime «pair» en la otra bóveda)')
     process.exit(2)
   }
-  const qr = parseInvite(texto)
+  const qr = parseInvite(text)
   // QUÉ HACE FALTA DE VERDAD: el nonce de la sesión (`sn`) y una forma de alcanzar a la
   // otra bóveda — la CITA del proxio (`conn`) en la invitación corta, o su llave (`iss`)
   // en la larga. Quien la consume es `enrollDevice`, que sabe canjear la cita.
@@ -502,13 +502,13 @@ async function cmdJoin (rest) {
   sendSignal(s.pid, 'SIGUSR2')
 
   console.log('Entrando en la cuenta de la otra bóveda…')
-  let visto = null
+  let seen = null
   for (let i = 0; i < 900; i++) {          // hasta 3 min: hay un humano tipeando al otro lado
     await sleep(200)
     const d = ipcRead(res, null)
     if (!d || ('req' in d && d.req !== reqId)) continue
-    if (d.code && d.code !== visto) {
-      visto = d.code
+    if (d.code && d.code !== seen) {
+      seen = d.code
       console.log('\n  Tipea este código en la OTRA bóveda:   dotrino-vault approve %s\n', d.code)
     }
     if (d.state === 'done') {
@@ -633,11 +633,11 @@ async function cmdMembers () {
   console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, profileId, record.seq)
   for (const m of record.members) {
     const who = m.label || m.id
-    const bloqueo = (record.blocked || []).find((b) => b.pub === m.pub)
+    const lockout = (record.blocked || []).find((b) => b.pub === m.pub)
     const marks = [
       // BLOQUEADO va primero y resaltado: es lo que hay que ver antes que ningún permiso,
       // porque mientras dure ningún permiso cuenta.
-      bloqueo ? `${B}BLOQUEADO${Z} desde el ${fechaCorta(bloqueo.since)} (dotrino-vault unblock ${m.id})` : null,
+      lockout ? `${B}BLOQUEADO${Z} desde el ${shortDate(lockout.since)} (dotrino-vault unblock ${m.id})` : null,
       // Ya no hay UN master: la marca dice quién puede sellar, y pueden ser varios. El
       // permiso también sale abajo en la lista, pero aquí se ve de un vistazo — que es
       // justo lo que se busca al mirar quién es quién.
@@ -652,7 +652,7 @@ async function cmdMembers () {
     // es lo que deja reconocer cuál es cuál y ver si hay uno que no recuerdas haber
     // conectado. El acta ya la guardaba (`addedAt`); solo no se enseñaba.
     console.log('  %s  %s%s%s\n      %s', m.id, who,
-      m.addedAt ? `  ${D}· conectado el ${fechaCorta(m.addedAt)}${Z}` : '',
+      m.addedAt ? `  ${D}· conectado el ${shortDate(m.addedAt)}${Z}` : '',
       marks.length ? '  [' + marks.join(' · ') + ']' : '', caps)
     // Un servicio SIN llave de cifrado no puede leer ninguna variable privada: van
     // selladas a esa llave. Se dice aquí, junto a él, porque es el único sitio donde
@@ -663,7 +663,7 @@ async function cmdMembers () {
     // variables» cuando no tiene ninguna que leer.
     // SI LE LLEGAN LOS AVISOS, en quien aprueba. No cambia a quién se le pide —se le pide a
     // todos—: es para ver a cuál no le suena el pedido.
-    if (m.caps.includes('approve') && 'notifiedAt' in m) console.log('      %s%s%s', D, avisosTxt(m.notifiedAt), Z)
+    if (m.caps.includes('approve') && 'notifiedAt' in m) console.log('      %s%s%s', D, noticesText(m.notifiedAt), Z)
     if (m.cn && m.cn !== COMM_CN && !m.canSeal) console.log('      %ssin llave de cifrado: NO puede leer sus variables%s', R, Z)
     // QUÉ CORRE, y si cuadra con esta bóveda (CONVENCIONES §14). Sin esto una
     // incompatibilidad de versiones se ve como que ese aparato «no responde», que es el
@@ -936,10 +936,10 @@ function plaintextFilesIn (d) {
   return names.filter((n) => {
     if (OK.has(n) || n.endsWith('.tmp')) return false
     try {
-      const texto = fs.readFileSync(path.join(d, n), 'utf8')
-      if (!texto.trim()) return false
+      const text = fs.readFileSync(path.join(d, n), 'utf8')
+      if (!text.trim()) return false
       // La bitácora va cifrada línea a línea: basta con mirar la primera.
-      return !(n === 'activity.log' ? (texto.split('\n')[0] || '') : texto).startsWith('DOTRINO-ATREST-v1.')
+      return !(n === 'activity.log' ? (text.split('\n')[0] || '') : text).startsWith('DOTRINO-ATREST-v1.')
     } catch (_) { return false }
   })
 }
@@ -953,7 +953,7 @@ function cmdAtrest (rest) {
 
   if (sub === 'status') {
     const cfg = readKekConfig(dir)
-    const archivos = encryptedFilesIn(dir)
+    const files = encryptedFilesIn(dir)
     if (cfg.provider === 'machine') {
       console.log('Clave del disco: derivada de ESTA máquina (machine-id + salt).')
       console.log('  Aviso: el material vive en el mismo disco que los datos, así que una')
@@ -962,7 +962,7 @@ function cmdAtrest (rest) {
       console.log('Clave del disco: envuelta por ' + (cfg.label || cfg.wrap?.cmd || 'un programa externo') + '.')
       console.log('  Una copia del disco NO basta: hace falta además poder desenvolverla.')
     }
-    console.log('Archivos cifrados: ' + (archivos.length ? archivos.join(', ') : 'ninguno todavía'))
+    console.log('Archivos cifrados: ' + (files.length ? files.join(', ') : 'ninguno todavía'))
 
     // Y LO QUE NO LO ESTÁ, que es la mitad que faltaba: listar lo cifrado no dice nada de
     // lo que quedó fuera. Así apareció `profiles.json.pre041.bak` —un respaldo que una
@@ -981,23 +981,23 @@ function cmdAtrest (rest) {
     // ES POR PERFIL, y eso hay que verlo: en la misma bóveda un perfil puede ir con KMS
     // y el de al lado con la clave de la máquina. Sin esta lista, «lo puse en el KMS» es
     // una creencia y no un hecho comprobable.
-    const otros = (readState().profiles || [])
-    if (otros.length > 1) {
+    const others = (readState().profiles || [])
+    if (others.length > 1) {
       console.log('')
       console.log('Los demás perfiles de esta bóveda (cada uno lleva su propia clave):')
-      for (const q of otros) {
+      for (const q of others) {
         let pv = 'machine'
         try { pv = readKekConfig(path.join(vaultRoot, 'p', q.id)).provider } catch (_) { pv = '?' }
-        const marca = q.current ? ' (activo)' : ''
-        console.log('  ' + (q.name || q.id) + marca + ': ' + (pv === 'machine' ? 'esta máquina' : 'programa externo / KMS'))
+        const mark = q.current ? ' (activo)' : ''
+        console.log('  ' + (q.name || q.id) + mark + ': ' + (pv === 'machine' ? 'esta máquina' : 'programa externo / KMS'))
       }
     }
     // El REGISTRO de perfiles vive en la raíz y tiene su propia clave: poner un perfil en
     // el KMS no lo cubre. Dentro está el verificador del candado y la lista de perfiles,
     // no el contenido de ninguno — pero conviene no creer que ya está protegido.
-    let raiz = 'machine'
-    try { raiz = readKekConfig(vaultRoot).provider } catch (_) {}
-    if (raiz === 'machine' && cfg.provider !== 'machine') {
+    let root = 'machine'
+    try { root = readKekConfig(vaultRoot).provider } catch (_) {}
+    if (root === 'machine' && cfg.provider !== 'machine') {
       console.log('')
       console.log('Ojo: el registro de perfiles (la raíz de la bóveda) sigue con la clave de')
       console.log('esta máquina. No guarda el contenido de ningún perfil, pero no está en el KMS.')
@@ -1037,8 +1037,8 @@ function cmdAtrest (rest) {
     // dejar creer que sí es peor que no ofrecerlo. Su maestra se escribió bajo la clave
     // vieja; cualquier copia del disco anterior a este momento la sigue abriendo, y eso
     // no hay recifrado que lo deshaga. Lo que sí sirve está en el mensaje.
-    const tieneIdentidad = fs.existsSync(path.join(dir, 'identity.json'))
-    if (tieneIdentidad && cfg.provider !== 'machine' && !rest.includes('--anyway')) {
+    const hasIdentity = fs.existsSync(path.join(dir, 'identity.json'))
+    if (hasIdentity && cfg.provider !== 'machine' && !rest.includes('--anyway')) {
       console.error('Este perfil ya tiene identidad, así que recifrarlo NO le da raíz en el KMS.')
       console.error('')
       console.error('Su maestra se generó y se escribió bajo la clave de esta máquina. Una copia')
@@ -1123,13 +1123,13 @@ function verifyActivity (lines) {
   return { ok: true, checked, unchained, last: seq }
 }
 
-function cmdActivity (n = 30, { verify = false, exportar = false } = {}) {
+function cmdActivity (n = 30, { verify = false, exportar: doExport = false } = {}) {
   const dir = profileDir()
   const lines = readActivity(dir)
   if (!lines.length) {
     console.log('Sin actividad registrada todavía (o el servicio es anterior a 0.1.10).'); return
   }
-  if (exportar) { for (const l of lines) console.log(l); return }
+  if (doExport) { for (const l of lines) console.log(l); return }
   if (verify) {
     const r = verifyActivity(lines)
     if (!r.ok) { console.error(`${R}CADENA ROTA${Z} en la entrada #${r.at}: ${r.why}`); process.exit(1) }
@@ -1323,7 +1323,7 @@ async function cmdSecret (rest) {
       : (d.ns?.[ns] || [])
     const missing = items.filter((it) => !has(list, it.key)).map((it) => it.key)
     if (missing.length) {
-      if (d?.secretError) return noSeAplico(d)
+      if (d?.secretError) return notApplied(d)
       console.error('El daemon no guardó: %s (revisa: dotrino-vault logs)', missing.join(', '))
       process.exit(1)
     }
@@ -1362,7 +1362,7 @@ async function cmdSecret (rest) {
    * único que se podía decir era «revisa los logs», que no ayuda a quien acaba de
    * escribir mal la contraseña.
    */
-  const noSeAplico = (d) => {
+  const notApplied = (d) => {
     if (d?.secretError?.code === 'WRONG_PASSWORD') console.error('Contraseña incorrecta.')
     else if (d?.secretError?.error) console.error('No se aplicó: %s', d.secretError.error)
     else console.error('El daemon no aplicó el cambio (revisa: dotrino-vault logs)')
@@ -1468,7 +1468,7 @@ async function cmdSecret (rest) {
     const d = await signalAndWaitList()
     const keys = (Array.isArray(d.dev) ? d.dev : []).find((x) => x.pub === m.pub)?.keys || []
     const ok = op === 'rm' ? !has(keys, key) : has(keys, key)
-    if (!ok) return noSeAplico(d)
+    if (!ok) return notApplied(d)
     if (op === 'rm') console.log('Variable borrada: %s/%s', m.id, key)
     else console.log('Variable guardada: %s/%s%s', m.id, key, (keys.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
@@ -1508,7 +1508,7 @@ async function cmdSecret (rest) {
     const d = await signalAndWaitList()
     const list = d.ns?.[ns] || []
     const ok = sub === 'rm' ? !has(list, key) : has(list, key)
-    if (!ok) return noSeAplico(d)
+    if (!ok) return notApplied(d)
     if (sub === 'rm') console.log('Secreto borrado: %s/%s', ns, key)
     else console.log('Secreto guardado: %s/%s%s', ns, key, (list.find((x) => x.key === key)?.public) ? '   (pública)' : '')
     return
@@ -1682,11 +1682,11 @@ async function cmdLogins (rest) {
       const { loginAddress } = await import('../lib/src/passwordLogins.js')
       console.log('Inicios de sesión con contraseña: %d', logins.length)
       for (const l of logins) {
-        const espera = l.blockedUntil > Date.now() ? `  ${R}espera ${Math.ceil((l.blockedUntil - Date.now()) / 1000)} s${Z}` : ''
+        const wait = l.blockedUntil > Date.now() ? `  ${R}espera ${Math.ceil((l.blockedUntil - Date.now()) / 1000)} s${Z}` : ''
         console.log('  · %s%s%s  %s%s  creado %s%s', B, loginAddress(l.user, fingerprint), Z, l.deviceId || '????-????',
-          l.label ? '  «' + l.label + '»' : '', fechaCorta(l.createdAt), espera)
+          l.label ? '  «' + l.label + '»' : '', shortDate(l.createdAt), wait)
         for (const s of l.sessions || []) {
-          console.log('      %sabierto%s %s  %s  usado %s', D, Z, s.sid.slice(0, 8), s.label || '(sin nombre)', fechaCorta(s.lastUsedAt))
+          console.log('      %sabierto%s %s  %s  usado %s', D, Z, s.sid.slice(0, 8), s.label || '(sin nombre)', shortDate(s.lastUsedAt))
         }
       }
       console.log('\nCerrar una sesión:  dotrino-vault logins close <usuario> [sid]')
@@ -1698,14 +1698,14 @@ async function cmdLogins (rest) {
       // siempre (firma, lee, guarda); lo demás es el nombre del equipo. Antes el texto de
       // ayuda lo anunciaba y aquí se juntaba todo como nombre.
       const caps = new Set(['sign', 'read', 'store'])
-      const nombre = []
+      const name = []
       for (const a of args.slice(1)) {
-        if (a[0] !== '+' && a[0] !== '-') { nombre.push(a); continue }
+        if (a[0] !== '+' && a[0] !== '-') { name.push(a); continue }
         const cap = CAP_BY_WORD[a.slice(1).toLowerCase()]
         if (!cap) { console.error('permiso no reconocido: %s', a); process.exit(2) }
         if (a[0] === '+') caps.add(cap); else caps.delete(cap)
       }
-      const label = nombre.join(' ').trim() || 'equipo prestado'
+      const label = name.join(' ').trim() || 'equipo prestado'
       const { createPasswordLogin } = await import('../lib/src/passwordLogins.js')
       const password = await askNewPassword(user)
       const r = await createPasswordLogin({
@@ -1751,12 +1751,12 @@ async function cmdLogins (rest) {
         return
       }
       const { logins } = await loginsRequest('list')
-      const fila = logins.find((x) => x.user === user)
-      if (!fila) { console.error('No hay ningún inicio de sesión con ese usuario. Míralos con: dotrino-vault logins'); process.exit(1) }
-      const abiertas = fila.sessions || []
-      if (!abiertas.length) { console.log('No tiene ninguna sesión abierta.'); return }
-      for (const s of abiertas) await loginsRequest('close', { user, sid: s.sid })
-      console.log('Cerradas %d sesión(es) de %s. Para entrar otra vez hace falta la contraseña.', abiertas.length, user)
+      const row = logins.find((x) => x.user === user)
+      if (!row) { console.error('No hay ningún inicio de sesión con ese usuario. Míralos con: dotrino-vault logins'); process.exit(1) }
+      const opened = row.sessions || []
+      if (!opened.length) { console.log('No tiene ninguna sesión abierta.'); return }
+      for (const s of opened) await loginsRequest('close', { user, sid: s.sid })
+      console.log('Cerradas %d sesión(es) de %s. Para entrar otra vez hace falta la contraseña.', opened.length, user)
       return
     }
     case 'unblock': {
@@ -1843,7 +1843,7 @@ async function cmdUpdate (args = []) {
     return
   }
   const { latestRelease, assetFor, download, verifyArtifact, isNewer, isUserInstall, installUserRelease, installKind, installRelease } = await import('./update.js')
-  const soloMirar = args.includes('--check')
+  const lookOnly = args.includes('--check')
 
   process.stdout.write('Mirando qué hay publicado… ')
   const r = await latestRelease()
@@ -1859,7 +1859,7 @@ async function cmdUpdate (args = []) {
     return
   }
   console.log('%sHay %s y esta es la %s.%s', B, r.version, VERSION, Z)
-  if (soloMirar) { console.log('Tráela con:  dotrino-vault update'); return }
+  if (lookOnly) { console.log('Tráela con:  dotrino-vault update'); return }
 
   // WINDOWS Y macOS: el instalador nuevo (Windows) o la app entera (macOS), verificados.
   const kind = installKind()
@@ -2023,11 +2023,11 @@ async function cmdProfile (rest) {
           console.error('No se creó ningún perfil.'); process.exit(1)
         }
       }
-      const creado = reportProfiles(await profileRequest('add', { name, ...(kek ? { kek } : {}) }))
+      const created = reportProfiles(await profileRequest('add', { name, ...(kek ? { kek } : {}) }))
       // CON LA LLAVE DESDE EL PRINCIPIO: el perfil nace sin candado y se le pone la puerta en
       // el acto, así que su maestra solo pasa un instante bajo la llave de la máquina.
       if (args.includes('--key')) {
-        PROFILE = creado.id
+        PROFILE = created.id
         console.log('')
         await cmdProfileKey(['add', ...args.filter((a) => a === '--no-touch' || a === '--with-password')])
       }
@@ -2243,8 +2243,8 @@ async function cmdProfileKey (args) {
   const out = await profileRequest('door-add', { spec: { ...spec, secret: b64s(spec.secret) } })
   spec.secret.fill(0)
   reportProfiles(out)
-  const tiene = (out.profiles || []).find((x) => x.id === p.id)
-  if (tiene) console.log('Ahora se abre con: %s', doorsSummary(tiene))
+  const has = (out.profiles || []).find((x) => x.id === p.id)
+  if (has) console.log('Ahora se abre con: %s', doorsSummary(has))
   if (spec.kind === 'chalresp') console.log('Sin toque: con la llave enchufada, cualquier programa de esta máquina puede abrirlo. Desenchúfala cuando no la uses.')
   console.log('Registra una segunda llave de repuesto, o deja también una contraseña: perder la única puerta es perder el perfil.')
 }
@@ -2681,8 +2681,8 @@ async function cmdReplica (args) {
   const dir = process.env.DOTRINO_REPLICA_DIR || replicaDir()
 
   if (sub === 'enroll') {
-    const invitacion = args.slice(1).filter((a) => !a.startsWith('-')).join(' ')
-    if (!invitacion) {
+    const invitation = args.slice(1).filter((a) => !a.startsWith('-')).join(' ')
+    if (!invitation) {
       console.error('uso: dotrino-vault replica enroll "<invitación>"')
       console.error('     la invitación sale de la bóveda:  dotrino-vault pair --scope replica --quiet')
       process.exit(2)
@@ -2693,7 +2693,7 @@ async function cmdReplica (args) {
     // leer. Regla del dueño: «recibirá todos los sobres que se generen, ningún sobre
     // firmado para él».
     const r = await enrollWithVault({
-      qr: invitacion,
+      qr: invitation,
       label: args.includes('--label') ? args[args.indexOf('--label') + 1] : 'replicador',
       expectedScope: REPLICA_SCOPE,
       withEncKey: false,
@@ -2741,7 +2741,7 @@ async function cmdReplica (args) {
 }
 
 /** «hace 3 días», «hace 5 horas»: para decir desde cuándo espera algo. */
-function hace (ms) {
+function ago (ms) {
   const h = Math.max(0, Math.floor((Date.now() - ms) / 3600000))
   if (h < 1) return 'hace menos de una hora'
   if (h < 48) return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`

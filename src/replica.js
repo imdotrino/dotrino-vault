@@ -54,11 +54,11 @@ const STATE = 'state.json'
  *
  * Las envolturas se SUMAN: son de aparatos distintos y ninguna estorba a otra.
  */
-export function mergeBundle (viejo, nuevo) {
-  if (!viejo) return nuevo
-  if (!nuevo) return viejo
-  const entries = { ...(viejo.entries || {}) }
-  for (const [k, e] of Object.entries(nuevo.entries || {})) {
+export function mergeBundle (old, newer) {
+  if (!old) return newer
+  if (!newer) return old
+  const entries = { ...(old.entries || {}) }
+  for (const [k, e] of Object.entries(newer.entries || {})) {
     const a = entries[k]
     if (!a) { entries[k] = e; continue }
     const ga = a.gen || 0
@@ -66,13 +66,13 @@ export function mergeBundle (viejo, nuevo) {
     if (gb > ga) entries[k] = e
     else if (gb === ga && String(e.e?.ct ?? e.pubv ?? '') < String(a.e?.ct ?? a.pubv ?? '')) entries[k] = e
   }
-  const wraps = mergeWraps(viejo.wraps, nuevo.wraps)
+  const wraps = mergeWraps(old.wraps, newer.wraps)
   // `ns`/`dev` son la envoltura VIGENTE de cada lado, y salen de la lista ya mezclada: con
   // `{...viejo, ...nuevo}` se quedaba la del empujón aunque su generación fuera menor, o
   // sea justo lo contrario de lo que decide la lista.
   return {
-    ...viejo,
-    ...nuevo,
+    ...old,
+    ...newer,
     entries,
     wraps,
     ns: wraps.ns[wraps.ns.length - 1] || null,
@@ -113,17 +113,17 @@ export const bundleKey = (ns, devicePub) => `${ns} ${devicePub}`
 export function openReplicaStore (dir) {
   fs.mkdirSync(dir, { recursive: true })
   const atRest = atRestFor(dir)
-  const leer = (f, d) => readJson(path.join(dir, f), d, atRest)
-  const escribir = (f, v) => writeJson(path.join(dir, f), v, atRest)
+  const read = (f, d) => readJson(path.join(dir, f), d, atRest)
+  const write = (f, v) => writeJson(path.join(dir, f), v, atRest)
 
-  let link = leer(LINK, null)
-  let state = leer(STATE, null) || { seq: 0, acta: null, bundles: {} }
+  let link = read(LINK, null)
+  let state = read(STATE, null) || { seq: 0, acta: null, bundles: {} }
 
   return {
     get link () { return link },
     get acta () { return state.acta },
     get seq () { return state.seq },
-    setLink (v) { link = v; escribir(LINK, v) },
+    setLink (v) { link = v; write(LINK, v) },
     bundleFor (ns, devicePub) { return state.bundles[bundleKey(ns, devicePub)] || null },
     get bundles () { return Object.keys(state.bundles).length },
     /**
@@ -134,10 +134,10 @@ export function openReplicaStore (dir) {
      */
     apply ({ seq, acta, bundles }) {
       if (typeof seq !== 'number' || seq < state.seq) return false
-      const mezclados = { ...state.bundles }
-      for (const [k, nuevo] of Object.entries(bundles || {})) mezclados[k] = mergeBundle(mezclados[k], nuevo)
-      state = { seq, acta: acta || state.acta, bundles: mezclados }
-      escribir(STATE, state)
+      const mixed = { ...state.bundles }
+      for (const [k, newer] of Object.entries(bundles || {})) mixed[k] = mergeBundle(mixed[k], newer)
+      state = { seq, acta: acta || state.acta, bundles: mixed }
+      write(STATE, state)
       return true
     }
   }
@@ -158,7 +158,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   const url = proxyUrl || link.proxy || process.env.PROXY_URL || 'wss://proxy.dotrino.com'
   const id = await keyLabel(link.device.publickey)
 
-  const firmar = (data) => signWithDevice({ privateJwk: link.device.privateJwk, data })
+  const sign = (data) => signWithDevice({ privateJwk: link.device.privateJwk, data })
   // CONTESTAR es por la CONEXIÓN (`send`) y no por la llave (`sendByPubkey`): `from` es el
   // identificador de quien escribe en el proxio, no su pubkey. Mandar por llave a un `from`
   // no falla — se va a la nada, y quien preguntó se queda esperando el plazo entero.
@@ -168,7 +168,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   const client = new WebSocketProxyClient({ url })
   await client.connect()
   // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
-  await client.identifyAs({ publickey: link.device.publickey, sign: (d) => firmar(d) })
+  await client.identifyAs({ publickey: link.device.publickey, sign: (d) => sign(d) })
   log(`[replica] ${id} · connected to ${url}`)
   log(`[replica] record #${store.seq}${store.acta ? '' : ' · no record yet: waiting for the vault'}`)
 
@@ -197,7 +197,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
     }
     log(`[replica] record #${store.seq} · ${Object.keys(body.bundles || {}).length} bundle(s) stored`)
     const ack = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
-    client.send(from, { type: MSG.REPLICA_ACK, body: ack, signature: (await firmar(ack)).signature })
+    client.send(from, { type: MSG.REPLICA_ACK, body: ack, signature: (await sign(ack)).signature })
   }
 
   /**
@@ -257,8 +257,8 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
       log(`[replica] the record does not let ${(await pubkeyId(chk.device)).slice(0, 8)} read "${ns}": refused`)
       return no(`unauthorized: cn — the record does not recognise this member as the "${ns}" service`)
     }
-    const quien = chk.device
-    const b = store.bundleFor(ns, quien)
+    const who = chk.device
+    const b = store.bundleFor(ns, who)
     if (!b) {
       log(`[replica] asked for "${ns}" and has nothing stored for that device`)
       return client.send(from, {
@@ -270,7 +270,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
     const body = { op: 'secrets.result', ns, enc, ts: Date.now() }
     // `by` y no `seq`: no tenemos la llave de sellado y no debemos tenerla. Quien recibe
     // mira el acta, ve que a esta llave le reconoce `replica`, y acepta.
-    const { signature } = await firmar(body)
+    const { signature } = await sign(body)
     client.send(from, { type: MSG.SECRETS_RESULT, body, seal: { by: link.device.publickey, sig: signature } })
     log(`[replica] served "${ns}" from record #${store.seq}`)
   }
@@ -295,9 +295,9 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, log = console.
   // conexión: si la bóveda va por delante, contesta con un empujón. Sin esto, un
   // replicador recién encendido se queda vacío hasta que alguien cambie algo — y el
   // empujón del propio enrolamiento se manda cuando este proceso todavía no existe.
-  const saludo = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
+  const greeting = { op: 'replica.ack', publickey: link.device.publickey, seq: store.seq, ts: Date.now() }
   try {
-    client.sendByPubkey(link.iss, { type: MSG.REPLICA_ACK, body: saludo, signature: (await firmar(saludo)).signature })
+    client.sendByPubkey(link.iss, { type: MSG.REPLICA_ACK, body: greeting, signature: (await sign(greeting)).signature })
   } catch (e) { log('[replica] could not say hello to the vault: ' + e.message) }
 
   log('[replica] ready · it hands out what the vault already signed, and nothing else')

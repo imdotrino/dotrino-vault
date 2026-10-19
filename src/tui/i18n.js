@@ -297,7 +297,7 @@ const es = {
   // en color, porque una versión que no cuadra es lo que hace que ese aparato parezca
   // apagado cuando en realidad no os entendéis.
   runs: 'corre',
-  mismatch: (producto, version) => `⚠ ${producto} ${version} no cuadra`,
+  mismatch: (product, version) => `⚠ ${product} ${version} no cuadra`,
   thisVault: 'esta bóveda (manda ella)',
   cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
   revokedCount: (n) => `  Revocados: ${n}`,

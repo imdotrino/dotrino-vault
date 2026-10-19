@@ -416,8 +416,8 @@ function settingsRows (st, t) {
     rows.push({ text: t.muted('   ' + i.settingsUnreadableHint), sel: false })
     rows.push({ text: '', sel: false })
   }
-  const frase = cfg.error ? i.settingUpdateUnknown : cfg.updateApproval ? i.settingUpdateAsks : i.settingUpdateAlone
-  rows.push({ text: ` ${t.bold(frase)}   ${t.accent(i.settingChange)}`, sel: true, meta: { setting: 'updateApproval' } })
+  const phrase = cfg.error ? i.settingUpdateUnknown : cfg.updateApproval ? i.settingUpdateAsks : i.settingUpdateAlone
+  rows.push({ text: ` ${t.bold(phrase)}   ${t.accent(i.settingChange)}`, sel: true, meta: { setting: 'updateApproval' } })
   rows.push({ text: t.muted('   ' + i.settingUpdateHint1), sel: false })
   rows.push({ text: t.muted('   ' + i.settingUpdateHint2), sel: false })
   // ARRANCAR AL INICIAR SESIÓN. En Linux lo deja la unidad de systemd; en Windows y macOS no
@@ -495,19 +495,19 @@ function deviceRows (st, t) {
   }
   // PERMISOS SIN GUARDAR en uno o varios aparatos: se dice ARRIBA y se marca cada uno con
   // `*`, porque G los firma todos juntos y hay que ver qué entra antes de pulsarlo.
-  const borrador = draftChanges(st)
-  const conCambios = new Set(borrador.map((c) => c.pub))
-  if (borrador.length) {
-    rows.unshift({ text: t.bold(' ' + i.devicesDraft(borrador.length)), sel: false }, { text: '', sel: false })
+  const draft = draftChanges(st)
+  const withChanges = new Set(draft.map((c) => c.pub))
+  if (draft.length) {
+    rows.unshift({ text: t.bold(' ' + i.devicesDraft(draft.length)), sel: false }, { text: '', sel: false })
   }
   for (const d of devices) {
     const label = d.label || t.muted(i.noLabel)
     // Dónde corre (`node · Linux 7.0 · mi-pc`), pegado al nombre: es con lo que se reconoce.
-    const maquina = machineLine(d.machine)
-    const donde = maquina ? t.muted(`  ${maquina}`) : ''
+    const machine = machineLine(d.machine)
+    const where = machine ? t.muted(`  ${machine}`) : ''
     const vars = devVarsOf(st, d.sub).length
     const debt = debtOf(st, d.sub)
-    const desde = d.addedAt ? t.muted(`  ${i.deviceSince}:${fmtExp(d.addedAt)}`) : ''
+    const since = d.addedAt ? t.muted(`  ${i.deviceSince}:${fmtExp(d.addedAt)}`) : ''
     // QUÉ VERSIÓN CORRE, y en color de aviso si no cuadra con la nuestra.
     //
     // Sin esto una incompatibilidad de versiones se ve como que ese aparato «no responde»,
@@ -517,14 +517,14 @@ function deviceRows (st, t) {
     //
     // Un aparato que todavía no ha hablado desde que arrancamos no sale: `null` es «no lo
     // sé», y escribir «desconocido» en cada fila sería ruido, no información.
-    const corre = d.running
+    const running = d.running
       ? (d.running.compatible
           ? t.muted(`  ${i.runs}:${d.running.version}`)
           : t.warn(`  ${i.mismatch(d.running.product, d.running.version)}`))
       : ''
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
       (vars ? t.muted(`  vars:${vars}`) : '') +
-      corre +
+      running +
       // En quien aprueba: si dijo que le llegan los avisos. No cambia a quién se le pide
       // (a todos); deja ver a cuál no le suena el pedido. Es un dato, va en gris.
       (d.notifiedAt === undefined ? '' : t.muted(`  ${d.notifiedAt ? i.notifyYes : i.notifyUnknown}`)) +
@@ -542,8 +542,8 @@ function deviceRows (st, t) {
       : d.isMaster
         ? t.muted(i.thisVault)
         : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp)))
-    const marca = conCambios.has(d.sub) ? t.bold('*') : ' '
-    rows.push({ text: `${marca}${t.bold(d.deviceId)}  ${label}${donde}${desde}  ${status}${extra}`, sel: true, meta: d })
+    const mark = withChanges.has(d.sub) ? t.bold('*') : ' '
+    rows.push({ text: `${mark}${t.bold(d.deviceId)}  ${label}${where}${since}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
@@ -576,12 +576,12 @@ function loginRows (st, t) {
     return rows
   }
   for (const l of list) {
-    const espera = l.blockedUntil > Date.now() ? Math.ceil((l.blockedUntil - Date.now()) / 1000) : 0
-    const abiertas = (l.sessions || []).length
+    const wait = l.blockedUntil > Date.now() ? Math.ceil((l.blockedUntil - Date.now()) / 1000) : 0
+    const opened = (l.sessions || []).length
     const extra = [
-      abiertas ? t.warn('  ' + i.loginOpen(abiertas)) : t.muted('  ' + i.loginOpen(0)),
+      opened ? t.warn('  ' + i.loginOpen(opened)) : t.muted('  ' + i.loginOpen(0)),
       l.label ? t.muted('  «' + l.label + '»') : '',
-      espera ? t.danger('  ' + i.loginWait(espera)) : '',
+      wait ? t.danger('  ' + i.loginWait(wait)) : '',
       l.createdAt ? t.muted('  ' + i.loginCreated(fmtExp(l.createdAt))) : ''
     ].join('')
     rows.push({ text: ` ${t.bold(l.address || l.user)}  ${t.muted(l.deviceId || '????-????')}${extra}`, sel: true, meta: l })
@@ -647,11 +647,11 @@ function pairModeRows (st, t) {
  * invisible aquí durante semanas —`sealer`, `unattended` y `secrets`, tres veces el mismo
  * fallo—. Ahora el orden se cura a mano, que es una decisión de diseño, pero lo que no
  * esté nombrado se añade al final: un permiso puede salir en mal sitio, nunca desaparecer.
- * `test/tui-permisos.test.mjs` exige además que todos tengan nombre en los dos idiomas.
+ * `test/tui-permissions.test.mjs` exige además que todos tengan nombre en los dos idiomas.
  */
-const ORDEN = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended', 'replica']
-const CAPS_ORDER = [...ORDEN.filter((c) => DEVICE_CAPS.includes(c)),
-  ...DEVICE_CAPS.filter((c) => !ORDEN.includes(c))]
+const ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended', 'replica']
+const CAPS_ORDER = [...ORDER.filter((c) => DEVICE_CAPS.includes(c)),
+  ...DEVICE_CAPS.filter((c) => !ORDER.includes(c))]
 
 /**
  * EL CAJÓN NO ES UNA CASILLA (dueño, 2026-10-13: «no entiendo por qué es un permiso el
@@ -672,7 +672,7 @@ const PAIR_DEFAULT_CAPS = ['sign', 'read', 'store']
  */
 function capChecklist (i, t, { cn = null, has, real = has }) {
   const rows = []
-  let tocados = 0
+  let touched = 0
   if (cn) rows.push({ text: t.muted(' ' + i.capsDrawer(cn)), sel: false }, { text: '', sel: false })
   for (const cap of CAPS_ORDER) {
     const mark = has.has(cap) ? '[x]' : '[ ]'
@@ -680,14 +680,14 @@ function capChecklist (i, t, { cn = null, has, real = has }) {
     // LO QUE CAMBIA SE SEÑALA. Sin esto el borrador es indistinguible del acta y no sabes
     // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
     const cambia = has.has(cap) !== real.has(cap)
-    if (cambia) tocados++
+    if (cambia) touched++
     // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +administra`—
     // así que no hay que repetirlo al lado. Lo que hace va debajo.
     const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })
     rows.push({ text: t.muted('      ' + i.capHint[cap]), sel: false })
   }
-  return { rows, tocados }
+  return { rows, tocados: touched }
 }
 
 /**
@@ -736,7 +736,7 @@ async function saveCapsDrafts (term, st) {
   const i = L(st)
   const changes = draftChanges(st)
   if (!changes.length) { flash(st, i.capsNothing); return }
-  const guardar = async () => {
+  const save = async () => {
     const r = await guard(term, st, i.applyingCaps, () => vc.setDevicesCaps(changes.map(({ pub, caps }) => ({ pub, caps })), activeId(st)))
     if (!r.ok) return
     applyDump(st, r.v)
@@ -744,12 +744,12 @@ async function saveCapsDrafts (term, st) {
     await refreshMembers(term, st)
     flash(st, i.capsSavedMany(changes.reduce((a, c) => a + c.n, 0), changes.length))
   }
-  const nuevosAdmin = changes.filter((c) => c.caps.includes('admin') && !(c.member.caps || []).includes('admin'))
-  if (nuevosAdmin.length) {
-    setConfirm(st, { text: i.confirmAdmin(nuevosAdmin.map((c) => c.member.id || deviceIdOf(st, c.pub)).join(', ')), onYes: guardar })
+  const newAdmins = changes.filter((c) => c.caps.includes('admin') && !(c.member.caps || []).includes('admin'))
+  if (newAdmins.length) {
+    setConfirm(st, { text: i.confirmAdmin(newAdmins.map((c) => c.member.id || deviceIdOf(st, c.pub)).join(', ')), onYes: save })
     return
   }
-  await guardar()
+  await save()
 }
 
 function capsRows (st, t) {
@@ -762,18 +762,18 @@ function capsRows (st, t) {
   // EL BORRADOR manda sobre lo que hay en el acta: es lo que estás a punto de dejar.
   const real = new Set(member.caps || [])
   const has = new Set(draftCapsOf(st, member))
-  const { rows: lista, tocados } = capChecklist(i, t, { cn: member.cn, has, real })
+  const { rows: list, tocados: touched } = capChecklist(i, t, { cn: member.cn, has, real })
   const rows = [
     { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
     { text: '', sel: false },
-    ...lista,
+    ...list,
     { text: '', sel: false }
   ]
   // Lo que hay pendiente en OTROS aparatos también se dice aquí: G los guarda juntos.
-  const otros = draftChanges(st).filter((c) => c.pub !== member.pub)
-  if (tocados) rows.push({ text: ' ' + t.bold(i.capsPending(tocados)), sel: false })
-  if (otros.length) rows.push({ text: ' ' + t.bold(i.capsPendingOthers(otros.length)), sel: false })
-  if (!tocados && !otros.length) rows.push({ text: t.muted(' ' + i.capsApplyHint), sel: false })
+  const others = draftChanges(st).filter((c) => c.pub !== member.pub)
+  if (touched) rows.push({ text: ' ' + t.bold(i.capsPending(touched)), sel: false })
+  if (others.length) rows.push({ text: ' ' + t.bold(i.capsPendingOthers(others.length)), sel: false })
+  if (!touched && !others.length) rows.push({ text: t.muted(' ' + i.capsApplyHint), sel: false })
   return rows
 }
 
@@ -787,11 +787,11 @@ function pairCapsRows (st, t) {
   const i = L(st)
   const pc = st.pairCaps
   if (!pc) return [{ text: t.muted(i.loading), sel: false }]
-  const { rows: lista } = capChecklist(i, t, { cn: pc.service || null, has: new Set(pc.caps) })
+  const { rows: list } = capChecklist(i, t, { cn: pc.service || null, has: new Set(pc.caps) })
   return [
     { text: ' ' + t.bold(pc.service ? i.pairCapsService(pc.service) : i.pairCapsFor(pc.label || '')), sel: false },
     { text: '', sel: false },
-    ...lista,
+    ...list,
     { text: '', sel: false },
     { text: t.muted(' ' + i.pairCapsHint), sel: false }
   ]
@@ -997,7 +997,7 @@ function autoLockWakeIn (st, now = Date.now()) {
  */
 /** Cada cuánto se le dice al daemon «sigo aquí». Muy por debajo del plazo del candado. */
 const TOUCH_MS = 60_000
-let ultimoToque = 0
+let lastTouch = 0
 
 /**
  * Le dice al daemon que sigues delante, sin pedirle nada. Se llama al teclear.
@@ -1006,14 +1006,14 @@ let ultimoToque = 0
  * haciendo, y si se pierde un aviso, el siguiente llega un minuto después — con cinco de
  * plazo, no pasa nada.
  */
-function seguirAqui (st, api = vc) {
-  const ahora = Date.now()
-  if (ahora - ultimoToque < TOUCH_MS) return
+function stayHere (st, api = vc) {
+  const now = Date.now()
+  if (now - lastTouch < TOUCH_MS) return
   const p = (st.state?.profiles || []).find((x) => x.current)
   // Solo tiene sentido en un perfil con contraseña y abierto: sin candado no hay plazo
   // que estirar, y cerrado no hay nada que mantener abierto.
   if (!p?.protected || p.locked) return
-  ultimoToque = ahora
+  lastTouch = now
   try { Promise.resolve(api.touchProfile(p.id)).catch(() => {}) } catch (_) {}
 }
 
@@ -1516,8 +1516,8 @@ async function onKeyLogins (term, st, key, api = vc) {
                       () => api.addLogin({ user, password: pw1, label }))
                     if (r.ok) {
                       await refreshLogins(term, st, api)
-                      const nuevo = (st.logins || []).find((l) => l.user === user)
-                      flash(st, i.loginCreatedOk(nuevo?.address || user))
+                      const newer = (st.logins || []).find((l) => l.user === user)
+                      flash(st, i.loginCreatedOk(newer?.address || user))
                     }
                   }
                 })
@@ -1532,16 +1532,16 @@ async function onKeyLogins (term, st, key, api = vc) {
       label: i.loginOldPass(cur.user),
       hint: i.loginPassHint,
       mask: true,
-      onSubmit: async (vieja) => {
+      onSubmit: async (oldOne) => {
         setInput(st, {
           label: i.loginNewPass,
           hint: i.loginPassHint,
           mask: true,
-          onSubmit: async (nueva) => {
-            if (String(nueva || '').length < MIN_LOGIN_PASSWORD) { flash(st, i.loginPassShort, 'warn'); return }
+          onSubmit: async (newOne) => {
+            if (String(newOne || '').length < MIN_LOGIN_PASSWORD) { flash(st, i.loginPassShort, 'warn'); return }
             st.input = null
             const r = await guard(term, st, i.loginChanging,
-              () => api.passwdLogin({ user: cur.user, oldPassword: vieja, newPassword: nueva }))
+              () => api.passwdLogin({ user: cur.user, oldPassword: oldOne, newPassword: newOne }))
             if (r.ok) { flash(st, i.loginChanged); await refreshLogins(term, st, api) }
           }
         })
@@ -1576,10 +1576,10 @@ async function onKeyLogins (term, st, key, api = vc) {
  * estabas usando. Es una cuenta recién creada y vacía —el aparato nunca entró—, así que no
  * hay nada dentro que perder; lo que sí molesta es que se queden acumulando.
  */
-async function descartarCuenta (term, st, id, volverA) {
+async function discardAccount (term, st, id, backTo) {
   const i = L(st)
   const r = await guard(term, st, i.discardingAccount, () => vc.removeProfile(id))
-  if (volverA) await guard(term, st, i.switchingVault, () => vc.useProfile(volverA))
+  if (backTo) await guard(term, st, i.switchingVault, () => vc.useProfile(backTo))
   await refreshAll(term, st)
   if (r.ok) flash(st, i.accountDiscarded)
 }
@@ -1600,12 +1600,12 @@ function beginPairingNamed (term, st, profile, service = null, after = null) {
   setInput(st, {
     label: i.nameDeviceLabel,
     hint: i.nameDeviceHint,
-    onSubmit: async (nombre) => {
+    onSubmit: async (name) => {
       st.input = null
       // Después del nombre, LOS PERMISOS: el aparato entra al acta ya con ellos. `after` es
       // para quien tenga que limpiar si el emparejamiento no llega a abrirse (la cuenta
       // que nació para él); lo llama la pantalla de permisos, al generar o al cancelar.
-      choosePairCaps(st, { profile, service, label: (nombre || '').trim().slice(0, 60) || null, after })
+      choosePairCaps(st, { profile, service, label: (name || '').trim().slice(0, 60) || null, after })
     },
     onCancel: async () => { st.input = null; if (after) await after(false) }
   })
@@ -1647,14 +1647,14 @@ async function onKeyCaps (term, st, key) {
   const cur = sels[Math.min(st.sel.caps || 0, sels.length - 1)]
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
 
-  const volver = () => { st.screen = 'devices'; st.capsFor = null }
+  const goBack = () => { st.screen = 'devices'; st.capsFor = null }
   const member = (st.members || []).find((m) => m.pub === st.capsFor?.pub)
   if (!member) {
-    if (key.name === 'escape' || ch === 'b') volver()
+    if (key.name === 'escape' || ch === 'b') goBack()
     return true
   }
   // Volver a la lista NO tira el borrador: es como se pasa al siguiente aparato.
-  if (key.name === 'escape' || ch === 'b') { volver(); return true }
+  if (key.name === 'escape' || ch === 'b') { goBack(); return true }
   if (key.name === 'f5') {
     // F5 trae el acta de nuevo y el borrador deja de tener con qué compararse: se pregunta
     // antes de tirarlo, igual que al salir de la bóveda.
@@ -1732,10 +1732,10 @@ async function onKeyDoors (term, st, key) {
 
   if ((key.name === 'delete' || ch === 'd') && cur?.door) {
     const d = cur.door
-    const ultima = (p.doors || []).length <= 1
+    const latest = (p.doors || []).length <= 1
     const what = d.label ? `${doorLabel(i, d)} · ${d.label}` : doorLabel(i, d)
     setConfirm(st, {
-      text: ultima ? i.removeLastDoorConfirm(what) : i.removeDoorConfirm(what),
+      text: latest ? i.removeLastDoorConfirm(what) : i.removeDoorConfirm(what),
       onYes: () => ensureUnlocked(term, st, p, async (q = p) => {
         const r = await guard(term, st, i.removingDoor, () => vc.removeProfileDoor(q.id, d.kind === 'password' ? 'password' : d.id))
         if (r.ok) {
@@ -1794,9 +1794,9 @@ async function addKeyDoor (term, st, p, mode) {
       busy(i.lookingForKey)
       serial = await hw.ykSerial()
       if (!serial) throw Object.assign(new Error('no key'), { code: 'HWKEY_NO_DEVICE' })
-      const ocupada = await hw.ykSlot2Busy()
+      const slotBusy = await hw.ykSlot2Busy()
       st.busy = null
-      const programar = async (overwrite) => {
+      const schedule = async (overwrite) => {
         try {
           busy(i.programmingSlot)
           await hw.ykProgramSlot2({ overwrite })
@@ -1807,8 +1807,8 @@ async function addKeyDoor (term, st, p, mode) {
         } catch (e) { fail(e) }
       }
       // Sobrescribir la ranura borra lo que tenga: eso lo decide la persona, aquí y en voz alta.
-      if (ocupada) { setConfirm(st, { text: i.slotBusyConfirm(serial), onYes: () => programar(true), onNo: () => { st.confirm = null } }); return }
-      await programar(false)
+      if (slotBusy) { setConfirm(st, { text: i.slotBusyConfirm(serial), onYes: () => schedule(true), onNo: () => { st.confirm = null } }); return }
+      await schedule(false)
     } catch (e) { fail(e) }
     return
   }
@@ -1868,7 +1868,7 @@ async function onKeyPairMode (term, st, key) {
       st.input = null
       const name = raw.trim()
       if (!name) { flash(st, i.nameEmpty, 'danger'); return }
-      const previa = activeId(st)
+      const previous = activeId(st)
       const r = await guard(term, st, i.creatingVault, () => vc.addProfile(name))
       if (!r.ok) return
       const created = r.v?.id || (r.v?.profiles || []).find((p) => p.name === name)?.id
@@ -1881,8 +1881,8 @@ async function onKeyPairMode (term, st, key) {
       // él: si no, cada intento fallido dejaba una cuenta vacía —y encima activa— que
       // luego había que ir a borrar a mano adivinando cuál era.
       beginPairingNamed(term, st, created, null, async (ok) => {
-        if (!ok) await descartarCuenta(term, st, created, previa)
-        else st.pairing.born = { id: created, from: previa }
+        if (!ok) await discardAccount(term, st, created, previous)
+        else st.pairing.born = { id: created, from: previous }
       })
     },
     onCancel: () => { st.input = null }
@@ -2057,7 +2057,7 @@ async function onKeyPairing (term, st, key) {
     if (born) {
       setConfirm(st, {
         text: i.confirmDiscardAccount,
-        onYes: async () => { st.confirm = null; st.pairing = null; st.screen = 'devices'; await descartarCuenta(term, st, born.id, born.from) },
+        onYes: async () => { st.confirm = null; st.pairing = null; st.screen = 'devices'; await discardAccount(term, st, born.id, born.from) },
         onNo: async () => { st.confirm = null; st.pairing = null; st.screen = 'devices'; await refreshDevices(term, st) }
       })
       return true
@@ -2152,8 +2152,8 @@ function promptRenameVariable (term, st, cur) {
     label: i.renameLabel(cur.key),
     hint: i.renameHint,
     value: cur.key,
-    onSubmit: async (nuevo) => {
-      const nv = nuevo.trim()
+    onSubmit: async (newer) => {
+      const nv = newer.trim()
       st.input = null
       if (!nv || nv === cur.key) return
       if (!KEY_RE.test(nv)) { flash(st, i.keyInvalid, 'danger'); return }
@@ -2179,14 +2179,14 @@ function promptRenameVariable (term, st, cur) {
 async function revealValue (term, st, owner, key, isPublic) {
   const i = L(st)
   const p = activeProfile(st)
-  const mostrar = async (pwd) => {
+  const show = async (pwd) => {
     const r = await guard(term, st, i.revealing, () => vc.revealSecret(owner, key, activeId(st), pwd))
     if (r.ok) flash(st, i.revealed(key, r.v), 'ok')
   }
-  if (isPublic) return mostrar(undefined)             // una pública no está cerrada
-  if (!p?.protected) { flash(st, i.revealNoPwd, 'warn'); return mostrar(undefined) }
-  const guardada = activePwd(st)
-  if (guardada) return mostrar(guardada)
+  if (isPublic) return show(undefined)             // una pública no está cerrada
+  if (!p?.protected) { flash(st, i.revealNoPwd, 'warn'); return show(undefined) }
+  const saved = activePwd(st)
+  if (saved) return show(saved)
   setInput(st, {
     label: i.revealAsk,
     hint: i.revealHint,
@@ -2194,7 +2194,7 @@ async function revealValue (term, st, owner, key, isPublic) {
     onSubmit: async (pwd) => {
       st.input = null
       if (!pwd) return
-      await mostrar(pwd)
+      await show(pwd)
     },
     onCancel: () => { st.input = null }
   })
@@ -2886,11 +2886,11 @@ function render (term, st) {
   // normal y simplemente no se actualiza, así que se dice aquí.
   if (!lines[2] && up && s?.updateAsk?.version) {
     const u = s.updateAsk
-    const dia = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+    const day = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
     // Esperando es un estado normal (gris); no aprobada es lo que hay que ver (aviso).
     lines[2] = ' ' + (u.result === 'pending'
-      ? t.muted(i.updateWaiting(u.version, dia(u.askedAt + 24 * 60 * 60 * 1000)))
-      : t.warn(i.updateNotApproved(u.version, dia(u.askedAt))))
+      ? t.muted(i.updateWaiting(u.version, day(u.askedAt + 24 * 60 * 60 * 1000)))
+      : t.warn(i.updateNotApproved(u.version, day(u.askedAt))))
   }
   // Hay versión nueva y se dijo que no (o todavía no se preguntó): se queda dicho aquí.
   if (!lines[2] && st.update?.release) lines[2] = ' ' + t.warn(i.updateAvailable(st.update.release.version))
@@ -3004,10 +3004,10 @@ export function viewModel (st, t) {
   if (up && s?.version && VERSION !== 'dev' && s.version !== VERSION) vm.notice = { text: i.daemonStale(s.version, VERSION), kind: 'warn' }
   else if (up && s?.updateAsk?.version) {
     const u = s.updateAsk
-    const dia = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
+    const day = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ')
     vm.notice = u.result === 'pending'
-      ? { text: i.updateWaiting(u.version, dia(u.askedAt + 24 * 60 * 60 * 1000)), kind: 'muted' }
-      : { text: i.updateNotApproved(u.version, dia(u.askedAt)), kind: 'warn' }
+      ? { text: i.updateWaiting(u.version, day(u.askedAt + 24 * 60 * 60 * 1000)), kind: 'muted' }
+      : { text: i.updateNotApproved(u.version, day(u.askedAt)), kind: 'warn' }
   } else if (st.update?.release) vm.notice = { text: i.updateAvailable(st.update.release.version), kind: 'warn' }
 
   if (INNER_TABS.includes(st.screen)) vm.tabs = INNER_TABS.map((k) => ({ key: k, label: tabLabel(i, k), active: st.screen === k }))
@@ -3209,7 +3209,7 @@ export async function handleKey (term, st, key) {
   // navegando esta pantalla y se cerraba igual, que es lo contrario de lo que se
   // quería. Se avisa como mucho una vez por minuto —el plazo son cinco, así que
   // sobra— para no escribir un archivo por tecla.
-  seguirAqui(st)
+  stayHere(st)
 
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
   // 'q' global sale — preguntando antes si hay permisos sin guardar.
@@ -3308,4 +3308,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { ultimoToque = 0 } }
+export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui: stayHere, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { lastTouch = 0 } }

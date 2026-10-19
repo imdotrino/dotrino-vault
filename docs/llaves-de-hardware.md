@@ -216,7 +216,7 @@ persona. Meterla en la KEK obligaría a tocarla en cada arranque del daemon.
 **El fallo que esto cierra.** Antes `K` salía de la contraseña. `password-rm` y cambiar la
 contraseña volvían a sellar los secretos pero **no la maestra**: tras reiniciar quedaba
 sellada con una `K` que ya no existía y el perfil no podía volver a firmar el acta.
-Reproducido el 2026-10-05 y cubierto por `test/puertas.e2e.test.mjs`. Un perfil al que ya le
+Reproducido el 2026-10-05 y cubierto por `test/doors.e2e.test.mjs`. Un perfil al que ya le
 pasó se recupera poniendo **la misma contraseña de antes** (`profile password`), porque
 `kdf.salt` sigue en el registro. Y la primera puerta de un perfil sin llave **comprueba antes
 de guardarse que la maestra abre** con esa llave: si no, se para con `MASTER_SEALED_ELSEWHERE`

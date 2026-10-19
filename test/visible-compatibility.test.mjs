@@ -42,7 +42,7 @@ test('la bóveda apunta la versión donde YA comprueba la firma', () => {
   assert.notEqual(i, -1, 'verifyChain va envuelto: una comprobación copiada ocho veces son siete olvidos')
   const cuerpo = src.slice(i, i + 400)
   assert.match(cuerpo, /chk\.ok && args\?\.data\?\.v/, 'solo se apunta lo verificado')
-  assert.match(cuerpo, /apuntarVersion/)
+  assert.match(cuerpo, /recordVersion/)
 })
 
 test('la bóveda anuncia lo suyo en cada respuesta', () => {
@@ -70,7 +70,7 @@ test('se ve en la lista de dispositivos: en el mensaje y en la CLI', () => {
  */
 test('el dictamen NO corta a nadie: informa', () => {
   const vault = leer('lib/src/core/vault.js')
-  const i = vault.indexOf('const apuntarVersion')
+  const i = vault.indexOf('const recordVersion')
   const cuerpo = vault.slice(i, i + 600)
   assert.doesNotMatch(cuerpo, /return reply\(|MSG\.ERROR/,
     'apuntar una versión no puede contestar que no')

@@ -327,13 +327,13 @@ export async function passwdLogin ({ user, oldPassword, newPassword } = {}) {
   let fin
   try { fin = opaque.loginFinish({ state: start.state, response: begun.response, password: oldPassword }) }
   catch (_) { throw coded('wrong password', 'login-failed') }
-  const entrada = await loginsOp('login-end', { lid: begun.lid, finalization: fin.finalization, label: 'la consola' })
-  const keys = await openDeviceKeys(fin.exportKey, entrada.blob)
+  const entry = await loginsOp('login-end', { lid: begun.lid, finalization: fin.finalization, label: 'la consola' })
+  const keys = await openDeviceKeys(fin.exportKey, entry.blob)
   const reg = opaque.registrationStart({ password: newPassword })
   const { response } = await loginsOp('register-begin', { user, request: reg.request, replace: true })
-  const nueva = opaque.registrationFinish({ state: reg.state, response, password: newPassword })
+  const newOne = opaque.registrationFinish({ state: reg.state, response, password: newPassword })
   return loginsOp('register-finish', {
-    user, upload: nueva.upload, blob: await sealDeviceKeys(nueva.exportKey, keys), replace: true
+    user, upload: newOne.upload, blob: await sealDeviceKeys(newOne.exportKey, keys), replace: true
   })
 }
 
