@@ -75,7 +75,7 @@ const T = {
     inactive: 'No está respondiendo',
     warning: 'Mientras esta pestaña esté abierta, tu bóveda responde a tus aparatos. Si la cierras, dejan de poder pedir contraseñas — nada se pierde, pero no responden hasta que vuelvas a abrirla.',
     devices: 'Aparatos que pueden pedir credenciales',
-    none: 'Ninguno todavía. Conéctalo como cualquier otro aparato, arriba, y dale el permiso de contraseñas.',
+    none: 'Ninguno todavía. Conéctalo como cualquier otro aparato, arriba, y asígnale el permiso de contraseñas.',
     manage: 'Se conectan y se quitan arriba, con el resto de tus aparatos.',
     kept: 'Guardado en esta bóveda',
     empty: 'Nada guardado. Importa lo que ya tienes desde otro gestor.',

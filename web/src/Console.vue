@@ -156,7 +156,7 @@ const T = {
     pair_code_b: 'Ábrela y teclea estos seis dígitos para aprobar la conexión. Nadie más los conoce.',
     pair_done: 'Listo, este dispositivo ya está conectado.',
     // ALTA NATIVA (app de Dotrino): la llave vive en el chip del teléfono y solo aprueba.
-    native_step: 'Para aprobar desde la pantalla Pedidos de este teléfono, dale permiso en tu bóveda:',
+    native_step: 'Para aprobar desde la pantalla Pedidos de este teléfono, asígnale el permiso en tu bóveda:',
     adopt_done: 'Listo, tu cuenta ya vive en tu bóveda.',
     adopt_done_b: 'Sigue siendo la misma cuenta de siempre: los mismos contactos, lo mismo firmado, nada que volver a hacer. Lo que cambió es que ahora la guarda tu bóveda, que pasa a ser el Master, y este aparato es uno más de los que la usan.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
