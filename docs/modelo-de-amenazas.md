@@ -123,6 +123,28 @@ donde un aparato ya revocado sigue dentro. Lo frena el pin de `maxSeq` del clien
 ya conoce la cuenta) y, a quien llega nuevo, que no se le crea a un replicador sin pin. El
 cierre de verdad es el **oráculo de frescura**, diferido (§4.3 de `acta-de-perfil.md`).
 
+## 2.bis La puerta: la bóveda solo atiende al acta (dueño, 2026-10-22)
+
+Antes de hacer nada con un mensaje, la bóveda mira quién lo manda (`lib/src/core/gate.js`, en
+`onMessage`, el router por el que pasan el proxio, el mostrador local y el canal directo):
+
+| Mensaje | Pasa si |
+|---|---|
+| todo lo de un aparato o servicio (`sign`, `get`, `store`, `check`, `devices`, `renew`, `secrets`, `admin`, `incident`, `rewrap.ok`, `replica.ack`) | la llave que dice mandarlo está en el acta **y** la firma es suya |
+| `renounce` | quien renuncia está en el acta (la firma la mira el manejador) |
+| `admin.event` (otra bóveda anuncia un acta) | el acta la selló un miembro de la nuestra (el sello lo mira `adoptActa`) |
+| `login.*` (entrar con contraseña) | siempre, con freno: 10 por conexión y 120 en total por minuto, además del freno por usuario — que ahora también tienen los usuarios que no existen, para que no se pueda saber cuáles hay |
+| `hello`, `enroll`, `acta.sealed` (el alta) | hay un emparejamiento abierto en esta bóveda y el mensaje es de ese |
+
+Lo demás se **descarta sin contestar**: ni un error, ni una firma, ni una línea en la bitácora,
+ni tocar el disco. Antes un desconocido conseguía, sin papel alguno, que le contestaran con el
+acta entera firmada (los errores de `secrets`), que la maestra firmara a petición suya (`check`,
+un `enroll` mal formado) y que la bitácora rotara hasta perder lo viejo. Lo descartado se cuenta
+en memoria (`gateStats()`).
+
+El precio, dicho: un aparato **expulsado** ya no recibe respuesta de la bóveda, tampoco a
+`check`. Se entera por el aviso de expulsión firmado que se le manda al quitarlo (cola de 24 h).
+
 ## 3. Lo que se afirma con pruebas, no con adjetivos
 
 Cada invariante tiene un test. Esto es lo que se puede enseñar, no lo que se puede prometer:

@@ -88,10 +88,11 @@ test('el contenido no se cruza entre perfiles', () => {
 test('un dispositivo de un perfil no puede usar el otro perfil', async () => {
   const [a, b] = mgr.list()
   const dev = await pair(mgr.get(a.id))
-  // Su cert es válido… pero pidiéndoselo a la maestra del OTRO perfil.
+  // Su cert es válido… pero pidiéndoselo a la maestra del OTRO perfil. No está en SU acta, así
+  // que esa bóveda ni le contesta (`gate.js`): ni un «no», que ya diría algo.
   await assert.rejects(
     () => store({ ...dev, master: mgr.get(b.id).master }, 'getStats'),
-    /unauthorized/
+    /timeout waiting for the vault response/
   )
 })
 
