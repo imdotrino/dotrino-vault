@@ -151,9 +151,10 @@ test('la sesión arranca cerrada; con la derivada se abre, con otra no', async (
   assert.equal(r.ready.abierta.locked, false, 'la derivada de su contraseña la abre')
 })
 
-// PENDIENTE: el proxio no le entrega a la segunda bóveda lo dirigido a SU maestra (solo a la del
-// perfil, que es la primera). Hasta que se ate, abrirla a distancia no llega.
-test('dormida y cerrada, la abre desde lejos un aparato con `admin` de la OTRA bóveda', { todo: 'el proxio no enruta a la maestra de una segunda bóveda' }, async () => {
+// A LA ALOJADA SE LE ESCRIBE POR SU LLAVE DE COMUNICACIÓN (`vault` en el acta dice de qué bóveda
+// es): lo dirigido a la maestra del perfil lo recibe la que conteste primero, y lo dirigido a la
+// maestra de la alojada se entrega a los aparatos que ella emparejó y no a ella.
+test('dormida y cerrada, la abre desde lejos un aparato con `admin` de la OTRA bóveda', async () => {
   // Un aparato de la cuenta con `admin`, emparejado con la bóveda del cliente (su papel lo firmó
   // ella, no la alojada): lo que pasa cuando la primera se pierde y hay que abrir la segunda.
   const { enrollWithVault } = await import('../lib/src/service.js')
@@ -161,13 +162,23 @@ test('dormida y cerrada, la abre desde lejos un aparato con `admin` de la OTRA b
   const { qr } = await vault.startPairing({ scope: ['vault:admin'], caps: ['admin'], label: 'consola' })
   const alta = enrollWithVault({ qr, label: 'consola', withEncKey: false, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
   const consola = await alta
-  const pide = (op, extra = {}) => requestAdmin({ master: alojada, proxy: proxyUrl, device: consola.device, cert: consola.cert, op, ...extra })
 
   const r = await runSession({
     store, dir: tmp('join-remota-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
     start: vaultStarter({
       startVault, locked: true,
       onReady: async (v) => {
+        // El acta donde entró la consola la selló la otra bóveda mientras esta dormía: le llega
+        // encolada al identificarse.
+        let members = []
+        for (let i = 0; i < 50 && !members.some((m) => m.pub === consola.device.publickey); i++) {
+          members = (await v.profileMembers()).members
+          if (!members.some((m) => m.pub === consola.device.publickey)) await sleep(100)
+        }
+        assert.ok(members.some((m) => m.pub === consola.device.publickey), 'adoptó el acta de la otra bóveda')
+        const comm = members.find((m) => m.cn === 'vault' && m.vault === alojada)?.pub
+        assert.ok(comm, 'el acta dice cuál es la llave de comunicación de la alojada')
+        const pide = (op, extra = {}) => requestAdmin({ master: alojada, to: comm, proxy: proxyUrl, device: consola.device, cert: consola.cert, op, ...extra })
         const begin = await pide('unlock.begin')
         const nonce = crypto.randomBytes(16).toString('hex')
         const key = crypto.scryptSync(PASSWORD, Buffer.from(begin.salt, 'base64'), begin.len, { N: begin.N, r: begin.r, p: begin.p })

@@ -100,6 +100,12 @@ manda solo la derivada, sellada a una llave efímera. Abierta lo está **mientra
    enc }`: contesta `{ deviceId, code }`. Ahora nace la maestra, ya sellada.
 5. En tu bóveda: `dotrino-vault approve <código>`.
 
+**Se le habla por su llave de comunicación.** El acta dice de qué bóveda es cada una (`vault` en el
+miembro con `cn: 'vault'`, `@dotrino/identity` ≥ 0.125.0), y la consola elige a cuál hablarle con
+`vaultAdmin(op, { to })`. Por la maestra no llega: la del perfil la reciben todas las bóvedas de la
+cuenta, y la de esta se entrega a los aparatos que ella emparejó. Por eso también se despierta por
+esa llave (timbre `self`), además de por la cuenta.
+
 Igual que la réplica: **solo entra en la cuenta `Owner`** (`wrong-account` antes del código), no
 es multiperfil (`already-enrolled`), y un alta que falla no deja nada en el bucket. La contraseña
 **no se recupera**: si se pierde, esa bóveda no vuelve a sellar y la quitas desde la otra.

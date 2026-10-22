@@ -187,6 +187,15 @@ const T = {
     at_self_err: 'no pudo encenderse:',
     at_remote: (n) => (n ? `Tu bóveda es «${n}»` : 'Tu bóveda es otra máquina'),
     at_remote_off: 'sin confirmar todavía',
+    // QUÉ BÓVEDA SE ADMINISTRA, cuando la cuenta tiene más de una (la de este navegador y la
+    // de la nube, por ejemplo). Todas guardan lo mismo; lo que cambia es a cuál se le habla.
+    pick_label: 'Qué bóveda administras',
+    pick_here: 'Este navegador',
+    at_pick: (n) => `Administras «${n}»`,
+    at_pick_wait: 'preguntando… si estaba dormida, tarda unos segundos en despertar',
+    at_pick_on: 'contesta',
+    pick_serve: 'La bóveda de este navegador funciona mientras haya una página suya abierta y visible: se abrió en otra ventana. Déjala abierta.',
+    pick_serve_again: 'Abrir la ventana',
     self_b: 'Este aparato hace de bóveda mientras esta página esté abierta. Otros aparatos tuyos se conectan a él.',
     self_add: 'Conectar otro aparato a esta bóveda',
     self_pair: 'Generar el código',
@@ -450,6 +459,13 @@ const T = {
     at_self_err: 'could not start:',
     at_remote: (n) => (n ? `Your vault is “${n}”` : 'Your vault is another machine'),
     at_remote_off: 'not confirmed yet',
+    pick_label: 'Which vault you manage',
+    pick_here: 'This browser',
+    at_pick: (n) => `Managing “${n}”`,
+    at_pick_wait: 'asking… if it was asleep, it takes a few seconds to wake up',
+    at_pick_on: 'answering',
+    pick_serve: 'This browser’s vault works while one of its pages is open and visible: it opened in another window. Keep it open.',
+    pick_serve_again: 'Open the window',
     self_b: 'This device acts as the vault while this page is open. Your other devices connect to it.',
     self_add: 'Connect another device to this vault',
     self_pair: 'Create the code',
@@ -1025,7 +1041,7 @@ const capsFor = () => DEVICE_CAPS
 const removeMember = (m) => run('rm-' + m.pub, async () => {
   const isSelf = !!m.isMe
   if (isMaster.value) await id.value.removeMember(m.pub)
-  else await id.value.vaultAdmin('revoke', { sub: m.pub })
+  else await vaultAdmin('revoke', { sub: m.pub })
   if (!isSelf) return
   // Me quité a mí mismo: aquí se acabó la cuenta. Se dice ya (la bóveda acaba de sacarnos
   // del acta, eso es un hecho) y se fuerza un contacto para recoger el aviso FIRMADO, que
@@ -1235,6 +1251,54 @@ const masterLabel = computed(() => {
 /** Fallo al encender el mostrador de esta bóveda. Se enseña; callarlo dejaba la página muda. */
 const selfError = ref('')
 
+// ---------- QUÉ BÓVEDA SE ADMINISTRA ----------
+
+/**
+ * LAS BÓVEDAS DE LA CUENTA. Con una alojada en la nube lo normal son dos: la del navegador
+ * donde nació la cuenta y la de la nube. Guardan lo mismo y se sincronizan, pero cada una
+ * tiene su estado (cerrada o abierta) y hay que poder hablarle a UNA.
+ *
+ * Se le habla por su llave de comunicación: el acta dice de qué bóveda es cada una (`vault`).
+ * Por la maestra no sirve: la del perfil la reciben todas, y la de la alojada se entrega a los
+ * aparatos que ella emparejó, no a ella.
+ */
+const vaults = computed(() => members.value
+  .filter((c) => c.cn === 'vault' && c.vault)
+  .map((c) => {
+    const owner = members.value.find((x) => x.pub === c.vault)
+    return { comm: c.pub, master: c.vault, id: owner?.id || '', label: owner?.label || owner?.id || '', here: !!owner?.isMe && vaultAt.value === 'self' }
+  }))
+// La elegida se recuerda en la pestaña (CONVENCIONES §4: es una vista, no una preferencia).
+const VAULT_PICK = 'dotrino.vault.pick'
+const picked = ref((() => { try { return sessionStorage.getItem(VAULT_PICK) || '' } catch (_) { return '' } })())
+const chosen = computed(() => vaults.value.find((v) => v.comm === picked.value) || vaults.value.find((v) => v.here) || vaults.value[0] || null)
+/**
+ * A quién va lo que se administra. Con una sola bóveda, como siempre (sin `to`). Con varias, a
+ * la elegida por su llave; salvo que sea la de este navegador y corra en esta misma pestaña,
+ * que se atiende aquí sin dar la vuelta por el proxio.
+ */
+const adminTo = computed(() => {
+  const v = chosen.value
+  if (vaults.value.length < 2 || !v) return null
+  return v.here && self.value.running ? null : v.comm
+})
+const vaultAdmin = (op, args = {}) => id.value.vaultAdmin(op, adminTo.value ? { ...args, to: adminTo.value } : args)
+/** La de este navegador, elegida y sin servirse aquí: tiene que haber una página suya abierta. */
+const serveElsewhere = computed(() => vaults.value.length > 1 && !!chosen.value?.here && !self.value.running)
+function openServeWindow () {
+  window.open(location.origin + '/vault', 'dotrino-vault-serve', 'popup,width=480,height=720')
+}
+async function pickVault (v) {
+  picked.value = v.comm
+  try { sessionStorage.setItem(VAULT_PICK, v.comm) } catch (_) {}
+  // Lo que se enseñaba era de la otra: se le vuelve a preguntar a esta.
+  vars.value = null
+  varsError.value = ''
+  blockedList.value = []
+  if (v.here && !self.value.running) openServeWindow()
+  await refreshAdmin()
+}
+
 /**
  * ESCUCHA O SE CONECTA, sin preguntar.
  *
@@ -1261,13 +1325,19 @@ async function applyVaultRole () {
 }
 
 /** El resumen de una línea que va arriba del todo: qué bóveda es y si está respondiendo. */
-const listening = computed(() => (vaultAt.value === 'self'
+const pickedRemote = computed(() => vaults.value.length > 1 && !!chosen.value && !chosen.value.here)
+const listening = computed(() => (pickedRemote.value ? !!vars.value : vaultAt.value === 'self'
   ? !!self.value.running
   : vaultAt.value === 'remote' && !syncError.value && !!checkedAt.value))
-const atTitle = computed(() => (vaultAt.value === 'self'
-  ? t.value.at_self
-  : t.value.at_remote(masterLabel.value)))
+const atTitle = computed(() => {
+  if (pickedRemote.value) return t.value.at_pick(chosen.value.label)
+  return vaultAt.value === 'self' ? t.value.at_self : t.value.at_remote(masterLabel.value)
+})
 const atState = computed(() => {
+  if (pickedRemote.value) {
+    if (varsError.value) return varsError.value
+    return vars.value ? t.value.at_pick_on : t.value.at_pick_wait
+  }
   if (vaultAt.value === 'self') {
     if (selfError.value) return t.value.at_self_err + ' ' + selfError.value
     if (self.value.running) return t.value.at_self_on
@@ -1564,12 +1634,12 @@ async function refreshAdmin () {
 const blockedList = ref([])
 const blockedOf = (pub) => blockedList.value.find((b) => b.pub === pub) || null
 async function loadBlocked () {
-  try { blockedList.value = (await id.value.vaultAdmin('blocked'))?.items || [] } catch (_) { blockedList.value = [] }
+  try { blockedList.value = (await vaultAdmin('blocked'))?.items || [] } catch (_) { blockedList.value = [] }
 }
-const unblock = (m) => run('unblock-' + m.pub, async () => { await id.value.vaultAdmin('unblock', { sub: m.pub }); await loadBlocked() })
+const unblock = (m) => run('unblock-' + m.pub, async () => { await vaultAdmin('unblock', { sub: m.pub }); await loadBlocked() })
 // BLOQUEAR A MANO (dueño, 2026-10-07): no toca el acta, la bóveda simplemente deja de
 // atender a ese aparato y sus agentes le cierran la puerta. Se deshace con Desbloquear.
-const block = (m) => run('block-' + m.pub, async () => { await id.value.vaultAdmin('block', { sub: m.pub }); await loadBlocked() })
+const block = (m) => run('block-' + m.pub, async () => { await vaultAdmin('block', { sub: m.pub }); await loadBlocked() })
 
 // ---------- PEDIDOS DE APROBACIÓN ----------
 // Un cajón con `secret policy <ns> approval on` no se entrega solo: la bóveda apunta el
@@ -1883,7 +1953,7 @@ const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.sl
 
 async function loadVars () {
   varsError.value = ''
-  const r = await id.value.vaultAdmin('vars')
+  const r = await vaultAdmin('vars')
   const data = JSON.parse(await id.value.openContent(r.enc))
   // ABRIR LAS PÚBLICAS QUE LA BÓVEDA NOS MANDÓ (dueño, 2026-09-02).
   //
@@ -1993,14 +2063,14 @@ async function abrirBoveda () {
     // capturado se reenvíe con un nonce nuevo. El del primero solo pide turno.
     const nuevoNonce = () => [...crypto.getRandomValues(new Uint8Array(16))]
       .map((b) => b.toString(16).padStart(2, '0')).join('')
-    const params = await id.value.vaultAdmin('unlock.begin', { nonce: nuevoNonce() })
+    const params = await vaultAdmin('unlock.begin', { nonce: nuevoNonce() })
     if (!params?.ek) throw new Error(t.value.unlock_no)
 
     const nonce = nuevoNonce()
     const enc = await sealedAdminKey({ password: unlockPwd.value, params, nonce })
     unlockPwd.value = ''
 
-    await id.value.vaultAdmin('unlock', { nonce, enc })
+    await vaultAdmin('unlock', { nonce, enc })
     await refresh()
   } catch (e) {
     // El freno viaja con el rechazo, así que se puede decir CUÁNTO falta en vez de dejar
@@ -2055,7 +2125,7 @@ function saveVars ({ target, items }) {
     // tanda suelen ser todas iguales y no hay que ir dos veces por lo mismo.
     const cache = new Map()
     const paraQuien = async (esPublica) => {
-      if (!cache.has(esPublica)) cache.set(esPublica, await id.value.vaultAdmin('var.recipients', { ...dest, public: esPublica }))
+      if (!cache.has(esPublica)) cache.set(esPublica, await vaultAdmin('var.recipients', { ...dest, public: esPublica }))
       return cache.get(esPublica)
     }
     const sealados = []
@@ -2067,7 +2137,7 @@ function saveVars ({ target, items }) {
         sealed: await buildSealedVar({ recipients: await paraQuien(esPublica), owner, key: it.key, value: it.value, author })
       })
     }
-    const r = await id.value.vaultAdmin('var.setMany', { ...dest, items: sealados })
+    const r = await vaultAdmin('var.setMany', { ...dest, items: sealados })
     // UN APARATO SIN `unattended` NO ESCRIBE SOLO: la bóveda deja la escritura esperando a
     // que la apruebes en el teléfono. No es un error, y tampoco está guardada todavía.
     if (r?.pending) msg.value = { kind: 'info', text: t.value.var_awaiting }
@@ -2313,6 +2383,15 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
            cuelga todo lo demás de la pantalla: con la bóveda aquí, esto es un mostrador
            que atiende; con la bóveda en otra máquina, es una consola que le habla. No
            hay nada que marcar — la página ya hizo lo que tocaba. -->
+      <div v-if="vaults.length > 1" class="vaultpick" role="group" :aria-label="t.pick_label" data-testid="vault-pick">
+        <button v-for="v in vaults" :key="v.comm" type="button" class="btn sm" :class="{ ghost: chosen?.comm !== v.comm }"
+                :aria-pressed="chosen?.comm === v.comm" :data-vault="v.id" :data-here="v.here || null"
+                data-testid="vault-pick-item" @click="pickVault(v)">{{ v.here ? t.pick_here : v.label }}</button>
+      </div>
+      <p v-if="serveElsewhere" class="muted" data-testid="vault-serve-note">
+        {{ t.pick_serve }}
+        <button type="button" class="btn ghost sm" data-testid="vault-serve-open" @click="openServeWindow">{{ t.pick_serve_again }}</button>
+      </p>
       <div class="vaultat" data-testid="vault-at" :data-where="vaultAt">
         <span class="dot" :class="{ on: listening }" aria-hidden="true"></span>
         <strong>{{ atTitle }}</strong>
@@ -2839,6 +2918,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
 .info-panel { margin-top: .35rem; }
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 /* Dónde vive la bóveda: una línea, con su lucecita. Es estado, no un cartel. */
+.vaultpick { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
 .vaultat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; font-size: 15px; }
 .vaultat .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dt-surface-3); }
 .vaultat .dot.on { background: var(--dt-ok); box-shadow: 0 0 8px var(--dt-ok); }

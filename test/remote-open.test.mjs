@@ -117,25 +117,30 @@ test('la consola deriva en el navegador y manda el resultado, no la contraseña'
   const i = src.indexOf('async function abrirBoveda')
   assert.notEqual(i, -1, 'la consola tiene que poder abrir la bóveda')
   const cuerpo = src.slice(i, i + 2200)
+  // El molino vive en UNA pieza (`adminKey.js`), la misma que pone la contraseña al comprar
+  // la bóveda alojada: la derivada tiene que salir igual en los dos sitios.
+  assert.match(cuerpo, /sealedAdminKey\(\{ password: unlockPwd\.value, params, nonce \}\)/, 'la consola usa la pieza')
+  assert.ok(!/key: unlockPwd/.test(cuerpo), 'la contraseña no puede viajar: la bóveda no la ve nunca')
 
-  assert.match(cuerpo, /await import\('scrypt-js'\)/, 'el molino se hace aquí')
-  assert.match(cuerpo, /key: btoa/, 'lo que viaja es el resultado del molino')
-  assert.ok(!/password: unlockPwd|key: unlockPwd/.test(cuerpo),
-    'la contraseña no puede viajar: la bóveda no la ve nunca')
-  assert.match(cuerpo, /clave\.fill\(0\)/, 'y el resultado no se queda en memoria')
+  const pieza = leer('web/src/adminKey.js')
+  assert.match(pieza, /await import\('scrypt-js'\)/, 'el molino se hace aquí')
+  assert.match(pieza, /key: btoa/, 'lo que viaja es el resultado del molino')
+  assert.ok(!/password[,}]/.test(pieza.slice(pieza.indexOf('seal('))), 'el sobre no lleva la contraseña')
+  assert.match(pieza, /key\.fill\(0\)/, 'y el resultado no se queda en memoria')
 })
 
 test('el nonce lo pone la consola y va en los DOS sitios', () => {
   const src = leer('web/src/Console.vue')
   const cuerpo = src.slice(src.indexOf('async function abrirBoveda'), src.indexOf('async function abrirBoveda') + 2200)
   assert.match(cuerpo, /vaultAdmin\('unlock', \{ nonce, enc \}\)/, 'fuera, para que la bóveda lo queme')
-  assert.match(cuerpo, /payload: \{ nonce,/, 'y DENTRO del sobre, para que no se reenvíe')
+  assert.match(cuerpo, /sealedAdminKey\(\{[^}]*nonce \}\)/, 'se le pasa a quien sella')
+  assert.match(leer('web/src/adminKey.js'), /payload: \{ nonce,/, 'y va DENTRO del sobre, para que no se reenvíe')
 })
 
 test('la consola usa la MISMA cripto que la bóveda, no una copia', () => {
-  const src = leer('web/src/Console.vue')
-  assert.match(src, /from '@dotrino\/vault\/sealed'/,
+  assert.match(leer('web/src/adminKey.js'), /from '@dotrino\/vault\/sealed'/,
     'copiar el sellado sería dos implementaciones que se separan sin hacer ruido')
+  assert.match(leer('web/src/Console.vue'), /from '\.\/adminKey\.js'/)
 })
 
 test('la bóveda le dice a la consola si está cerrada y si se puede abrir', () => {
