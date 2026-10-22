@@ -256,7 +256,7 @@ export const DOOR_FILE = '.door'
  * Si algo falla, se va todo lo que nació aquí: una bóveda a medias en el almacén haría que el
  * siguiente intento dijera «ya está dada de alta».
  *
- * @returns {Promise<{ lock: object, deviceId: string, seq: number }>}  el candado sigue ABIERTO
+ * @returns {Promise<{ lock: object, deviceId: string, seq: number, publickey: string }>}  el candado sigue ABIERTO
  */
 export async function enrollJoin ({ store, dir, invitation, account, req, deadline, owner = 'enroll', openIdentity, parseInvite, makeEphemeralKey, openSealed, log = () => {} }) {
   if (!invitation) throw Object.assign(new Error('enrollJoin: no invitation'), { code: 'no-invitation' })
@@ -312,7 +312,7 @@ export async function enrollJoin ({ store, dir, invitation, account, req, deadli
     const mine = await identity.myMembership()
     await mirror.push()
     log(`[vault-lambda] joined the account (record #${mine.seq}) as ${mine.id}`)
-    return { lock, deviceId: mine.id, seq: mine.seq }
+    return { lock, deviceId: mine.id, seq: mine.seq, publickey: identity.me.publickey }
   } catch (e) {
     lock?.close()
     if (before) {

@@ -1,7 +1,7 @@
 <script setup>
 /**
- * LA RÉPLICA EN LA NUBE (`/hosted`): contratarla, enrolarla en tu cuenta y ver o cancelar las
- * tuyas (`dotrino-accounts/docs/DISENO.md` §8.bis y §9).
+ * EN LA NUBE (`/hosted`): contratar una RÉPLICA o una SEGUNDA BÓVEDA, enrolarla en tu cuenta y
+ * ver o cancelar las tuyas (`dotrino-accounts/docs/DISENO.md` §5, §8.bis y §9).
  *
  * Es una pantalla administrativa (CONVENCIONES §5.1): precio, un botón y tus réplicas; lo que
  * explica va en el wiki. Habla con `accounts.dotrino.com` (`dotrino-accounts`), que cobra con
@@ -14,6 +14,9 @@
  *      la pegas desde la máquina donde corre (`dotrino-vault pair --scope replica --quiet`). La
  *      réplica pide el alta y aquí sale el código, que apruebas en tu bóveda. Va después del
  *      pago porque una invitación caduca a los 5 minutos.
+ *   4. La segunda bóveda pide además una CONTRASEÑA, con la que nace sellada su maestra: se
+ *      deriva aquí y viaja sellada a una llave efímera suya (`adminKey.js`), así que ni
+ *      `accounts` ni nadie por el camino la ven. Es la misma con la que la abrirás después.
  *
  * Dentro de una app nativa no se vende nada (`noPayments`).
  */
@@ -23,30 +26,47 @@ import { signedFor } from '@dotrino/identity/assertion'
 import { noPayments } from '@dotrino/support/policy'
 import { encodeInvite } from '../../lib/src/invite.js'
 import { identityOptions } from './identity.js'
+import { sealedAdminKey } from './adminKey.js'
 
 const props = defineProps({ lang: { type: String, default: 'es' } })
 
 const ACCOUNTS = (import.meta.env.VITE_ACCOUNTS_URL || 'https://accounts.dotrino.com').replace(/\/$/, '')
 const AUD = 'https://accounts.dotrino.com'
 const FORMAT_V = 1
-const PRODUCT = 'replica'
+/**
+ * Lo que se vende, y con qué invitación entra cada uno: la réplica solo reparte (`replica`); la
+ * segunda bóveda sella (`sella`) y firma, lee y guarda como una bóveda.
+ */
+const PRODUCTS = {
+  replica: { cmd: 'dotrino-vault pair --scope replica --quiet', scope: ['vault:replica'], caps: ['replica'] },
+  vault: { cmd: 'dotrino-vault pair --scope sella,firma,lee,guarda --quiet', scope: ['vault:sign'], caps: ['sign', 'read', 'store', 'sealer'] }
+}
+const PASSWORD_MIN = 12
 const WIKI = { es: 'https://wiki.dotrino.com/vault/nube/', en: 'https://wiki.dotrino.com/en/vault/nube/' }
-const PAIR_CMD = 'dotrino-vault pair --scope replica --quiet'
 
 const T = {
   es: {
-    title: 'Réplica en la nube',
-    lead: 'Tu cuenta contesta aunque tu bóveda esté apagada.',
+    title: 'En la nube',
+    products: {
+      replica: { name: 'Réplica', what: 'Tu cuenta contesta aunque tu bóveda esté apagada.' },
+      vault: { name: 'Segunda bóveda', what: 'Tu cuenta puede seguir añadiendo aparatos aunque pierdas tu bóveda.' }
+    },
     price: (p) => `US$ ${p.subtotal} al mes + IVA (US$ ${p.total} en total). Se renueva sola cada mes y la cancelas cuando quieras.`,
     buy: 'Contratar con PayPal',
     buying: 'Abriendo PayPal…',
-    native: 'La réplica en la nube se contrata desde el navegador, en vault.dotrino.com/hosted.',
+    native: 'Se contrata desde el navegador, en vault.dotrino.com/hosted.',
     howto: 'Cómo funciona',
-    no_profile: 'Abre o crea tu perfil para contratar y ver tus réplicas.',
+    no_profile: 'Abre o crea tu perfil para contratar y ver lo tuyo.',
     back_working: 'Confirmando el pago…',
-    mine: 'Tus réplicas',
-    none: 'Todavía no tienes ninguna.',
-    replica: (d) => d ? `Réplica ${d}` : 'Réplica',
+    mine: 'Lo tuyo en la nube',
+    none: 'Todavía no tienes nada.',
+    item: (product, d) => `${T.es.products[product]?.name || product}${d ? ' ' + d : ''}`,
+    pwd_h: 'Su contraseña',
+    pwd: 'Contraseña (mínimo 12 caracteres)',
+    pwd_again: 'Repítela',
+    pwd_short: 'Mínimo 12 caracteres.',
+    pwd_differ: 'No coinciden.',
+    pwd_warn: 'No se puede recuperar. Si la olvidas, esta bóveda no vuelve a poder añadir ni quitar aparatos; la otra sigue pudiendo, y puede quitarla.',
     status: { ACTIVE: 'Activa', APPROVAL_PENDING: 'Esperando a PayPal', SUSPENDED: 'Pago pendiente', CANCELLED: 'Cancelada', EXPIRED: 'Vencida', COMP: 'Sin cargo' },
     stack: { creating: 'creándose', failed: 'no se pudo crear', deleted: 'borrada' },
     in_account: 'en tu cuenta',
@@ -81,25 +101,36 @@ const T = {
       'payment-declined': 'PayPal no aceptó esa forma de pago. Elige otra.',
       unreachable: 'No hay conexión con el servicio. Inténtalo de nuevo.',
       'enroll-failed': 'La invitación no sirvió (caducada o ya usada). Saca otra.',
-      'no-code': 'La réplica no recibió respuesta de tu bóveda. ¿Está encendida? Saca otra invitación.',
-      'already-enrolled': 'Esta réplica ya está en tu cuenta.',
-      'lease-busy': 'La réplica sigue esperando la invitación anterior. Inténtalo de nuevo en unos minutos.',
-      'wrong-account': 'Esa invitación es de otra cuenta. La réplica solo entra en la cuenta con la que la compraste.'
+      'no-code': 'No llegó respuesta de tu bóveda. ¿Está encendida? Saca otra invitación.',
+      'no-door': 'No dio tiempo a mandar la contraseña. Saca otra invitación.',
+      'bad-door': 'La contraseña no llegó bien. Saca otra invitación e inténtalo de nuevo.',
+      'already-enrolled': 'Ya está en tu cuenta.',
+      'lease-busy': 'Sigue esperando la invitación anterior. Inténtalo de nuevo en unos minutos.',
+      'wrong-account': 'Esa invitación es de otra cuenta. Solo entra en la cuenta con la que la compraste.'
     },
   },
   en: {
-    title: 'Replica in the cloud',
-    lead: 'Your account answers even with your vault off.',
+    title: 'In the cloud',
+    products: {
+      replica: { name: 'Replica', what: 'Your account answers even with your vault off.' },
+      vault: { name: 'Second vault', what: 'Your account can keep adding devices even if you lose your vault.' }
+    },
     price: (p) => `US$ ${p.subtotal} a month + VAT (US$ ${p.total} in total). It renews every month and you cancel whenever you want.`,
     buy: 'Subscribe with PayPal',
     buying: 'Opening PayPal…',
-    native: 'The replica in the cloud is subscribed from the browser, at vault.dotrino.com/hosted.',
+    native: 'It is subscribed from the browser, at vault.dotrino.com/hosted.',
     howto: 'How it works',
-    no_profile: 'Open or create your profile to subscribe and see your replicas.',
+    no_profile: 'Open or create your profile to subscribe and see yours.',
     back_working: 'Confirming the payment…',
-    mine: 'Your replicas',
-    none: 'You do not have any yet.',
-    replica: (d) => d ? `Replica ${d}` : 'Replica',
+    mine: 'Yours in the cloud',
+    none: 'You do not have anything yet.',
+    item: (product, d) => `${T.en.products[product]?.name || product}${d ? ' ' + d : ''}`,
+    pwd_h: 'Its password',
+    pwd: 'Password (at least 12 characters)',
+    pwd_again: 'Repeat it',
+    pwd_short: 'At least 12 characters.',
+    pwd_differ: 'They do not match.',
+    pwd_warn: 'It cannot be recovered. If you forget it, this vault can no longer add or remove devices; your other one still can, and can remove it.',
     status: { ACTIVE: 'Active', APPROVAL_PENDING: 'Waiting for PayPal', SUSPENDED: 'Payment pending', CANCELLED: 'Cancelled', EXPIRED: 'Expired', COMP: 'No charge' },
     stack: { creating: 'being created', failed: 'could not be created', deleted: 'deleted' },
     in_account: 'in your account',
@@ -134,10 +165,12 @@ const T = {
       'payment-declined': 'PayPal did not accept that payment method. Pick another one.',
       unreachable: 'No connection to the service. Try again.',
       'enroll-failed': 'The invitation did not work (expired or already used). Get another one.',
-      'no-code': 'The replica got no answer from your vault. Is it on? Get another invitation.',
-      'already-enrolled': 'This replica is already in your account.',
-      'lease-busy': 'The replica is still waiting on the previous invitation. Try again in a few minutes.',
-      'wrong-account': 'That invitation is from another account. The replica only joins the account you bought it with.'
+      'no-code': 'No answer from your vault. Is it on? Get another invitation.',
+      'no-door': 'There was no time to send the password. Get another invitation.',
+      'bad-door': 'The password did not arrive right. Get another invitation and try again.',
+      'already-enrolled': 'It is already in your account.',
+      'lease-busy': 'It is still waiting on the previous invitation. Try again in a few minutes.',
+      'wrong-account': 'That invitation is from another account. It only joins the account you bought it with.'
     },
   },
 }
@@ -157,7 +190,7 @@ async function api (method, path, body) {
 }
 const errorText = (e) => t.value.errors[e?.code] || t.value.error
 
-const price = ref(null)
+const prices = ref({}) // producto -> lo que cuesta
 const busy = ref('')
 const notice = ref(null) // { kind: 'ok' | 'error', text }
 
@@ -187,11 +220,11 @@ async function connect () {
 const signed = (fields) => signedFor(identity.value, { aud: AUD, fields: { v: FORMAT_V, ...fields } })
 
 // ----- comprar -----
-async function buy () {
-  busy.value = 'buy'
+async function buy (product) {
+  busy.value = 'buy:' + product
   notice.value = null
   try {
-    const r = await api('POST', '/subscribe', { req: await signed({ op: 'subscribe', product: PRODUCT }) })
+    const r = await api('POST', '/subscribe', { req: await signed({ op: 'subscribe', product }) })
     location.href = r.approveUrl
   } catch (e) { notice.value = { kind: 'error', text: errorText(e) }; busy.value = '' }
 }
@@ -210,6 +243,14 @@ const mine = ref([])
 const cancelling = ref(null)
 const invitation = ref({}) // id -> lo pegado
 const codes = ref({})      // id -> el código que salió al enrolar
+const pwd = ref({})        // id -> { a, b }: la contraseña de una segunda bóveda, dos veces
+/** Por qué la contraseña todavía no vale, o '' si vale. Solo la segunda bóveda lleva. */
+const pwdProblem = (s) => {
+  if (s.product !== 'vault') return ''
+  const { a = '', b = '' } = pwd.value[s.id] || {}
+  if (a.length < PASSWORD_MIN) return t.value.pwd_short
+  return a === b ? '' : t.value.pwd_differ
+}
 let timer = null
 async function loadMine () {
   if (!identity.value) return
@@ -225,11 +266,20 @@ async function enroll (s, fromHere) {
   notice.value = null
   try {
     let inv = (invitation.value[s.id] || '').trim()
+    if (pwdProblem(s)) return
     if (fromHere) {
-      const r = await identity.value.selfVaultPairing({ scope: ['vault:replica'], caps: ['replica'] })
+      const { scope, caps } = PRODUCTS[s.product]
+      const r = await identity.value.selfVaultPairing({ scope, caps })
       inv = encodeInvite(r.qr)
     }
-    const r = await api('POST', '/enroll', { id: s.id, invitation: inv, req: await signed({ op: 'enroll', id: s.id }) })
+    let r = await api('POST', '/enroll', { id: s.id, invitation: inv, req: await signed({ op: 'enroll', id: s.id }) })
+    // La segunda bóveda todavía no tiene maestra: nace con la contraseña, que va sellada a su
+    // llave efímera. El nonce es el del alta, para que el sobre no valga en otra.
+    if (r.door) {
+      const enc = await sealedAdminKey({ password: pwd.value[s.id].a, params: r.door, nonce: r.door.req })
+      r = await api('POST', '/enroll-door', { id: s.id, door: { req: r.door.req, enc }, req: await signed({ op: 'enroll-door', id: s.id }) })
+      pwd.value = { ...pwd.value, [s.id]: {} }
+    }
     codes.value = { ...codes.value, [s.id]: r.code }
     await loadMine()
   } catch (e) { notice.value = { kind: 'error', text: errorText(e) } } finally { busy.value = '' }
@@ -264,7 +314,9 @@ const fmtWhen = (ts) => new Intl.DateTimeFormat(props.lang, { dateStyle: 'medium
 
 onMounted(async () => {
   if (native) return
-  api('GET', '/price').then((p) => { price.value = p }).catch(() => {})
+  for (const product of Object.keys(PRODUCTS)) {
+    api('GET', '/price?product=' + product).then((p) => { prices.value = { ...prices.value, [product]: p } }).catch(() => {})
+  }
   await connect()
   await finishPurchase()
   await loadMine()
@@ -273,18 +325,19 @@ onMounted(async () => {
 
 <template>
   <section class="hosted" data-testid="hosted">
-    <h1>{{ t.title }}</h1>
-    <p class="lead">{{ t.lead }} <a :href="wiki" rel="noopener">{{ t.howto }}</a></p>
+    <h1>{{ t.title }} <a class="howto" :href="wiki" rel="noopener">{{ t.howto }}</a></h1>
 
     <p v-if="native" class="muted" data-testid="hosted-native">{{ t.native }}</p>
 
     <template v-else>
       <p v-if="notice" :class="['notice', notice.kind]" role="status" data-testid="hosted-notice">{{ notice.text }}</p>
 
-      <div class="card" data-testid="hosted-buy">
-        <p v-if="price" class="price" data-testid="hosted-price">{{ t.price(price) }}</p>
+      <div v-for="(_, product) in PRODUCTS" :key="product" class="card" :data-product="product" data-testid="hosted-buy">
+        <h2>{{ t.products[product].name }}</h2>
+        <p>{{ t.products[product].what }}</p>
+        <p v-if="prices[product]" class="price" data-testid="hosted-price">{{ t.price(prices[product]) }}</p>
         <p v-if="!hasProfile" class="muted">{{ t.no_profile }}</p>
-        <button class="btn btn-primary" :disabled="!!busy || !price || !identity" @click="buy" data-testid="hosted-subscribe">{{ busy === 'buy' ? t.buying : t.buy }}</button>
+        <button class="btn btn-primary" :disabled="!!busy || !prices[product] || !identity" @click="buy(product)" data-testid="hosted-subscribe">{{ busy === 'buy:' + product ? t.buying : t.buy }}</button>
       </div>
 
       <div v-if="identity" class="card" data-testid="hosted-mine">
@@ -292,7 +345,7 @@ onMounted(async () => {
         <p v-if="!mine.length" class="muted">{{ t.none }}</p>
         <article v-for="s in mine" :key="s.id" class="sub" :data-sub-id="s.id" data-testid="hosted-sub">
           <p>
-            <strong>{{ t.replica(s.device) }}</strong> ·
+            <strong>{{ t.item(s.product, s.device) }}</strong> ·
             {{ t.status[s.status] || s.status }}
             <template v-if="s.stack !== 'ready'"> · {{ t.stack[s.stack] || s.stack }}</template>
             <template v-else> · {{ s.on ? t.on : t.off }}<template v-if="s.enrolled"> · <span data-testid="hosted-enrolled">{{ t.in_account }}</span></template></template>
@@ -303,6 +356,15 @@ onMounted(async () => {
 
           <div v-if="s.stack === 'ready' && !s.enrolled && (s.status === 'ACTIVE' || s.status === 'COMP')" class="enroll" data-testid="hosted-enroll">
             <h3>{{ t.enroll_h }}</h3>
+            <template v-if="s.product === 'vault' && !codes[s.id]">
+              <p><strong>{{ t.pwd_h }}</strong></p>
+              <p class="row">
+                <input class="inv" type="password" autocomplete="new-password" v-model="(pwd[s.id] ||= {}).a" :placeholder="t.pwd" data-testid="hosted-password" />
+                <input class="inv" type="password" autocomplete="new-password" v-model="(pwd[s.id] ||= {}).b" :placeholder="t.pwd_again" data-testid="hosted-password-again" />
+              </p>
+              <p v-if="(pwd[s.id]?.a || pwd[s.id]?.b) && pwdProblem(s)" class="muted" data-testid="hosted-password-problem">{{ pwdProblem(s) }}</p>
+              <p class="warn">{{ t.pwd_warn }}</p>
+            </template>
             <template v-if="codes[s.id]">
               <p><strong>{{ t.code_h }}</strong></p>
               <p class="row"><code class="code" data-testid="hosted-code">{{ codes[s.id] }}</code>
@@ -314,16 +376,16 @@ onMounted(async () => {
               <p class="muted">{{ t.code_wait }}</p>
             </template>
             <p v-if="selfVault.enabled" class="row">
-              <button class="btn btn-primary" :disabled="!!busy || !selfVault.running" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
+              <button class="btn btn-primary" :disabled="!!busy || !selfVault.running || !!pwdProblem(s)" @click="enroll(s, true)" data-testid="hosted-enroll-here">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_here }}</button>
               <span v-if="!selfVault.running && selfVault.error" class="muted" data-testid="hosted-self-error">{{ t.self_error[selfVault.error.code] || t.self_error_other }}</span>
               <span v-else-if="!selfVault.running" class="muted">{{ t.self_starting }}</span>
             </p>
             <p class="muted">{{ t.enroll_paste }}</p>
-            <p class="row"><code>{{ PAIR_CMD }}</code>
-              <button class="btn btn-ghost small" @click="copy('pair-' + s.id, PAIR_CMD)">{{ copied === 'pair-' + s.id ? t.copied : t.copy }}</button></p>
+            <p class="row"><code>{{ PRODUCTS[s.product].cmd }}</code>
+              <button class="btn btn-ghost small" @click="copy('pair-' + s.id, PRODUCTS[s.product].cmd)">{{ copied === 'pair-' + s.id ? t.copied : t.copy }}</button></p>
             <p class="row">
               <input class="inv" v-model="invitation[s.id]" :placeholder="t.enroll_placeholder" data-testid="hosted-invitation" />
-              <button class="btn" :disabled="!!busy || !(invitation[s.id] || '').trim()" @click="enroll(s, false)" data-testid="hosted-enroll-go">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_go }}</button>
+              <button class="btn" :disabled="!!busy || !(invitation[s.id] || '').trim() || !!pwdProblem(s)" @click="enroll(s, false)" data-testid="hosted-enroll-go">{{ busy === 'enroll:' + s.id ? t.enrolling : t.enroll_go }}</button>
             </p>
             <p v-if="s.enrollBefore" class="warn">{{ (s.status === 'COMP' ? t.enroll_before_comp : t.enroll_before)(fmtWhen(s.enrollBefore)) }}</p>
           </div>
@@ -345,7 +407,8 @@ onMounted(async () => {
 
 <style scoped>
 .hosted { max-width: 720px; margin: 24px auto 64px; }
-.lead { color: var(--muted); }
+.howto { font-size: .9rem; font-weight: 400; margin-left: 8px; }
+.card h2 { margin: 0 0 4px; font-size: 1.1rem; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
 .price { font-weight: 700; }
 .notice { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); }

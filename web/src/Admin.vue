@@ -38,7 +38,7 @@ const T = {
     open: 'Abrir', close: 'Cerrar', reload: 'Recargar',
     connecting: 'Conectando…',
     none: 'No hay suscripciones.',
-    col: { account: 'Cuenta', id: 'Suscripción', status: 'Estado', stack: 'Réplica', device: 'Aparato', power: 'Encendida', paid: 'Pagada hasta', refund: 'Devolución', paypal: 'PayPal', actions: '' },
+    col: { account: 'Cuenta', id: 'Suscripción', product: 'Producto', status: 'Estado', stack: 'Pila', device: 'Aparato', power: 'Encendida', paid: 'Pagada hasta', refund: 'Devolución', paypal: 'PayPal', actions: '' },
     status: { ACTIVE: 'Activa', APPROVAL_PENDING: 'Esperando a PayPal', SUSPENDED: 'Pago pendiente', CANCELLED: 'Cancelada', EXPIRED: 'Vencida', COMP: 'Sin cargo' },
     stack: { none: 'sin crear', creating: 'creándose', ready: 'lista', failed: 'falló', deleted: 'borrada' },
     enrolled: 'en la cuenta', not_enrolled: 'sin añadir',
@@ -49,10 +49,11 @@ const T = {
     remove_btn: 'Borrar la réplica', remove_sure: '¿Borrar esta réplica? Si la suscripción sigue activa, se cancela.',
     yes: 'Sí', no: 'No',
     refunded: (r) => `Devuelto ${r.amount} (${r.capture}).`,
-    add_h: 'Añadir una réplica a una cuenta',
+    products: { replica: 'Réplica', vault: 'Segunda bóveda' },
+    add_h: 'Añadir a una cuenta, sin cargo',
     add_placeholder: 'ID de la cuenta (64 caracteres hexadecimales)',
     add_go: 'Añadir',
-    added: 'Réplica añadida. La cuenta la verá en su página «En la nube» para añadirla con su invitación.',
+    added: 'Añadida. La cuenta la verá en su página «En la nube» para añadirla con su invitación.',
     error: (code, msg) => `No se pudo (${code})${msg ? ': ' + msg : ''}`,
     errors: {
       forbidden: 'Este aparato no tiene el permiso «admin» en la cuenta.',
@@ -72,7 +73,7 @@ const T = {
     open: 'Open', close: 'Close', reload: 'Reload',
     connecting: 'Connecting…',
     none: 'No subscriptions.',
-    col: { account: 'Account', id: 'Subscription', status: 'Status', stack: 'Replica', device: 'Device', power: 'On', paid: 'Paid until', refund: 'Refund', paypal: 'PayPal', actions: '' },
+    col: { account: 'Account', id: 'Subscription', product: 'Product', status: 'Status', stack: 'Stack', device: 'Device', power: 'On', paid: 'Paid until', refund: 'Refund', paypal: 'PayPal', actions: '' },
     status: { ACTIVE: 'Active', APPROVAL_PENDING: 'Waiting for PayPal', SUSPENDED: 'Payment pending', CANCELLED: 'Cancelled', EXPIRED: 'Expired', COMP: 'No charge' },
     stack: { none: 'not created', creating: 'being created', ready: 'ready', failed: 'failed', deleted: 'deleted' },
     enrolled: 'in the account', not_enrolled: 'not added',
@@ -83,10 +84,11 @@ const T = {
     remove_btn: 'Delete the replica', remove_sure: 'Delete this replica? If the subscription is still active, it is cancelled.',
     yes: 'Yes', no: 'No',
     refunded: (r) => `Refunded ${r.amount} (${r.capture}).`,
-    add_h: 'Add a replica to an account',
+    products: { replica: 'Replica', vault: 'Second vault' },
+    add_h: 'Add to an account, at no charge',
     add_placeholder: 'Account ID (64 hexadecimal characters)',
     add_go: 'Add',
-    added: 'Replica added. The account will see it on its «In the cloud» page to add it with its invitation.',
+    added: 'Added. The account will see it on its «In the cloud» page to add it with its invitation.',
     error: (code, msg) => `It did not work (${code})${msg ? ': ' + msg : ''}`,
     errors: {
       forbidden: 'This device does not have the «admin» permission in the account.',
@@ -118,7 +120,7 @@ onMounted(async () => {
   link.value = markRaw(l)
   agents.value = await Promise.all(props.members.map(async (m) => reactive({
     sub: m.sub, label: m.label, deviceId: await keyLabel(m.sub), online: null,
-    open: false, client: null, rows: null, busy: '', notice: null, confirm: null, account: ''
+    open: false, client: null, rows: null, busy: '', notice: null, confirm: null, account: '', product: 'replica'
   })))
   try {
     const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
@@ -200,7 +202,7 @@ const remove = (a, r) => run(a, 'remove:' + r.id, async () => {
 })
 
 const addReplica = (a) => run(a, 'add', async () => {
-  await request(a, 'addReplica', { account: a.account.trim() })
+  await request(a, 'addReplica', { account: a.account.trim(), product: a.product })
   a.account = ''
   a.notice = { kind: 'ok', text: t.value.added }
   a.rows = await request(a, 'list')
@@ -234,6 +236,7 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
               <dl class="fields">
                 <div><dt>{{ t.col.account }}</dt><dd><code :title="r.account">{{ short(r.account, 12) }}</code></dd></div>
                 <div><dt>{{ t.col.id }}</dt><dd><code :title="r.id">{{ short(r.id) }}</code></dd></div>
+                <div><dt>{{ t.col.product }}</dt><dd>{{ t.products[r.product] || r.product }}</dd></div>
                 <div><dt>{{ t.col.status }}</dt><dd>{{ t.status[r.status] || r.status }}</dd></div>
                 <div><dt>{{ t.col.stack }}</dt><dd><span :title="r.note || ''">{{ t.stack[r.stack] || r.stack }}</span><code v-if="r.vault" class="muted"> {{ r.vault }}</code></dd></div>
                 <div><dt>{{ t.col.device }}</dt><dd>{{ r.enrolled ? t.enrolled : t.not_enrolled }}<code v-if="r.device"> {{ r.device }}</code></dd></div>
@@ -263,6 +266,9 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 
           <h3>{{ t.add_h }}</h3>
           <p class="row">
+            <select class="inp sel" v-model="a.product" data-testid="admin-add-product">
+              <option v-for="(name, key) in t.products" :key="key" :value="key">{{ name }}</option>
+            </select>
             <input class="inp" v-model="a.account" :placeholder="t.add_placeholder" spellcheck="false" autocomplete="off" data-testid="admin-add-account" />
             <button class="btn" :disabled="!!a.busy || !ACCOUNT_RE.test(a.account.trim())" @click="addReplica(a)" data-testid="admin-add-go">{{ t.add_go }}</button>
           </p>
@@ -291,5 +297,6 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 .fields dt { font-size: .75rem; font-weight: 700; color: var(--muted); }
 .fields dd { margin: 0; overflow-wrap: anywhere; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.sel { flex: 0 0 auto; font-family: inherit; }
 .inp { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg, transparent); color: inherit; font-family: monospace; }
 </style>

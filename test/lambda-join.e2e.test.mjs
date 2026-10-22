@@ -95,6 +95,9 @@ test('con la invitación de otra cuenta no hay código, y no queda nada a medias
 })
 
 let derivada = null
+let alojada = null
+// Entra con la invitación de cualquier bóveda de la cuenta que SELLE, como cualquier aparato
+// (dueño, 2026-10-19): el alta solo comprueba que quien invita sella esa cuenta.
 test('nace sellada, entra en la cuenta con el código del dueño y sella', async () => {
   const r = alta(await invitar(vault), 'req-1')
   const door = await pairing('req-1', (g) => g.phase === 'door')
@@ -103,9 +106,10 @@ test('nace sellada, entra en la cuenta con el código del dueño y sella', async
   const pend = await pairing('req-1', (g) => !!g.code)
   assert.ok(pend.code, pend.message || 'el código para teclear en la bóveda')
   await vault.approveDevice(pend.code)
-  const { lock, deviceId } = await r
+  const { lock, deviceId, publickey } = await r
   lock.close()
   assert.equal(deviceId, pend.deviceId)
+  alojada = publickey
 
   const st = await joinStatus({ store, dir: tmp('join-estado-'), openIdentity })
   assert.equal(st.enrolled, true)
@@ -145,6 +149,37 @@ test('la sesión arranca cerrada; con la derivada se abre, con otra no', async (
   assert.equal(r.ready.cerrada.locked, true, 'nace cerrada en cada sesión')
   assert.equal(r.ready.mala, 'WRONG_PASSWORD')
   assert.equal(r.ready.abierta.locked, false, 'la derivada de su contraseña la abre')
+})
+
+// PENDIENTE: el proxio no le entrega a la segunda bóveda lo dirigido a SU maestra (solo a la del
+// perfil, que es la primera). Hasta que se ate, abrirla a distancia no llega.
+test('dormida y cerrada, la abre desde lejos un aparato con `admin` de la OTRA bóveda', { todo: 'el proxio no enruta a la maestra de una segunda bóveda' }, async () => {
+  // Un aparato de la cuenta con `admin`, emparejado con la bóveda del cliente (su papel lo firmó
+  // ella, no la alojada): lo que pasa cuando la primera se pierde y hay que abrir la segunda.
+  const { enrollWithVault } = await import('../lib/src/service.js')
+  const { requestAdmin } = await import('@dotrino/identity/vault/remote.js')
+  const { qr } = await vault.startPairing({ scope: ['vault:admin'], caps: ['admin'], label: 'consola' })
+  const alta = enrollWithVault({ qr, label: 'consola', withEncKey: false, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
+  const consola = await alta
+  const pide = (op, extra = {}) => requestAdmin({ master: alojada, proxy: proxyUrl, device: consola.device, cert: consola.cert, op, ...extra })
+
+  const r = await runSession({
+    store, dir: tmp('join-remota-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({
+      startVault, locked: true,
+      onReady: async (v) => {
+        const begin = await pide('unlock.begin')
+        const nonce = crypto.randomBytes(16).toString('hex')
+        const key = crypto.scryptSync(PASSWORD, Buffer.from(begin.salt, 'base64'), begin.len, { N: begin.N, r: begin.r, p: begin.p })
+        const enc = await seal({ ek: begin.ek, payload: { nonce, key: key.toString('base64') } })
+        const opened = await pide('unlock', { nonce, enc })
+        return { begin, opened, after: await v.takeMasterKey() }
+      }
+    })
+  })
+  assert.ok(r.ready.begin.ek, 'contesta cerrada, con la llave efímera')
+  assert.equal(r.ready.opened.locked, false)
+  assert.equal(r.ready.after.locked, false, 'la maestra quedó en memoria')
 })
 
 test('una bóveda ya dada de alta no se vuelve a dar de alta', async () => {

@@ -22,7 +22,7 @@ import { ref, computed, watch, markRaw, onMounted, onBeforeUnmount, defineAsyncC
  */
 import { buildSealedVar } from '@dotrino/vault/admin'
 // La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.
-import { seal as sealToEphemeral } from '@dotrino/vault/sealed'
+import { sealedAdminKey } from './adminKey.js'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope, DEVICE_CAPS } from '@dotrino/identity/acta'
@@ -1996,14 +1996,8 @@ async function abrirBoveda () {
     const params = await id.value.vaultAdmin('unlock.begin', { nonce: nuevoNonce() })
     if (!params?.ek) throw new Error(t.value.unlock_no)
 
-    const { scrypt } = await import('scrypt-js')
-    const salt = Uint8Array.from(atob(params.salt), (c) => c.charCodeAt(0))
-    const clave = await scrypt(new TextEncoder().encode(unlockPwd.value), salt,
-      params.N, params.r, params.p, params.len)
-
     const nonce = nuevoNonce()
-    const enc = await sealToEphemeral({ ek: params.ek, payload: { nonce, key: btoa(String.fromCharCode(...clave)) } })
-    clave.fill(0)
+    const enc = await sealedAdminKey({ password: unlockPwd.value, params, nonce })
     unlockPwd.value = ''
 
     await id.value.vaultAdmin('unlock', { nonce, enc })
