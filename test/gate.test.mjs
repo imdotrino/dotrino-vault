@@ -73,3 +73,17 @@ test('entrar con contraseña: pasa sin ser miembro, con freno por conexión y gl
   t = 1000
   assert.equal((await gate.admit('a', { type: MSG.LOGIN_START })).ok, true, 'ventana nueva')
 })
+
+test('un ex-miembro con su aviso pasa solo a preguntar (CHECK), con su firma y con freno', async () => {
+  const yo = await key(); const ido = await key(); const extraño = await key()
+  const limiter = makeLimiter({ perKey: 1, global: 100, windowMs: 1000, now: () => 0 })
+  const gate = createGate({ MSG, acta: async () => ({ members: [{ pub: yo.pub }] }), pairing: () => false, former: (pub) => pub === ido.pub, limiter })
+  const pregunta = await signed(ido, { op: 'check', publickey: ido.pub, ts: Date.now() })
+  assert.equal((await gate.admit('t', { type: MSG.CHECK, ...pregunta })).ok, true)
+  assert.equal((await gate.admit('t', { type: MSG.ADMIN, ...pregunta })).ok, false, 'solo CHECK')
+  const ajena = await signed(extraño, { op: 'check', publickey: ido.pub, ts: Date.now() })
+  assert.equal((await gate.admit('u', { type: MSG.CHECK, ...ajena })).ok, false, 'con su firma')
+  const otro = await signed(extraño, { op: 'check', publickey: extraño.pub, ts: Date.now() })
+  assert.equal((await gate.admit('u', { type: MSG.CHECK, ...otro })).ok, false, 'quien nunca estuvo, nada')
+  assert.equal((await gate.admit('t', { type: MSG.CHECK, ...pregunta })).ok, false, 'freno')
+})

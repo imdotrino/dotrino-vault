@@ -132,6 +132,7 @@ Antes de hacer nada con un mensaje, la bóveda mira quién lo manda (`lib/src/co
 |---|---|
 | todo lo de un aparato o servicio (`sign`, `get`, `store`, `check`, `devices`, `renew`, `secrets`, `admin`, `incident`, `rewrap.ok`, `replica.ack`) | la llave que dice mandarlo está en el acta **y** la firma es suya |
 | `renounce` | quien renuncia está en el acta (la firma la mira el manejador) |
+| `check` de quien salió | estuvo en las actas de la ventana, la firma es suya y cabe en el freno; se le contesta con su aviso de expulsión |
 | `admin.event` (otra bóveda anuncia un acta) | el acta la selló un miembro de la nuestra (el sello lo mira `adoptActa`) |
 | `login.*` (entrar con contraseña) | siempre, con freno: 10 por conexión y 120 en total por minuto, además del freno por usuario — que ahora también tienen los usuarios que no existen, para que no se pueda saber cuáles hay |
 | `hello`, `enroll`, `acta.sealed` (el alta) | hay un emparejamiento abierto en esta bóveda y el mensaje es de ese |
@@ -142,8 +143,12 @@ acta entera firmada (los errores de `secrets`), que la maestra firmara a petici�
 un `enroll` mal formado) y que la bitácora rotara hasta perder lo viejo. Lo descartado se cuenta
 en memoria (`gateStats()`).
 
-El precio, dicho: un aparato **expulsado** ya no recibe respuesta de la bóveda, tampoco a
-`check`. Se entera por el aviso de expulsión firmado que se le manda al quitarlo (cola de 24 h).
+**Los que salieron se borran solos.** Un aparato de las actas de la ventana del historial
+(`pastMembers`, 50 actas) que ya no está pasa la puerta para una sola cosa: `check`, con su firma
+y con freno. La respuesta es su aviso de expulsión, firmado UNA vez con la bóveda abierta y
+guardado (`exNotices.js`, sin caducidad): preguntar no hace firmar a la maestra, y el aparato se
+borra aunque el aviso que se le mandó al echarlo no le llegara (la cola del proxio dura 24 h).
+Fuera de la ventana no se sabe quién estuvo, y a ese no se le contesta.
 
 ## 3. Lo que se afirma con pruebas, no con adjetivos
 
