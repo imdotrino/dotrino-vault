@@ -197,7 +197,9 @@ aparatos se cancela (§1.7).
 ### 1.7 Dos aparatos responden a la misma invitación: se cancela y es un incidente
 
 > Regla del dueño, 2026-10-23. **Vale para todos los medios** (QR, pegar, descubrir): es
-> una regla, no dos. **Estado: sin implementar.**
+> una regla, no dos. **Es SOLO del emparejamiento de la bóveda**: añadir amigos o juntarse
+> varios en un juego por Bluetooth no tiene incidente, ahí que lleguen varios es lo normal
+> (§1.8). **Estado: sin implementar.**
 
 **Qué cuenta como segunda respuesta.** Un ENROLL **válido** (firma del aparato correcta,
 `sn` de esta sesión, dentro de la ventana anti-replay) con una `dpub` **distinta** de la
@@ -246,7 +248,10 @@ quien está al lado sin teclear ni escanear nada.
   «Descubrir», pasa a ser una pieza compartida: un Web Component para la web y su versión
   en `dotrino-native`. Así se añaden amigos desde cualquier app y aparecen en todas.
 - **Mismas reglas que §1.6**: solo se anuncia mientras está abierta la pantalla de añadir,
-  y «Descubrir» es un botón. Cada lado ve el identicon y el apodo del otro antes de aceptar,
+  y «Descubrir» es un botón.
+- **Sin incidente** (dueño, 2026-10-23): que respondan varios a la vez es lo esperado —un
+  grupo que se junta, varios jugadores en una partida por Bluetooth—. El §1.7 es solo de la
+  bóveda, porque ahí lo que se juega es entrar en la cuenta. Cada lado ve el identicon y el apodo del otro antes de aceptar,
   y aceptar es de los dos (la solicitud entre pares del messenger).
 - **En el navegador** solo hay QR, por lo mismo que en §1.6.
 
