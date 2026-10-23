@@ -110,6 +110,10 @@ export function nodePlatform (dir) {
     readProcContext,
     openLocalDesk,
     noticeGroupMs: Number(process.env.DOTRINO_VAULT_NOTICE_MS) || 3000,
+    // EL BLUETOOTH del transporte (proxy-client docs/bluetooth.md): en Linux, por BlueZ; en
+    // otro sistema el pilar no encuentra con qué y sigue sin él. Sirve para anunciar cerca la
+    // invitación de emparejar (pairing-protocol.md §1.6) y como escalón directo.
+    bluetooth: true,
     async openIdentity ({ openKey = null, log = console.log } = {}) {
       // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
       // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando

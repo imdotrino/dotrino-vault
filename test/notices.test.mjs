@@ -61,3 +61,15 @@ test('«necesita permisos de administrador» es otro aviso, con las mismas regla
   assert.deepEqual([b.ev, b.deviceId, b.label], ['update-needs-root', 'AB12-CD34', 'servidor'])
   assert.throws(() => n.add('whatever', { version: '1.0.0' }), (e) => e.code === 'bad-notice')
 })
+
+test('pairing-contested: el incidente lleva los dos aparatos y no pide versión', async () => {
+  const { openNotices } = await import('../lib/src/core/notices.js')
+  const files = new Map()
+  const disk = { atRest: { encrypt: (s) => s, decrypt: (s) => s }, exists: (f) => files.has(f), read: (f) => files.get(f), write: (f, d) => files.set(f, d) }
+  const n = openNotices({ disk })
+  const it = n.add('pairing-contested', { devices: [{ deviceId: 'AB12-CD34', machine: { os: 'android' } }, { deviceId: 'EF56-7890', machine: null }] })
+  assert.equal(it.ev, 'pairing-contested')
+  assert.deepEqual(it.devices.map((d) => d.deviceId), ['AB12-CD34', 'EF56-7890'])
+  assert.equal(n.list().length, 1)
+  assert.throws(() => n.add('pairing-contested', { devices: [{ deviceId: 'x' }] }), { code: 'bad-notice' })
+})

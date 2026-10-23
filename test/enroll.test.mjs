@@ -369,3 +369,64 @@ test('el reto y los errores llevan la firma de la maestra y el sn; el aparato de
   // Y un error que fabrique cualquiera, sin la maestra, no pasa.
   assert.equal(await fromMyVault({ type: 'vault.error', error: 'x', signed: { type: 'vault.error', error: 'x', sn: qr.sn, iss: identity.iss, ts: 1 } }, qr), false)
 })
+
+test('DOS APARATOS RESPONDEN a la misma invitación: se cancela, ninguno entra y es un incidente (§1.7)', async () => {
+  const contested = []
+  const { identity, desk, sent } = await mount({ onContested: (c) => contested.push(c) })
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000 })
+  const a = await deviceEnroll(qr, { label: 'a' })
+  const b = await deviceEnroll(qr, { label: 'b' })
+  await desk.handleEnroll('tok-a', a.payload)
+  const r = await desk.handleEnroll('tok-b', b.payload)
+  assert.equal(r.contested, true)
+  const errs = sent.filter((m) => m.type === 'vault.error' && m.code === 'pairing-contested')
+  assert.deepEqual(errs.map((m) => m.to).sort(), ['tok-a', 'tok-b'], 'se les dice a los dos')
+  assert.ok(errs.every((m) => m.vsig && m.signed?.sn === qr.sn), 'firmado, como todo error del emparejamiento')
+  assert.equal(contested.length, 1)
+  assert.equal(contested[0].devices.length, 2)
+  assert.equal(desk.listPending().length, 0)
+  await assert.rejects(desk.approve(a.code), 'con el código bueno tampoco entra')
+  assert.equal(identity.issued.length, 0)
+})
+
+test('dos ENROLL a la vez del mismo emparejamiento: también se cancela (no pasan los dos)', async () => {
+  const contested = []
+  const { desk } = await mount({ onContested: (c) => contested.push(c) })
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000 })
+  const a = await deviceEnroll(qr); const b = await deviceEnroll(qr)
+  await Promise.all([desk.handleEnroll('tok-a', a.payload), desk.handleEnroll('tok-b', b.payload)])
+  assert.equal(contested.length, 1)
+  assert.equal(desk.listPending().length, 0)
+})
+
+test('el mismo aparato que repite su ENROLL no es un incidente', async () => {
+  const contested = []
+  const { desk } = await mount({ onContested: (c) => contested.push(c) })
+  const { qr } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000 })
+  const a = await deviceEnroll(qr)
+  await desk.handleEnroll('tok-a', a.payload)
+  await desk.handleEnroll('tok-a', a.payload)
+  assert.equal(contested.length, 0)
+  assert.equal((await desk.approve(a.code)).ok, true)
+})
+
+test('la invitación se anuncia cerca mientras la sesión vive, y se deja de anunciar al cerrarla (§1.6)', async () => {
+  const live = new Set()
+  const announce = (kind, data) => { const k = kind + ':' + data; live.add(k); return () => live.delete(k) }
+  const { desk } = await mount({ announce })
+  const { qr, token } = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000 })
+  const { parseInvite } = await import('../lib/src/invite.js')
+  assert.equal(live.size, 1)
+  const [k] = [...live]
+  assert.ok(k.startsWith('pair:'))
+  assert.deepEqual(parseInvite(k.slice(5)).sn, qr.sn, 'lo anunciado es la misma invitación')
+  const a = await deviceEnroll(qr)
+  await desk.handleEnroll('tok-a', a.payload)
+  await desk.approve(a.code)
+  assert.equal(live.size, 0, 'aprobado: ya no se anuncia')
+  const again = await desk.startPairing({ scope: ['vault:sign'], ttlMs: 60000 })
+  assert.equal(live.size, 1)
+  desk.stopPairing(again.token)
+  assert.equal(live.size, 0, 'parado: ya no se anuncia')
+  assert.ok(token)
+})

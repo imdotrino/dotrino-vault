@@ -2825,6 +2825,7 @@ function pairingBody (st, t, cols, height, { qr: withQr = true } = {}) {
   lines.push(t.muted(i.pairPaste))
   lines.push(info.b64 || info.payload)
   lines.push('')
+  if (info.nearby) { lines.push(t.muted(i.pairNearby)); lines.push('') }
   lines.push(t.danger(i.pairWarning))
   lines.push('')
   if (st.pending) {

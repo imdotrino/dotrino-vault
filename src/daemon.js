@@ -270,8 +270,8 @@ export async function runDaemon () {
       //               perfil de esta bóveda tiene que haber nacido para eso (`--adopt`
       //               crea uno vacío), o no habría dónde meterla.
       const mode = pairReq?.mode === 'adopt' ? 'adopt' : 'join'
-      const { qr, expiresInMs } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName, ...(caps ? { caps } : {}) })
-      ipcWrite(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName })
+      const { qr, expiresInMs, nearby } = await vault.startPairing({ scope, label, ttlMs: DEVICE_TTL_MS, mode, account: profileName, ...(caps ? { caps } : {}) })
+      ipcWrite(pairFile, { v: 2, at: Date.now(), qr, expiresAt: Date.now() + expiresInMs, profile: profileId, profileName, nearby: !!nearby })
       // El token es un secreto efímero: no debe quedar en disco más allá de su
       // vida. Se borra al VENCER (aquí) y al APROBARSE (abajo, consumido).
       const tok = qr.token
