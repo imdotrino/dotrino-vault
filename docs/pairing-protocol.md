@@ -234,7 +234,11 @@ que no anuncia nada.
 
 ### 1.8 La misma pieza sirve para añadir amigos, y los amigos son del ecosistema
 
-> Pedido por el dueño el 2026-10-23. **Estado: sin implementar.**
+> Pedido por el dueño el 2026-10-23. **Estado: por Bluetooth, en el messenger nativo** (Android e
+> iOS, pestaña «Cerca» de «Añadir contacto»). La tarjeta es el fragmento `#to=` del messenger
+> (`@dotrino/proxy-client` ≥ 0.42.0, `dotrino-proxy-client/docs/bluetooth.md` §3; `BleWire` en
+> `dotrino-native` ≥ 0.44.0). **Falta:** la pieza compartida de añadir (Web Component y su versión
+> en `dotrino-native`) para que otras apps añadan amigos; hoy el flujo vive en el messenger.
 
 Añadir a un amigo es otra cosa que emparejar un aparato: **nadie entra en tu cuenta**. Se
 intercambia la tarjeta pública de contacto (pubkey, llave de cifrado, apodo). Pero el
