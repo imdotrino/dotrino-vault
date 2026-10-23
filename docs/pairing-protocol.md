@@ -6,7 +6,7 @@ I have everything needed. Writing the hardened pairing protocol decision documen
 
 Estado: APROBADO para implementación. Reemplaza el flujo de token al portador (bearer) hoy implementado en `dotrino-vault/src/{vault.js,client.js,ctl.js,daemon.js}`.
 
-Resumen ejecutivo: el emparejamiento actual concede un certificado firmado por la maestra a **cualquiera que presente el token de 5 min**, con `scope` por defecto `[vault:sign, vault:read]` y sin confirmar qué clave de dispositivo se autoriza (`handleEnroll`, `vault.js:64-76`). Esto produce robo total de datos y secuestro de identidad por simple ingeniería social (relay del QR). El diseño endurecido elimina el token al portador como autoridad suficiente: el dispositivo prueba posesión de su clave `D`, el dueño **confirma en el PC** un código corto de autenticación mutuo (SAS) derivado del `deviceId`, el dispositivo **valida la cadena** del cert que recibe contra el `iss` que el usuario vio, y el `scope` por defecto baja a mínimo. Se añade el self-wipe por revocación **autenticado por firma de la maestra** (cierra el wipe-DoS).
+Resumen ejecutivo: el emparejamiento actual concede un certificado firmado por la maestra a **cualquiera que presente el token de 5 min**, con `scope` por defecto `[vault:sign, vault:read]` y sin confirmar qué clave de dispositivo se autoriza (`handleEnroll`, `vault.js:64-76`). Esto produce robo total de datos y secuestro de identidad por simple ingeniería social (relay del QR). El diseño endurecido elimina el token al portador como autoridad suficiente: el dispositivo prueba posesión de su clave `D`, el dueño **teclea en la bóveda** el código de 6 dígitos que enseña el dispositivo (solo viaja su compromiso), el dispositivo **valida la cadena** del cert que recibe contra el `iss` que el usuario vio, y el `scope` por defecto baja a mínimo. Se añade el self-wipe por revocación **autenticado por firma de la maestra** (cierra el wipe-DoS).
 
 ---
 
@@ -18,13 +18,15 @@ La autorización de un dispositivo nuevo se ancla a **tres** cosas, no a un secr
 
 1. **Posesión de la clave `D`** del dispositivo (prueba criptográfica, no "presentar un string").
 2. **Confirmación humana en la máquina de la maestra** del `deviceId` concreto que se autoriza.
-3. **Verificación de un Short-Authentication-String (SAS) mutuo** que el humano compara visualmente entre las dos pantallas — esto es lo que mata el relay/phishing: el atacante remoto **no puede mostrar el SAS correcto en el dispositivo físico de la víctima**.
+3. **Un código de 6 dígitos que solo conoce el dispositivo** y que el humano lee en su pantalla y teclea en la bóveda. El código lo genera el dispositivo al azar y **nunca viaja**: viaja su compromiso `SHA-256(code‖dpub‖sn)`. Aprobar exige haber estado delante del dispositivo, y un atacante remoto no puede poner su código en la pantalla del dispositivo de la víctima. (La primera versión de este documento derivaba un SAS con HKDF y lo comparaba entre pantallas. El código vigente es el compromiso: `lib/src/enroll.js`, cabecera.)
 
 El token de pairing deja de ser "autoridad". Pasa a ser solo un **localizador de sesión** de baja sensibilidad: dice *a qué vault hablar y en qué ventana*, pero **no** basta para obtener un cert. Por eso el flujo es robusto aunque el token se filtre (foto del QR, copia-pega a un falso soporte, proxy malicioso que lo lee en claro).
 
 ### 1.2 Flujo paso a paso
 
-Notación: `M` = pubkey maestra del daemon (vault); `D` = par de claves del dispositivo (`makeDeviceKey`, `capabilities.js:65`); `deviceId = pubkeyId(D.publickey)` (`capabilities.js:50`); `SAS` = 6 dígitos derivados deterministamente de `(M, D, sessionNonce)`.
+Notación: `M` = pubkey maestra del daemon (vault); `D` = par de claves del dispositivo (`makeDeviceKey`, `capabilities.js:65`); `deviceId = pubkeyId(D.publickey)` (`capabilities.js:50`); `code` = 6 dígitos aleatorios que genera el dispositivo y no salen de él; `commit = SHA-256(code‖dpub‖sn)` (`commitCode`, `@dotrino/identity/capabilities`).
+
+El diagrama se queda en lo esencial. Antes del paso 3 hay un `hello` firmado por la maestra con el `sn` dentro, y todo error del emparejamiento va firmado igual: el dispositivo solo obedece lo que verifica contra el `iss` y el `sn` de su invitación.
 
 ```
 DISPOSITIVO (profile.dotrino.com / app)              VAULT (PC, daemon, custodia M)
@@ -37,39 +39,39 @@ DISPOSITIVO (profile.dotrino.com / app)              VAULT (PC, daemon, custodia
                                                          - banner rojo de scope/advertencia
                                                          - NO escribe pair.json en disco
                                                            (solo memoria del daemon; ver §5)
-(2) usuario escanea/pega el QR.
-    El DISPOSITIVO genera D = makeDeviceKey().
+(2) usuario escanea/pega el QR (o lo descubre, §1.6).
+    El DISPOSITIVO genera D = makeDeviceKey()
+    y un code aleatorio de 6 dígitos.
 (3) construye data = { op:'enroll', dpub:D.publickey,
-       token, sn, label, ts }
+       token, sn, label, ts, commit }
     firma con D: sig = signWithDevice(D, data)
     ───── sendByPubkey(M, {ENROLL, data, sig}) ─────▶
                                                      (4) handleEnroll:
                                                        - pend = pending.get(token); válido/no usado/no exp
                                                        - rawVerify(dpub, canon(data), sig)  ← PRUEBA DE POSESIÓN
-                                                       - sn === pend.sn
+                                                       - sn === pend.sn; commit presente
+                                                       - otra dpub ya en esta sesión → §1.7
                                                        - calcula deviceId = pubkeyId(dpub)
-                                                       - calcula SAS = HKDF(M ‖ dpub ‖ sn) → 6 díg
-                                                       - estado pend → PENDING_CONFIRM(dpub,deviceId,SAS)
-                                                       - responde {ENROLL_CHALLENGE, deviceId, sas:SAS}
-                                                       - MUESTRA en el PC:
-                                                         "Dispositivo XQ7F-3K9P quiere enrolarse.
-                                                          Código: 418 027. ¿Aprobar? (dotrino-vault
-                                                          approve XQ7F-3K9P  /  rechazar)"
-                                  ◀──── {ENROLL_CHALLENGE, deviceId, sas} ────
+                                                       - estado pend → PENDING_CONFIRM(dpub,deviceId,commit)
+                                                       - responde {ENROLL_CHALLENGE, deviceId}
+                                                       - MUESTRA: "Dispositivo XQ7F-3K9P quiere
+                                                         enrolarse. Teclea el código que enseña."
+                                  ◀──── {ENROLL_CHALLENGE, deviceId} ────
 (5) el DISPOSITIVO muestra en su pantalla:
       "Tu código: 418 027 — deviceId XQ7F-3K9P.
-       Confírmalo en tu PC."
-(6) EL USUARIO COMPARA los dos códigos
-    (pantalla del dispositivo ↔ pantalla del PC).
-    Solo si COINCIDEN, teclea en el PC:
-                                                     (7) `dotrino-vault approve XQ7F-3K9P`:
-                                                       - el dueño confirma el deviceId+SAS visto
-                                                       - SOLO ahora: signDelegation(dpub, scope, ttl)
+       Tecléalo en tu bóveda."
+(6) EL USUARIO lee el código en el dispositivo
+    y lo teclea en la bóveda:
+                                                     (7) `dotrino-vault approve 418027`:
+                                                       - recalcula SHA-256(code‖dpub‖sn)
+                                                       - no coincide con commit → no hay cert
+                                                       - SOLO si coincide: signDelegation(dpub, scope, ttl)
                                                          (scope mínimo por defecto; ver §1.4)
-                                                       - pend.used = true; pending.delete
-                                  ◀──── {ENROLLED, cert, iss:M, sas} ────
+                                                       - pending.delete
+                                  ◀──── {ENROLLED, cert, iss:M, code} ────
 (8) el DISPOSITIVO valida ESTRICTAMENTE antes de persistir:
-      verifyChain({ data:{publickey:D.publickey}, ...,
+      code === el suyo   (una bóveda que no vio el código no puede enrolarlo)
+      AND verifyChain({ data:{publickey:D.publickey}, ...,
                     cert, trustedIssuer: qr.iss,
                     expectedSub: D.publickey,
                     expectedScope }) === ok
@@ -84,16 +86,16 @@ DISPOSITIVO (profile.dotrino.com / app)              VAULT (PC, daemon, custodia
 | Lado | Verifica | Cierra |
 |---|---|---|
 | Vault (paso 4) | `rawVerify(dpub, data, sig)` — el remitente posee la privada de `D` | Un proxy/atacante que solo *vio* el token no puede enrolar **su** pubkey sin firmar con esa pubkey; y firmar con la pubkey de la víctima es imposible (no tiene su privada) |
-| Vault (paso 7) | Confirmación humana del `deviceId` + SAS **antes** de `signDelegation` | Relay del QR a soporte falso: el dueño ve un `deviceId`/SAS que no reconoce y rechaza |
-| Usuario (paso 6) | SAS pantalla-dispositivo == SAS pantalla-PC | Man-in-the-middle/relay: el SAS del dispositivo del atacante **no** aparece en el dispositivo físico de la víctima |
-| Dispositivo (paso 8) | `verifyChain` + `cert.iss === qr.iss` + `cert.sub === D.publickey` | Inyección de cert de **otra** maestra por un proxy/atacante que conteste primero (re-pairing silencioso) |
+| Vault (paso 7) | El código tecleado reproduce el `commit` **antes** de `signDelegation` | Emitir un cert sin que quien aprueba haya leído el código del dispositivo; un cliente malicioso ya no se queda con un cert válido |
+| Usuario (paso 6) | Lee el código en el dispositivo que tiene delante | Relay remoto: el código del dispositivo del atacante **no** aparece en el dispositivo físico de la víctima |
+| Dispositivo (paso 8) | Código devuelto == el suyo + `verifyChain` + `cert.iss === qr.iss` + `cert.sub === D.publickey` | Bóveda falsa (nunca vio el código) e inyección de cert de **otra** maestra por quien conteste primero (re-pairing silencioso) |
 
 ### 1.4 Formato del código y por qué NO depende de un secreto
 
 El **QR/objeto** (`{ v:2, iss:M, proxy, token, sn }`) deja de ser sensible en el sentido de "quien lo tiene gana", porque:
 
 - El `token` ya **no autoriza nada por sí solo**: para obtener un cert hay que (a) probar posesión de `D` y (b) que el dueño apruebe el `deviceId` en el PC. Filtrar el token solo permite *iniciar* un challenge que el dueño verá y rechazará si no lo reconoce.
-- El **SAS de 6 dígitos** es el control anti-phishing, y **no es secreto transmisible**: se deriva de `(M, D, sn)` y solo tiene valor *comparado entre las dos pantallas presentes*. Un atacante remoto no puede inyectar su SAS en la pantalla del dispositivo legítimo de la víctima.
+- El **código de 6 dígitos** es el control anti-phishing. Es aleatorio, lo genera el dispositivo y **no viaja**: por la red solo va su compromiso, que no deja sacar el código. Quien no vea la pantalla del dispositivo no puede aprobarlo. Lo que no cierra: que alguien le **dicte** su código al dueño por otro canal (residual A1/A2).
 - El `deviceId` (`pubkeyId(dpub).slice(0,8)`, agrupado legible tipo `XQ7F-3K9P`) es **público por diseño** (es un hash de una pubkey); su función es ser reconocible/comparable por el humano, no secreto.
 
 Esto es la "dirección invertida" del diseño implementada de verdad: la **aprobación ocurre en la máquina que tiene la maestra**, y la decisión humana está atada a un código que el dispositivo legítimo muestra. No hay ningún secreto al portador cuya mera posesión conceda acceso.
@@ -185,11 +187,12 @@ bóveda antes de elegir.
 (~100 bytes) se lee de una característica GATT de solo lectura. El ENROLL va por el
 transporte de siempre (socket local → WebRTC → proxio), que en la misma red sale directo.
 
-**Qué cambia en la seguridad.** Hoy la invitación solo se ve en la pantalla de la bóveda.
-Anunciada, la puede leer cualquiera que esté al alcance mientras la ventana siga abierta.
-Con eso no entra, porque el código no viaja (solo su compromiso `SHA-256(code‖dpub‖sn)`)
-y sin teclearlo en la bóveda no hay certificado. Pero sí puede **pedir** entrar. Eso lo
-cierra §1.7.
+**La red local y el Bluetooth son ambiente seguro** (dueño, 2026-10-23). Por eso la bóveda
+sí anuncia ahí su invitación, aunque por internet nunca manda invitaciones ni recibe el
+código: la regla «la bóveda no invita por la red» habla de internet y del proxio, no del
+alcance local. Lo que no cambia: el código no viaja (solo su compromiso
+`SHA-256(code‖dpub‖sn)`), sin teclearlo en la bóveda no hay certificado, y si responden dos
+aparatos se cancela (§1.7).
 
 ### 1.7 Dos aparatos responden a la misma invitación: se cancela y es un incidente
 
@@ -262,7 +265,7 @@ Precondición: el dispositivo no tiene cert previo (`VAULT_CERT_STORAGE` vacío)
 Precondición: ya hay cert de `A`. Cambiar a `B` es una acción **muy advertida**: el dispositivo muestra "Vas a desconectarte de tu bóveda actual y conectarte a otra. Se BORRARÁN los datos locales de este dispositivo (store + identidad de dispositivo) para empezar limpio." Requiere:
 
 1. Confirmación textual explícita (escribir "CAMBIAR" o equivalente), no un solo clic.
-2. El flujo §1 completo contra `B` (incluido el SAS comparado).
+2. El flujo §1 completo contra `B` (incluido el código tecleado).
 3. Solo tras enrolar con éxito en `B`, se ejecuta el **clean-slate local**: borra `DEVICE_KEY_STORAGE` + `VAULT_CERT_STORAGE` del store y de identidad, y limpia el cache local. **No** se toca `KEY_STORAGE` (la maestra legacy del navegador) salvo que el usuario lo pida.
 
 El borrado aquí es **local y disparado por el propio usuario** en su dispositivo; no llega por la red, así que no hay superficie de wipe-DoS.
@@ -315,8 +318,8 @@ Consecuencia: con el cert anclado a la maestra correcta, **auto-sync siempre-on 
 
 | # | Ataque confirmado (sev) | Defensa del protocolo endurecido | Residual |
 |---|---|---|---|
-| A1 | Robo del QR/token + redención con dpub del atacante (critical) | Prueba de posesión de `D` (paso 4) + confirmación humana del `deviceId`+SAS (paso 6-7). El token solo ya no autoriza | Token filtrado permite *iniciar* un challenge; el dueño debe rechazar correctamente (UX + copy) |
-| A2 | Relay del QR disfrazado de soporte (critical) | SAS mutuo comparado entre pantallas (paso 6): el atacante remoto no muestra el SAS en el dispositivo físico de la víctima | Usuario que aprueba "a ciegas" sin comparar SAS — mitigado por copy y por mostrar el `deviceId` esperado |
+| A1 | Robo del QR/token + redención con dpub del atacante (critical) | Prueba de posesión de `D` (paso 4) + código del dispositivo tecleado en la bóveda (paso 6-7). El token solo ya no autoriza | Token filtrado permite *iniciar* un challenge; el dueño debe rechazar correctamente (UX + copy) |
+| A2 | Relay del QR disfrazado de soporte (critical) | Código leído en el dispositivo físico (paso 6): el atacante remoto no pone su código en la pantalla del dispositivo de la víctima | Que el atacante le dicte su código al dueño por otro canal — mitigado por copy y por mostrar el `deviceId` |
 | A3 | Robo del token por proxy malicioso / enroll-stealing (critical) | Posesión de `D` (el proxy ve el token pero no puede firmar como otra `D`) + pin de `qr.iss` en el dispositivo | Proxy puede hacer DoS del enroll (descartar mensajes); no roba acceso |
 | A4 | Sustitución del issuer `iss` por el proxy (high) | Paso 8: `cert.iss === qr.iss`, ignorar `res.iss`; `verifyChain(trustedIssuer: qr.iss)` | Ninguno relevante (sin la privada de `qr.iss` el proxy no forja un cert válido) |
 | A5 / A12 | Inyección de cert de otra maestra / re-pairing silencioso (critical) | Paso 8 estricto: `verifyChain` ok + `iss`/`sub` correctos antes de persistir | Ninguno |
@@ -331,7 +334,7 @@ Consecuencia: con el cert anclado a la maestra correcta, **auto-sync siempre-on 
 | A15 | Persistencia/camuflaje (múltiples certs, label falsificable) (low) | Mostrar `deviceId` (`sub`) en `devices` y en el log de enroll; `revoke --all-except`; rotar token tras enroll | Auditabilidad mejorada; label sigue siendo libre (marcar duplicados) |
 | A16 | Copy sin advertencia de scope (medium) | Banner rojo de scope en `pair` + scope mínimo por defecto + confirmación interactiva | UX-dependiente |
 | A17 | `handleGet(id:'root')` = volcado total (low) | Scope acotado a subárbol (`vault:read:<nodeId>`), paginación, rate-limit/alerta | Defensa en profundidad; depende de A1 estar cerrado |
-| A18 | Invitación anunciada por mDNS/BLE: cualquiera al alcance la lee y pide entrar (medium) | El código no viaja (compromiso) y se teclea en la bóveda; dos respuestas válidas cancelan la sesión y abren un incidente (§1.6, §1.7) | Quien esté al alcance puede cancelar emparejamientos por descubrimiento (DoS visible); salida: QR |
+| A18 | Invitación anunciada por mDNS/BLE (ambiente local, que se considera seguro): quien esté al alcance la lee y pide entrar (low) | El código no viaja (compromiso) y se teclea en la bóveda; dos respuestas válidas cancelan la sesión y abren un incidente (§1.6, §1.7) | Quien esté al alcance puede cancelar emparejamientos por descubrimiento (DoS visible); salida: QR |
 
 Residuales que se aceptan y documentan:
 - **R1 (A9/A10/A11):** exfiltración pasada irreversible y ventana de `exp` para cert robado. Mitigación: `exp` corto + renovación + `D` no-extraíble. **No** se promete recuperación de datos ya copiados.
@@ -341,6 +344,11 @@ Residuales que se aceptan y documentan:
 ---
 
 ## 5. Cambios concretos vs. el diseño/código original
+
+> **Histórico.** Esta sección es el plan de la primera implementación y se deja como
+> estaba. El SAS por HKDF (`deriveSAS`, `ENROLL_CHALLENGE { sas }`, `approve <deviceId>`)
+> no llegó a quedarse: lo vigente es el código aleatorio del dispositivo con su compromiso
+> (`commitCode`) y `dotrino-vault approve <código>` (§1.2).
 
 ### 5.1 `@dotrino/identity` — `vault/capabilities.js`
 
@@ -401,4 +409,4 @@ Archivos load-bearing a tocar (rutas absolutas):
 - `/mnt/sda1/Dotrino/dotrino-profile-app/src/main.js` (UX tres acciones + SAS)
 - `/mnt/sda1/Dotrino/dotrino-store/store/` (`vault-backend.js`, `merge.js`, `D` no-extraíble, MSG.REVOKED)
 
-El cambio que cierra el agujero de raíz es la **confirmación humana del `deviceId`+SAS en la máquina de la maestra antes de `signDelegation`** (paso 6-7) combinada con la **validación estricta de la cadena en el dispositivo** (paso 8): el token deja de ser credencial suficiente y la maestra solo firma para el `D` que el usuario aprobó comparando códigos. Todo lo demás es defensa en profundidad.
+El cambio que cierra el agujero de raíz es la **código del dispositivo tecleado en la bóveda antes de `signDelegation`** (paso 6-7) combinada con la **validación estricta de la cadena en el dispositivo** (paso 8): el token deja de ser credencial suficiente y la maestra solo firma para el `D` cuyo código tecleó el usuario. Todo lo demás es defensa en profundidad.
