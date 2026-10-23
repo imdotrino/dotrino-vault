@@ -143,6 +143,110 @@ etapas anteriores (`/dispositivos`, `/devices`) ya no existen, pero **un enlace 
 con ellas sigue emparejando**: `parseInvite` lee el `#fragment` y no mira la ruta, y la
 página cae por `404.html`, que es la propia app.
 
+### 1.6 Descubrir en la red local o por Bluetooth: otro medio para la MISMA invitación
+
+> Decidido por el dueño el 2026-10-23. **Estado: diseño, sin implementar.**
+
+En la bóveda se pulsa **«Emparejar»** y en el aparato **«Descubrir»**. Es un medio más
+para que la invitación llegue al aparato, al lado del QR y de copiar y pegar. **No es otro
+protocolo**: lo que se anuncia es exactamente la cadena de §1.5 (`c…`). Desde que el
+aparato la tiene, todo sigue igual: `hello` firmado, ENROLL con el compromiso del código,
+código tecleado en la bóveda y `cert.iss === qr.iss`. Por eso «sin invitación no se
+enrola» sigue siendo literal: la invitación existe, lo único que cambia es por dónde llega.
+
+**No reemplaza a la invitación de siempre**, y no puede:
+
+- El navegador no descubre nada. Desde JS no hay mDNS ni UDP. Web Bluetooth solo existe
+  en Chrome y solo como central: escanea, pero no anuncia. Safari en iOS no lo tiene. La
+  pestaña, el iframe de `id.dotrino.com` y la extensión quedan fuera en los dos papeles.
+- Muchos emparejamientos no comparten red ni aire: la bóveda del VPS, la réplica alojada,
+  el equipo prestado, un aparato en otra ciudad.
+
+**Cuándo se anuncia.** Solo con la ventana de «Emparejar» abierta. Se apaga al aprobar, al
+cancelar o al caducar (`PAIRING_TTL_MS`). Fuera de esa ventana no hay baliza: una bóveda
+anunciándose siempre le diría a todo el que pasa que ahí hay una bóveda y de qué cuenta es.
+Dentro de la ventana se anuncia sola, sin una casilla aparte que explicar (regla de
+simplificar). La protección viene del código tecleado y de §1.7, no de un interruptor más.
+
+**En el aparato**, «Descubrir» es un botón que se pulsa, junto a «Escanear QR» y «Pegar
+invitación». No escucha en segundo plano. Cada bóveda encontrada se lista con el **ID de
+la cuenta** y el **identicon** (de `acct` / `iss`), para compararlos con la pantalla de la
+bóveda antes de elegir.
+
+| Pieza | Anuncia | Descubre |
+|---|---|---|
+| `vaultd` (PC) | mDNS, en JS puro (`dgram`). BLE no: pide un módulo nativo y un `.node` no entra en el SEA | — |
+| Agentes de Node | — | mDNS |
+| App nativa Android | NSD y BLE | NSD y BLE |
+| App nativa iOS | Bonjour y BLE (permiso de red local y de Bluetooth) | Bonjour y BLE |
+| Pestaña, iframe, extensión | no | no |
+
+**No se abre ningún puerto.** mDNS es un anuncio UDP multicast. En BLE, la invitación
+(~100 bytes) se lee de una característica GATT de solo lectura. El ENROLL va por el
+transporte de siempre (socket local → WebRTC → proxio), que en la misma red sale directo.
+
+**Qué cambia en la seguridad.** Hoy la invitación solo se ve en la pantalla de la bóveda.
+Anunciada, la puede leer cualquiera que esté al alcance mientras la ventana siga abierta.
+Con eso no entra, porque el código no viaja (solo su compromiso `SHA-256(code‖dpub‖sn)`)
+y sin teclearlo en la bóveda no hay certificado. Pero sí puede **pedir** entrar. Eso lo
+cierra §1.7.
+
+### 1.7 Dos aparatos responden a la misma invitación: se cancela y es un incidente
+
+> Regla del dueño, 2026-10-23. **Vale para todos los medios** (QR, pegar, descubrir): es
+> una regla, no dos. **Estado: sin implementar.**
+
+**Qué cuenta como segunda respuesta.** Un ENROLL **válido** (firma del aparato correcta,
+`sn` de esta sesión, dentro de la ventana anti-replay) con una `dpub` **distinta** de la
+primera. Que el mismo aparato reintente con la misma `dpub` no cuenta. Un ENROLL que no
+pasa las comprobaciones se rechaza como hoy y no cancela nada: si cancelara, bastaría con
+mandar basura para cortar cualquier emparejamiento.
+
+**Qué hace la bóveda:**
+
+1. **Cierra la sesión.** No aprueba a ninguno de los dos, aunque luego se teclee un código
+   correcto. La invitación pasa a `gone`.
+2. **Avisa a los dos aparatos** con un error firmado (maestra + `sn`, como todo error del
+   emparejamiento) y un `code` propio (`pairing-contested`). Los dos aparatos enseñan que
+   la invitación se canceló porque respondió otro aparato y que hay que empezar de nuevo.
+   No reintentan solos.
+3. **Apunta un incidente de seguridad**: el pedido `kind: 'incident'` que ya existe
+   (`vault.incident`, `lib/src/protocol.js`), con el motivo `pairing-contested`, el ID y la
+   máquina de los dos aparatos, el medio y la hora. Timbra a quien aprueba y queda en la
+   bitácora. No se escribe otro tipo de aviso.
+
+**Qué cambia respecto del código de hoy.** Hoy `lib/src/enroll.js` rechaza al segundo
+(`another device is already using this pairing session`) y el primero sigue esperando. Si
+el primero era el intruso, el aparato legítimo se queda fuera y el dueño solo ve un código
+que no cuadra, sin saber por qué. Con la regla nueva el intento se ve como lo que es.
+
+**El precio, que se dice:** alguien al alcance puede cortar cada emparejamiento por
+descubrimiento. Se acepta: no entra, y queda a la vista. Si se repite, se empareja por QR,
+que no anuncia nada.
+
+### 1.8 La misma pieza sirve para añadir amigos, y los amigos son del ecosistema
+
+> Pedido por el dueño el 2026-10-23. **Estado: sin implementar.**
+
+Añadir a un amigo es otra cosa que emparejar un aparato: **nadie entra en tu cuenta**. Se
+intercambia la tarjeta pública de contacto (pubkey, llave de cifrado, apodo). Pero el
+problema del medio es el mismo: hoy esa tarjeta viaja por QR, y por Bluetooth llegaría a
+quien está al lado sin teclear ni escanear nada.
+
+- **Una sola pieza de anunciar y descubrir**, en `dotrino-native` (regla de reutilización),
+  con dos usos: la invitación de emparejar (§1.6) y la tarjeta de contacto. No hay dos
+  implementaciones de BLE.
+- **Los amigos ya son del ecosistema**: viven en la libreta de `@dotrino/identity`
+  (`addContact` / `listContacts`, flag `isContact`), que el messenger y el chat ya
+  escriben. Lo que hoy es exclusivo del messenger es el **flujo de añadir**
+  (`dotrino-messenger/src/components/AddContactModal.vue`). Ese flujo, con QR y con
+  «Descubrir», pasa a ser una pieza compartida: un Web Component para la web y su versión
+  en `dotrino-native`. Así se añaden amigos desde cualquier app y aparecen en todas.
+- **Mismas reglas que §1.6**: solo se anuncia mientras está abierta la pantalla de añadir,
+  y «Descubrir» es un botón. Cada lado ve el identicon y el apodo del otro antes de aceptar,
+  y aceptar es de los dos (la solicitud entre pares del messenger).
+- **En el navegador** solo hay QR, por lo mismo que en §1.6.
+
 ---
 
 ## 2. PIN + BORRADO: las tres acciones separadas, con el trigger de self-wipe autenticado
@@ -227,6 +331,7 @@ Consecuencia: con el cert anclado a la maestra correcta, **auto-sync siempre-on 
 | A15 | Persistencia/camuflaje (múltiples certs, label falsificable) (low) | Mostrar `deviceId` (`sub`) en `devices` y en el log de enroll; `revoke --all-except`; rotar token tras enroll | Auditabilidad mejorada; label sigue siendo libre (marcar duplicados) |
 | A16 | Copy sin advertencia de scope (medium) | Banner rojo de scope en `pair` + scope mínimo por defecto + confirmación interactiva | UX-dependiente |
 | A17 | `handleGet(id:'root')` = volcado total (low) | Scope acotado a subárbol (`vault:read:<nodeId>`), paginación, rate-limit/alerta | Defensa en profundidad; depende de A1 estar cerrado |
+| A18 | Invitación anunciada por mDNS/BLE: cualquiera al alcance la lee y pide entrar (medium) | El código no viaja (compromiso) y se teclea en la bóveda; dos respuestas válidas cancelan la sesión y abren un incidente (§1.6, §1.7) | Quien esté al alcance puede cancelar emparejamientos por descubrimiento (DoS visible); salida: QR |
 
 Residuales que se aceptan y documentan:
 - **R1 (A9/A10/A11):** exfiltración pasada irreversible y ventana de `exp` para cert robado. Mitigación: `exp` corto + renovación + `D` no-extraíble. **No** se promete recuperación de datos ya copiados.
