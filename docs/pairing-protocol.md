@@ -147,7 +147,9 @@ página cae por `404.html`, que es la propia app.
 
 ### 1.6 Descubrir en la red local o por Bluetooth: otro medio para la MISMA invitación
 
-> Decidido por el dueño el 2026-10-23. **Estado: diseño, sin implementar.**
+> Decidido por el dueño el 2026-10-23. **Estado: por Bluetooth, implementado** (vaultd 0.172.0 /
+> `@dotrino/vault` 0.100.0 anuncian; la app Dotrino descubre en Android e iOS; transporte en
+> `@dotrino/proxy-client` 0.41.0 y `dotrino-native`). **Por la red local, sin implementar.**
 
 En la bóveda se pulsa **«Emparejar»** y en el aparato **«Descubrir»**. Es un medio más
 para que la invitación llegue al aparato, al lado del QR y de copiar y pegar. **No es otro
@@ -199,7 +201,8 @@ aparatos se cancela (§1.7).
 > Regla del dueño, 2026-10-23. **Vale para todos los medios** (QR, pegar, descubrir): es
 > una regla, no dos. **Es SOLO del emparejamiento de la bóveda**: añadir amigos o juntarse
 > varios en un juego por Bluetooth no tiene incidente, ahí que lleguen varios es lo normal
-> (§1.8). **Estado: sin implementar.**
+> (§1.8). **Estado: implementado** (vaultd 0.172.0: error `pairing-contested` a los dos aparatos
+> y aviso `pairing-contested` a los aprobadores).
 
 **Qué cuenta como segunda respuesta.** Un ENROLL **válido** (firma del aparato correcta,
 `sn` de esta sesión, dentro de la ventana anti-replay) con una `dpub` **distinta** de la
