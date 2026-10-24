@@ -846,7 +846,7 @@ export async function startPairing ({ profile, service, label, caps } = {}) {
       // `profile`/`profileName`: DE QUÉ CUENTA del vault sale este QR. El vault
       // puede tener varias y el emparejamiento mete al dispositivo en UNA; la TUI
       // y la CLI lo muestran para que no se enrole en la equivocada.
-      // `nearby`: la invitación también se anuncia por Bluetooth (pairing-protocol.md §1.6).
+      // `nearby`: la invitación también se anuncia en la red local y por Bluetooth (pairing-protocol.md §1.6).
       return { qr: pr.qr, expiresAt: pr.expiresAt, url, payload, code, b64: code, profile: pr.profile || null, profileName: pr.profileName || '', nearby: !!pr.nearby }
     }
   }

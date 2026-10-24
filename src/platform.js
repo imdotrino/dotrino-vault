@@ -114,6 +114,9 @@ export function nodePlatform (dir) {
     // otro sistema el pilar no encuentra con qué y sigue sin él. Sirve para anunciar cerca la
     // invitación de emparejar (pairing-protocol.md §1.6) y como escalón directo.
     bluetooth: true,
+    // LA RED LOCAL (proxy-client docs/lan.md): la misma invitación por mDNS, en Linux, macOS y
+    // Windows. No abre ningún puerto: es un anuncio multicast.
+    lan: true,
     async openIdentity ({ openKey = null, log = console.log } = {}) {
       // CIFRADO EN REPOSO ligado a esta máquina: ningún archivo del dir queda en claro, así
       // que copiarlos a otro equipo no sirve de nada. La identidad se migra AQUÍ (verificando

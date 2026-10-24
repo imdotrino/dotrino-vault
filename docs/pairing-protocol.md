@@ -147,9 +147,10 @@ página cae por `404.html`, que es la propia app.
 
 ### 1.6 Descubrir en la red local o por Bluetooth: otro medio para la MISMA invitación
 
-> Decidido por el dueño el 2026-10-23. **Estado: por Bluetooth, implementado** (vaultd 0.172.0 /
-> `@dotrino/vault` 0.100.0 anuncian; la app Dotrino descubre en Android e iOS; transporte en
-> `@dotrino/proxy-client` 0.41.0 y `dotrino-native`). **Por la red local, sin implementar.**
+> Decidido por el dueño el 2026-10-23. **Estado: implementado por los dos medios.** Bluetooth desde
+> vaultd 0.172.0 / `@dotrino/vault` 0.100.0 (`@dotrino/proxy-client` 0.41.0); la red local (mDNS)
+> desde vaultd 0.174.0 / `@dotrino/vault` 0.102.0 (`@dotrino/proxy-client` 0.43.0,
+> `docs/lan.md`). La app Dotrino descubre por los dos a la vez (`Nearby`, `dotrino-native` 0.45.0).
 
 En la bóveda se pulsa **«Emparejar»** y en el aparato **«Descubrir»**. Es un medio más
 para que la invitación llegue al aparato, al lado del QR y de copiar y pegar. **No es otro
@@ -179,8 +180,8 @@ bóveda antes de elegir.
 
 | Pieza | Anuncia | Descubre |
 |---|---|---|
-| `vaultd` (PC) | mDNS, en JS puro (`dgram`). BLE no: pide un módulo nativo y un `.node` no entra en el SEA | — |
-| Agentes de Node | — | mDNS |
+| `vaultd` (PC) | mDNS, en JS puro (`dgram`), en Linux, macOS y Windows. BLE solo en Linux (BlueZ por D-Bus, sin `.node`) | — |
+| Agentes de Node | — | mDNS (`@dotrino/proxy-client/lan`) |
 | App nativa Android | NSD y BLE | NSD y BLE |
 | App nativa iOS | Bonjour y BLE (permiso de red local y de Bluetooth) | Bonjour y BLE |
 | Pestaña, iframe, extensión | no | no |

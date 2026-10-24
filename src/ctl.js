@@ -404,7 +404,7 @@ async function cmdPair (args = []) {
   console.log(`${R}  NO lo compartas con nadie, ni con "soporte". Solo escanéalo en TU dispositivo.${Z}`)
   console.log('\nO abre esta dirección en el dispositivo:\n  ' + url)
   console.log('\nO pega este código en vault.dotrino.com/vault :\n  ' + b64)
-  if (pair.nearby) console.log('\nO, en un teléfono cerca, pulsa «Descubrir»: esta invitación también se anuncia por Bluetooth.')
+  if (pair.nearby) console.log('\nO, en un teléfono cerca, pulsa «Descubrir»: esta invitación también se anuncia en tu red y por Bluetooth.')
 
   // --save [archivo]: escribe la invitación (.dpair) para transferirla y abrirla en profile.
   const saveIdx = args.indexOf('--save')
