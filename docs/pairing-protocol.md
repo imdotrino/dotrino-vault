@@ -149,7 +149,7 @@ página cae por `404.html`, que es la propia app.
 
 > Decidido por el dueño el 2026-10-23. **Estado: implementado por los dos medios.** Bluetooth desde
 > vaultd 0.172.0 / `@dotrino/vault` 0.100.0 (`@dotrino/proxy-client` 0.41.0); la red local (mDNS)
-> desde vaultd 0.174.0 / `@dotrino/vault` 0.102.0 (`@dotrino/proxy-client` 0.43.0,
+> desde vaultd 0.174.1 / `@dotrino/vault` 0.102.1 (`@dotrino/proxy-client` 0.44.1,
 > `docs/lan.md`). La app Dotrino descubre por los dos a la vez (`Nearby`, `dotrino-native` 0.45.0).
 
 En la bóveda se pulsa **«Emparejar»** y en el aparato **«Descubrir»**. Es un medio más
