@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { makeDeviceKey, makeDeviceEncKey, signWithDevice } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, signWithDevice, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import { client as opaqueClient } from '@dotrino/opaque'
 // El paquete de llaves lo cierra QUIEN CREA el aparato, con la misma pieza que usan la CLI,
 // la pestaña y la extensión: si esto tuviera su propia copia, la prueba dejaría de probar
@@ -205,4 +205,49 @@ test('a password login takes ANY permission of the account record, all the same 
       user, upload: fin.upload, pub: device.publickey, label: 'x', blob: await seal(fin.exportKey, { sign: device.privateJwk }), ...extra
     })
   }
+})
+
+/**
+ * SIN INICIO DE SESIÓN ABIERTO NO SE SIRVE NADA, y el navegador se entera FIRMADO.
+ *
+ * Cerrar la sesión desde la consola no saca la llave del acta —el siguiente inicio la vuelve
+ * a usar—, así que el papel sigue verificando. Lo que corta es la bóveda al atender. Y como un
+ * «unauthorized» suelto no puede borrar nada (wipe-DoS), llega además el `vault.revoked`
+ * firmado con `why: 'login-closed'`, que es lo que hace que ese navegador borre la cuenta.
+ */
+test('a closed login is not served, and it is told to leave with a signed notice', async () => {
+  await createLogin({ user: 'gus', password: 'la de gus, bien larga' })
+  const b = await browser()
+  try {
+    const entrada = await login(b, { user: 'gus', password: 'la de gus, bien larga' })
+    const llaves = await open(entrada.exportKey, entrada.blob)
+    const pub = entrada.cert.sub
+    // Identificado bajo su llave, que es adonde la bóveda manda el aviso.
+    const idData = { op: 'identify', publickey: pub, token: b.client.token, ts: Date.now() }
+    await b.client.identify({ data: idData, signature: (await signWithDevice({ privateJwk: llaves.sign, data: idData })).signature, cert: entrada.cert })
+
+    const pedirFirma = async () => {
+      const data = { op: 'sign', payload: { hola: 1 }, publickey: pub, ts: Date.now() }
+      const { signature } = await signWithDevice({ privateJwk: llaves.sign, data })
+      return b.ask({ type: MSG.SIGN, data, signature, cert: entrada.cert }, [MSG.SIGNED, MSG.ERROR])
+    }
+    assert.equal((await pedirFirma()).type, MSG.SIGNED, 'with the session open it is served')
+
+    const aviso = new Promise((resolve) => b.client.on('message', (_f, p) => { if (p?.type === MSG.REVOKED) resolve(p) }))
+    assert.deepEqual(vault.closeLogin({ user: 'gus', sid: entrada.sid }), { ok: true })
+
+    const no = await pedirFirma()
+    assert.equal(no.type, MSG.ERROR)
+    assert.equal(no.reason, 'login-closed')
+
+    const r = await aviso
+    assert.equal(r.body.why, 'login-closed')
+    assert.equal(r.body.sub, pub)
+    assert.equal(r.body.nonce, entrada.cert.nonce, 'it names the paper the device holds, or the device ignores it')
+    assert.equal(await verifyDeviceSig({ publickey: vault.master, data: r.body, signature: r.signature }), true, 'signed by the vault the device pinned')
+
+    // Y volver a entrar con la contraseña lo deja pasar otra vez: la llave nunca salió del acta.
+    await login(b, { user: 'gus', password: 'la de gus, bien larga' })
+    assert.equal((await pedirFirma()).type, MSG.SIGNED)
+  } finally { b.close() }
 })

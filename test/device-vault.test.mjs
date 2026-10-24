@@ -361,6 +361,44 @@ test('LOGIN: la bóveda-pestaña crea el aparato y lo deja entrar', async () => 
   assert.equal(client.sent.filter((x) => x.type === MSG.LOGIN_RESPONSE).length, 3, 'un usuario que no existe se distingue por fuera')
 })
 
+test('LOGIN: sin inicio de sesión abierto no se sirve, y se le manda el aviso FIRMADO de irse', async () => {
+  const { identity, client, vault } = await mountWithLogins()
+  const password = 'una contraseña larga de verdad'
+  const device = await makeDeviceKey({ label: 'equipo prestado' })
+  const reg = opaqueClient.registrationStart({ password })
+  const { response } = await vault.loginRegisterBegin({ user: 'ana', request: reg.request })
+  const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
+  const { cert } = await vault.loginRegisterFinish({ user: 'ana', upload: fin.upload, pub: device.publickey, label: 'x', blob: 'sealed:x' })
+
+  const start = opaqueClient.loginStart({ password })
+  client.emit('message', 'nadie', { type: MSG.LOGIN_START, user: 'ana', request: start.request })
+  await new Promise((r) => setTimeout(r, 60))
+  const first = client.sent.find((x) => x.type === MSG.LOGIN_RESPONSE)
+  const l2 = opaqueClient.loginFinish({ state: start.state, response: first.response, password })
+  client.emit('message', 'nadie', { type: MSG.LOGIN_FINISH, lid: first.lid, finalization: l2.finalization })
+  await new Promise((r) => setTimeout(r, 60))
+  const { sid } = client.sent.find((x) => x.type === MSG.LOGIN_OK)
+
+  const firmar = async () => {
+    client.emit('message', 'b', { type: MSG.SIGN, ...(await signedByDevice(device, cert, { op: 'sign', publickey: device.publickey, payload: { a: 1 }, ts: Date.now() })) })
+    await new Promise((r) => setTimeout(r, 60))
+  }
+  await firmar()
+  assert.equal(client.sent.filter((x) => x.type === MSG.SIGNED).length, 1, 'con la sesión abierta se firma')
+
+  vault.closeLogin({ user: 'ana', sid })
+  await firmar()
+  assert.equal(client.sent.filter((x) => x.type === MSG.SIGNED).length, 1, 'firmó sin sesión abierta')
+  assert.ok(client.sent.some((x) => x.type === MSG.ERROR && x.reason === 'login-closed'), 'el rechazo dice por qué')
+  const aviso = client.sent.find((x) => x.type === MSG.REVOKED && x.pub === device.publickey)
+  assert.ok(aviso, 'no se le mandó el aviso de irse')
+  assert.equal(aviso.body.why, 'login-closed')
+  assert.equal(aviso.body.nonce, cert.nonce)
+  // Que la firma valga lo prueba `password-login.e2e`: la identidad de mentira de aquí no
+  // firma en la forma canónica.
+  assert.equal(typeof aviso.signature, 'string')
+})
+
 test('LOGIN: sin almacén, la bóveda-pestaña lo DICE (no dice que la contraseña está mal)', async () => {
   const { client, vault } = await mount()
   client.emit('message', 'x', { type: MSG.LOGIN_START, user: 'ana', request: 'x' })
