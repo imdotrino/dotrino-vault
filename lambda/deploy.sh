@@ -3,7 +3,10 @@
 # Quien despliega una release no necesita esto: sube la plantilla de la release en la consola
 # de CloudFormation (ver README.md).
 #
-#   lambda/deploy.sh <nombre> [--concurrency N] [--proxy wss://…] [--key <arn de KMS>]
+#   lambda/deploy.sh <nombre> [--concurrency N] [--proxy wss://…] [--key <arn de KMS>] [--mode demo] [--user <usuario>]
+#
+# --mode demo arma el zip con el agente de Terminal (build.sh --demo) y despliega `Mode: demo`.
+# --user es el usuario del primer administrador (por defecto `admin`).
 #
 # --key adopta el bucket y la llave que dejó una pila borrada con el mismo nombre.
 #
@@ -19,12 +22,14 @@
 set -euo pipefail
 NAME=${1:?usage: lambda/deploy.sh <name> [--concurrency N] [--proxy URL] [--key ARN]}; shift
 STACK=dotrino-vault-$NAME
-CONCURRENCY=0; PROXY=wss://proxy.dotrino.com; KEY=
+CONCURRENCY=0; PROXY=wss://proxy.dotrino.com; KEY=; MODE=vault; USER_NAME=admin
 while [ $# -gt 0 ]; do
   case "$1" in
     --concurrency) CONCURRENCY=$2; shift 2 ;;
     --proxy) PROXY=$2; shift 2 ;;
     --key) KEY=$2; shift 2 ;;
+    --mode) MODE=$2; shift 2 ;;
+    --user) USER_NAME=$2; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -37,8 +42,10 @@ ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 DEV=dotrino-vault-dev-$ACCOUNT-$AWS_REGION
 
 aws s3api head-bucket --bucket "$DEV" 2>/dev/null || aws s3 mb "s3://$DEV" >/dev/null
-bash "$HERE/build.sh" "placeholder" >/dev/null
-ZIP="$REPO/dist/dotrino-vault-lambda-$V.zip"
+BUILD_ARGS=(); SUFFIX=
+[ "$MODE" = demo ] && BUILD_ARGS=(--demo) && SUFFIX=-demo
+bash "$HERE/build.sh" "${BUILD_ARGS[@]}" "placeholder" >/dev/null
+ZIP="$REPO/dist/dotrino-vault-lambda-$V$SUFFIX.zip"
 SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
 aws s3 cp "$ZIP" "s3://$DEV/dotrino-vault-lambda-$SHA.zip" >/dev/null
 URL=$(aws s3 presign "s3://$DEV/dotrino-vault-lambda-$SHA.zip" --expires-in 3600)
@@ -57,7 +64,7 @@ TPL=$(mktemp); sed -e "s#__VERSION__#$V-dev#" -e "s#__CODE_SHA256__#$SHA#" "$HER
 # parámetro y CloudFormation conserva el anterior.
 [ "${PASS[0]}" = "AdminPassword=UsePreviousValue" ] && PASS=()
 aws cloudformation deploy --stack-name "$STACK" --template-file "$TPL" --capabilities CAPABILITY_IAM \
-  --parameter-overrides Name="$NAME" ProxyUrl="$PROXY" ReservedConcurrency="$CONCURRENCY" ExistingKeyArn="$KEY" CodeUrl="$URL" CodeSha256="$SHA" "${PASS[@]}" \
+  --parameter-overrides Name="$NAME" Mode="$MODE" AdminUser="$USER_NAME" ProxyUrl="$PROXY" ReservedConcurrency="$CONCURRENCY" ExistingKeyArn="$KEY" CodeUrl="$URL" CodeSha256="$SHA" "${PASS[@]}" \
   --no-fail-on-empty-changeset
 rm -f "$TPL"
 aws cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text

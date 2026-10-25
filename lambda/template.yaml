@@ -29,8 +29,8 @@ Parameters:
   Mode:
     Type: String
     Default: vault
-    AllowedValues: [vault, replica, join]
-    Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md). join is a second vault of an account you already have - it has its own master key, sealed with a password you set when it joins, and seals the record (dotrino-accounts/docs/DISENO.md section 5).
+    AllowedValues: [vault, replica, join, demo]
+    Description: vault is a whole new account with its first administrator. replica joins an account you already have, with an invitation from your vault and a code you approve there; it has no master and can open nothing (dotrino-vault/docs/replicas.md). join is a second vault of an account you already have - it has its own master key, sealed with a password you set when it joins, and seals the record (dotrino-accounts/docs/DISENO.md section 5). demo is vault plus the Dotrino Terminal agent in the same function, for app store reviewers; it needs the demo code (lambda/build.sh --demo).
   Owner:
     Type: String
     Default: ''
@@ -94,7 +94,7 @@ Conditions:
   Shared: !Not [!Equals [!Ref SharedKeyArn, '']]
   CreateKey: !And [!Condition New, !Not [!Condition Shared]]
   Bounded: !Not [!Equals [!Ref PermissionsBoundary, '']]
-  IsVault: !Equals [!Ref Mode, vault]
+  IsVault: !Or [!Equals [!Ref Mode, vault], !Equals [!Ref Mode, demo]]
 
 Resources:
   ProfileBucket:

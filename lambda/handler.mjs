@@ -6,6 +6,8 @@
  *   · `vault`: una cuenta entera, con su primer administrador.
  *   · `replica`: el replicador (`src/replica.js`) de una cuenta que ya existe. No tiene
  *     maestra, no abre nada y entra al acta con la invitación de su dueño.
+ *   · `demo`: como `vault`, más el agente de Dotrino Terminal en el mismo proceso, para quien
+ *     revisa la app en una tienda (`./demo.mjs`).
  *   · `join`: una SEGUNDA BÓVEDA de una cuenta que ya existe (la de $5 de `dotrino-accounts`).
  *     Tiene maestra y sella, entra con la invitación de su dueño, y la maestra va sellada con
  *     la contraseña que él puso (`lock.mjs`): cerrada sirve, y se abre desde su consola.
@@ -24,7 +26,7 @@
  *
  * Variables de entorno (las pone la plantilla):
  *
- *   DOTRINO_VAULT_MODE     `vault` (por defecto), `replica` o `join`
+ *   DOTRINO_VAULT_MODE     `vault` (por defecto), `replica`, `join` o `demo`
  *   DOTRINO_VAULT_BUCKET   el bucket del perfil
  *   DOTRINO_VAULT_PREFIX   prefijo dentro del bucket (por defecto `vault/`)
  *   DOTRINO_KMS_KEY_ID     la llave de KMS que envuelve la del disco
@@ -64,9 +66,22 @@ async function session (context, { wakeBase, idleMs, onReady, lock = null } = {}
   const fs = await import('node:fs')
   // Un contenedor que ya atendió una sesión tiene el perfil viejo en /tmp: se empieza de cero.
   fs.rmSync(DIR, { recursive: true, force: true })
-  const start = MODE === 'replica'
-    ? replicaStarter({ runReplica: (await import('../src/replica.js')).runReplica })
-    : vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady, locked: MODE === 'join', lock })
+  let start
+  if (MODE === 'replica') start = replicaStarter({ runReplica: (await import('../src/replica.js')).runReplica })
+  else if (MODE === 'demo') {
+    // El agente solo está en el zip de la demo (`build.sh --demo`).
+    const { demoStarter, DEMO_IDLE_MS, pipePtyWhenNoTerminal } = await import('./demo.mjs')
+    const agentEntry = import.meta.resolve('@dotrino/terminal-agent')
+    if (pipePtyWhenNoTerminal(new URL(agentEntry).pathname)) console.log('[vault-lambda] no pseudo-terminals here: the demo consoles run over pipes')
+    const { startAgent } = await import('@dotrino/terminal-agent')
+    // El enlace es el del pilar que trae el agente: puede ir anidado bajo él, no en la raíz.
+    const { createRequire } = await import('node:module')
+    const { pathToFileURL } = await import('node:url')
+    const linkPath = createRequire(import.meta.resolve('@dotrino/terminal-agent')).resolve('@dotrino/remote-agent/link')
+    const { enroll, loadLink } = await import(pathToFileURL(linkPath).href)
+    start = demoStarter({ startVault: (await import('../src/vault.js')).startVault, startAgent, enroll, loadLink, onReady })
+    idleMs ??= DEMO_IDLE_MS
+  } else start = vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady, locked: MODE === 'join', lock })
   return runSession({
     store: await store(), dir: DIR, start,
     proxyUrl: process.env.DOTRINO_PROXY_URL || undefined,
