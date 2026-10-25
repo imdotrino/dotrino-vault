@@ -160,11 +160,11 @@ export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null
     // QUÉ LA MANTIENE DESPIERTA: cada mensaje reinicia la cuenta de inactividad, así que una
     // sesión que solo acaba por el tope lo dice con los tipos que recibió (2026-10-25: las de
     // la segunda bóveda de Seyacat duraban los 15 min enteros sin que se supiera por qué).
-    const seen = new Map()
+    const seen = new Map()   // `tipo pub` → cuántas
     const onActivity = (m) => {
       last = Date.now()
-      const t = m?.type || '?'
-      seen.set(t, (seen.get(t) || 0) + 1)
+      const k = `${m?.type || '?'} ${m?.pub || ''}`
+      seen.set(k, (seen.get(k) || 0) + 1)
     }
     piece = await start({ dir, proxyUrl, wakeUrl, onActivity, log, push: () => mirror.push() })
     await mirror.push()
@@ -178,7 +178,17 @@ export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null
     }
     log(`[vault-lambda] session ends (${reason})`)
     if (reason.startsWith('deadline') && seen.size) {
-      log(`[vault-lambda] messages this session: ${[...seen].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ×${n}`).join(', ')}`)
+      // Con el ID de aparato de quien lo manda (el de `dotrino-vault members`).
+      const { keyLabel } = await import('@dotrino/identity/capabilities')
+      const top = [...seen].sort((a, b) => b[1] - a[1]).slice(0, 8)
+      const said = []
+      for (const [k, n] of top) {
+        const i = k.indexOf(' ')
+        const type = k.slice(0, i)
+        const pub = k.slice(i + 1)
+        said.push(`${type}${pub ? ' from ' + await keyLabel(pub).catch(() => '?') : ''} ×${n}`)
+      }
+      log(`[vault-lambda] work this session: ${said.join(', ')}`)
     }
     return { ready: piece.ready, reason }
   } finally {

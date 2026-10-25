@@ -137,3 +137,32 @@ test('un cerrojo vencido se toma: un contenedor que murió no deja la bóveda ce
   assert.match(s.objects.get('.lease').body.toString(), /vivo/)
   await nuevo.release()
 })
+
+// LO QUE LA BÓVEDA NO ATIENDE NO LA MANTIENE DESPIERTA (2026-10-25). La app Terminal sondea a
+// todos los miembros del acta cada 30 s con un `ra.ping`, bóvedas incluidas; contaba como
+// trabajo y la sesión de la Lambda duraba siempre sus 15 minutos.
+test('un sondeo que la bóveda no atiende no la mantiene despierta', async () => {
+  const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
+  const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
+  await c.connect()
+  const dir = tmp('vault-sondeo-')
+  let timer = null
+  let sent = 0
+  try {
+    const t0 = Date.now()
+    const r = await sesion({
+      dir, deadline: Date.now() + 15_000,
+      onReady: () => {
+        // A la cuenta: la llave pública del perfil está en claro en `key.json`.
+        const pub = fs.readdirSync(dir, { recursive: true }).filter((f) => String(f).endsWith('key.json'))
+          .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, String(f)), 'utf8')).pub } catch (_) { return null } })
+          .find(Boolean)
+        assert.ok(pub, 'la llave pública de la cuenta')
+        timer = setInterval(() => { try { c.sendByPubkey(pub, { type: 'ra.ping', n: String(++sent) }, { ephemeral: true }) } catch (_) {} }, 300)
+      }
+    })
+    assert.equal(r.reason, 'idle', 'se apagó por inactividad y no por el tope')
+    assert.ok(sent >= 4, `el sondeo siguió llegando mientras tanto (${sent})`)
+    assert.ok(Date.now() - t0 < 12_000)
+  } finally { clearInterval(timer); c.close() }
+})
