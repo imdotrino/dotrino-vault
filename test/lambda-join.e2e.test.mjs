@@ -30,7 +30,10 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const proxyServerPath = path.join(here, '..', '..', 'dotrino-proxy', 'server.js')
 const FAKE_KMS = path.join(here, 'fixtures', 'fake-kms.mjs')
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), name))
-const log = process.env.VAULT_LOG ? console.error : () => {}
+// Se guarda todo lo que dice la bóveda: al final se mira que no haya reventado nada por dentro
+// (un `catch` que solo loguea no tumba ninguna prueba, y así pasó el `Acta` declarado tarde).
+const lines = []
+const log = (...a) => { lines.push(a.join(' ')); if (process.env.VAULT_LOG) console.error(...a) }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const PASSWORD = 'caballo grapa batería correcta'
 
@@ -195,4 +198,9 @@ test('dormida y cerrada, la abre desde lejos un aparato con `admin` de la OTRA b
 
 test('una bóveda ya dada de alta no se vuelve a dar de alta', async () => {
   await assert.rejects(alta(await invitar(vault), 'req-2'), (e) => e.code === 'already-enrolled')
+})
+
+test('la bóveda no reventó por dentro en ninguna sesión', () => {
+  const malas = lines.filter((l) => /before initialization|is not defined/.test(l))
+  assert.deepEqual(malas, [])
 })
