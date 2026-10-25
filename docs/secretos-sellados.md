@@ -705,7 +705,7 @@ llave de la máquina a ver si cede.
 |---|---|---|
 | **la maestra** (`keypair`) | la contraseña | **no cede** — ni firma ni se recupera |
 | **`#recovery`** | la contraseña | **no cede** — el AES-GCM no autentica con la llave de máquina |
-| **`enc-keypair`** | la llave de máquina | cede |
+| **`enc-keypair`** | la llave de máquina | cede, **a propósito** |
 | **`sealkeys.json`** | la llave de máquina | cede, **a propósito** |
 | **`commkey.json`** | la llave de máquina | cede, **a propósito** |
 
@@ -719,9 +719,11 @@ perfil, y su privada vive bajo la llave de máquina. **No abre los cajones de se
 hay ni un sobre dirigido a ella (comprobado sobre los dos perfiles, con 0 y 4 destinatarios,
 y ninguno es ella), porque la bóveda no se envuelve a sí misma — envolverle la CEK sería
 devolverle la capacidad de leerlo todo. Lo que sí abre es el CONTENIDO sellado a este
-perfil. Sigue siendo la pieza que falta cerrar bajo la contraseña, y lo que lo frena es
-decidir si el almacén sirve con el perfil cerrado: hoy sirve, y por eso su llave no puede
-pedir una frase que no está puesta.
+perfil. **Se queda bajo la llave de máquina, a propósito** (decidido por el dueño el
+2026-10-25): la bóveda siempre sirve cerrada, el almacén incluido, y solo se abre para
+emparejar, cambiar permisos y lo poco que necesita la maestra. Una llave que pidiera la frase
+rompería eso. Lo que la protegería de una copia del disco entero es el KMS, igual que a las
+otras dos.
 
 **Las otras dos ceden a propósito, y es el precio de servir cerrada.** La de sellado firma
 lo que la bóveda sirve; la de comunicación la identifica en el proxio. Si pidieran la frase,

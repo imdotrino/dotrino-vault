@@ -184,8 +184,10 @@ Quien opere el proxio lo lee. Es deuda abierta y está en `PENDIENTES.md`.
 ### 4.2. Tres llaves ceden a la llave de la máquina
 
 - **`enc-keypair`** — abre el contenido sellado al perfil. **No abre ningún cajón de
-  secretos** (se midió: no hay un solo sobre dirigido a ella). Es la pieza que falta cerrar
-  bajo la contraseña, y lo que lo frena es decidir si el almacén sirve con el perfil cerrado.
+  secretos** (se midió: no hay un solo sobre dirigido a ella). **Cede a propósito**, igual que
+  las otras dos: la bóveda **siempre sirve cerrada**, también el almacén, y se abre solo para
+  emparejar, cambiar permisos y lo poco que necesita la maestra (dueño, 2026-10-25). Una llave
+  que pidiera la frase dejaría el almacén sin servir con el candado echado.
 - **de sellado** y **de comunicación** — ceden **a propósito**: son las que dejan servir y
   hablar con el candado echado. Si pidieran la frase, una bóveda cerrada no existiría en la
   red ni atendería a sus aparatos, que es justo lo que el candado no debe romper. La de
