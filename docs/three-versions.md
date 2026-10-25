@@ -86,6 +86,12 @@ Limitaciones de contexto, no olvidos:
   como declarado.
 - **Atiende mientras la pestaña esté abierta.** La que está encendida siempre es la del
   binario.
+- **En el navegador la maestra ES la llave del aparato** (dueño, 2026-10-25). La identidad
+  de la pestaña firma con ella todo lo que firman las apps (`signData`, `identify`), y eso no
+  es asunto de la bóveda: la regla de «la maestra tiene dos trabajos» es de la bóveda, no de
+  la identidad. Lo que sí obliga a la bóveda del navegador es no firmar sola: el papel con el
+  que su consola la administra (`selfCertIssuer`) se firma solo cuando cambian el acta o sus
+  permisos, no cada minuto. En el binario la maestra y el aparato son llaves distintas.
 
 ## Lo que falta (pantallas, no protocolo)
 
