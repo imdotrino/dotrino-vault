@@ -70,6 +70,25 @@ ningún código y contesta `wrong-account`: no hay nada que aprobar. Una bóveda
 vuelve a enrolar** (`already-enrolled`): no es multiperfil. Si el alta no llegó a aprobarse,
 se repite con otra invitación.
 
+## Se actualiza sola (`code.mjs`, `update.mjs`)
+
+**Cada Lambda es una bóveda aparte, y ninguna hay que actualizarla a mano.** La función que
+despliega la pila es solo el punto de partida: al arrancar mira `code/current.json` de su propio
+bucket y, si apunta a una versión más nueva que ella, carga esa (la baja de `code/`, comprueba su
+sha256 y la deja desempaquetada en `/tmp`). Si lo apuntado no está o no cuadra, **se para y lo
+dice**: no corre la vieja en silencio.
+
+Quien apunta es la bóveda en marcha, una vez al día durante una sesión, con las reglas del binario
+(CONVENCIONES §15): mira la última release, baja `dotrino-vault-lambda-<versión>.zip`, lo
+**verifica contra la atestación de sigstore** de la release, lo deja en `code/` y escribe el
+marcador. Corre desde el siguiente arranque en frío, y esa versión, al arrancar por primera vez,
+se lo cuenta a quien aprueba (`ev: 'updated'`). Pedir aprobación es un ajuste (`settings.json`,
+apagado por defecto); encendido, el pedido dura lo que la sesión (como mucho 15 min) y no un día.
+
+Para pasar a esto, una pila anterior necesita **una** actualización con la plantilla nueva (trae
+el permiso sobre `code/*` y Node 24). La demo (`Mode: demo`) no se actualiza así: su código no va
+en la release.
+
 ## Volver a montar una pila borrada
 
 El bucket y la llave **se quedan** al borrar la pila: son la cuenta. Crear otra con el mismo
@@ -120,6 +139,8 @@ es multiperfil (`already-enrolled`), y un alta que falla no deja nada en el buck
 | `lock.mjs` | El candado de la segunda bóveda: `lock.json` (la llave del perfil envuelta con la derivada de la contraseña, cifrado además con KMS) y el freno de intentos, los mismos que la contraseña del admin de escritorio (`../src/adminDoor.js`). |
 | `mirror.mjs` | El reflejo directorio ⇄ S3 con escrituras condicionales por `ETag`, y el cerrojo (`.lease`, vence solo si el contenedor muere). |
 | `bootstrap.mjs` | El primer administrador (`createPasswordLogin`, el mismo camino que `dotrino-vault logins add`). |
+| `code.mjs` | El cargador: corre la versión que apunta `code/current.json` si es más nueva, o se para si no cuadra. |
+| `update.mjs` | Mirar la release una vez al día, verificar el zip y apuntarlo; y avisar cuando la nueva arranca. |
 | `build.sh` | El zip (reproducible) y la plantilla con la URL y el hash puestos. Lo corre `release.yml`. |
 
 **El despertar** lo hace el proxio (`websocket-proxy` ≥ 1.7.0): la bóveda registra su URL al

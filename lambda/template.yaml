@@ -211,10 +211,17 @@ Resources:
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
                 Resource: !Join ['', [!If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}'], '/vault/*']]
+              # EL CÓDIGO QUE CORRE (`lambda/code.mjs`): la bóveda deja aquí la versión nueva ya
+              # verificada y la apunta en `code/current.json`; la función la carga al arrancar.
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Join ['', [!If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}'], '/code/*']]
+              # ListBucket también para `code/`: sin él, S3 contesta 403 y no «no existe» cuando
+              # todavía no hay marcador, y la función no arrancaría.
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !If [New, !GetAtt ProfileBucket.Arn, !Sub 'arn:aws:s3:::dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']
-                Condition: { StringLike: { 's3:prefix': ['vault/*'] } }
+                Condition: { StringLike: { 's3:prefix': ['vault/*', 'code/*'] } }
               # Con la llave COMPARTIDA, cada bóveda solo puede usarla con su propio nombre en el
               # contexto: el sobre de otra bóveda no se abre con este rol.
               - Effect: Allow
@@ -230,7 +237,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub dotrino-vault-${Name}
-      Runtime: nodejs22.x
+      Runtime: nodejs24.x
       Handler: lambda/handler.handler
       Code:
         S3Bucket: !If [New, !Ref ProfileBucket, !Sub 'dotrino-vault-${Name}-${AWS::AccountId}-${AWS::Region}']

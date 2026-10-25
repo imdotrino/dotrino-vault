@@ -32,7 +32,9 @@
  *   DOTRINO_KMS_KEY_ID     la llave de KMS que envuelve la del disco
  *   DOTRINO_PROXY_URL      el proxio (por defecto el de producción)
  */
+import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const DIR = '/tmp/dotrino-vault/profile'
 /** Lo que tarda como mucho la réplica en pedir el código, desde que se lanza el alta. */
@@ -49,7 +51,15 @@ const END_MARGIN_MS = 45_000
 // Antes de cargar nada de la bóveda: en Lambda solo se puede escribir en `/tmp`, y el
 // proveedor de KMS se busca donde lo deja la imagen del contenedor, que aquí es otra.
 process.env.HOME = '/tmp'
-process.env.DOTRINO_KMS_SCRIPT ||= path.join(process.env.LAMBDA_TASK_ROOT || '/var/task', 'packaging', 'kms-aws.mjs')
+// El de ESTE código, no el de `LAMBDA_TASK_ROOT`: con el cargador (`code.mjs`) puede correr una
+// versión desempaquetada en `/tmp`, y su proveedor de KMS es el que trae ella. Una ruta que
+// pusiera otro (la imagen de un contenedor) se respeta.
+if (!process.env.DOTRINO_KMS_SCRIPT || process.env.DOTRINO_KMS_SCRIPT_FROM_LAMBDA) {
+  process.env.DOTRINO_KMS_SCRIPT = fileURLToPath(new URL('../packaging/kms-aws.mjs', import.meta.url))
+  process.env.DOTRINO_KMS_SCRIPT_FROM_LAMBDA = '1'
+}
+/** La versión de este código (el `package.json` que viaja en el zip). */
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 async function store () {
   const bucket = process.env.DOTRINO_VAULT_BUCKET
@@ -61,11 +71,51 @@ async function store () {
   return s3Store({ bucket, prefix: process.env.DOTRINO_VAULT_PREFIX ?? 'vault/' })
 }
 
-async function session (context, { wakeBase, idleMs, onReady, lock = null } = {}) {
+/** `code/` del mismo bucket: el código que corre la función (`code.mjs`, `update.mjs`). */
+async function codeStore () {
+  const { s3Store } = await import('./mirror.mjs')
+  const { CODE_PREFIX } = await import('./code.mjs')
+  return s3Store({ bucket: process.env.DOTRINO_VAULT_BUCKET, prefix: CODE_PREFIX })
+}
+
+/**
+ * MIRAR SI HAY VERSIÓN NUEVA mientras dura la sesión (`update.mjs`), y contarlo si esta es la
+ * que acaba de entrar. Va por detrás: la sesión no espera a esto para atender, pero no se
+ * apaga mientras siga (`busy`). La demo no se actualiza: su código no va en la release.
+ */
+function withFreshCode (start, { deadline, vaultOf }) {
+  return async (args) => {
+    const piece = await start(args)
+    let running = (async () => {
+      const [{ updateCode, announceIfNew }, code, upd, settings, approval] = await Promise.all([
+        import('./update.mjs'), codeStore(), import('@dotrino/update'), import('../src/settings.js'), import('../src/updateApproval.js')
+      ])
+      const { fetchVerified } = await import('@dotrino/update/fetch')
+      const vault = vaultOf()
+      if (vault) await announceIfNew({ store: code, myVersion: VERSION, vault, log: args.log })
+      await updateCode({
+        store: code, dir: args.dir, myVersion: VERSION, vault, deadline: deadline - 30_000, log: args.log,
+        deps: {
+          latestRelease: () => upd.latestVersion({ source: 'github', repo: REPO, product: 'dotrino-vault', version: VERSION }),
+          isNewer: upd.isNewer, fetchVerified, checkEveryMs: upd.CHECK_EVERY_MS, repo: REPO,
+          readSettings: settings.readSettings, firstYes: approval.firstYes, readAsked: approval.readAsked,
+          writeAsked: approval.writeAsked, clearAsked: approval.clearAsked, shouldAsk: approval.shouldAsk
+        }
+      })
+    })().catch((e) => args.log(`[vault-lambda] update: ${e.code || ''} ${e.message}`)).finally(() => { running = null })
+    return { ...piece, busy: () => piece.busy() || !!running, why: () => [piece.why?.(), running ? 'checking for a new version' : null].filter(Boolean).join(' · ') }
+  }
+}
+
+const REPO = 'imdotrino/dotrino-vault'
+
+async function session (context, { wakeBase, idleMs, onReady, lock = null, update = true } = {}) {
   const { runSession, vaultStarter, replicaStarter } = await import('./session.mjs')
   const fs = await import('node:fs')
   // Un contenedor que ya atendió una sesión tiene el perfil viejo en /tmp: se empieza de cero.
   fs.rmSync(DIR, { recursive: true, force: true })
+  let vaultRef = null
+  const keep = async (v) => { vaultRef = v; return onReady ? onReady(v) : null }
   let start
   if (MODE === 'replica') start = replicaStarter({ runReplica: (await import('../src/replica.js')).runReplica })
   else if (MODE === 'demo') {
@@ -81,12 +131,14 @@ async function session (context, { wakeBase, idleMs, onReady, lock = null } = {}
     const { enroll, loadLink } = await import(pathToFileURL(linkPath).href)
     start = demoStarter({ startVault: (await import('../src/vault.js')).startVault, startAgent, enroll, loadLink, onReady })
     idleMs ??= DEMO_IDLE_MS
-  } else start = vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady, locked: MODE === 'join', lock })
+  } else start = vaultStarter({ startVault: (await import('../src/vault.js')).startVault, onReady: keep, locked: MODE === 'join', lock })
+  const deadline = Date.now() + context.getRemainingTimeInMillis() - END_MARGIN_MS
+  if (update && MODE !== 'demo') start = withFreshCode(start, { deadline, vaultOf: () => vaultRef })
   return runSession({
     store: await store(), dir: DIR, start,
     proxyUrl: process.env.DOTRINO_PROXY_URL || undefined,
     wakeBase,
-    deadline: Date.now() + context.getRemainingTimeInMillis() - END_MARGIN_MS,
+    deadline,
     ...(idleMs !== undefined ? { idleMs } : {}),
     owner: context.awsRequestId,
     log: console.log
@@ -274,7 +326,8 @@ async function onStack (event, context) {
     }
     const { ensureAdmin } = await import('./bootstrap.mjs')
     const { ready } = await session(context, {
-      wakeBase: p.FunctionUrl, idleMs: 0,
+      // El primer arranque no se actualiza: CloudFormation está esperando la respuesta.
+      wakeBase: p.FunctionUrl, idleMs: 0, update: false,
       onReady: (vault) => ensureAdmin(vault, {
         user: p.AdminUser || 'admin',
         password: async () => {
@@ -291,7 +344,21 @@ async function onStack (event, context) {
   }
 }
 
+/**
+ * EL CÓDIGO FRESCO (`code.mjs`): si el bucket apunta a una versión más nueva que esta, la
+ * invocación entera la atiende esa. Si lo apuntado no se puede cargar, se para y se dice.
+ */
 export async function handler (event, context) {
+  if (MODE !== 'demo') {
+    const { freshHandler } = await import('./code.mjs')
+    const { isNewer } = await import('@dotrino/update')
+    const fresh = await freshHandler({ store: await codeStore(), myVersion: VERSION, isNewer, log: console.log })
+    if (fresh) return fresh(event, context)
+  }
+  return ownHandler(event, context)
+}
+
+async function ownHandler (event, context) {
   if (event?.RequestType && event?.ResponseURL) return onStack(event, context)
   if (event?.requestContext?.http) return onWake(event)
   if (event?.kind === 'session') {

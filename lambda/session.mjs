@@ -112,6 +112,15 @@ export const vaultStarter = ({ startVault, onReady = null, locked = false, lock:
     // Un emparejamiento esperando su código o un pedido esperando al aprobador no son
     // inactividad: apagarse ahí los perdería, porque viven en memoria.
     busy: () => vault.listPending().length > 0 || vault.listApprovals().length > 0,
+    // Lo que la tiene despierta, para el log: una sesión que solo acaba por el tope sin decir
+    // por qué es una que cuesta 15 minutos cada vez sin que nadie lo vea (2026-10-25).
+    why: () => {
+      const a = vault.listApprovals()
+      return [
+        vault.listPending().length ? `${vault.listPending().length} pairing(s) waiting for a code` : null,
+        a.length ? `${a.length} request(s) waiting for an approver (${[...new Set(a.map((x) => x.kind || '?'))].join(', ')})` : null
+      ].filter(Boolean).join(' · ')
+    },
     close: () => { try { vault.close() } finally { lock?.close() } }
   }
 }
@@ -148,17 +157,29 @@ export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null
     const wakeUrl = wakeBase ? `${wakeBase.replace(/\/+$/, '')}/wake?k=${await wakeSecret(store, { create: true })}` : null
     if (!wakeUrl) log('[vault-lambda] no function URL: the proxy will not be able to wake this one')
     let last = Date.now()
-    piece = await start({ dir, proxyUrl, wakeUrl, onActivity: () => { last = Date.now() }, log, push: () => mirror.push() })
+    // QUÉ LA MANTIENE DESPIERTA: cada mensaje reinicia la cuenta de inactividad, así que una
+    // sesión que solo acaba por el tope lo dice con los tipos que recibió (2026-10-25: las de
+    // la segunda bóveda de Seyacat duraban los 15 min enteros sin que se supiera por qué).
+    const seen = new Map()
+    const onActivity = (m) => {
+      last = Date.now()
+      const t = m?.type || '?'
+      seen.set(t, (seen.get(t) || 0) + 1)
+    }
+    piece = await start({ dir, proxyUrl, wakeUrl, onActivity, log, push: () => mirror.push() })
     await mirror.push()
 
     let reason = 'idle'
     for (;;) {
-      if (Date.now() >= deadline) { reason = 'deadline'; break }
+      if (Date.now() >= deadline) { reason = `deadline${piece.busy() && piece.why?.() ? ': ' + piece.why() : ''}`; break }
       if (!piece.busy() && Date.now() - last >= idleMs) break
       await sleep(Math.min(SYNC_EVERY_MS, Math.max(0, deadline - Date.now())))
       await mirror.push()
     }
     log(`[vault-lambda] session ends (${reason})`)
+    if (reason.startsWith('deadline') && seen.size) {
+      log(`[vault-lambda] messages this session: ${[...seen].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ×${n}`).join(', ')}`)
+    }
     return { ready: piece.ready, reason }
   } finally {
     try { piece?.close() } catch (_) {}

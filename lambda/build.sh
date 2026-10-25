@@ -25,6 +25,16 @@ BUILD="$HERE/build"
 
 rm -rf "$BUILD"; mkdir -p "$BUILD/lib" "$BUILD/packaging" "$BUILD/lambda" "$REPO/dist"
 cp "$REPO/package.json" "$REPO/package-lock.json" "$BUILD/"
+# LOS AGENTES DE PROXY EN SU VERSIÓN COMMONJS, solo en la Lambda. `sigstore` (con el que la
+# bóveda verifica lo que baja, `update.mjs`) carga `@npmcli/agent`, que hace require() de cuatro
+# paquetes que en su última versión son solo ESM; el Node de Lambda no deja hacer require() de
+# ESM (ERR_REQUIRE_ESM, también con nodejs24.x, visto en AWS el 2026-10-25). Las versiones de
+# abajo tienen la misma interfaz y son CommonJS; probado con `--no-experimental-require-module`
+# verificando el zip de una release real.
+node -e '
+const f = process.argv[1], p = JSON.parse(require("fs").readFileSync(f, "utf8"))
+p.overrides = { ...(p.overrides || {}), "agent-base": "7.1.4", "http-proxy-agent": "7.0.2", "https-proxy-agent": "7.0.6", "socks-proxy-agent": "8.0.5" }
+require("fs").writeFileSync(f, JSON.stringify(p, null, 2) + "\n")' "$BUILD/package.json"
 cp -r "$REPO/bin" "$REPO/src" "$REPO/vendor" "$BUILD/"
 cp -r "$REPO/lib/src" "$BUILD/lib/"
 cp "$REPO/packaging/kms-aws.mjs" "$BUILD/packaging/"
