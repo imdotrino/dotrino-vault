@@ -190,6 +190,10 @@ const T = {
     // QUÉ BÓVEDA SE ADMINISTRA, cuando la cuenta tiene más de una (la de este navegador y la
     // de la nube, por ejemplo). Todas guardan lo mismo; lo que cambia es a cuál se le habla.
     pick_label: 'Qué bóveda administras',
+    choose_title: 'Tus bóvedas',
+    choose_current: 'perfil activo',
+    choose_noname: 'Perfil sin nombre',
+    choose_change: 'Cambiar de bóveda',
     pick_here: 'Este navegador',
     at_pick: (n) => `Administras «${n}»`,
     at_pick_wait: 'preguntando… si estaba dormida, tarda unos segundos en despertar',
@@ -460,6 +464,10 @@ const T = {
     at_remote: (n) => (n ? `Your vault is “${n}”` : 'Your vault is another machine'),
     at_remote_off: 'not confirmed yet',
     pick_label: 'Which vault you manage',
+    choose_title: 'Your vaults',
+    choose_current: 'active profile',
+    choose_noname: 'Unnamed profile',
+    choose_change: 'Switch vault',
     pick_here: 'This browser',
     at_pick: (n) => `Managing “${n}”`,
     at_pick_wait: 'asking… if it was asleep, it takes a few seconds to wake up',
@@ -921,6 +929,9 @@ onMounted(async () => {
   // (Venía roto desde que existe esta consola; lo destapó una prueba de punta a punta.)
   try { id.value = markRaw(await Identity.connect(identityOptions())) } catch { fatal.value = t.value.err_connect; loading.value = false; return }
   await refresh()
+  // Los perfiles ANTES de enseñar nada: la primera pantalla puede ser elegir bóveda, y esa
+  // lista sale de todos ellos (`allVaults`).
+  await refreshProfiles()
   loading.value = false
   // El QR de `dotrino-vault pair` abre esta página con el código en el #fragment
   // (que nunca llega al servidor). Si viene, arrancamos la conexión sola.
@@ -944,7 +955,6 @@ onMounted(async () => {
   // el icono y es molesto», dueño 2026-09-10). Mirar en los demás perfiles no puede costar
   // cambiarse a ellos — eso se arregla en el pilar de identidad, no aquí.
   if (approvalsOnly.value) {
-    await refreshProfiles()
     computeMyDeviceId()
     await refreshApprovals()
     // Y lo que ya está aprobado: al abrir, no al primer latido. Si no, la lista de
@@ -1288,6 +1298,50 @@ const serveElsewhere = computed(() => vaults.value.length > 1 && !!chosen.value?
 function openServeWindow () {
   window.open(location.origin + '/vault', 'dotrino-vault-serve', 'popup,width=480,height=720')
 }
+/**
+ * PRIMERO SE ELIGE LA BÓVEDA, entre las de TODOS tus perfiles (dueño, 2026-10-26: «en esta
+ * página debería primero escoger la bóveda que quiero abrir para administrar», como Terminal
+ * con sus máquinas). Lo que lo pidió: con la página en el perfil Dotrino, la bóveda de la nube
+ * de Seyacat no salía por ningún lado, y no había forma de saber por qué.
+ *
+ * La lista sale de `listProfiles` (identity ≥ 0.129.0), que lee el acta de cada perfil sin
+ * cambiar el activo. Elegir una de OTRO perfil sí lo cambia, y eso es recargar (multi-perfil
+ * no es reactivo, por diseño): la elección viaja en `sessionStorage` y se aplica al volver.
+ * Con una sola bóveda en total no se pregunta nada.
+ */
+const allVaults = computed(() => profiles.value.flatMap((p) => (p.vaults || []).map((v) => ({
+  ...v, profileId: p.id, profileName: p.name || '', current: !!p.current,
+  here: !!p.current && !!vaults.value.find((x) => x.comm === v.comm)?.here
+}))))
+const vaultGroups = computed(() => {
+  const out = []
+  for (const v of allVaults.value) {
+    let g = out.find((x) => x.id === v.profileId)
+    if (!g) out.push(g = { id: v.profileId, name: v.profileName, current: v.current, vaults: [] })
+    g.vaults.push(v)
+  }
+  return out
+})
+const VAULT_CHOSEN = 'dotrino.vault.chosen'
+const choseHere = ref((() => { try { return !!sessionStorage.getItem(VAULT_CHOSEN) } catch (_) { return false } })())
+const choosing = computed(() => allVaults.value.length > 1 && !choseHere.value)
+async function chooseVault (v) {
+  try { sessionStorage.setItem(VAULT_PICK, v.comm); sessionStorage.setItem(VAULT_CHOSEN, '1') } catch (_) {}
+  if (!v.current) {
+    await id.value.switchProfile(v.profileId)
+    location.reload()
+    return
+  }
+  choseHere.value = true
+  const live = vaults.value.find((x) => x.comm === v.comm)
+  if (live) await pickVault(live)
+}
+async function changeVault () {
+  try { sessionStorage.removeItem(VAULT_CHOSEN) } catch (_) {}
+  await refreshProfiles()
+  choseHere.value = false
+}
+
 async function pickVault (v) {
   picked.value = v.comm
   try { sessionStorage.setItem(VAULT_PICK, v.comm) } catch (_) {}
@@ -2376,6 +2430,17 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       </p>
     </template>
 
+    <div v-else-if="choosing" class="vaultlist" data-testid="vault-choose">
+      <span class="mlabel">{{ t.choose_title }}</span>
+      <div v-for="g in vaultGroups" :key="g.id" class="vgroup" :data-profile="g.id">
+        <p class="muted vgname">{{ g.name || t.choose_noname }}<template v-if="g.current"> · {{ t.choose_current }}</template></p>
+        <button v-for="v in g.vaults" :key="v.comm" type="button" class="vaultrow" :data-vault="v.id"
+                data-testid="vault-choose-item" @click="chooseVault(v)">
+          <span>{{ v.here ? t.pick_here : (v.label || v.id) }}</span> <code>{{ v.id }}</code>
+        </button>
+      </div>
+    </div>
+
     <template v-else>
       <div v-if="msg" class="banner" :class="msg.kind">{{ msg.text }}</div>
 
@@ -2383,10 +2448,8 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
            cuelga todo lo demás de la pantalla: con la bóveda aquí, esto es un mostrador
            que atiende; con la bóveda en otra máquina, es una consola que le habla. No
            hay nada que marcar — la página ya hizo lo que tocaba. -->
-      <div v-if="vaults.length > 1" class="vaultpick" role="group" :aria-label="t.pick_label" data-testid="vault-pick">
-        <button v-for="v in vaults" :key="v.comm" type="button" class="btn sm" :class="{ ghost: chosen?.comm !== v.comm }"
-                :aria-pressed="chosen?.comm === v.comm" :data-vault="v.id" :data-here="v.here || null"
-                data-testid="vault-pick-item" @click="pickVault(v)">{{ v.here ? t.pick_here : v.label }}</button>
+      <div v-if="allVaults.length > 1" class="vaultpick" data-testid="vault-pick">
+        <button type="button" class="btn ghost sm" data-testid="vault-change" @click="changeVault">{{ t.choose_change }}</button>
       </div>
       <p v-if="serveElsewhere" class="muted" data-testid="vault-serve-note">
         {{ t.pick_serve }}
@@ -2919,6 +2982,14 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
 .console { max-width: 860px; margin: 0 auto; padding: 24px 18px 64px; }
 /* Dónde vive la bóveda: una línea, con su lucecita. Es estado, no un cartel. */
 .vaultpick { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.vaultlist { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.vaultlist .mlabel { font-weight: 600; }
+.vgroup { display: flex; flex-direction: column; gap: 6px; }
+.vgname { margin: 4px 0 0; font-size: 13px; }
+.vaultrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: var(--dt-radius, 12px); border: 1px solid var(--dt-border, var(--dt-surface-3));
+  background: var(--dt-surface-2, transparent); color: inherit; font: inherit; cursor: pointer; }
+.vaultrow:hover { border-color: var(--dt-primary, #00658c); }
 .vaultat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; font-size: 15px; }
 .vaultat .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dt-surface-3); }
 .vaultat .dot.on { background: var(--dt-ok); box-shadow: 0 0 8px var(--dt-ok); }
