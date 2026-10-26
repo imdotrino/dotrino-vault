@@ -157,9 +157,9 @@ export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null
     const wakeUrl = wakeBase ? `${wakeBase.replace(/\/+$/, '')}/wake?k=${await wakeSecret(store, { create: true })}` : null
     if (!wakeUrl) log('[vault-lambda] no function URL: the proxy will not be able to wake this one')
     let last = Date.now()
-    // QUÉ LA MANTIENE DESPIERTA: cada mensaje reinicia la cuenta de inactividad, así que una
-    // sesión que solo acaba por el tope lo dice con los tipos que recibió (2026-10-25: las de
-    // la segunda bóveda de Seyacat duraban los 15 min enteros sin que se supiera por qué).
+    // QUÉ LA MANTIENE DESPIERTA: cada mensaje reinicia la cuenta de inactividad, así que la
+    // sesión lo dice al acabar con los tipos que recibió (2026-10-25: las de la segunda bóveda
+    // de Seyacat duraban los 15 min enteros sin que se supiera por qué).
     const seen = new Map()   // `tipo pub` → cuántas
     const onActivity = (m) => {
       last = Date.now()
@@ -170,14 +170,19 @@ export async function runSession ({ store, dir, start, proxyUrl, wakeBase = null
     await mirror.push()
 
     let reason = 'idle'
+    const busyFor = new Set()   // lo que la tuvo ocupada sin mensajes (`why`), aunque acabe por inactividad
     for (;;) {
       if (Date.now() >= deadline) { reason = `deadline${piece.busy() && piece.why?.() ? ': ' + piece.why() : ''}`; break }
-      if (!piece.busy() && Date.now() - last >= idleMs) break
+      if (piece.busy()) { const w = piece.why?.(); if (w) busyFor.add(w) }
+      else if (Date.now() - last >= idleMs) break
       await sleep(Math.min(SYNC_EVERY_MS, Math.max(0, deadline - Date.now())))
       await mirror.push()
     }
     log(`[vault-lambda] session ends (${reason})`)
-    if (reason.startsWith('deadline') && seen.size) {
+    // SIEMPRE, no solo al acabar por el tope (2026-10-26): una sesión de casi 4 min que acabó
+    // por inactividad no decía qué la había tenido despierta.
+    if (busyFor.size) log(`[vault-lambda] busy this session: ${[...busyFor].join(', ')}`)
+    if (seen.size) {
       // Con el ID de aparato de quien lo manda (el de `dotrino-vault members`).
       const { keyLabel } = await import('@dotrino/identity/capabilities')
       const top = [...seen].sort((a, b) => b[1] - a[1]).slice(0, 8)
