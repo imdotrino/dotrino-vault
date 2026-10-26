@@ -303,3 +303,91 @@ cerrada con la clave de la máquina —que allí era la del KMS, y el rol de la 
 desenvolvía—. O sea que era un sellador **permanentemente abierto**: cualquiera con una
 shell ahí sellaba en nombre del dueño. Un replicador no tiene ese problema porque no tiene
 maestra, y esa es exactamente la razón por la que es la pieza correcta para poner fuera.
+
+## 11. DECIDIDO (2026-10-26): las bóvedas son CLONES, y comparten la sincronización con el replicador
+
+> El dueño: *«las vaults deben tener un sistema de sincronización: cuando una cambia debe
+> notificar a las otras y actualizar, cuando una despierta debe pedir a las otras también
+> actualizaciones; en teoría todas deben tenerlo todo, ser clones»*. Y: *«la diferencia entre
+> una vault y una réplica es que la vault puede firmar un acta; de ahí deben compartir el
+> sistema de sincronización»*.
+
+### 11.1. Lo que lo destapó
+
+La bóveda de Lambda de Seyacat (`Mode: join`, vaultd 0.176.2) no podía firmar **nada** de lo
+que sirve: `this vault has no sealing key named by the record: it cannot serve`. El acta nombra
+**una** llave de sellado (`sealPub`), la estrena quien sella esa acta, y la #58 la selló el PC.
+Todo lo que sale firmado por `sealOrFail` —entregar secretos, la lista de pedidos, aprobar,
+denegar, avisar de una actualización— solo lo podía servir el PC. Con el PC apagado, la segunda
+bóveda no servía, que es justo para lo que se paga. Y al abrirse, una bóveda que no tiene la
+`sealPub` del acta la rota (`vault.js`, arranque): las dos se la habrían ido quitando.
+
+Además, entre dos bóvedas que sellan solo viajaba el acta. Lo demás (cajones, pedidos, avisos)
+se quedaba en la que lo escribió.
+
+### 11.2. Una pieza, dos papeles
+
+Bóveda y replicador son **el mismo nodo de sincronización**. La única diferencia es que la
+bóveda tiene maestra y puede sellar el acta; el replicador no.
+
+| | Bóveda | Replicador |
+|---|---|---|
+| Recibe y empuja cambios | sí | sí |
+| Al despertar pide lo que le falta | sí | sí |
+| Sirve lo que tiene | sí | sí |
+| Sella el acta / fabrica sobres nuevos | sí (abierta) | nunca |
+
+**Hermanas:** las bóvedas y los replicadores de la cuenta, sacados del acta (miembros con
+`cn: 'vault'`, los que sellan y los `replica`). No hay lista aparte que mantener.
+
+### 11.3. Qué se clona y qué no
+
+| Se clona (los datos) | NO se clona (las llaves, D1) |
+|---|---|
+| el acta y su cadena | la maestra (`key.json`, `identity.json`) |
+| los cajones (`secrets.json`): sobres ya sellados a su destinatario | la llave de comunicación (`commkey.json`) |
+| pedidos y avisos (`notices.json`, `exnotices.json`) | las llaves de sellado (`sealkeys.json`) |
+| las máquinas (`machines.json`) y quién recibe avisos (`notifiable.json`) | el cifrado del disco (`atrest.*`) |
+| los ajustes (`approve.json`, `prefs.json`) | |
+| el respaldo del store (`threads.json`) | |
+
+Clonar los datos no abre nada: un sobre va cerrado a quien lo consume, y guardarlo no exige
+abrirlo. Por eso **una bóveda cerrada también sincroniza**, igual que un replicador.
+
+### 11.4. Cómo viaja
+
+- **Empuje al cambiar.** Tras cada cambio, el nodo lo manda a sus hermanas, firmado. Es
+  `pushToReplicas` generalizado a todas las hermanas y a todos los datos de §11.3. Se juntan los
+  cambios de unos segundos en un empujón: cada empujón timbra a una Lambda dormida y la despierta.
+- **Arrastre al despertar.** El nodo dice a sus hermanas por dónde va y ellas le mandan lo que le
+  falte. Es el `replica.ack` → `catch-up` de hoy, en las dos direcciones.
+- **Conflictos: gana el último cambio.** Cada cambio lleva hora y nodo. Si dos hermanas cambiaron
+  lo mismo sin verse, gana el más reciente; el perdedor se apunta en la bitácora y se avisa a los
+  aprobadores. El acta no entra aquí: sigue con su regla (`seq`, y `canAdopt` para el empate).
+
+### 11.5. Quién firma lo que se sirve: cada nodo, con su llave de comunicación
+
+Cada nodo firma lo que sirve con **su** llave de comunicación, que es miembro estable del acta y
+no rota. Quien verifica acepta la firma de cualquier hermana que el acta nombre. Así ninguna
+bóveda depende de tener la `sealPub` del acta para contestar, y desaparece la rotación cruzada.
+
+Para que no se pierda lo que daba `sealPub` (§8.9 de `secretos-sellados.md`: *un sobre dice en
+qué membresía se selló*), el `seq` del acta va **dentro** de lo firmado.
+
+**Pendiente de confirmar con el dueño:** si con esto `sealPub` se retira entera (los sobres
+también los firma la llave de comunicación de quien escribe) o se queda solo para los sobres.
+
+### 11.6. Lo que sigue en pie
+
+- **D1:** las llaves no viajan. Clonar es de datos.
+- **El oráculo de frescura (§6.1)** sigue siendo prerrequisito: una hermana atrasada es el estado
+  normal unos segundos.
+- **Un replicador no fabrica sobres** (§8.bis, limitación 2): uno para un miembro nuevo lo hace la
+  primera bóveda que se abra, y desde ahí se clona a todas.
+
+### 11.7. Fases
+
+1. Firmar lo servido con la llave de comunicación (§11.5), en la bóveda y en quien verifica
+   (`@dotrino/vault`, las apps). Arregla la Lambda de Seyacat por sí solo.
+2. El nodo de sincronización común: empuje y arrastre entre hermanas, de los datos de §11.3.
+3. El replicador pasa a usar ese mismo nodo, y `pushToReplicas` desaparece.
