@@ -374,8 +374,12 @@ bóveda depende de tener la `sealPub` del acta para contestar, y desaparece la r
 Para que no se pierda lo que daba `sealPub` (§8.9 de `secretos-sellados.md`: *un sobre dice en
 qué membresía se selló*), el `seq` del acta va **dentro** de lo firmado.
 
-**Pendiente de confirmar con el dueño:** si con esto `sealPub` se retira entera (los sobres
-también los firma la llave de comunicación de quien escribe) o se queda solo para los sobres.
+**Decidido (dueño, 2026-10-26): *«ambas son master»*, *«son clones y pueden hacer lo mismo, y se
+sincronizan»*.** Ninguna bóveda es la principal. `sealPub` se retira entera, porque es una llave
+que solo tiene una de ellas (la que selló la última acta). Los sobres también los firma la llave de
+comunicación de la bóveda que escribe. Cualquier bóveda abierta puede hacer lo que haga otra:
+sellar el acta, admitir, revocar, escribir variables y fabricar sobres. Lo hecho se sincroniza
+(§11.4).
 
 ### 11.6. Lo que sigue en pie
 
