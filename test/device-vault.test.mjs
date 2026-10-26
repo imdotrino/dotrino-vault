@@ -10,7 +10,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeDeviceKey, signWithDevice, signDelegationWith, verifyDelegation, verifyDeviceSig } from '@dotrino/identity/capabilities'
+import { makeDeviceKey, makeDeviceEncKey, signWithDevice, signDelegationWith, verifyDelegation, verifyDeviceSig } from '@dotrino/identity/capabilities'
 import { client as opaqueClient } from '@dotrino/opaque'
 import { startDeviceVault } from '../lib/src/index.js'
 import { createLoginDesk } from '../lib/src/passwordLogins.js'
@@ -332,7 +332,7 @@ test('LOGIN: la bóveda-pestaña crea el aparato y lo deja entrar', async () => 
   const { response } = await vault.loginRegisterBegin({ user: 'ana', request: reg.request })
   const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
   const created = await vault.loginRegisterFinish({
-    user: 'ana', upload: fin.upload, pub: device.publickey, label: 'equipo prestado',
+    user: 'ana', upload: fin.upload, pub: device.publickey, encPub: (await makeDeviceEncKey()).encPublickey, label: 'equipo prestado',
     blob: 'sealed:' + fin.exportKey.slice(0, 16)
   })
   assert.ok(created.cert?.sig, 'el aparato sale con su papel')
@@ -368,7 +368,7 @@ test('LOGIN: sin inicio de sesión abierto no se sirve, y se le manda el aviso F
   const reg = opaqueClient.registrationStart({ password })
   const { response } = await vault.loginRegisterBegin({ user: 'ana', request: reg.request })
   const fin = opaqueClient.registrationFinish({ state: reg.state, response, password })
-  const { cert } = await vault.loginRegisterFinish({ user: 'ana', upload: fin.upload, pub: device.publickey, label: 'x', blob: 'sealed:x' })
+  const { cert } = await vault.loginRegisterFinish({ user: 'ana', upload: fin.upload, pub: device.publickey, encPub: (await makeDeviceEncKey()).encPublickey, label: 'x', blob: 'sealed:x' })
 
   const start = opaqueClient.loginStart({ password })
   client.emit('message', 'nadie', { type: MSG.LOGIN_START, user: 'ana', request: start.request })

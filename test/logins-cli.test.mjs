@@ -54,9 +54,9 @@ async function createLogin (user, password, label = 'equipo prestado') {
   const fin = opaqueClient.registrationFinish({ state: start.state, response: begun.response, password })
   const device = await makeDeviceKey({ label })
   const enc = await makeDeviceEncKey()
-  const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+  const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.encPrivateJwk })
   const r = await ask('register-finish', {
-    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob
+    user, upload: fin.upload, pub: device.publickey, encPub: enc.encPublickey, label, blob
   })
   return { ...r, device }
 }

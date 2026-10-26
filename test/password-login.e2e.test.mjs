@@ -56,9 +56,9 @@ async function createLogin ({ user, password, label = 'equipo prestado' }) {
   const start = opaqueClient.registrationStart({ password })
   const { response } = await vault.loginRegisterBegin({ user, request: start.request })
   const fin = opaqueClient.registrationFinish({ state: start.state, response, password })
-  const blob = await seal(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+  const blob = await seal(fin.exportKey, { sign: device.privateJwk, enc: enc.encPrivateJwk })
   const r = await vault.loginRegisterFinish({
-    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob
+    user, upload: fin.upload, pub: device.publickey, encPub: enc.encPublickey, label, blob
   })
   return { ...r, device, exportKey: fin.exportKey }
 }
@@ -201,8 +201,9 @@ test('a password login takes ANY permission of the account record, all the same 
     const start = opaqueClient.registrationStart({ password: 'una contraseña larga' })
     const { response } = await vault.loginRegisterBegin({ user, request: start.request })
     const fin = opaqueClient.registrationFinish({ state: start.state, response, password: 'una contraseña larga' })
+    const enc = await makeDeviceEncKey()
     return vault.loginRegisterFinish({
-      user, upload: fin.upload, pub: device.publickey, label: 'x', blob: await seal(fin.exportKey, { sign: device.privateJwk }), ...extra
+      user, upload: fin.upload, pub: device.publickey, encPub: enc.encPublickey, label: 'x', blob: await seal(fin.exportKey, { sign: device.privateJwk }), ...extra
     })
   }
 })

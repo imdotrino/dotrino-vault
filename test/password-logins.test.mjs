@@ -204,3 +204,27 @@ test('removing the login takes its record and its sessions with it', async () =>
   assert.equal(JSON.stringify(raw().users), '{}')
   await fails(() => login(d, { user: 'ana', password: 'p' }), 'login-failed')
 })
+
+test('el aparato nace CON su llave de cifrado, en el acta y en el paquete de llaves', async () => {
+  // 2026-10-26: `createPasswordLogin` leía `enc.publickey` y `enc.privateJwk`, que no
+  // existen (`makeDeviceEncKey` da `encPublickey` y `encPrivateJwk`). El aparato entraba al
+  // acta sin `encPub` y nada se le podía sellar.
+  const { createPasswordLogin, openDeviceKeys, registerLogin } = await import('../lib/src/passwordLogins.js')
+  const { desk: d } = desk()
+  const password = 'una contraseña larga de prueba'
+  let sent = null
+  await createPasswordLogin({
+    user: 'ana', password, label: 'prueba',
+    begin: (req) => d.registerBegin(req),
+    finish: async (req) => { sent = req; return { ok: true } }
+  })
+  assert.ok(sent.encPub, 'encPub viaja al alta')
+  assert.equal(JSON.parse(sent.encPub).kty, 'EC')
+  // Entrar da la export_key; con ella el paquete se abre y trae la privada de cifrado.
+  await d.registerFinish({ user: 'ana', upload: sent.upload, pub: sent.pub, label: 'prueba', blob: sent.blob })
+  const { exportKey } = await login(d, { user: 'ana', password })
+  const keys = await openDeviceKeys(exportKey, sent.blob)
+  assert.ok(keys.enc?.d, 'el paquete lleva la privada de cifrado')
+  // Y sin encPub el alta se niega en vez de admitir un aparato al que no se le puede sellar.
+  await assert.rejects(registerLogin({ identity: { admitMember () {} }, logins: d, user: 'beto', upload: 'x', pub: sent.pub, blob: 'b' }), { code: 'no-encpub' })
+})

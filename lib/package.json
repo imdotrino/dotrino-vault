@@ -1,6 +1,6 @@
 {
   "name": "@dotrino/vault",
-  "version": "0.103.1",
+  "version": "0.103.2",
   "description": "La bóveda de Dotrino como librería: el MISMO núcleo que el binario corriendo en el navegador (`@dotrino/vault/browser`), el mostrador de emparejamiento y el cliente de SERVICIO (Node): un proyecto se enrola una vez y jala sus credenciales del vault en vez del .env (`import '@dotrino/vault/config'`).",
   "type": "module",
   "main": "src/index.js",
@@ -85,7 +85,7 @@
   "dependencies": {
     "@dotrino/compat": "0.4.0",
     "@dotrino/opaque": "0.1.0",
-    "@dotrino/passmanager": "0.18.4",
+    "@dotrino/passmanager": "0.18.6",
     "@dotrino/roadmap": "0.4.30",
     "@dotrino/update": "0.9.0"
   },

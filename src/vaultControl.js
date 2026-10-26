@@ -306,11 +306,11 @@ export async function addLogin ({ user, password, label = 'equipo prestado', cap
   const fin = opaque.registrationFinish({ state: start.state, response: begun.response, password })
   const device = await makeDeviceKey({ label })
   const enc = await makeDeviceEncKey()
-  const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+  const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.encPrivateJwk })
   // Los PERMISOS del acta, tal cual: cualquiera, y todos por el mismo camino. Traducirlos a
   // los scopes del certificado es cosa del pilar (`registerLogin`), no de esta pantalla.
   return loginsOp('register-finish', {
-    user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps
+    user, upload: fin.upload, pub: device.publickey, encPub: enc.encPublickey, label, blob, caps
   })
 }
 
