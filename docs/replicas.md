@@ -365,21 +365,28 @@ abrirlo. Por eso **una bóveda cerrada también sincroniza**, igual que un repli
   lo mismo sin verse, gana el más reciente; el perdedor se apunta en la bitácora y se avisa a los
   aprobadores. El acta no entra aquí: sigue con su regla (`seq`, y `canAdopt` para el empate).
 
-### 11.5. Quién firma lo que se sirve: cada nodo, con su llave de comunicación
-
-Cada nodo firma lo que sirve con **su** llave de comunicación, que es miembro estable del acta y
-no rota. Quien verifica acepta la firma de cualquier hermana que el acta nombre. Así ninguna
-bóveda depende de tener la `sealPub` del acta para contestar, y desaparece la rotación cruzada.
-
-Para que no se pierda lo que daba `sealPub` (§8.9 de `secretos-sellados.md`: *un sobre dice en
-qué membresía se selló*), el `seq` del acta va **dentro** de lo firmado.
+### 11.5. Quién firma lo que se sirve: cada bóveda, con SU llave de sellado, y el acta las nombra todas
 
 **Decidido (dueño, 2026-10-26): *«ambas son master»*, *«son clones y pueden hacer lo mismo, y se
-sincronizan»*.** Ninguna bóveda es la principal. `sealPub` se retira entera, porque es una llave
-que solo tiene una de ellas (la que selló la última acta). Los sobres también los firma la llave de
-comunicación de la bóveda que escribe. Cualquier bóveda abierta puede hacer lo que haga otra:
-sellar el acta, admitir, revocar, escribir variables y fabricar sobres. Lo hecho se sincroniza
-(§11.4).
+sincronizan»*, y *«la bóveda antigua puede saber la pública de sellado de la otra bóveda, así que
+le puede presellar»*.**
+
+Ninguna bóveda es la principal. Cada una tiene su llave de sellado, que no sale de su máquina (D1).
+Su **pública** sí viaja con la sincronización, así que la bóveda que sella un acta nombra en ella
+la llave de sellado de **cada** hermana: la suya recién estrenada y la vigente de las demás. Así,
+nada más sellarse el acta, todas pueden firmar lo que sirven y los sobres que escriben, sin que la
+otra tenga que abrirse ni sellar.
+
+- **El acta pasa de una `sealPub` a una por bóveda**, con su registro de tramos (`sealKeys`) por
+  bóveda, para que los sobres viejos sigan verificando (§8.9 de `secretos-sellados.md`).
+- **La firma dice de qué bóveda es** (`seal.by` junto a `seal.seq`), y quien verifica busca la
+  llave de ESA bóveda en el acta de ese `seq`.
+- **Cada bóveda rota solo la suya**, al sellar. La de una hermana no la puede rotar (no tiene la
+  privada): la nombra tal como la conoce.
+- **Desaparece la rotación cruzada** del arranque: una bóveda que se abre ya no rota porque «el
+  acta no nombra la mía», porque el acta sí la nombra.
+- Cualquier bóveda abierta puede hacer lo que haga otra: sellar el acta, admitir, revocar,
+  escribir variables y fabricar sobres. Lo hecho se sincroniza (§11.4).
 
 ### 11.6. Lo que sigue en pie
 
@@ -405,8 +412,9 @@ dónde envolver: el alta de una bóveda la tiene que traer, o se para y se dice.
 
 ### 11.7. Fases
 
-1. Firmar lo servido con la llave de comunicación (§11.5), en la bóveda y en quien verifica
-   (`@dotrino/vault`, las apps). Arregla la Lambda de Seyacat por sí solo.
+1. Una llave de sellado por bóveda en el acta (§11.5): `@dotrino/identity` (acta), la bóveda
+   (firmar con la suya, nombrar las de las hermanas) y quien verifica (`@dotrino/vault/service`,
+   el replicador). Arregla la Lambda de Seyacat por sí solo.
 2. El nodo de sincronización común: empuje y arrastre entre hermanas, de los datos de §11.3,
    empezando por el alta (§11.6.bis): la que admite manda los sobres a la nueva.
 3. El replicador pasa a usar ese mismo nodo, y `pushToReplicas` desaparece.
