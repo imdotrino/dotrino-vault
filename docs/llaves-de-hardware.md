@@ -208,8 +208,23 @@ persona. Meterla en la KEK obligaría a tocarla en cada arranque del daemon.
   contesta `FIDO_ERR_UP_REQUIRED` sin él), `chalresp` (HKDF de la respuesta HMAC-SHA1 de la
   ranura OTP 2, **sin toque**), y cualquiera de hardware con `withPassword`: HKDF(scrypt ‖
   secreto), hacen falta las dos. El `info` del HKDF lleva el tipo.
-- `machine`: el perfil sin candado guarda `K` bajo la llave de la máquina. Es lo que queda
-  al quitar la última puerta, y por eso **quitar la contraseña ya no vuelve a sellar nada**.
+- **La contraseña siempre lleva la llave de la máquina** (dueño, 2026-10-25; vaultd 0.178).
+  Una puerta `password` nueva (`machine: true`) son dos capas: `K` cerrada con
+  scrypt(contraseña), y eso cerrado con la llave de la máquina **del perfil** (`kekFor`; con
+  KMS, la del KMS). Una copia del disco sin la máquina no se ataca a diccionario.
+  `atrest rekey` mueve la capa de fuera sin pedir la contraseña (`rewrapMachineLayer`, y deja
+  `profiles.json.bak-rekey`). Una contraseña de antes se vuelve a cerrar así al abrir con ella.
+- **La contraseña puede ser vacía** (`empty: true`): es el perfil «sin contraseña». Abre solo y
+  protege lo que protegía la puerta `machine` de antes (la capa de la máquina), pero por el
+  mismo camino que cualquier contraseña. Es lo que queda al quitar la última puerta, y por eso
+  **quitar la contraseña no vuelve a sellar nada**. Junto a una llave de seguridad no se
+  guarda: la dejaría abierta para cualquiera, así que ahí «poner la vacía» es quitar la
+  contraseña.
+- **Todo perfil tiene `K`**, y la maestra siempre va sellada con ella. Los perfiles nuevos
+  nacen con la contraseña vacía, y los de antes sin llave (la maestra bajo la llave de la
+  máquina) la reciben al arrancar el servicio (`manager.ensureProfileKey`), por el mismo
+  camino que poner una contraseña. La puerta `machine` de antes se convierte a vacía al
+  leerla (migración hasta 2027-04-01).
 - Los perfiles de antes (`K = scrypt(contraseña, kdf.salt)`) se pasan a puerta al abrirlos
   con la contraseña, con la misma `K`.
 
@@ -230,7 +245,7 @@ la llave, por el mismo camino que la contraseña. Sin módulos nativos: se llama
 
 **En la TUI**, la tecla `y` sobre una bóveda abre «Con qué se abre la bóveda»: sus puertas,
 añadir llave (con toque, sin toque, con toque y contraseña) y quitar con confirmación —la
-última avisa de que se queda sin candado—. Al abrir, la TUI prueba primero la llave. Hasta
+última avisa de que se queda sin contraseña—. Al abrir, la TUI prueba primero la llave. Hasta
 0.140.0 eso no funcionaba: `vaultControl.profileOp` solo reenviaba `name` y `password`, y
 se perdían `door`/`secret` (y `current` al cambiar la contraseña, desde antes).
 

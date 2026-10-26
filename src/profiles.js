@@ -127,9 +127,25 @@ async function derivePwd (password, saltB64, iter) {
  *   · `chalresp`  HKDF(respuesta HMAC-SHA1 de la ranura 2), sin toque.
  *   · las dos de hardware con `withPassword`: HKDF(scrypt(contraseña) ‖ secreto de la llave).
  *     Hacen falta las DOS cosas.
- *   · `machine`   la llave de esta máquina — la de un perfil sin candado.
+ *   · `machine`   la llave de esta máquina — la de un perfil sin candado. YA NO SE CREA: la
+ *                 sustituye la contraseña VACÍA (ver abajo) y se convierte al leerla.
  *
  * El `info` de HKDF lleva el tipo: los bytes de una llave no pueden abrir la puerta de otro tipo.
+ *
+ * LA CONTRASEÑA SIEMPRE LLEVA LA LLAVE DE LA MÁQUINA (dueño, 2026-10-25). Una puerta de
+ * contraseña nueva (`machine: true`) son dos capas: dentro, `K` cerrada con scrypt(contraseña);
+ * fuera, eso cerrado con la llave de la máquina del perfil (`kekFor`, que con KMS es la del KMS).
+ * Para abrirla hacen falta las dos cosas, así que una copia del disco sin la máquina no se
+ * ataca a fuerza de diccionario.
+ *
+ * Y LA CONTRASEÑA PUEDE SER VACÍA (`empty: true`): es el perfil «sin contraseña». Abre solo, como
+ * abría la puerta `machine`, y protege lo mismo que ella —la capa de la máquina—, pero es el
+ * mismo camino que cualquier otra contraseña: todo perfil tiene llave `K` y la maestra siempre va
+ * sellada con ella. Antes un perfil sin candado podía no tener `K` y llevar la maestra bajo la
+ * llave de la máquina, que era otro caso que cuidar en cada sitio.
+ *
+ * La capa de fuera se puede volver a cerrar SIN la contraseña: es lo que hace `atrest rekey`
+ * al cambiar la llave de la máquina (`rewrapMachineLayer`).
  */
 const HW_INFO = { fido2: 'dotrino-vault/door/fido2/v1', chalresp: 'dotrino-vault/door/chalresp/v1' }
 const HW_KINDS = Object.keys(HW_INFO)
@@ -138,7 +154,7 @@ const scryptKey = (password, saltB64) => crypto2.scryptSync(String(password), Bu
 
 /** La llave de una puerta con lo que se trae, o `null` si falta algo para esa puerta. */
 function doorKey (door, { password = null, secret = null } = {}) {
-  if (door.kind === 'password') return password ? scryptKey(password, door.salt) : null
+  if (door.kind === 'password') return password || (door.empty && password === '') ? scryptKey(password, door.salt) : null
   if (!HW_INFO[door.kind] || !secret?.length) return null
   if (door.withPassword && !password) return null
   const ikm = door.withPassword ? Buffer.concat([scryptKey(password, door.salt), Buffer.from(secret)]) : Buffer.from(secret)
@@ -147,14 +163,24 @@ function doorKey (door, { password = null, secret = null } = {}) {
   return k
 }
 
+/** Saca `K` de una puerta con la llave de esa puerta; la capa de la máquina, si la lleva, con `kek`. */
+function openDoor (door, k, kek) {
+  const inner = door.machine ? decryptText(door.wrapped, kek) : door.wrapped
+  return Buffer.from(decryptText(inner, k), 'base64')
+}
+
 const newDoorId = () => crypto2.randomBytes(4).toString('hex')
-const realDoors = (p) => (p.doors || []).filter((d) => d.kind !== 'machine')
+const isEmptyDoor = (d) => d.kind === 'password' && !!d.empty
+/** Las puertas que CIERRAN: todas menos la de la máquina (heredada) y la contraseña vacía. */
+const realDoors = (p) => (p.doors || []).filter((d) => d.kind !== 'machine' && !isEmptyDoor(d))
 /** Tiene candado: alguna puerta de verdad, o la contraseña de antes de las puertas. */
 const isProtected = (p) => !!p.pwd || realDoors(p).length > 0
 /** Ya tiene llave de perfil (con o sin candado). */
 const hasKey = (p) => !!p.pwd || (p.doors || []).length > 0
 
 function checkPassword (password) {
+  // Vacía vale: es «sin contraseña» (ver las puertas).
+  if (password === '') return
   if (!password || String(password).length < PWD_MIN) {
     throw Object.assign(new Error(`password must be at least ${PWD_MIN} characters: use several random words`),
       { code: 'PASSWORD_TOO_SHORT', min: PWD_MIN })
@@ -162,14 +188,17 @@ function checkPassword (password) {
 }
 
 /** Fabrica una puerta: el sobre de `K` y lo que hace falta para volver a pedírselo a la llave. */
-function makeDoor (K, spec = {}, { checkMin = true } = {}) {
+function makeDoor (K, spec = {}, { checkMin = true, kek = null } = {}) {
   const kind = spec.kind
   if (kind !== 'password' && !HW_INFO[kind]) throw Object.assign(new Error('unknown door kind: ' + kind), { code: 'BAD_DOOR' })
   const withPassword = kind !== 'password' && !!spec.password
   if ((kind === 'password' || withPassword) && checkMin) checkPassword(spec.password)
-  if ((kind === 'password' || withPassword) && !spec.password) throw Object.assign(new Error('a password is required'), { code: 'BAD_DOOR' })
+  if (kind === 'password' && typeof spec.password !== 'string') throw Object.assign(new Error('a password is required'), { code: 'BAD_DOOR' })
+  // Sin la llave de la máquina no se fabrica una contraseña: saldría sin su capa de fuera.
+  if (kind === 'password' && !kek) throw Object.assign(new Error('a password door needs the machine key'), { code: 'BAD_DOOR' })
   const door = { id: newDoorId(), kind, createdAt: Date.now(), ...(spec.label ? { label: String(spec.label).slice(0, MAX_NAME) } : {}) }
   if (kind === 'password' || withPassword) door.salt = b64(crypto2.randomBytes(32))
+  if (kind === 'password') { door.machine = true; if (spec.password === '') door.empty = true }
   if (withPassword) door.withPassword = true
   if (kind === 'fido2') {
     if (!spec.credId || !spec.hsalt) throw Object.assign(new Error('a fido2 door needs credId and hsalt'), { code: 'BAD_DOOR' })
@@ -182,9 +211,10 @@ function makeDoor (K, spec = {}, { checkMin = true } = {}) {
   const secret = spec.secret ? Buffer.from(spec.secret) : null
   if (HW_INFO[kind] && !secret?.length) throw Object.assign(new Error('the key gave nothing to seal the door with'), { code: 'BAD_DOOR' })
   const k = doorKey(door, { password: spec.password, secret })
-  door.wrapped = encryptText(b64(K), k)
+  const inner = encryptText(b64(K), k)
+  door.wrapped = door.machine ? encryptText(inner, kek) : inner
   // Se comprueba ANTES de guardar: una puerta que no abre es peor que no tenerla.
-  const back = Buffer.from(decryptText(door.wrapped, k), 'base64')
+  const back = openDoor(door, k, kek)
   k.fill(0)
   if (!back.equals(Buffer.from(K))) throw Object.assign(new Error('the new door does not open: not saved'), { code: 'BAD_DOOR' })
   return door
@@ -223,6 +253,33 @@ function normCreds (c) {
  */
 const stagingName = () => '.new-' + crypto.randomUUID().slice(0, 8)
 const cleanName = (name) => String(name || '').slice(0, MAX_NAME)
+
+/**
+ * LA CAPA DE LA MÁQUINA, CUANDO CAMBIA LA LLAVE DE LA MÁQUINA (`atrest rekey`).
+ *
+ * La contraseña de un perfil va cerrada por fuera con la llave de la máquina de ESE perfil. Si
+ * `atrest rekey` cambia esa llave y no esto, el perfil no vuelve a abrir. No hace falta la
+ * contraseña: solo se quita la capa de fuera con la llave vieja y se pone con la nueva.
+ * Devuelve cuántas puertas tocó; deja `profiles.json.bak-rekey` si tocó alguna.
+ */
+export function rewrapMachineLayer (root, id, oldKek, newKek) {
+  const file = path.join(root, REGISTRY)
+  const atRest = atRestFor(root)
+  const data = readJson(file, null, atRest)
+  const p = data?.profiles?.find((x) => x.id === id)
+  if (!p) return 0
+  let n = 0
+  p.doors = (p.doors || []).map((d) => {
+    if (!d.machine && d.kind !== 'machine') return d
+    n++
+    return { ...d, wrapped: encryptText(decryptText(d.wrapped, oldKek), newKek) }
+  })
+  if (n) {
+    fs.copyFileSync(file, file + '.bak-rekey')
+    writeJson(file, data, atRest)
+  }
+  return n
+}
 
 /**
  * @param {string} root  dir de datos
@@ -315,6 +372,8 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
 
   const find = (id) => data.profiles.find((p) => p.id === id) || null
   const dirOf = (id) => path.join(root, 'p', id)
+  /** La llave de la máquina de ESE perfil (con KMS, la del KMS): la capa de fuera de su contraseña. */
+  const machineKek = (id) => Buffer.from(kekFor(dirOf(id)))
 
   const entry = (p) => ({
     id: p.id,
@@ -383,13 +442,15 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       throw Object.assign(new Error('nothing to open the profile with'), { code: 'NO_CREDENTIALS' })
     }
     const tries = throttle(p)
+    const kek = machineKek(p.id)
     let K = null
+    let opened = null
     for (const d of cands) {
       const k = doorKey(d, { password, secret })
       if (!k) continue
-      try { K = Buffer.from(decryptText(d.wrapped, k), 'base64') } catch (_) { K = null }
+      try { K = openDoor(d, k, kek) } catch (_) { K = null }
       k.fill(0)
-      if (K?.length === 32) break
+      if (K?.length === 32) { opened = d; break }
       K = null
     }
     let legacy = false
@@ -402,6 +463,7 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       }
     }
     if (!K) {
+      kek.fill(0)
       p.tries = { n: tries.n + 1, at: Date.now() }
       save()
       throw Object.assign(new Error(door ? 'the key did not open this profile' : 'wrong password'), { code: 'WRONG_PASSWORD', tries: p.tries.n })
@@ -410,9 +472,14 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     if (legacy) {
       // A PUERTA: la misma `K`, ahora en un sobre de la contraseña. El verificador y el salt de
       // derivación directa se van — de aquí en adelante la contraseña es una puerta más.
-      p.doors = [...real, makeDoor(K, { kind: 'password', password }, { checkMin: false })]
+      p.doors = [...real, makeDoor(K, { kind: 'password', password }, { checkMin: false, kek })]
       delete p.pwd; delete p.kdf
+    } else if (opened?.kind === 'password' && !opened.machine) {
+      // UNA CONTRASEÑA DE ANTES DE LA CAPA DE LA MÁQUINA: se vuelve a cerrar con ella. Es el único
+      // momento en que se tiene la contraseña en la mano. Misma `K`, nada más que sellar.
+      p.doors = p.doors.map((d) => (d === opened ? makeDoor(K, { kind: 'password', password }, { checkMin: false, kek }) : d))
     }
+    kek.fill(0)
     save()
     return K
   }
@@ -651,6 +718,8 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
     // ----- candado -----
 
     isProtected: (id) => { const p = find(id); return !!p && isProtected(p) },
+    /** Tiene llave de perfil `K`. Uno sin ella lleva la maestra bajo la llave de la máquina (de antes de 0.178). */
+    hasKey: (id) => { const p = find(id); return !!p && hasKey(p) },
     isLocked: (id) => { const p = find(id); return !!p && isProtected(p) && !isOpen(id) },
     /** Cuánto dura abierto el candado sin usarse (ms). 0 = no se cierra solo. */
     get autoLockMs () { return autoLockMs },
@@ -758,21 +827,24 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
       assertExists(id)
       const K = api.openKey(id)
       if (!K) throw Object.assign(new Error('unlock the profile first'), { code: 'PROFILE_LOCKED' })
-      return makeDoor(K, spec)
+      return makeDoor(K, spec, { kek: machineKek(id) })
     },
 
     addDoor (id, spec) {
       const p = assertExists(id)
       const K = api.openKey(id)
       if (!K) throw Object.assign(new Error('unlock the profile first'), { code: 'PROFILE_LOCKED' })
-      const door = spec?.prepared || makeDoor(K, spec)
-      let doors = (p.doors || []).filter((d) => d.kind !== 'machine')
+      const door = spec?.prepared || makeDoor(K, spec, { kek: machineKek(id) })
+      let doors = (p.doors || []).filter((d) => d.kind !== 'machine' && !isEmptyDoor(d))
       // UNA contraseña por perfil: poner otra la sustituye, también a la de antes de las puertas.
       if (door.kind === 'password') { doors = doors.filter((d) => d.kind !== 'password'); delete p.pwd }
       // El salt de derivación directa solo sirve para recuperar (ver `ensureKey`); con la llave
       // ya en una puerta, sobra.
       delete p.kdf
-      p.doors = [...doors, door]
+      // LA VACÍA solo queda si no hay otra puerta: junto a una llave de seguridad la dejaría
+      // abierta para cualquiera, así que ahí poner la vacía es quitar la contraseña.
+      p.doors = door.empty ? (doors.length ? doors : [door]) : [...doors, door]
+      if (!realDoors(p).length) delete p.kdf2
       delete p.tries
       save()
       // Si la llave venía de la de la máquina (perfil sin candado), ahora es la del perfil
@@ -797,14 +869,15 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
         p.doors = (p.doors || []).filter((d) => d.kind !== 'password')
         delete p.pwd; delete p.kdf
       } else {
-        if (!(p.doors || []).some((d) => d.id === which && d.kind !== 'machine')) {
+        if (!realDoors(p).some((d) => d.id === which)) {
           throw Object.assign(new Error('that door does not exist: ' + which), { code: 'NO_SUCH_DOOR' })
         }
         p.doors = p.doors.filter((d) => d.id !== which)
       }
       const removed = before - realDoors(p).length
       if (!realDoors(p).length) {
-        p.doors = [{ id: newDoorId(), kind: 'machine', createdAt: Date.now(), wrapped: encryptText(b64(K), Buffer.from(kekFor(dirOf(id)))) }]
+        // SIN PUERTA QUE CIERRE queda la contraseña vacía: la misma `K`, bajo la llave de la máquina.
+        p.doors = [makeDoor(K, { kind: 'password', password: '' }, { kek: machineKek(id) })]
         // Sin candado no hay nada que abrir a distancia.
         delete p.kdf2
       }
@@ -914,16 +987,27 @@ export function openProfiles (root = dataDir(), { autoLockMs = AUTO_LOCK_MS, onA
      * tendrá que pedirla, que es exactamente el comportamiento de antes.
      */
     openKey (id) {
-      if (isOpen(id)) return keys.get(id) || null
-      // SIN CANDADO PERO CON LLAVE: un perfil al que se le quitó la última puerta. Su `K` vive
-      // bajo la llave de la máquina y se abre sola, como el resto del disco.
+      if (isOpen(id) && keys.get(id)) return keys.get(id)
+      // SIN CONTRASEÑA: la puerta vacía abre sola, con la llave de la máquina, como el resto del disco.
       const p = find(id)
-      const m = p && !isProtected(p) ? (p.doors || []).find((d) => d.kind === 'machine') : null
-      if (!m) return null
+      if (!p || isProtected(p)) return null
       if (!byMachine.has(id)) {
-        const K = Buffer.from(decryptText(m.wrapped, Buffer.from(kekFor(dirOf(id)))), 'base64')
+        const empty = (p.doors || []).find(isEmptyDoor)
+        const m = (p.doors || []).find((d) => d.kind === 'machine')
+        if (!empty && !m) return null
+        const kek = machineKek(id)
+        let K
+        try {
+          K = empty ? openDoor(empty, scryptKey('', empty.salt), kek) : Buffer.from(decryptText(m.wrapped, kek), 'base64')
+        } finally { kek.fill(0) }
         if (K.length !== 32) throw Object.assign(new Error('the profile key under this machine key is malformed'), { code: 'BAD_PROFILE_KEY' })
         byMachine.set(id, new Uint8Array(K))
+        // MIGRACIÓN (hasta 2027-04-01, cuando no queden bóvedas anteriores a 0.178): la puerta
+        // `machine` pasa a contraseña vacía. Misma `K`, así que no hay nada más que sellar.
+        if (!empty) {
+          p.doors = [makeDoor(K, { kind: 'password', password: '' }, { kek: machineKek(id) })]
+          save()
+        }
       }
       return byMachine.get(id)
     },

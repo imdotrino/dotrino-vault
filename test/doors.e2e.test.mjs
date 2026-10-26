@@ -78,10 +78,18 @@ test('un perfil que el fallo viejo dejó con la maestra sellada se recupera poni
   const file = path.join(root, 'profiles.json')
   const VIEJA = 'la-frase-de-antes'
 
-  // 1) Un perfil de ANTES de las puertas: verificador + `K = scrypt(contraseña, kdf.salt)`.
-  let mgr = await arrancar(root)
-  const id = mgr.currentId()
-  mgr.close()
+  // 1) Un perfil de ANTES de las puertas: verificador + `K = scrypt(contraseña, kdf.salt)`. Se
+  //    acuña sin el gestor, que hoy le daría su llave al arrancar: así nacían los de entonces,
+  //    con la maestra bajo la llave de la máquina.
+  const { openProfiles } = await import('../src/profiles.js')
+  const { installNodeGlobals } = await import('../src/node-globals.js')
+  const { Identity } = await import('@dotrino/identity/node')
+  installNodeGlobals(root)
+  const { id } = await openProfiles(root, { autoLockMs: 0 }).migrate(async (dir) => {
+    const i = await Identity.connect({ dir, atRest: atRestFor(dir) })
+    try { if (!i.me?.publickey) await i.setMyNickname(''); return i.me?.publickey || null } finally { i.destroy() }
+  })
+  let mgr
   const salt = crypto.randomBytes(16).toString('base64')
   const kdfSalt = crypto.randomBytes(32).toString('base64')
   let reg = readJson(file, null, atRestFor(root))
@@ -114,5 +122,64 @@ test('un perfil que el fallo viejo dejó con la maestra sellada se recupera poni
   try {
     await mgr.unlock(id, VIEJA)
     assert.equal((await mgr.get(id).takeMasterKey())?.locked, false, 'recuperada')
+  } finally { mgr.close() }
+})
+
+test('todo perfil nace con llave: contraseña vacía, y la maestra sellada con ella', async () => {
+  const { readJson, writeJson } = await import('../src/paths.js')
+  const { atRestFor } = await import('../src/atrest.js')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-puertas-e2e-'))
+  const file = path.join(root, 'profiles.json')
+  let mgr = await arrancar(root)
+  const id = mgr.currentId()
+  try {
+    assert.equal(mgr.profiles.hasKey(id), true, 'nace con su llave')
+    assert.equal(mgr.profiles.isProtected(id), false, 'y sin contraseña: abre sola')
+  } finally { mgr.close() }
+
+  mgr = await arrancar(root)
+  try {
+    assert.equal(mgr.profiles.isLocked(id), false)
+    assert.equal((await mgr.get(id).takeMasterKey())?.locked, false, 'tras reiniciar la maestra abre sola')
+  } finally { mgr.close() }
+
+  // La prueba de que la maestra va SELLADA con esa llave: sin la puerta vacía no abre.
+  const reg = readJson(file, null, atRestFor(root))
+  reg.profiles[0].doors = []
+  writeJson(file, reg, atRestFor(root))
+  mgr = await arrancar(root)
+  try {
+    assert.equal((await mgr.get(id).takeMasterKey())?.locked, true, 'sin la llave del perfil la maestra no abre')
+  } finally { mgr.close() }
+})
+
+test('un perfil de antes, sin llave, la recibe al arrancar y su maestra pasa a ella', async () => {
+  const { readJson, writeJson } = await import('../src/paths.js')
+  const { atRestFor } = await import('../src/atrest.js')
+  const { openProfiles } = await import('../src/profiles.js')
+  const { installNodeGlobals } = await import('../src/node-globals.js')
+  const { Identity } = await import('@dotrino/identity/node')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-puertas-e2e-'))
+  installNodeGlobals(root)
+  // Como nacían antes de 0.178: sin puertas y con la maestra bajo la llave de la máquina.
+  const { id } = await openProfiles(root, { autoLockMs: 0 }).migrate(async (dir) => {
+    const i = await Identity.connect({ dir, atRest: atRestFor(dir) })
+    try { if (!i.me?.publickey) await i.setMyNickname(''); return i.me?.publickey || null } finally { i.destroy() }
+  })
+  assert.equal(openProfiles(root).hasKey(id), false)
+
+  let mgr = await arrancar(root)
+  try {
+    assert.equal(mgr.profiles.hasKey(id), true, 'al arrancar recibe la contraseña vacía')
+    assert.equal((await mgr.get(id).takeMasterKey())?.locked, false)
+  } finally { mgr.close() }
+
+  const file = path.join(root, 'profiles.json')
+  const reg = readJson(file, null, atRestFor(root))
+  reg.profiles[0].doors = []
+  writeJson(file, reg, atRestFor(root))
+  mgr = await arrancar(root)
+  try {
+    assert.equal((await mgr.get(id).takeMasterKey())?.locked, true, 'la maestra ya no está bajo la llave de la máquina')
   } finally { mgr.close() }
 })

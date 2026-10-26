@@ -35,7 +35,8 @@ import { isValidSecretsNs } from './protocol.js'
 import { parseEnvText, PAIR_RE } from '../lib/src/envtext.js'
 import { qrToString } from './qr.js'
 import { encodeInvite, inviteUrl, parseInvite } from '../lib/src/invite.js'
-import { atRestFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
+import { atRestFor, kekFor, readConfig as readKekConfig, probe as probeKek, rekeyDir, encryptedFilesIn, CONFIG_FILE as KEK_CONFIG_FILE } from '../lib/src/atrest.js'
+import { rewrapMachineLayer } from './profiles.js'
 import { VERSION } from './version.js'
 import * as hw from './hwkeys.js'
 import { isNewer } from './update.js'
@@ -199,7 +200,7 @@ function cmdStatus () {
 
 /** Una línea por perfil: nombre, id, huella y estado del candado. */
 function describeProfile (p) {
-  const lock = !p.protected ? 'sin candado' : `${p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado'} · ${doorsSummary(p)}`
+  const lock = !p.protected ? 'sin contraseña' : `${p.locked ? `${B}🔒 bloqueado${Z}` : '🔓 desbloqueado'} · ${doorsSummary(p)}`
   // ALCANZABLE, Y SE DICE AQUÍ. Una bóveda puede estar corriendo y fuera de la red —si el
   // proxio le rechazó el `identify`, nadie la alcanza por su pubkey— y desde fuera eso se ve
   // igual que «no hay nada que aprobar»: el teléfono no timbra y no hay nada que mirar.
@@ -1057,9 +1058,24 @@ function cmdAtrest (rest) {
       console.error('  dotrino-vault atrest rekey %s --anyway', file)
       process.exitCode = 1; return
     }
+    let oldKek
+    try { oldKek = Buffer.from(kekFor(dir)) } catch (e) {
+      console.error('NO se cambió nada (' + (e.code || 'error') + '): ' + e.message)
+      process.exitCode = 1; return
+    }
     try {
       const r = rekeyDir(dir, cfg)
       console.log('Listo: ' + r.from + ' → ' + r.to + '. Recifrados ' + r.files.length + ' archivos.')
+      // La contraseña del perfil lleva por fuera la llave de la máquina: con la llave nueva,
+      // esa capa también. Si esto falla, el perfil no abre hasta restaurar las copias.
+      try {
+        const n = rewrapMachineLayer(vaultRoot, path.basename(dir), oldKek, Buffer.from(kekFor(dir)))
+        if (n) console.log('La contraseña del perfil quedó cerrada con la clave nueva (' + n + ' puerta' + (n === 1 ? '' : 's') + ').')
+      } catch (e) {
+        console.error('OJO: los datos ya están con la clave nueva, pero la contraseña del perfil no (' + e.message + ').')
+        console.error('Restaura las copias .bak-rekey (también ' + path.join(vaultRoot, 'profiles.json.bak-rekey') + ' si existe) antes de reiniciar.')
+        process.exitCode = 1
+      }
       if (r.backups.length) {
         console.log('Copias de seguridad (bórralas cuando compruebes que todo abre):')
         for (const b of r.backups) console.log('  ' + b)
@@ -2219,7 +2235,7 @@ async function cmdProfileKey (args) {
   const p = await targetProfile()
   if (!p) { console.error('el perfil no existe: %s', PROFILE); process.exit(1) }
   if (action === 'ls') {
-    console.log('%s se abre con: %s', p.name || p.id, p.protected ? doorsSummary(p) : 'nada (sin candado)')
+    console.log('%s se abre con: %s', p.name || p.id, p.protected ? doorsSummary(p) : 'nada (sin contraseña)')
     for (const d of hwDoors(p)) {
       console.log('  %s  %s  %s%s', d.id, doorName(d), d.label || '', d.createdAt ? `  (${new Date(d.createdAt).toISOString().slice(0, 10)})` : '')
     }

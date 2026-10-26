@@ -35,6 +35,12 @@ Y las llaves que sostienen todo eso, que son el objetivo real de cualquiera que 
 | **de comunicación** (`commkey`) | identifica a la bóveda en el proxio | la llave de la máquina |
 | **de cada aparato** | firma por ese aparato; el acta dice qué puede | no extraíble (navegador) / archivo cifrado (daemon) |
 
+**«La contraseña del perfil» son dos capas** (vaultd ≥ 0.178): la llave del perfil `K` va
+cerrada con scrypt(contraseña) y, por fuera, con la llave de la máquina. Todo perfil tiene
+`K`; **sin contraseña** es la contraseña vacía, que abre sola y protege lo mismo que la llave
+de la máquina. Con contraseña, una copia del disco sin la máquina (o sin el KMS) no se ataca a
+diccionario. Detalle en `docs/llaves-de-hardware.md` §2bis.
+
 ## 2. Quién puede llegar, por capacidad
 
 Se modela por **lo que alguien puede hacer**, no por quién es. Un actor no es un villano con

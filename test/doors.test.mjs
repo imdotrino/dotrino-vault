@@ -11,7 +11,9 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openProfiles } from '../src/profiles.js'
+import { openProfiles, rewrapMachineLayer, SCRYPT } from '../src/profiles.js'
+import { readJson, writeJson } from '../src/paths.js'
+import { atRestFor, kekFor, encryptText } from '../src/atrest.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vault-puertas-'))
 const llave = async () => {
@@ -94,7 +96,7 @@ test('los bytes de una llave no abren la puerta de OTRO tipo', async () => {
   assert.equal(a.isLocked(id), false)
 })
 
-test('QUITAR LA ÚLTIMA PUERTA no pierde la llave del perfil: pasa a la llave de la máquina', async () => {
+test('QUITAR LA ÚLTIMA PUERTA no pierde la llave del perfil: queda la contraseña vacía', async () => {
   // El fallo que esto arregla (2026-10-05): quitar la contraseña cambiaba la llave del perfil y
   // la maestra quedaba sellada con una que ya no existía. Ahora la llave es la misma siempre.
   const { root, p, id } = await nuevo()
@@ -150,4 +152,102 @@ test('una contraseña nueva corta se rechaza también en una puerta de llave + c
   const { p, id } = await nuevo()
   p.ensureKey(id)
   assert.throws(() => p.addDoor(id, { ...fido2(), password: 'corta' }), { code: 'PASSWORD_TOO_SHORT' })
+})
+
+// ----- LA CONTRASEÑA VACÍA Y LA CAPA DE LA MÁQUINA (dueño, 2026-10-25) -----
+
+/** El registro tal cual está en el disco (va cifrado con la llave de la raíz). */
+const registro = (root) => readJson(path.join(root, 'profiles.json'), null, atRestFor(root))
+const escribirRegistro = (root, data) => writeJson(path.join(root, 'profiles.json'), data, atRestFor(root))
+const puertas = (root, id) => registro(root).profiles.find((x) => x.id === id).doors || []
+
+test('toda contraseña nueva lleva la capa de la máquina, también la vacía', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, PWD)
+  const [d] = puertas(root, id)
+  assert.equal(d.kind, 'password')
+  assert.equal(d.machine, true)
+  assert.equal(d.empty, undefined)
+  p.removePassword(id)
+  const [v] = puertas(root, id)
+  assert.equal(v.kind, 'password')
+  assert.equal(v.machine, true)
+  assert.equal(v.empty, true, 'sin puerta que cierre queda la contraseña vacía, no la puerta de la máquina')
+})
+
+test('contraseña vacía = sin contraseña: abre sola y la llave del perfil no cambia', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, PWD)
+  const antes = K(p, id)
+  await p.setPassword(id, '')
+  assert.equal(p.isProtected(id), false)
+  assert.equal(p.doors(id).length, 0, 'la vacía no se enseña como puerta')
+  const tras = openProfiles(root)
+  assert.equal(tras.isLocked(id), false)
+  assert.deepEqual(K(tras, id), antes)
+})
+
+test('una llave de seguridad en un perfil sin contraseña quita la vacía: si no, lo dejaría abierto', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, '')
+  const f = fido2()
+  p.addDoor(id, f)
+  assert.equal(p.isProtected(id), true)
+  assert.ok(!puertas(root, id).some((d) => d.empty))
+  // Y al revés: poner la vacía junto a la llave es quitar la contraseña, no abrir el perfil.
+  await p.setPassword(id, PWD)
+  await p.setPassword(id, '')
+  assert.equal(p.isProtected(id), true)
+  assert.deepEqual(puertas(root, id).map((d) => d.kind), ['fido2'])
+})
+
+test('la puerta `machine` de antes pasa a contraseña vacía al leerla, con la misma llave', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, PWD)
+  const antes = K(p, id)
+  const data = registro(root)
+  const q = data.profiles.find((x) => x.id === id)
+  q.doors = [{ id: 'm1', kind: 'machine', createdAt: 1, wrapped: encryptText(antes.toString('base64'), Buffer.from(kekFor(p.dirOf(id)))) }]
+  escribirRegistro(root, data)
+  const a = openProfiles(root)
+  assert.equal(a.isLocked(id), false)
+  assert.deepEqual(K(a, id), antes)
+  const [d] = puertas(root, id)
+  assert.equal(d.kind, 'password')
+  assert.equal(d.empty, true)
+  assert.deepEqual(K(openProfiles(root), id), antes, 'y sigue abriendo después de convertirla')
+})
+
+test('una contraseña de antes de la capa de la máquina abre, y se vuelve a cerrar con ella', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, PWD)
+  const antes = K(p, id)
+  // Una puerta como las de antes: solo scrypt(contraseña), sin capa de fuera.
+  const salt = crypto.randomBytes(32).toString('base64')
+  const k = crypto.scryptSync(PWD, Buffer.from(salt, 'base64'), SCRYPT.len, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p })
+  const data = registro(root)
+  data.profiles.find((x) => x.id === id).doors = [{ id: 'v1', kind: 'password', createdAt: 1, salt, wrapped: encryptText(antes.toString('base64'), k) }]
+  escribirRegistro(root, data)
+  const a = openProfiles(root)
+  await a.unlock(id, PWD)
+  assert.deepEqual(K(a, id), antes)
+  const [d] = puertas(root, id)
+  assert.equal(d.machine, true, 'subió a la capa de la máquina')
+  const b = openProfiles(root)
+  await b.unlock(id, PWD)
+  assert.deepEqual(K(b, id), antes)
+})
+
+test('sin la llave de la máquina la contraseña no abre; `atrest rekey` mueve esa capa sin pedirla', async () => {
+  const { root, p, id } = await nuevo()
+  await p.setPassword(id, PWD)
+  const antes = K(p, id)
+  const vieja = Buffer.from(kekFor(p.dirOf(id)))
+  const otra = crypto.randomBytes(32)
+  assert.equal(rewrapMachineLayer(root, id, vieja, otra), 1)
+  await assert.rejects(() => openProfiles(root).unlock(id, PWD), { code: 'WRONG_PASSWORD' }, 'con otra llave de máquina, la buena contraseña no basta')
+  assert.equal(rewrapMachineLayer(root, id, otra, vieja), 1)
+  const a = openProfiles(root)
+  await a.unlock(id, PWD)
+  assert.deepEqual(K(a, id), antes)
 })

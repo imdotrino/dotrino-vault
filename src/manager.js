@@ -137,7 +137,8 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
       id = await profiles.ensureNamedByKey(p.id, mintKey)
       if (id !== p.id) log('[vault] profile %s renamed to %s (the folder is named after its key)', p.id, id)
     } catch (e) { log('[vault] could not name the folder of %s after its key: %s', p.id, e.message) }
-    try { await open(id) } catch (e) { log('[vault] could not open profile %s: %s', id, e.message) }
+    try { await open(id) } catch (e) { log('[vault] could not open profile %s: %s', id, e.message); continue }
+    await ensureProfileKey(id)
   }
 
   const get = (id) => {
@@ -227,6 +228,28 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     return door
   }
 
+  /**
+   * TODO PERFIL TIENE LLAVE (dueño, 2026-10-25: «la contraseña puede ser vacía para no estar
+   * peleando con el código»). Uno que nació sin ella —todos los anteriores a 0.178 que nunca
+   * tuvieron contraseña— lleva la maestra bajo la llave de la máquina; aquí recibe la contraseña
+   * VACÍA por el mismo camino que poner cualquier contraseña, que ya sella la maestra y la copia
+   * de recuperación con la llave nueva. A partir de ahí hay un solo caso: la maestra va sellada
+   * con `K`, y «sin contraseña» es una contraseña más.
+   *
+   * Si falla no se arrastra: el perfil sigue sirviendo como hasta ahora, y se dice.
+   */
+  async function ensureProfileKey (id) {
+    if (profiles.hasKey(id)) return false
+    try {
+      await addDoor(id, { kind: 'password', password: '' })
+      log('[vault] profile %s now has its own key (empty password): the master key is sealed with it', id)
+      return true
+    } catch (e) {
+      log('[vault] could not give profile %s its own key: %s', id, e.message)
+      return false
+    }
+  }
+
   /** Quitar una puerta (por id, o `'password'`). Sin la última, el perfil queda sin candado. */
   async function removeDoor (id, which) {
     return profiles.removeDoor(id, which)
@@ -271,6 +294,7 @@ export async function startVaultManager ({ root = dataDir(), proxyUrl, log = con
     async add (name, { adopt = false, kek = null } = {}) {
       const p = await profiles.add(name, { adopt, kek, mintKey })
       await open(p.id)
+      await ensureProfileKey(p.id)
       log('[vault] profile created%s: %s (%s)', adopt ? ' (waiting to adopt an account)' : '', p.name || '(no name)', p.id)
       return profiles.get(p.id)
     },

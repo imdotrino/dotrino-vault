@@ -576,7 +576,7 @@ export async function runDaemon () {
           await mgr.unlock(id, { password: req.password })
         }
         const r = await mgr.removeDoor(id, 'password')
-        return { done: r.protected ? 'contraseña quitada · el perfil sigue cerrándose con su llave de seguridad' : 'contraseña quitada · el perfil ya no tiene candado: se abre con la llave de esta máquina' }
+        return { done: r.protected ? 'contraseña quitada · el perfil sigue cerrándose con su llave de seguridad' : 'contraseña quitada · el perfil queda sin contraseña: se abre con la llave de esta máquina' }
       }
       // LLAVES DE SEGURIDAD (YubiKey). Quien habla con la llave es la CLI; aquí llegan la
       // credencial o el reto, y los bytes que devolvió — nunca un secreto que la abra sin ella.
@@ -595,7 +595,7 @@ export async function runDaemon () {
         const id = ref()
         if (!req.door) throw Object.assign(new Error('which door? (dotrino-vault profile key ls)'), { code: 'NO_SUCH_DOOR' })
         const r = await mgr.removeDoor(id, req.door)
-        return { done: r.protected ? 'llave de seguridad quitada' : 'llave de seguridad quitada · el perfil ya no tiene candado: se abre con la llave de esta máquina' }
+        return { done: r.protected ? 'llave de seguridad quitada' : 'llave de seguridad quitada · el perfil queda sin contraseña: se abre con la llave de esta máquina' }
       }
       // ----- LA CONTRASEÑA DEL ADMIN (`docs/abrir-a-distancia.md`) -----
       //

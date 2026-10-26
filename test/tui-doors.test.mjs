@@ -52,7 +52,7 @@ test('la lista de bóvedas dice con qué se abre cada una', () => {
   const fila = V.profileRows(st, makeTheme())[0].text
   assert.match(fila, /contraseña o llave \(toque\)/)
   const sin = V.profileRows(estado(perfil([])), makeTheme())[0].text
-  assert.match(sin, /sin candado/)
+  assert.match(sin, /sin contraseña/)
 })
 
 test('`y` entra a las llaves de la bóveda, y Esc vuelve', async () => {
@@ -80,18 +80,18 @@ test('la pantalla de llaves enseña las puertas y lo que se puede añadir, y cab
   }
 })
 
-test('quitar una llave pide confirmación, y la última avisa de que se queda sin candado', async () => {
+test('quitar una llave pide confirmación, y la última avisa de que se queda sin contraseña', async () => {
   const term = fakeTerm()
   const dos = estado(perfil([PWD, TOQUE]), { screen: 'doors', doorsFor: 'p1' })
   dos.sel.doors = 1 // la llave
   await V.onKeyDoors(term, dos, tecla('d'))
   assert.ok(dos.confirm, 'pregunta antes de quitar')
   assert.match(dos.confirm.text, /llave \(toque\)/)
-  assert.doesNotMatch(dos.confirm.text, /sin candado/)
+  assert.doesNotMatch(dos.confirm.text, /sin contraseña/)
 
   const una = estado(perfil([TOQUE]), { screen: 'doors', doorsFor: 'p1' })
   await V.onKeyDoors(term, una, tecla('d'))
-  assert.match(una.confirm.text, /última.*sin candado/)
+  assert.match(una.confirm.text, /última.*sin contraseña/)
   una.confirm.onNo()
   assert.equal(una.confirm, null)
 })
