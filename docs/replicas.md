@@ -385,9 +385,24 @@ también los firma la llave de comunicación de quien escribe) o se queda solo p
 - **Un replicador no fabrica sobres** (§8.bis, limitación 2): uno para un miembro nuevo lo hace la
   primera bóveda que se abra, y desde ahí se clona a todas.
 
+### 11.6.bis. Al admitir otra bóveda, la que admite le hace los sobres y se los manda (dueño, 2026-10-26)
+
+> *«El momento que una bóveda admite otra bóveda debe hacer los sobres de los cajones para que lo
+> use y se los envía; no hace falta abrir la bóveda remota.»*
+
+Admitir es sellar el acta, así que la bóveda que admite **ya está abierta** y tiene la llave de cada
+cajón. En ese momento envuelve cada cajón a la `encPub` de la bóveda nueva y le manda los sobres
+junto con el acta, por el mismo empuje de §11.4. La nueva no tiene que abrirse para nada: guarda
+lo que le llega, como cualquier hermana cerrada.
+
+Hoy ya se le envuelven (`cosealerMembers` en `recipientsOf`), pero los sobres se quedan en el disco
+de la que admite: no le llegan a la nueva. Y si la nueva no trae `encPub` al darse de alta, no hay a
+dónde envolver: el alta de una bóveda la tiene que traer, o se para y se dice.
+
 ### 11.7. Fases
 
 1. Firmar lo servido con la llave de comunicación (§11.5), en la bóveda y en quien verifica
    (`@dotrino/vault`, las apps). Arregla la Lambda de Seyacat por sí solo.
-2. El nodo de sincronización común: empuje y arrastre entre hermanas, de los datos de §11.3.
+2. El nodo de sincronización común: empuje y arrastre entre hermanas, de los datos de §11.3,
+   empezando por el alta (§11.6.bis): la que admite manda los sobres a la nueva.
 3. El replicador pasa a usar ese mismo nodo, y `pushToReplicas` desaparece.
