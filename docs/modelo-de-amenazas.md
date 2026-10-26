@@ -194,12 +194,21 @@ Quien opere el proxio lo lee. Es deuda abierta y está en `PENDIENTES.md`.
   comunicación va acotada por el acta (`cn: 'vault'`, solo `sign`): habla por la bóveda, no
   firma por la persona ni lee nada.
 
-### 4.3. La bitácora se puede truncar por el final
+### 4.3. La bitácora se puede truncar por el final (a medio cerrar)
 
 Está encadenada por hash, así que reescribir o quitar una entrada del medio se ve. **Cortar
-el final no**: un prefijo sigue siendo una cadena válida. No se cierra en local — pide anclar
-el último hash fuera de la máquina (un TSA, otro aparato). Hay un test que lo afirma, para
-que no se descubra el día de una auditoría.
+el final no**: un prefijo sigue siendo una cadena válida. No se cierra en local, y hay un
+test que lo afirma para que no se descubra el día de una auditoría.
+
+**Lo que se hizo (vault 0.104.0, dueño 2026-10-26):** la bóveda ancla la cabeza fuera de la
+máquina. Cada pocas horas, si la bitácora creció, la sella con `signer.dotrino.com` (que da
+el *cuándo*, firmado por un tercero, y solo recibe el hash) y manda el recibo, callado, a
+los aparatos con `approve` (`logAnchor.js`, aviso `log-anchor`). El aprobador guarda la
+última: una nueva con un `logSeq` menor, o con el mismo y otra cabeza, es un corte.
+
+**Lo que falta:** que el aprobador la guarde y la compare. La app Dotrino (Android e iOS,
+por `dotrino-native`) todavía no lo hace; hasta entonces el ancla sale y nadie la mira.
+Sin aprobadores en el acta no hay dónde dejarla, y la bóveda lo dice en el log.
 
 ### 4.4. Las llaves del daemon son archivos
 
@@ -207,18 +216,19 @@ En el navegador la privada es una `CryptoKey` **no extraíble**: ni el propio c�
 bytes. En el daemon es un JWK cifrado en reposo — atado a la máquina por cifrado, no por
 hardware. No hay TPM ni enclave. El KMS de `atrest` es el camino, y está sin usar.
 
-### 4.4.bis. Una renuncia vieja se puede volver a usar si el permiso se reconcedió
+### 4.4.bis. Una renuncia vieja se podía volver a usar si el permiso se reconcedía (CERRADO)
 
-El registro de renuncia va firmado por el propio miembro y lleva `ts`, pero **nadie
-compara ese `ts` con nada**. Desde el 2026-09-04 una repetición no hace nada mientras el
-permiso siga quitado —la bóveda mira lo que el acta dice hoy y para ahí—, así que ya no
-sirve para hacer churn del acta ni para escribir en la bitácora una renuncia que su aparato
-no hizo. Lo que queda abierto: si el dueño **vuelve a conceder** ese permiso, quien
-capturara el registro puede quitárselo otra vez, y las veces que quiera.
+**Cerrado el 2026-10-25** (`@dotrino/identity` 0.127.0, `@dotrino/vault` 0.104.0). El
+registro de renuncia va firmado por el propio miembro y lleva `ts`, pero nadie comparaba ese
+`ts` con nada: si el dueño volvía a conceder el permiso, quien capturara el registro podía
+quitárselo otra vez, las veces que quisiera.
 
-Cerrarlo del todo pide que el acta recuerde la fecha de la última renuncia por miembro y
-rechace las que no sean posteriores — monotonía, como el `seq` y el `gen`. No está hecho:
-toca la forma del acta, o sea todos sus consumidores.
+Ahora el acta recuerda en cada miembro la fecha de su última renuncia (`renouncedAt`), y
+también la conserva cuando el master le devuelve el permiso. Una renuncia que no sea
+posterior es una repetición (`renounceIsFresh`): la bóveda la rechaza en la entrada
+(`renounce-stale`), el pilar no la absorbe y una suelta no resta nada. Monotonía, como el
+`seq` y el `gen`. Los lectores nativos (`dotrino-native`) solo cuentan las renuncias del
+propio aparato, así que ahí no hay repetición que frenar; su paridad queda pendiente.
 
 ### 4.5. Metadatos del transporte
 

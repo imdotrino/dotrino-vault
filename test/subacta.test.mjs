@@ -141,3 +141,15 @@ test('el unlock absorbe, y renunciar no falla con la bóveda cerrada', () => {
   assert.match(cuerpo, /ok: true, seq, pending: seq === null/,
     'con la bóveda cerrada la respuesta sigue siendo un sí: la renuncia YA vale')
 })
+
+test('una renuncia repetida se para en la entrada, antes de guardarla', () => {
+  // Modelo de amenazas §4.4.bis: el mismo registro capturado volvía a quitar un permiso que
+  // el master había devuelto. El pilar ya lo ignora (`renounceIsFresh`); la entrada lo dice.
+  const src = fs.readFileSync(fileURLToPath(new URL('../lib/src/core/vault.js', import.meta.url)), 'utf8')
+  const j = src.indexOf('async function handleRenounce')
+  const cuerpo = src.slice(j, j + 5000)
+  const mira = cuerpo.indexOf('Acta.renounceIsFresh(actual, record)')
+  const guarda = cuerpo.indexOf('subacta.add(record)')
+  assert.ok(mira !== -1 && mira < guarda, 'se comprueba que es nueva antes de guardarla')
+  assert.match(cuerpo, /code: 'renounce-stale'/, 'con un código que se pueda buscar')
+})
