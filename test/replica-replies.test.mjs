@@ -104,5 +104,5 @@ test('un acta sellada por OTRA maestra no vale ni con replicador', async () => {
   const seal = { by: repl.pub, sig: await firmaDe(repl, cuerpo) }
   await assert.rejects(
     () => verifyResponder({ body: cuerpo, seal, acta, masterPubkey: ajeno.pub, knownSeq: acta.seq }),
-    /not sealed by the master this agent knows/)
+    /not sealed by a vault this agent knows/)
 })

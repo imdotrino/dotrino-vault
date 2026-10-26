@@ -200,6 +200,54 @@ test('una bóveda ya dada de alta no se vuelve a dar de alta', async () => {
   await assert.rejects(alta(await invitar(vault), 'req-2'), (e) => e.code === 'already-enrolled')
 })
 
+// LAS DOS SON MAESTRA (`docs/replicas.md` §11.5). Lo que pasó con la de Lambda de Seyacat: la
+// última acta la selló la otra bóveda, el acta solo nombraba UNA llave de sellado (la de esa), y
+// la alojada no podía firmar nada de lo que sirve («no sealing key named by the record»). Ahora
+// cada bóveda tiene la suya en el acta y la de la otra se conserva al sellar.
+test('las dos son maestra: con la otra apagada, la alojada contesta firmado con SU llave', async () => {
+  const { enrollService, fetchSecrets } = await import('../lib/src/service.js')
+  const svcDir = tmp('join-svc-')
+  const { qr } = await vault.startPairing({ scope: ['vault:secrets:demo'], label: 'service:demo', ttlMs: 60_000 })
+  let ok
+  await enrollService({ qr, ns: 'demo', dir: svcDir, onCode: ({ code }) => { ok = vault.approveDevice(code) } })
+  await ok
+  // Una vuelta con la bóveda del cliente: el servicio aprende quién puede sellar la cuenta.
+  await fetchSecrets({ dir: svcDir, timeoutMs: 15_000 }).catch(() => {})
+
+  const seqOf = async (v) => (await v.profileMembers()).seq
+  const dosDir = tmp('join-dos-')
+  const lock = openLock(dosDir)
+  const r = await runSession({
+    store, dir: dosDir, proxyUrl, deadline: Date.now() + 90_000, idleMs: 0, log,
+    start: vaultStarter({
+      startVault, locked: true, lock,
+      onReady: async (v) => {
+        lock.open(derivada)
+        await v.takeMasterKey()
+        // Se abrió: estrenó su llave y la nombró en un acta que selló ella.
+        const propia = await seqOf(v)
+        for (let i = 0; i < 100 && (await seqOf(vault)) < propia; i++) await sleep(100)
+        // La otra bóveda sella después (como el PC con la #58): la llave de la alojada sigue ahí.
+        const me = (await vault.profileMembers()).members.find((m) => m.label === 'service:demo')
+        await vault.setLabel(me.pub, 'service:demo (renombrado)')
+        const otraSello = await seqOf(vault)
+        for (let i = 0; i < 100 && (await seqOf(v)) < otraSello; i++) await sleep(100)
+        await vault.close()
+        let res = null; let err = null
+        try { res = await fetchSecrets({ dir: svcDir, timeoutMs: 15_000 }) } catch (e) { err = e }
+        return { propia, otraSello, adoptada: await seqOf(v), res, err }
+      }
+    })
+  })
+  assert.ok(r.ready.otraSello > r.ready.propia, 'la otra bóveda selló después')
+  assert.equal(r.ready.adoptada, r.ready.otraSello, 'la alojada adoptó el acta de la otra')
+  assert.ok(!lines.some((l) => /no sealing key named by the record/.test(l)), 'la alojada pudo firmar lo que sirvió')
+  // Lo que importa: una respuesta VERIFICADA de la alojada (el cajón está vacío en ella hasta la
+  // fase 2, así que basta un `{}` o un error firmado; lo que no vale es quedarse esperando).
+  assert.ok(!r.ready.err || !/timeout|unanswered|unreachable|did not answer|unverified|nobody answered/i.test(r.ready.err.message + ' ' + (r.ready.err.code || '')),
+    `contestó la alojada, verificado: ${r.ready.err?.message}`)
+})
+
 test('la bóveda no reventó por dentro en ninguna sesión', () => {
   const malas = lines.filter((l) => /before initialization|is not defined/.test(l))
   assert.deepEqual(malas, [])

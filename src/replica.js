@@ -198,9 +198,12 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null
     if (!body || body.op !== 'replica.push') return
     const acta = body.acta || store.acta
     if (!acta) return log('[replica] a push arrived with no record and none is stored: ignored')
-    if (acta.sealedBy !== link.iss) return log('[replica] the pushed record was sealed by another master: ignored')
+    // LAS DOS SON MAESTRA (`docs/replicas.md` §11.5): vale la que enroló a este replicador o una
+    // bóveda a la que el acta que ya guarda le dejaba sellar.
+    const known = acta.sealedBy === link.iss || (store.acta && sealersOf(store.acta).includes(acta.sealedBy))
+    if (!known) return log('[replica] the pushed record was sealed by a vault this replica does not know: ignored')
     if (!(await verifyActa({ acta })).ok) return log('[replica] the pushed record does not verify: ignored')
-    const pub = sealKeyAt(acta, p.seal?.seq)
+    const pub = sealKeyAt(acta, p.seal?.seq, p.seal?.vault ?? null)
     if (!pub || !(await verifyDeviceSig({ publickey: pub, data: body, signature: p.seal?.sig }))) {
       return log('[replica] the push is not signed by the key the record names: ignored')
     }

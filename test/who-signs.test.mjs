@@ -51,7 +51,7 @@ test('un acta que no selló MI maestra se rechaza, aunque la firma cuadre con el
       acta: actaFalsa(impostor.publickey, impostor.publickey),
       masterPubkey: 'LA-MAESTRA-DE-VERDAD'
     }),
-    /not sealed by the master this agent knows/
+    /not sealed by a vault this agent knows/
   )
 })
 
