@@ -975,17 +975,21 @@ test('un sobre con la firma cambiada NO se abre: el agente comprueba la proceden
 })
 
 
-test('quien administra NO puede ver un valor a distancia: la operacion no existe (2026-08-22)', async () => {
-  // Lo que se quitó y no vuelve: `var.reveal` / `var.history` del protocolo de
-  // administración. Un aparato que administra no tiene sobres de lo privado; ver, el
-  // histórico y volver a una versión son de la bóveda en su máquina (CLI/TUI).
-  assert.equal(vault.vars.reveal, undefined, 'no hay reveal para el admin')
-  assert.equal(vault.vars.history, undefined, 'ni history')
+test('quien administra VE un valor solo a través de la bóveda; el histórico sigue sin estar', async () => {
+  // 2026-08-22 se quitaron `var.reveal` / `var.history`. El 2026-10-26 el dueño devolvió
+  // `var.reveal` («obviamente necesita aprobación si hay aprobadores»): lo abre la BÓVEDA, con
+  // la llave del perfil, y lo cierra a una llave efímera de quien pregunta
+  // (`test/var-reveal.test.mjs`). El aparato que administra sigue sin tener sobres de lo
+  // privado (el invariante de abajo), y el histórico y volver a una versión siguen siendo de la
+  // máquina de la bóveda.
+  assert.equal(typeof vault.vars.reveal, 'function', 'ver pasa por la bóveda')
+  assert.equal(vault.vars.history, undefined, 'el histórico no')
   const { ADMIN_OPS } = await import('../lib/src/admin.js').catch(() => ({}))
   if (ADMIN_OPS) {
-    assert.ok(!ADMIN_OPS.includes('var.reveal') && !ADMIN_OPS.includes('var.history'), 'y el protocolo tampoco las anuncia')
+    assert.ok(ADMIN_OPS.includes('var.reveal') && !ADMIN_OPS.includes('var.history'), 'el protocolo anuncia reveal y no history')
   }
 })
+
 
 /**
  * EL INVARIANTE del 2026-08-22: un cajón CON DUEÑO no se envuelve para quien administra.

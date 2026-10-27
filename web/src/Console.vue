@@ -23,6 +23,9 @@ import { ref, computed, watch, markRaw, onMounted, onBeforeUnmount, defineAsyncC
 import { buildSealedVar } from '@dotrino/vault/admin'
 // La MISMA cripto que usa la bóveda para abrirlo: se importa, no se copia.
 import { sealedAdminKey } from './adminKey.js'
+import { makeEphemeralKey, openSealed, seal } from '@dotrino/vault/sealed'
+import { sealKeyAt, sealersOf, verifyActa } from '@dotrino/identity/acta'
+import { verifyDeviceSig } from '@dotrino/identity/capabilities'
 import { Identity } from '@dotrino/identity'
 // El permiso → scope lo dice el acta, no una tabla copiada aquí.
 import { capScope, DEVICE_CAPS } from '@dotrino/identity/acta'
@@ -280,6 +283,8 @@ const T = {
     apv_error: 'No se pudieron consultar los pedidos:',
     apv_asks: 'pide tus claves de',
     apv_writes: 'quiere guardar variables en',
+    apv_reveals: 'quiere VER el valor de',
+    apv_reveals_of: 'en',
     apv_update: (v, de) => `La bóveda quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '. Se verifica antes de instalar.',
     apv_update_device: (quien, v, de) => `${quien} quiere actualizarse a la ${v}` + (de ? ` (ahora ${de})` : '') + '.',
     apv_keys: 'Variables:',
@@ -346,6 +351,12 @@ const T = {
     // entero. La fila nueva aparece sola al escribir, así que no hay botón que explicar.
     var_paste_hint: 'Para cargar varias de una vez, pega tu configuración (NOMBRE=valor, una por línea) en el campo del nombre.',
     var_value_ph: 'valor',
+    var_reveal: 'Ver',
+    var_hide: 'Ocultar',
+    var_revealing: 'Esperando aprobación…',
+    var_reveal_timeout: 'Nadie aprobó a tiempo.',
+    var_reveal_none: 'La bóveda no devolvió el valor.',
+    var_reveal_bad: 'La respuesta no viene firmada por tu bóveda: no se enseña.',
     var_private_ask: 'Privada',
     var_private_final: 'Una variable privada no se puede volver pública: bórrala y créala de nuevo.',
     var_paste_err: (e) => ({
@@ -546,6 +557,8 @@ const T = {
     apv_error: 'Could not check for requests:',
     apv_asks: 'asks for your keys of',
     apv_writes: 'wants to save variables in',
+    apv_reveals: 'wants to SEE the value of',
+    apv_reveals_of: 'in',
     apv_update: (v, from) => `The vault wants to update to ${v}` + (from ? ` (now ${from})` : '') + '. It is verified before installing.',
     apv_update_device: (who, v, from) => `${who} wants to update to ${v}` + (from ? ` (now ${from})` : '') + '.',
     apv_keys: 'Variables:',
@@ -612,6 +625,12 @@ const T = {
     var_key_ph: 'VARIABLE_NAME',
     var_paste_hint: 'To load several at once, paste your configuration (NAME=value, one per line) into the name field.',
     var_value_ph: 'value',
+    var_reveal: 'Show',
+    var_hide: 'Hide',
+    var_revealing: 'Waiting for approval…',
+    var_reveal_timeout: 'Nobody approved in time.',
+    var_reveal_none: 'The vault did not return the value.',
+    var_reveal_bad: 'The reply is not signed by your vault: it is not shown.',
     var_private_ask: 'Private',
     var_private_final: 'A private variable cannot be made public: delete it and create it again.',
     self_code_ph: 'The 6 digits it shows',
@@ -1340,6 +1359,48 @@ async function changeVault () {
   try { sessionStorage.removeItem(VAULT_CHOSEN) } catch (_) {}
   await refreshProfiles()
   choseHere.value = false
+}
+
+/**
+ * VER UNA PRIVADA (`var.reveal`; la política es de la bóveda, `varsDesk.reveal`).
+ *
+ * NADA EN CLARO: lo que se pide va sellado a una llave de un uso de la bóveda
+ * (`var.reveal.begin`), y la respuesta vuelve sellada a una efímera que se estrena aquí y no
+ * sale de esta pestaña. Y ANTES DE ENSEÑAR NADA se comprueba de dónde viene: la firma tiene que
+ * ser de la llave de sellado que el acta nombra, sobre lo que se pidió y para ESTA efímera.
+ * El acta con la que se juzga es la que este aparato ya adoptó; una más nueva que traiga la
+ * respuesta solo vale si la selló una bóveda que esa ya dejaba sellar.
+ *
+ * Si hay quien apruebe, la bóveda contesta «pendiente» y se le pregunta cada pocos segundos
+ * hasta que el teléfono diga sí o no. Una aprobación es para este valor y una lectura.
+ */
+async function revealVar ({ target, key }) {
+  const dest = target.startsWith('ns:') ? { ns: target.slice(3) } : { pub: target.slice(4) }
+  const eph = await makeEphemeralKey()
+  const door = await vaultAdmin('var.reveal.begin')
+  const enc = await seal({ ek: door.ek, payload: { ...dest, key, ek: eph.ek } })
+  let r = await vaultAdmin('var.reveal', { door: door.door, enc })
+  const hasta = Date.now() + 5 * 60_000
+  while (r?.pending) {
+    if (Date.now() > hasta) throw new Error(t.value.var_reveal_timeout)
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    r = await vaultAdmin('var.reveal', { request: r.pending })
+  }
+  if (!r?.enc) throw new Error(t.value.var_reveal_none)
+  const { body, seal: firma, acta } = await openSealed({ privateKey: eph.privateKey, enc: r.enc })
+  const owner = dest.ns ? `ns:${dest.ns}` : `dev:${dest.pub}`
+  if (!body || body.op !== 'var.reveal' || body.key !== key || body.owner !== owner || body.ek !== eph.ek) throw new Error(t.value.var_reveal_bad)
+  const mine = (await id.value.profileActa?.().catch(() => null))?.acta || null
+  if (!mine) throw new Error(t.value.var_reveal_bad)
+  let ref = mine
+  if (acta && acta.seq > mine.seq) {
+    const okActa = acta.profileId === mine.profileId && sealersOf(mine).includes(acta.sealedBy) && (await verifyActa({ acta })).ok
+    if (!okActa) throw new Error(t.value.var_reveal_bad)
+    ref = acta
+  }
+  const pub = sealKeyAt(ref, firma?.seq, firma?.vault ?? null)
+  if (!pub || !(await verifyDeviceSig({ publickey: pub, data: body, signature: firma.sig }))) throw new Error(t.value.var_reveal_bad)
+  return body.value
 }
 
 async function pickVault (v) {
@@ -2346,7 +2407,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <template v-if="p.kind === 'update'">{{ updateText(p) }}</template>
             <template v-else-if="p.kind === 'passwords'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.ctx?.op === 'remove' ? t.apv_passwords_remove : (p.ctx?.op === 'put' || p.ctx?.op === 'patch') ? t.apv_passwords_change : t.apv_passwords }}</template>
             <template v-else-if="p.kind === 'incident'"><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ t.apv_incident(p.ctx?.reporterLabel ? `${p.ctx.reporterLabel} (${p.ns})` : p.ns) }}</template>
-            <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> {{ p.kind === 'write' ? t.apv_writes : t.apv_asks }} <code>{{ p.ns }}</code></template>
+            <template v-else><b>{{ p.label || p.deviceId }}</b> <code v-if="p.label">{{ p.deviceId }}</code> <template v-if="p.kind === 'reveal'">{{ t.apv_reveals }} <code>{{ (p.ctx?.keys || []).join(', ') }}</code> {{ t.apv_reveals_of }}</template><template v-else>{{ p.kind === 'write' ? t.apv_writes : t.apv_asks }}</template> <code>{{ p.ns }}</code></template>
             <span class="muted"> · {{ t.apv_left }} {{ apvLeft(p) }} s</span></span>
           <!-- QUÉ ESTÁ EJECUTANDO Y DESDE DÓNDE: es lo que hace que este pedido se pueda
                decidir. Sin esto solo se sabía qué aparato pide qué cajón, que no distingue
@@ -2610,7 +2671,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                :data-testid="'devvars-' + m.id">
             <h3>{{ t.var_dev_t }}</h3>
             <Vars :target="'dev:' + m.pub" :tid="m.id" :rows="varsOfDevice(m.pub)"
-                  :t="t" :busy="busy" :save="saveVars" :add="!!m.cn" />
+                  :t="t" :busy="busy" :save="saveVars" :reveal="revealVar" :add="!!m.cn" />
           </div>
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
@@ -2912,7 +2973,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                 <span class="muted count">{{ (vars.ns[ns] || []).length }}</span>
               </div>
               <Vars v-if="openGroups.has(ns)" :target="'ns:' + ns" :tid="ns" :rows="vars.ns[ns] || []"
-                    :t="t" :busy="busy" :save="saveVars" />
+                    :t="t" :busy="busy" :save="saveVars" :reveal="revealVar" />
             </li>
 
             <!-- Cajones de aparatos que ya no están en el acta: no tienen fila arriba. -->

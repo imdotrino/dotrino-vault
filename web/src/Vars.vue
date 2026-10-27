@@ -46,9 +46,24 @@ const props = defineProps({
   // servicio: la bóveda solo se las guarda a quien las lee, así que ofrecer el formulario
   // sería un botón que siempre falla. Lo que ya tuviera se sigue viendo y se puede cambiar.
   add: { type: Boolean, default: true },
-  // (Los botones «Ver» y «Versiones» se quitaron: un valor privado no se mira ni se
-  // deshace desde la consola, se cambia.)
+  // VER el valor de una privada (dueño, 2026-10-26): `({ target, key }) → Promise<string>`.
+  // La bóveda pide aprobación si hay quien apruebe, así que puede tardar. «Versiones» sigue
+  // sin estar: deshacer es de la máquina de la bóveda.
+  reveal: { type: Function, default: null },
 })
+
+/** Lo que se está viendo: clave → { state: 'asking' | 'shown', value, error }. Solo en memoria. */
+const seen = ref({})
+async function toggleReveal (key) {
+  if (seen.value[key]?.state === 'shown') { const n = { ...seen.value }; delete n[key]; seen.value = n; return }
+  seen.value = { ...seen.value, [key]: { state: 'asking' } }
+  try {
+    const value = await props.reveal({ target: props.target, key })
+    seen.value = { ...seen.value, [key]: { state: 'shown', value } }
+  } catch (e) {
+    seen.value = { ...seen.value, [key]: { state: 'error', error: e.message } }
+  }
+}
 
 const busyRow = ref('')
 const rowError = ref('')
@@ -182,7 +197,15 @@ const submit = () => props.save({
         {{ t.var_private_ask }}
       </label>
       <span v-if="changed(d)" class="tag">{{ t.var_pending }}</span>
+      <button v-if="reveal && d.was.priv" type="button" class="btn ghost sm" :disabled="seen[d.key]?.state === 'asking'"
+              :data-testid="'var-reveal-' + tid + '-' + d.key" @click="toggleReveal(d.key)">
+        {{ seen[d.key]?.state === 'shown' ? t.var_hide : seen[d.key]?.state === 'asking' ? t.var_revealing : t.var_reveal }}
+      </button>
     </div>
+    <div v-if="seen[d.key]?.state === 'shown'" class="varseen" :data-testid="'var-seen-' + tid + '-' + d.key">
+      <code>{{ seen[d.key].value }}</code>
+    </div>
+    <p v-else-if="seen[d.key]?.state === 'error'" class="muted" :data-testid="'var-seen-err-' + tid + '-' + d.key">{{ seen[d.key].error }}</p>
     </template>
 
     <template v-if="add">
@@ -247,4 +270,5 @@ input:disabled { color: var(--dt-accent); background: var(--dt-surface); border-
 .btn.sm { padding: 5px 10px; font-size: 13px; }
 .btn.ghost { background: transparent; border-color: var(--dt-line); color: var(--dt-accent); }
 .btn:disabled { opacity: .5; cursor: default; }
+.varseen { margin: -2px 0 8px; padding: 8px 10px; border-radius: 8px; background: var(--dt-surface-2, rgba(0,0,0,.04)); overflow-wrap: anywhere; user-select: all; }
 </style>
