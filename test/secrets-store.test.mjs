@@ -142,9 +142,10 @@ test('UNA GENERACION POR ESCRITURA, y el llavero recoge lo que ya no abre nada',
   const gen1 = enDisco(dir).ns.proxy.vars.K.gen
   await s.set('proxy', 'K', 'dos')
   const disco = enDisco(dir)
-  assert.equal(disco.ns.proxy.vars.K.gen, gen1 + 1, 'no se reutiliza la CEK: no se puede abrir')
+  const gen2 = disco.ns.proxy.vars.K.gen
+  assert.ok(gen2 > gen1, 'no se reutiliza la CEK: no se puede abrir')
   // La primera generación sigue viva porque el HISTÓRICO la referencia.
-  assert.deepEqual(disco.ns.proxy.keyring.map((g) => g.gen), [gen1, gen1 + 1])
+  assert.deepEqual(disco.ns.proxy.keyring.map((g) => g.gen), [gen1, gen2])
   assert.equal(disco.history.length, 1)
 
   // Y al borrar la variable se van las dos, con su histórico: ya no las abre nadie, y
@@ -186,7 +187,8 @@ test('la FIRMA del sobre dice de que acta salio; sin firmante, sale sin firma', 
     signer: (body) => ({ seq: 7, sig: `firma(${body.owner}/${body.key}/${body.gen})` })
   })
   await s.set('proxy', 'K', 'v')
-  assert.deepEqual(enDisco(dir).ns.proxy.vars.K.seal, { seq: 7, sig: 'firma(ns:proxy/K/1)' })
+  const K = enDisco(dir).ns.proxy.vars.K
+  assert.deepEqual(K.seal, { seq: 7, sig: `firma(ns:proxy/K/${K.gen})` })
 
   const dir2 = tmp()
   const s2 = abrir(dir2, fakeSealer(), { recipients: () => miembros('A') })
@@ -455,7 +457,7 @@ test('una envoltura solo se AÑADE: un servicio no puede pisar la de otro', asyn
   const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
   await s.set('proxy', 'TOKEN', 'secreto')
 
-  const gen = 1
+  const gen = enDisco(dir).ns.proxy.vars.TOKEN.gen
   const wrap = { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' }
 
   assert.equal(s.putWrap('ns:proxy', gen, 'newcomer', wrap), true, 'añadir al que no tenía, sí')
@@ -476,7 +478,7 @@ test('rehacer el llavero deja lo que dice el acta y nada más', async () => {
   const dir = tmp()
   const s = abrir(dir, fakeSealer(), { recipients: () => miembros('A') })
   await s.set('proxy', 'TOKEN', 'secreto')
-  s.putWrap('ns:proxy', 1, 'intruder', { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' })
+  s.putWrap('ns:proxy', enDisco(dir).ns.proxy.vars.TOKEN.gen, 'intruder', { epk: '{"kty":"EC"}', iv: 'aXY=', ct: 'Y3Q=' })
   assert.ok(s.recipientsIn('ns:proxy').includes('intruder'), 'se coló uno')
 
   await s.rewrap('ns:proxy', miembros('A'), null, { exact: true })
@@ -514,7 +516,7 @@ test('putSealed guarda el sobre sin abrirlo, y exige la envoltura de recuperaci�
   const wraps = { [RECOVERY]: 'w-rec', A: 'w-A', B: 'w-B' }
 
   const r = await s.putSealed('ns:demo', 'TOKEN', { e, wraps })
-  assert.equal(r.gen, 1)
+  assert.ok(r.gen >= 1, 'la generación la pone el almacén')
   const guardado = s.bundleFor('demo').entries.TOKEN
   assert.equal(guardado.pub, false)
   assert.equal(guardado.e.ct, e.ct, 'se guardó EXACTAMENTE lo que llegó: nadie lo abrió para volver a cerrarlo')
@@ -790,4 +792,58 @@ test('profileView: lo público con su valor, lo privado solo nombrado', async ()
   assert.deepEqual(v.private, ['telefono'])
   assert.ok(!JSON.stringify(v).includes('opaco'), 'de lo privado no sale ni el sobre')
   assert.ok(v.updatedAt > 0)
+})
+
+// ----- CLONES (`docs/replicas.md` §11.3-§11.4): los cajones viajan entre bóvedas -----
+
+test('clonar: lo de una hermana se mezcla sin abrir nada, y su recuperación no pisa la nuestra', async () => {
+  const sa = fakeSealer(); const sb = fakeSealer()
+  const dirA = tmp(); const dirB = tmp()
+  const a = abrir(dirA, sa, { recipients: () => miembros('A', 'NUBE') })
+  const b = abrir(dirB, sb, { recipients: () => miembros('A', 'NUBE') })
+  sb.newKey() // que su par de recuperación no sea el mismo que el de A (en la vida real nunca lo es)
+  await b.ensureRecovery()
+  await a.set('demo', 'TOKEN', 'uno')
+  const r = await b.mergeState(a.exportState())
+  assert.equal(r.changed, 1)
+  const enB = enDisco(dirB).ns.demo
+  assert.equal(enB.vars.TOKEN.e.ct, enDisco(dirA).ns.demo.vars.TOKEN.e.ct, 'el mismo sobre, tal cual')
+  const g = enB.keyring.find((x) => x.gen === enB.vars.TOKEN.gen)
+  assert.ok(g.wraps.NUBE, 'con la envoltura de la hermana')
+  assert.equal(g.wraps[RECOVERY], undefined, 'la recuperación de A no entra como la de B')
+  assert.ok(Object.keys(g.wraps).some((w) => w.startsWith(RECOVERY + '@')), 'va con su etiqueta')
+  assert.ok(!b.recipientsIn('ns:demo').some((w) => w.startsWith('#')), 'y no cuenta como destinatario')
+  assert.equal((await b.mergeState(a.exportState())).changed, 0, 'mezclar dos veces no cambia nada')
+})
+
+test('clonar: gana el último cambio, y lo borrado no resucita', async () => {
+  const dirA = tmp(); const dirB = tmp()
+  const a = abrir(dirA, fakeSealer(), { recipients: () => miembros('A') })
+  const b = abrir(dirB, fakeSealer(), { recipients: () => miembros('A') })
+  await a.set('demo', 'K', 'viejo')
+  await b.mergeState(a.exportState())
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await b.set('demo', 'K', 'nuevo')
+  await a.mergeState(b.exportState())
+  assert.equal(enDisco(dirA).ns.demo.vars.K.e.ct, enDisco(dirB).ns.demo.vars.K.e.ct, 'A se queda con lo de B, que es posterior')
+  assert.equal((await b.mergeState(a.exportState())).changed, 0, 'y B no retrocede')
+  // Borrar en A deja lápida; B lo borra, y una copia vieja de B no lo devuelve.
+  const viejoDeB = b.exportState()
+  await a.delete('demo', 'K')
+  await b.mergeState(a.exportState())
+  assert.equal(enDisco(dirB).ns.demo?.vars?.K, undefined, 'borrado en las dos')
+  await a.mergeState(viejoDeB)
+  assert.equal(enDisco(dirA).ns.demo?.vars?.K, undefined, 'lo viejo no lo resucita')
+})
+
+test('clonar: lo que llega de una hermana no se vuelve a avisar (no hay ida y vuelta)', async () => {
+  let avisos = 0
+  const dirA = tmp(); const dirB = tmp()
+  const a = abrir(dirA, fakeSealer(), { recipients: () => miembros('A') })
+  const b = abrir(dirB, fakeSealer(), { recipients: () => miembros('A'), onChange: () => { avisos++ } })
+  await a.set('demo', 'K', 'v')
+  await b.mergeState(a.exportState())
+  assert.equal(avisos, 0)
+  await b.set('demo', 'OTRA', 'w')
+  assert.ok(avisos > 0, 'una escritura de aquí sí avisa')
 })

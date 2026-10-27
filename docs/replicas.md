@@ -417,6 +417,32 @@ Hoy ya se le envuelven (`cosealerMembers` en `recipientsOf`), pero los sobres se
 de la que admite: no le llegan a la nueva. Y si la nueva no trae `encPub` al darse de alta, no hay a
 dónde envolver: el alta de una bóveda la tiene que traer, o se para y se dice.
 
+### 11.6.ter. Cómo quedó la fase 2, los cajones (2026-10-26, vaultd 0.180.0)
+
+- **Qué viaja:** los cajones tal cual (sobres, generaciones con sus envolturas) y las lápidas
+  (`secretsStore.exportState`). El histórico no: es la memoria de cada máquina.
+- **Cuándo:** al cambiar algo (los cambios de 3 s van juntos), al arrancar, y cuando una hermana
+  anuncia un acta más vieja que la nuestra (va atrasada).
+- **Cómo:** `vault.sibling.drawers`, **sellado por el pilar** (`sendSealed`) a la llave de cifrado
+  del transporte de la hermana, que vive bajo la llave de la máquina (`commKey.encKeypair`) para
+  que una bóveda CERRADA lo abra; y firmado por la llave de comunicación de quien manda, que la
+  puerta comprueba. Callado: no despierta a nadie, se recibe al despertar. Llegado sin sellar, se
+  tira.
+- **Mezcla** (`secretsStore.mergeState`): gana la generación más alta, que desde aquí es la HORA
+  de la escritura (`nextGen`), así que dos bóvedas que escriben sin verse no chocan y gana el
+  último cambio; empate, el `ct` menor. Una lápida gana a un valor de su generación o anterior.
+  Las envolturas de una generación se suman. La envoltura de recuperación de la hermana viaja con
+  su etiqueta (`#recovery@<x>`) y no se confunde con la nuestra. Lo mezclado no se vuelve a avisar.
+
+**Lo que falta, dicho:**
+
+- **Pedidos, avisos, ajustes y el respaldo del store** (el resto de §11.3) todavía no viajan.
+- **Una generación que llegó de una hermana no la puede reenvolver esta bóveda** para un miembro
+  nuevo: reenvolver abre con NUESTRA recuperación, y esa generación lleva la de la otra. Lo hace la
+  hermana que la escribió, o esta cuando aprenda a abrir con su propia envoltura de selladora.
+- **Si la hermana nunca anunció su llave de cifrado** (no ha despertado desde que arrancó el
+  proxio), no se le puede sellar: se dice en el log y le llega en el siguiente empujón.
+
 ### 11.7. Fases
 
 1. Una llave de sellado por bóveda en el acta (§11.5): `@dotrino/identity` (acta), la bóveda

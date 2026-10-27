@@ -200,6 +200,29 @@ test('una bóveda ya dada de alta no se vuelve a dar de alta', async () => {
   await assert.rejects(alta(await invitar(vault), 'req-2'), (e) => e.code === 'already-enrolled')
 })
 
+// CLONES (`docs/replicas.md` §11.3-§11.4): un cajón escrito en una bóveda le llega a la otra,
+// cerrada y dormida, cuando despierta; y uno borrado se borra también allí.
+test('clones: el cajón escrito en la otra bóveda llega a la alojada, y el borrado también', async () => {
+  await vault.setSecret('clon', 'TOKEN', 'valor del pc', false)
+  await sleep(3500) // se juntan los cambios de unos segundos antes de mandarlos
+  const tiene = async (v, ns, key) => ((await v.listSecrets())[ns] || []).some((x) => x.key === key)
+  const espera = async (cond) => { for (let i = 0; i < 80 && !(await cond()); i++) await sleep(100); return cond() }
+  const r1 = await runSession({
+    store, dir: tmp('join-clon-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({ startVault, locked: true, onReady: async (v) => espera(() => tiene(v, 'clon', 'TOKEN')) })
+  })
+  assert.equal(r1.ready, true, 'la alojada, cerrada, recibió el cajón')
+
+  await vault.deleteSecret('clon', 'TOKEN')
+  await sleep(3500)
+  const r2 = await runSession({
+    store, dir: tmp('join-clon2-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({ startVault, locked: true, onReady: async (v) => espera(async () => !(await tiene(v, 'clon', 'TOKEN'))) })
+  })
+  assert.equal(r2.ready, true, 'y lo borrado se borró allí')
+  assert.ok(lines.some((l) => /merged the drawers of a sibling vault/.test(l)), 'se mezclaron los cajones de la hermana')
+})
+
 // LAS DOS SON MAESTRA (`docs/replicas.md` §11.5). Lo que pasó con la de Lambda de Seyacat: la
 // última acta la selló la otra bóveda, el acta solo nombraba UNA llave de sellado (la de esa), y
 // la alojada no podía firmar nada de lo que sirve («no sealing key named by the record»). Ahora

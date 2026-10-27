@@ -259,6 +259,9 @@ test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
     // aprobación, y esa mesa vive en el mostrador `SECRETS`, que es del daemon. Sin mesa no
     // hay a quién ponérselo; va con `SECRETS`, no aparte.
     'INCIDENT',
+    // Los CAJONES de una bóveda hermana (`docs/replicas.md` §11.4): son los de `SECRETS`, y
+    // un dispositivo-bóveda no los guarda. Van con `SECRETS`, no aparte.
+    'SIBLING_DRAWERS',
   ])
 
   const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))
