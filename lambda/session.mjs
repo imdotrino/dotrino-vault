@@ -344,7 +344,10 @@ export async function enrollJoin ({ store, dir, invitation, account, req, deadli
         .catch((err) => log(`[vault-lambda] could not leave the pairing code: ${err.message}`))
     })
     let r
-    try { r = await identity.enrollDevice(qr, { label: 'bóveda en la nube', join: 'current', account }) } finally { off?.() }
+    // Una SEGUNDA BÓVEDA sella: con una invitación que no le da `sealer` entraría como un aparato
+    // más —sin llave de comunicación, sin llave de sellado y sin que el proxio la despierte—, que
+    // es lo que le pasó a la de Seyacat (2026-10-27). Se para antes de enseñar el código.
+    try { r = await identity.enrollDevice(qr, { label: 'bóveda en la nube', join: 'current', account, requireCaps: ['sealer'] }) } finally { off?.() }
     const mine = await identity.myMembership()
     await mirror.push()
     log(`[vault-lambda] joined the account (record #${mine.seq}) as ${mine.id}`)

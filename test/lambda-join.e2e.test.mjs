@@ -97,6 +97,19 @@ test('con la invitación de otra cuenta no hay código, y no queda nada a medias
   assert.ok(!nombres.includes(LOCK_FILE) && !nombres.includes('identity.json'), `quedó algo del alta fallida: ${nombres.join(', ')}`)
 })
 
+// SIN `sella` NO ES UNA BÓVEDA (2026-10-27): la de Seyacat entró con una invitación sin ese
+// permiso y quedó como un aparato más. Se para antes del código, y no queda nada a medias.
+test('con una invitación que no da «sella» no hay código, y no queda nada a medias', async () => {
+  const sinSella = encodeInvite((await vault.startPairing({ scope: ['vault:sign'], caps: ['sign', 'read', 'store'], label: 'sin sella' })).qr)
+  const r = alta(sinSella, 'req-sin-sella')
+  const door = await pairing('req-sin-sella', (g) => g.phase === 'door')
+  await mandarContrasena('req-sin-sella', door)
+  await assert.rejects(r, (e) => e.code === 'missing-caps' && e.missing?.includes('sealer'))
+  const nombres = [...store.objects.keys()]
+  assert.ok(!nombres.includes(LOCK_FILE) && !nombres.includes('identity.json'), `quedó algo del alta fallida: ${nombres.join(', ')}`)
+  await vault.stopPairing?.()
+})
+
 let derivada = null
 let alojada = null
 // Entra con la invitación de cualquier bóveda de la cuenta que SELLE, como cualquier aparato
@@ -134,8 +147,10 @@ test('primera sesión tras el alta: nombra su llave de sellado, abre la llave de
   const lock = openLock(dir)
   const starter = vaultStarter({
     startVault, locked: true, lock,
+    // NADA de abrir aquí: el handler no lo hace, y la prueba tiene que ver lo que ve él.
     onReady: async (v) => ({
-      locked: (await v.takeMasterKey()).locked,
+      locked: v.identity.masterLocked,
+      comm: await espera(async () => (await v.identity.profileActa()).acta.members.some((m) => m.cn === 'vault' && m.vault === alojada)),
       sealPub: await espera(async () => !!(await suFila(v))?.sealPub),
       cek: !!(await v.identity.contentKey()),
       drawers: await espera(() => tiene(v, 'primera', 'TOKEN'))
@@ -147,6 +162,7 @@ test('primera sesión tras el alta: nombra su llave de sellado, abre la llave de
     start: async (args) => { lock.open(derivada); return starter(args) }
   })
   assert.equal(r.ready.locked, false, 'abierta, como nace')
+  assert.equal(r.ready.comm, true, 'su llave de comunicación está en el acta: sin ella el proxio no la despierta')
   assert.equal(r.ready.sealPub, true, 'su llave de sellado está en el acta')
   assert.equal(r.ready.cek, true, 'abre la llave de contenido')
   assert.equal(r.ready.drawers, true, 'recibió los cajones de la otra bóveda')
