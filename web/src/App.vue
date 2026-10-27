@@ -433,15 +433,17 @@ const onTopbarLang = (e) => { if (e.detail?.lang) setLang(e.detail.lang) }
 
 /**
  * `/admin` (la administración de `dotrino-accounts`) existe solo para una cuenta cuyo acta tiene
- * un servicio `accounts`: la de Dotrino. Para cualquier otra no sale ni el enlace. Se mira en el
- * acta (los miembros con cajón `accounts`), que no toca la red de nadie; qué contesta cada uno
- * y quién puede administrar lo deciden la página y el servicio.
+ * un servicio `accounts` —la de Dotrino— Y para un aparato que en ese acta tiene `admin` (dueño,
+ * 2026-10-27: «el dispositivo no tiene admin, en teoría no debía haberme dejado entrar»). Para
+ * cualquier otro no sale ni el enlace. Se mira en el acta, que no toca la red de nadie; el
+ * servicio lo vuelve a comprobar en cada petición.
  */
 const identity = ref(null)
 const accountsAgents = ref([])
 async function findAccountsAgents (id) {
   try {
-    accountsAgents.value = (await listAgentsByLabel(id)).filter((m) => m.cn === 'accounts')
+    const { caps = [] } = await id.myMembership()
+    accountsAgents.value = caps.includes('admin') ? (await listAgentsByLabel(id)).filter((m) => m.cn === 'accounts') : []
   } catch (e) {
     // Sin acta no se sabe si hay servicios: no se enseña el enlace, y se dice en la consola.
     console.warn(`[admin] could not read the account record: ${e.code || ''} ${e.message}`)
