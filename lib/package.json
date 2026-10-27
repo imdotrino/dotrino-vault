@@ -1,6 +1,6 @@
 {
   "name": "@dotrino/vault",
-  "version": "0.106.0",
+  "version": "0.106.1",
   "description": "La bóveda de Dotrino como librería: el MISMO núcleo que el binario corriendo en el navegador (`@dotrino/vault/browser`), el mostrador de emparejamiento y el cliente de SERVICIO (Node): un proyecto se enrola una vez y jala sus credenciales del vault en vez del .env (`import '@dotrino/vault/config'`).",
   "type": "module",
   "main": "src/index.js",
@@ -65,7 +65,7 @@
     "pairing"
   ],
   "peerDependencies": {
-    "@dotrino/identity": ">=0.128.0",
+    "@dotrino/identity": ">=0.129.3",
     "@dotrino/proxy-client": ">=0.44.1",
     "@dotrino/store": ">=0.12.3"
   },

@@ -361,6 +361,13 @@ abrirlo. Por eso **una bóveda cerrada también sincroniza**, igual que un repli
   cambios de unos segundos en un empujón: cada empujón timbra a una Lambda dormida y la despierta.
 - **Arrastre al despertar.** El nodo dice a sus hermanas por dónde va y ellas le mandan lo que le
   falte. Es el `replica.ack` → `catch-up` de hoy, en las dos direcciones.
+- **Primero se ponen de acuerdo, después reparten** (dueño, 2026-10-26: *«las bóvedas primero
+  deben ponerse de acuerdo entre ellas antes de andar mandando actas»*). Una bóveda que sella o
+  adopta un acta se la empuja antes a sus hermanas y solo después la anuncia a los aparatos. Y
+  una que despierta se pone al día con las hermanas ANTES de contestar a nadie. Lo que lo pidió:
+  la Lambda despertó en la #58, le llegaron la #60 y la #59 a la vez, y por una carrera al
+  adoptar se quedó en la #59 (identity 0.129.2 pone las adopciones en fila); los aparatos ya
+  tenían papel de la #60 y ella les contestaba «stale-record».
 - **Conflictos: gana el último cambio.** Cada cambio lleva hora y nodo. Si dos hermanas cambiaron
   lo mismo sin verse, gana el más reciente; el perdedor se apunta en la bitácora y se avisa a los
   aprobadores. El acta no entra aquí: sigue con su regla (`seq`, y `canAdopt` para el empate).
