@@ -2125,10 +2125,14 @@ async function cmdProfile (rest) {
         return
       }
       if (action && action !== 'set') { console.error('uso: dotrino-vault profile admin-password [set|rm]'); process.exit(2) }
+      // Ponerla exige la llave del perfil en memoria: se mira ANTES de pedirla, para no
+      // hacer teclear dos veces una contraseña que luego no se puede guardar.
+      const p = await targetProfile()
+      if (!p) { console.error('el perfil no existe: %s', PROFILE); process.exit(1) }
+      if (p.locked) { console.error('El perfil está bloqueado. Ábrelo primero:  dotrino-vault unlock'); process.exit(1) }
       console.log('Una contraseña APARTE, para abrir la bóveda desde el admin remoto.')
       console.log('Aquí no abre nada: tecleada en esta máquina no vale. Y para usarla hace')
       console.log('falta además un aparato tuyo que administre — la contraseña sola no basta.')
-      console.log('\nEl perfil tiene que estar abierto ahora mismo para poder ponerla.')
       const pwd = await askPassword('\nContraseña del admin: ')
       if (!pwd) { console.error('Cancelado.'); process.exit(1) }
       const again = await askPassword('Repítela: ')
