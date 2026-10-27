@@ -2199,8 +2199,15 @@ async function abrirBoveda () {
     const enc = await sealedAdminKey({ password: unlockPwd.value, params, nonce })
     unlockPwd.value = ''
 
-    await vaultAdmin('unlock', { nonce, enc })
+    const opened = await vaultAdmin('unlock', { nonce, enc })
+    // SE ENTERA EN EL ACTO (dueño, 2026-10-26: «una vez abierta… el admin ni se entera y se
+    // queda con el input abierto»). `refresh` solo vuelve a pedir la lista si no estaba, así
+    // que el candado se quedaba en «cerrada» hasta recargar. La respuesta ya lo dice, y la
+    // lista se pide otra vez porque abierta trae lo que cerrada no podía mandar.
+    lockState.value = { ...(lockState.value || {}), locked: opened?.locked !== false }
+    vars.value = null
     await refresh()
+    await loadVars().catch((e) => { varsError.value = e?.message || String(e) })
   } catch (e) {
     // El freno viaja con el rechazo, así que se puede decir CUÁNTO falta en vez de dejar
     // al usuario reintentando contra una puerta que ya no responde.
