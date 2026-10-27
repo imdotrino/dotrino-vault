@@ -223,6 +223,10 @@ export function createTerm () {
   const onResize = () => push({ name: 'resize' })
 
   let closed = false
+  // Lo último que se pintó, línea a línea (ver `render`).
+  let frame = []
+  let frameCols = 0
+  let frameRows = 0
   const write = (s) => { try { out.write(s) } catch (_) {} }
 
   function open () {
@@ -278,13 +282,19 @@ export function createTerm () {
     },
     /** Dibuja `lines` desde arriba; recorta al ancho y limpia lo que sobre. */
     render (lines) {
-      const { cols } = this.size()
-      let s = CSI + 'H'
-      for (let i = 0; i < lines.length; i++) {
-        s += CSI + (i + 1) + ';1H' + trunc(lines[i] ?? '', cols) + t.reset + CSI + 'K'
+      const { cols, rows } = this.size()
+      // Solo se reescriben las líneas que cambiaron. Reescribir una celda, aunque sea con
+      // lo mismo, le borra al terminal la selección del ratón: con el tick de cada segundo
+      // no se podía copiar el código ni el enlace del emparejamiento.
+      if (cols !== frameCols || rows !== frameRows) { frame = []; frameCols = cols; frameRows = rows; write(CSI + '2J') }
+      const next = lines.map((l) => trunc(l ?? '', cols) + t.reset)
+      let s = ''
+      for (let i = 0; i < next.length; i++) {
+        if (frame[i] !== next[i]) s += CSI + (i + 1) + ';1H' + next[i] + CSI + 'K'
       }
-      s += CSI + 'J' // limpia de la última línea hacia abajo
-      write(s)
+      if (next.length < frame.length) s += CSI + (next.length + 1) + ';1H' + CSI + 'J' // limpia lo que sobra
+      frame = next
+      if (s) write(s)
     },
     close
   }

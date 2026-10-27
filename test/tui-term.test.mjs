@@ -59,3 +59,27 @@ test('teclas: flechas, F5 y las de edición se decodifican', () => {
   // Un pegado con varias teclas sale en orden y sin perder ninguna.
   assert.deepEqual(leer('ab\x1b[15~c').map((k) => k.name), ['char', 'char', 'f5', 'char'])
 })
+
+test('render solo reescribe las líneas que cambiaron (no borra la selección del ratón)', async () => {
+  const { createTerm } = await import('../src/tui/term.js')
+  const out = []
+  const orig = process.stdout.write
+  process.stdout.write = (s) => { out.push(String(s)); return true }
+  try {
+    const term = createTerm()
+    term.render(['codigo AB12', 'enlace https://x', 'expira en 5'])
+    out.length = 0
+    term.render(['codigo AB12', 'enlace https://x', 'expira en 5'])
+    assert.equal(out.join(''), '', 'un cuadro idéntico no escribe nada')
+    term.render(['codigo AB12', 'enlace https://x', 'expira en 4'])
+    const s = out.join('')
+    assert.ok(s.includes('expira en 4'))
+    assert.ok(!s.includes('codigo') && !s.includes('enlace'), 'las líneas iguales no se tocan')
+    out.length = 0
+    term.render(['codigo AB12'])
+    assert.ok(out.join('').includes('\x1b[2;1H\x1b[J'), 'lo que sobra se limpia')
+    term.close()
+  } finally {
+    process.stdout.write = orig
+  }
+})
