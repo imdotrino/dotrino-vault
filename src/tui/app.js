@@ -167,6 +167,8 @@ function mergeMembersAndCerts (members, issued) {
       // QUÉ CORRE ESE APARATO (CONVENCIONES §14). Lo apunta la bóveda cuando le habla, así
       // que aquí solo hay que dejarlo pasar — que es justo lo que le faltaba a `addedAt`.
       running: m.running || null,
+      // LO QUE NECESITA Y EL ACTA NO LE DA (`needs` de su anuncio). Se pinta como aviso.
+      missing: m.missing || [],
       // DÓNDE CORRE (`@dotrino/identity/machine`): lo último que dijo firmado o, si no, lo
       // que dijo al emparejarse. Es lo que distingue tres navegadores que se llaman igual.
       machine: m.machine || cert?.machine || null,
@@ -568,6 +570,7 @@ function deviceRows (st, t) {
     const extra = (d.certCount > 1 ? t.muted(`  certs:${d.certCount}`) : '') +
       (vars ? t.muted(`  vars:${vars}`) : '') +
       running +
+      (d.missing?.length ? t.warn(`  ${i.needsCaps(d.missing.map((c) => i.capName[c] || c).join(', '))}`) : '') +
       // En quien aprueba: si dijo que le llegan los avisos. No cambia a quién se le pide
       // (a todos); deja ver a cuál no le suena el pedido. Es un dato, va en gris.
       (d.notifiedAt === undefined ? '' : t.muted(`  ${d.notifiedAt ? i.notifyYes : i.notifyUnknown}`)) +

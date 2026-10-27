@@ -122,6 +122,22 @@ test('flujo completo: set → pair --service → enroll → fetchSecrets', async
   assert.deepEqual(secrets, { TURN_KEY_ID: 'k-123', TURN_KEY_API_TOKEN: 't-456' })
 })
 
+// LO QUE NECESITA Y EL ACTA NO LE DA (dueño, 2026-10-27). El servicio lo declara al pedir
+// (`needs`), la bóveda lo apunta de lo firmado y lo enseña en su fila; no concede nada.
+test('needs: el servicio dice qué permisos del acta necesita, y la bóveda enseña los que faltan', async () => {
+  const { fetchSecrets, readServiceIdentity } = await import('../lib/src/service.js')
+  const pub = readServiceIdentity(svcDir).device.publickey
+  await fetchSecrets({ dir: svcDir, product: 'proxy', version: '1.2.3', needs: ['sign', 'store'] })
+  const fila = async () => (await vault.profileMembers()).members.find((m) => m.pub === pub)
+  const m = await fila()
+  assert.equal(m.running.product, 'proxy', 'se anuncia como el servicio, no como la librería')
+  assert.deepEqual(m.running.needs, ['sign', 'store'])
+  assert.deepEqual(m.missing, ['sign', 'store'], 'su cajón lo abre su nombre; firmar y guardar no los tiene')
+  await vault.setCaps(pub, [...new Set([...m.caps, 'sign', 'store'])])
+  assert.deepEqual((await fila()).missing, [], 'dado el permiso, ya no falta nada')
+  await vault.setCaps(pub, m.caps) // lo deja como estaba para las pruebas de después
+})
+
 /**
  * PERMISOS, NO TIPOS (2026-08-22). Un aparato es un aparato y lo que puede hacer: un
  * bot que publica en las apps firma como aparato del acta (`vault:sign`) Y lee su

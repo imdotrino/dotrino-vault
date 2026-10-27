@@ -686,6 +686,13 @@ async function cmdMembers () {
       if (m.running.compatible) console.log('      %scorre %s%s', D, v, Z)
       else console.log('      %s⚠ corre %s · %s%s', R, v, m.running.reason, Z)
     }
+    // LO QUE NECESITA Y EL ACTA NO LE DA (`needs` de su anuncio, dueño 2026-10-27). Se dice
+    // con el comando que lo arregla: decidirlo es del dueño, no de la bóveda.
+    if (m.missing?.length) {
+      const palabra = (c) => Object.keys(CAP_BY_WORD).find((w) => CAP_BY_WORD[w] === c) || c
+      console.log('      %s⚠ necesita %s y el acta no se lo da · dotrino-vault caps %s %s%s',
+        R, m.missing.map(palabra).join(', '), m.id || '<ID>', m.missing.map((c) => '+' + palabra(c)).join(' '), Z)
+    }
   }
   if (record.vault) {
     console.log('\n  %sEsta bóveda corre %s %s (protocolo %d)%s',

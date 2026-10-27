@@ -298,6 +298,7 @@ const es = {
   // apagado cuando en realidad no os entendéis.
   runs: 'corre',
   mismatch: (product, version) => `⚠ ${product} ${version} no cuadra`,
+  needsCaps: (caps) => `⚠ necesita ${caps}`,
   thisVault: 'esta · sella el acta',
   otherVault: 'sella el acta',
   commKey: 'llave de comunicación',
@@ -836,6 +837,7 @@ const en = {
   deviceDebt: (n) => `cannot open ${n}`,
   runs: 'runs',
   mismatch: (product, version) => `⚠ ${product} ${version} does not match`,
+  needsCaps: (caps) => `⚠ needs ${caps}`,
   thisVault: 'this one · seals the record',
   otherVault: 'seals the record',
   commKey: 'communication key',

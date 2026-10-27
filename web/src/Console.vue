@@ -126,6 +126,9 @@ const T = {
     dev_runs: (v) => 'corre ' + v,
     dev_notify_yes: 'le llegan avisos', dev_notify_unknown: 'no ha dicho si le llegan avisos',
     dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' no cuadra',
+    dev_needs: (caps) => '⚠ necesita ' + caps,
+    dev_needs_b: (caps) => 'Este servicio dice que necesita ' + caps + ' y el acta no se lo da: sin eso no funciona del todo.',
+    dev_needs_add: 'Añadir lo que falta',
     vault_runs: (p, v, n) => 'Esta bóveda corre ' + p + ' ' + v + ' (protocolo ' + n + ')',
     dev_nocert: 'sin acceso',
     dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
@@ -419,6 +422,9 @@ const T = {
     dev_runs: (v) => 'runs ' + v,
     dev_notify_yes: 'gets notifications', dev_notify_unknown: 'has not said if notifications reach it',
     dev_mismatch: (p, v) => '⚠ ' + p + ' ' + v + ' does not match',
+    dev_needs: (caps) => '⚠ needs ' + caps,
+    dev_needs_b: (caps) => 'This service says it needs ' + caps + ' and the record does not give it: without it, it does not fully work.',
+    dev_needs_add: 'Add what is missing',
     vault_runs: (p, v, n) => 'This vault runs ' + p + ' ' + v + ' (protocol ' + n + ')',
     dev_nocert: 'no access',
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
@@ -785,6 +791,7 @@ async function refresh () {
     // QUÉ CORRE CADA UNO (CONVENCIONES §14). Viene con la lista, no del acta: el acta dice
     // quién puede qué, no qué build es. Y la de la bóveda, para el pie.
     runningBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.running).map((d) => [d.sub, d.running]))
+    missingBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.missing?.length).map((d) => [d.sub, d.missing]))
     // DÓNDE CORRE CADA UNO, según lo último que le dijo a la bóveda (o lo del acta).
     machineBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.machine).map((d) => [d.sub, d.machine]))
     // SI A CADA UNO LE LLEGAN LOS AVISOS, según lo que le dijo a la bóveda. Es un dato para
@@ -842,6 +849,8 @@ async function refresh () {
  * abajo desaparecía, la de arriba no.
  */
 const runningBySub = ref(new Map())
+/** Lo que cada aparato declaró necesitar (`needs`) y el acta no le da, según la bóveda. */
+const missingBySub = ref(new Map())
 const machineBySub = ref(new Map())
 const notifiedBySub = ref(new Map())
 /**
@@ -882,6 +891,7 @@ const devices = computed(() => members.value.map((m) => {
     // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
     noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size,
     running: runningBySub.value.get(m.pub) || null,
+    missing: missingBySub.value.get(m.pub) || [],
     // Dónde corre (`@dotrino/identity/machine`): lo último que dijo, o lo que dijo al entrar.
     machine: machineLine(machineBySub.value.get(m.pub) || m.machine),
     // `undefined` = no aprueba, o la bóveda no lo dice (anterior a 0.146): no se pinta.
@@ -1051,6 +1061,11 @@ const draftList = computed(() => members.value
   .filter((m) => capsDraft.value[m.pub] && !sameCaps(capsDraft.value[m.pub], m.caps))
   .map((m) => ({ pub: m.pub, caps: capsDraft.value[m.pub], m })))
 const discardCaps = () => { capsDraft.value = {}; confirming.value = null }
+/** Pone en el borrador lo que le falta a un aparato. Se guarda como cualquier cambio de permisos. */
+const addMissing = (m) => {
+  const caps = [...new Set([...capsOf(m), ...m.missing])]
+  capsDraft.value = { ...capsDraft.value, [m.pub]: caps }
+}
 const saveCaps = () => run('caps-save', async () => {
   const changes = draftList.value.map(({ pub, caps }) => ({ pub, caps }))
   if (!changes.length) return
@@ -2656,6 +2671,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                   :data-testid="'runs-' + m.id" :title="m.running.reason || ''">
               {{ m.running.compatible ? t.dev_runs(m.running.version) : t.dev_mismatch(m.running.product, m.running.version) }}
             </span>
+            <!-- LO QUE NECESITA Y EL ACTA NO LE DA (`needs` de su anuncio, dueño 2026-10-27).
+                 Es un aviso: sin eso ese servicio no funciona del todo, y nadie lo veía. -->
+            <span v-if="m.missing.length" class="tag out" :data-testid="'needs-' + m.id">{{ t.dev_needs(m.missing.map((c) => t.caps[c] || c).join(', ')) }}</span>
             <!-- En quien aprueba: si dijo que le llegan los avisos. Es un dato (gris): deja
                  ver a cuál no le suena un pedido que lleva tiempo sin respuesta. -->
             <span v-if="m.notified !== undefined" class="tag runs" :data-testid="'notify-' + m.id">{{ m.notified ? t.dev_notify_yes : t.dev_notify_unknown }}</span>
@@ -2671,6 +2689,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                     @click="toggleCap(m, c)">{{ t.caps[c] }}</button>
             <span v-if="!capsOf(m).length" class="muted">{{ t.caps_none }}</span>
           </div>
+          <p v-if="m.missing.length" class="warn" :data-testid="'needs-note-' + m.id">
+            {{ t.dev_needs_b(m.missing.map((c) => t.caps[c] || c).join(', ')) }}
+            <button class="btn ghost sm" :data-testid="'needs-add-' + m.id" :disabled="!isMaster || busy === 'caps-save'" @click="addMissing(m)">{{ t.dev_needs_add }}</button>
+          </p>
           <p v-if="m.cn" class="muted svc-note">{{ t.service_note }}</p>
           <!-- APARATO EN DEUDA: está en el acta pero no puede abrir lo suyo. Pasa siempre
                que entra uno nuevo — envolverle su llave exige abrir la de contenido, y eso
