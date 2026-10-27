@@ -262,7 +262,8 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
                     <button v-else class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, true)" data-testid="admin-turn-on">{{ t.turn_on }}</button>
                     <button v-if="r.adminOn !== null" class="btn btn-ghost small" :disabled="!!a.busy" @click="setOn(a, r, null)" data-testid="admin-release">{{ t.release }}</button>
                   </template>
-                  <button class="btn btn-ghost small" :disabled="!!a.busy || !r.paypalId" @click="a.confirm = { id: r.id, op: 'refund' }" data-testid="admin-refund">{{ t.refund_btn }}</button>
+                  <!-- Sin cargo no hay ni habrá cobro que devolver: no se ofrece (dueño, 2026-10-27). -->
+                  <button v-if="r.status !== 'COMP'" class="btn btn-ghost small" :disabled="!!a.busy || !r.paypalId" @click="a.confirm = { id: r.id, op: 'refund' }" data-testid="admin-refund">{{ t.refund_btn }}</button>
                   <button class="btn btn-ghost small" :disabled="!!a.busy || r.stack === 'deleted' || r.stack === 'none'" @click="a.confirm = { id: r.id, op: 'remove' }" data-testid="admin-remove">{{ t.remove_btn }}</button>
                 </template>
               </div>
