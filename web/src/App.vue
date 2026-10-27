@@ -14,7 +14,7 @@ const DISCORD = 'https://discord.gg/D648uq7cth'
 /* ---------------- i18n (es/en · tuteo, sin voseo · lenguaje llano) ---------------- */
 const I18N = {
   es: {
-    nav_how: 'Cómo funciona', nav_download: 'Descargar', nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_hosted: 'En la nube', nav_admin: 'Administrar', nav_docs: 'Documentación', nav_home: 'Inicio',
+    nav_approvals: 'Pedidos', nav_vault: 'Mi bóveda', nav_hosted: 'En la nube', nav_admin: 'Administrar', nav_docs: 'Documentación', nav_home: 'Inicio', nav_label: 'Secciones',
     nav_menu: 'Menú', nav_menu_label: 'Navegación',
     hero_kicker: 'Tu bóveda personal · en tu propia máquina',
     hero_title: 'Toda tu información, en un solo lugar seguro',
@@ -89,7 +89,6 @@ const I18N = {
     m3_desktop: 'Necesitas Docker Desktop instalado. Y ojo con una cosa: el volumen ES tu cuenta. Si lo borras, se perdió. Tampoco hace falta abrir puertos: la bóveda no escucha nada.',
     dl_pair_note: 'Según cómo la hayas instalado, el comando se escribe con un prefijo distinto. Está explicado abajo, en «Cómo se usa».',
     dl_other: 'Las tres formas dejan la misma bóveda: elige la que te resulte más cómoda.',
-    nav_use: 'Cómo se usa',
     use_title: 'Cómo se usa, una vez instalada',
     use_lead: 'Casi todo el tiempo no tienes que hacer nada: la bóveda trabaja de fondo. Con el instalador de Linux y con Docker arranca sola cada vez que enciendes la computadora; si la levantaste con el comando de Windows o macOS, funciona mientras dejes esa ventana abierta. Esto es lo poco que sí harás alguna vez.',
     use_cards: [
@@ -143,7 +142,7 @@ const I18N = {
     foot_eco: 'Parte del ecosistema Dotrino', foot_src: 'Código', foot_discord: 'Discord',
   },
   en: {
-    nav_how: 'How it works', nav_download: 'Download', nav_approvals: 'Requests', nav_vault: 'My vault', nav_hosted: 'In the cloud', nav_admin: 'Manage', nav_docs: 'Docs', nav_home: 'Home',
+    nav_approvals: 'Requests', nav_vault: 'My vault', nav_hosted: 'In the cloud', nav_admin: 'Manage', nav_docs: 'Docs', nav_home: 'Home', nav_label: 'Sections',
     nav_menu: 'Menu', nav_menu_label: 'Navigation',
     hero_kicker: 'Your personal vault · on your own machine',
     hero_title: 'All your information, in one safe place',
@@ -217,7 +216,6 @@ const I18N = {
     m3_desktop: 'You need Docker Desktop installed. And one thing to keep in mind: the volume IS your account. If you delete it, it is gone. No ports to open either: the vault listens to nothing.',
     dl_pair_note: 'Depending on how you installed it, the command takes a different prefix. It is explained below, under “How to use it”.',
     dl_other: 'All three ways leave you the same vault: pick whichever suits you.',
-    nav_use: 'How to use it',
     use_title: 'How to use it, once installed',
     use_lead: 'Most of the time you do nothing: the vault works in the background. With the Linux installer and with Docker it starts on its own every time you turn the computer on; if you launched it with the Windows or macOS command, it runs while you leave that window open. This is the little you will actually do.',
     use_cards: [
@@ -471,8 +469,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
-    <dotrino-topbar
+  <!-- La barra estándar ocupa TODO el ancho, y la navegación va debajo en pestañas (dueño,
+       2026-10-27). El contenido sigue en su columna (`.page`). -->
+  <dotrino-topbar
       ref="topbar"
       brand="Dotrino Vault"
       icon="/icon.svg"
@@ -482,17 +481,20 @@ onMounted(async () => {
       support-discord="https://discord.gg/D648uq7cth"
       :lang="lang"
       @dotrino-lang="onTopbarLang"
-    >
-      <a v-if="view === 'home'" href="#how" @click="goTo('how', $event)">{{ t.nav_how }}</a>
-      <a v-if="view === 'home'" href="#download" @click="goTo('download', $event)">{{ t.nav_download }}</a>
-      <a v-if="view === 'home'" href="#use" data-testid="nav-use" @click="goTo('use', $event)">{{ t.nav_use }}</a>
-      <a href="/vault" data-testid="nav-vault" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
-      <a href="/approvals" data-testid="nav-approvals" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
-      <a v-if="!nativeApp" href="/hosted" data-testid="nav-hosted" :class="{ on: view === 'hosted' }" @click="go('hosted', $event)">{{ t.nav_hosted }}</a>
-      <a v-if="accountsAgents.length" href="/admin" data-testid="nav-admin" :class="{ on: view === 'admin' }" @click="go('admin', $event)">{{ t.nav_admin }}</a>
-      <a href="https://wiki.dotrino.com/vault/modelo/" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }}</a>
-      <a v-if="view !== 'home'" href="/" data-testid="nav-mobile-home" @click="go('home', $event)">{{ t.nav_home }}</a>
-    </dotrino-topbar>
+    ></dotrino-topbar>
+
+  <nav class="tabs" :aria-label="t.nav_label">
+    <div class="tabs-in">
+      <a href="/" data-testid="nav-home" :aria-current="view === 'home' ? 'page' : null" :class="{ on: view === 'home' }" @click="go('home', $event)">{{ t.nav_home }}</a>
+      <a href="/vault" data-testid="nav-vault" :aria-current="view === 'vault' ? 'page' : null" :class="{ on: view === 'vault' }" @click="go('vault', $event)">{{ t.nav_vault }}</a>
+      <a href="/approvals" data-testid="nav-approvals" :aria-current="view === 'approvals' ? 'page' : null" :class="{ on: view === 'approvals' }" @click="go('approvals', $event)">{{ t.nav_approvals }}</a>
+      <a v-if="!nativeApp" href="/hosted" data-testid="nav-hosted" :aria-current="view === 'hosted' ? 'page' : null" :class="{ on: view === 'hosted' }" @click="go('hosted', $event)">{{ t.nav_hosted }}</a>
+      <a v-if="accountsAgents.length" href="/admin" data-testid="nav-admin" :aria-current="view === 'admin' ? 'page' : null" :class="{ on: view === 'admin' }" @click="go('admin', $event)">{{ t.nav_admin }}</a>
+      <a href="https://wiki.dotrino.com/vault/modelo/" class="ext" data-testid="nav-docs" rel="noopener">{{ t.nav_docs }} ↗</a>
+    </div>
+  </nav>
+
+  <div class="page">
 
     <main>
       <Hosted v-if="view === 'hosted'" :lang="lang" />

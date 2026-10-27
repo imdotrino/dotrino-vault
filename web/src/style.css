@@ -25,61 +25,30 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
 
 .page { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
 
-/* ---------- topbar ---------- */
-.topbar {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  padding: 16px 0; padding-top: max(16px, env(safe-area-inset-top));
+/* ---------- pestañas bajo la barra (dueño, 2026-10-27) ----------
+   La barra es <dotrino-topbar> a todo el ancho; la navegación va debajo, en una fila de
+   pestañas también a todo el ancho, con su contenido alineado a la columna de `.page`. En
+   pantallas estrechas la fila se desplaza de lado en vez de partirse. */
+.tabs {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  position: sticky; top: 0; z-index: 30;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; text-decoration: none; font-size: 1.1rem; }
-.brand img { display: block; }
-.navlinks { display: flex; gap: 22px; margin-left: 8px; }
-.navlinks a, dotrino-topbar > a { color: var(--muted); text-decoration: none; font-size: .95rem; }
-.navlinks a:hover, dotrino-topbar > a:hover { color: var(--text); }
-.navlinks a.on, .mobile-nav a.on, dotrino-topbar > a.on { color: var(--accent); font-weight: 700; }
+.tabs-in {
+  max-width: 1040px; margin: 0 auto; padding: 0 20px;
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none;
+}
+.tabs-in::-webkit-scrollbar { display: none; }
+.tabs a {
+  flex: none; padding: 12px 14px; margin-bottom: -1px;
+  color: var(--muted); text-decoration: none; font-size: .95rem; font-weight: 600;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.tabs a:hover { color: var(--text); }
+.tabs a.on { color: var(--accent); border-bottom-color: var(--accent); }
+.tabs a.ext { margin-left: auto; }
+.tabs a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
 .actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
-
-/* menú móvil: en pantallas estrechas `.navlinks` se oculta (§5); el botón ☰
-   devuelve Inicio, Mis dispositivos y el resto de la barra de escritorio. */
-.menu-toggle {
-  display: none; align-items: center; justify-content: center;
-  width: 44px; height: 44px; margin-left: auto;
-  border: 1px solid var(--line); border-radius: 12px;
-  background: var(--surface); color: var(--text); cursor: pointer;
-}
-.menu-toggle:hover { border-color: var(--accent2); }
-.menu-bars { display: flex; flex-direction: column; gap: 5px; width: 18px; }
-.menu-bars span {
-  display: block; height: 2px; border-radius: 1px;
-  background: currentColor; transition: transform .15s, opacity .15s;
-}
-.menu-toggle[aria-expanded="true"] .menu-bars span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
-.menu-toggle[aria-expanded="true"] .menu-bars span:nth-child(2) { opacity: 0; }
-.menu-toggle[aria-expanded="true"] .menu-bars span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
-.mobile-nav-backdrop {
-  display: none; position: fixed; inset: 0; z-index: 40;
-  background: rgba(4, 8, 16, .55);
-}
-.mobile-nav {
-  display: none; position: fixed; z-index: 50;
-  top: calc(max(16px, env(safe-area-inset-top)) + 62px);
-  left: 20px; right: 20px;
-  flex-direction: column; gap: 4px;
-  padding: 10px; border-radius: 16px;
-  background: var(--surface); border: 1px solid var(--line);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, .45);
-}
-.mobile-nav a {
-  display: block; padding: 14px 16px; border-radius: 12px;
-  color: var(--text); text-decoration: none; font-weight: 600; font-size: 1rem;
-}
-.mobile-nav a:hover { background: var(--bg2); }
-
-.lang-selector { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-.lang-selector button {
-  background: transparent; color: var(--muted); border: 0; padding: 5px 11px;
-  font-size: .82rem; font-weight: 700; cursor: pointer;
-}
-.lang-selector button.on { background: var(--accent2); color: var(--dt-accent-ink); }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -177,14 +146,8 @@ section h2 { font-size: clamp(1.5rem, 4vw, 2.1rem); margin: 0 0 18px; }
 .foot-links a:hover { color: var(--accent); }
 .foot-lic { color: var(--dt-accent); font-size: .82rem; margin: 0; }
 
-/* ---------- mobile: acciones a segunda fila (CONVENCIONES §5) ---------- */
+/* ---------- mobile ---------- */
 @media (max-width: 600px) {
-  .navlinks { display: none; }
-  .menu-toggle { display: inline-flex; }
-  .mobile-nav-backdrop { display: block; }
-  .mobile-nav { display: none; }
-  .mobile-nav.open { display: flex; }
-  .actions { flex-basis: 100%; margin-left: 0; justify-content: flex-end; }
   .hero .shield { display: none; }
 }
 .use-cmds .cmds-how { color: var(--muted); font-size: .92rem; margin: 0 0 8px; }
