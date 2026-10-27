@@ -119,6 +119,57 @@ test('nace sellada, entra en la cuenta con el código del dueño y sella', async
   assert.equal(st.sealer, true, 'entró con `sella`')
 })
 
+// LA PRIMERA SESIÓN, la que sigue al alta con el candado recién nacido y ABIERTO (`onEnrollRun`
+// del handler): ahí la alojada tiene que quedar completa, sin que nadie la abra después. Lo que
+// le faltó a la Nube de Seyacat (2026-10-27): su llave de sellado sin nombrar y su llave de
+// cifrado bajo la contraseña, así que cerrada no abría la llave de contenido ni enseñaba cajones.
+const tiene = async (v, ns, key) => ((await v.listSecrets())[ns] || []).some((x) => x.key === key)
+const espera = async (cond, n = 80) => { for (let i = 0; i < n && !(await cond()); i++) await sleep(100); return cond() }
+const suFila = async (v) => (await v.identity.profileActa()).acta.members.find((m) => m.pub === alojada)
+
+test('primera sesión tras el alta: nombra su llave de sellado, abre la llave de contenido y recibe los cajones', async () => {
+  await vault.setSecret('primera', 'TOKEN', 'del pc', false)
+  await sleep(3500)
+  const dir = tmp('join-primera-')
+  const lock = openLock(dir)
+  const starter = vaultStarter({
+    startVault, locked: true, lock,
+    onReady: async (v) => ({
+      locked: (await v.takeMasterKey()).locked,
+      sealPub: await espera(async () => !!(await suFila(v))?.sealPub),
+      cek: !!(await v.identity.contentKey()),
+      drawers: await espera(() => tiene(v, 'primera', 'TOKEN'))
+    })
+  })
+  // Como `onEnrollRun`: el candado entra ya abierto.
+  const r = await runSession({
+    store, dir, proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: async (args) => { lock.open(derivada); return starter(args) }
+  })
+  assert.equal(r.ready.locked, false, 'abierta, como nace')
+  assert.equal(r.ready.sealPub, true, 'su llave de sellado está en el acta')
+  assert.equal(r.ready.cek, true, 'abre la llave de contenido')
+  assert.equal(r.ready.drawers, true, 'recibió los cajones de la otra bóveda')
+})
+
+test('después, CERRADA, sigue abriendo la llave de contenido y cifra la lista de la consola', async () => {
+  const r = await runSession({
+    store, dir: tmp('join-cerrada-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({
+      startVault, locked: true,
+      onReady: async (v) => {
+        let lista = null
+        try { lista = await v.identity.sealContent('lista') } catch (e) { lista = e.message }
+        return { locked: (await v.takeMasterKey()).locked, cek: !!(await v.identity.contentKey()), lista, drawers: await tiene(v, 'primera', 'TOKEN') }
+      }
+    })
+  })
+  assert.equal(r.ready.locked, true, 'nace cerrada en cada sesión')
+  assert.equal(r.ready.cek, true, 'cerrada, abre la llave de contenido')
+  assert.equal(typeof r.ready.lista, 'object', `cifra la lista: ${r.ready.lista}`)
+  assert.equal(r.ready.drawers, true, 'y los cajones siguen ahí')
+})
+
 test('la maestra no se abre sin la contraseña: ni con el almacén y KMS en la mano', async () => {
   const dir = tmp('join-ladron-')
   for (const [name, o] of store.objects) {
