@@ -1321,17 +1321,14 @@ function openServeWindow () {
   window.open(location.origin + '/vault', 'dotrino-vault-serve', 'popup,width=480,height=720')
 }
 /**
- * PRIMERO SE ELIGE LA BÓVEDA, entre las de TODOS tus perfiles (dueño, 2026-10-26: «en esta
- * página debería primero escoger la bóveda que quiero abrir para administrar», como Terminal
- * con sus máquinas). Lo que lo pidió: con la página en el perfil Dotrino, la bóveda de la nube
- * de Seyacat no salía por ningún lado, y no había forma de saber por qué.
+ * PRIMERO SE ELIGE LA BÓVEDA (dueño, 2026-10-26: «en esta página debería primero escoger la
+ * bóveda que quiero abrir para administrar», como Terminal con sus máquinas), y SOLO ENTRE LAS
+ * DEL PERFIL ACTIVO (dueño, 2026-10-27: «no tengo por qué ver bóvedas que no son del perfil
+ * seleccionado»). Las de otro perfil se ven cambiando de perfil, desde su menú.
  *
- * La lista sale de `listProfiles` (identity ≥ 0.129.0), que lee el acta de cada perfil sin
- * cambiar el activo. Elegir una de OTRO perfil sí lo cambia, y eso es recargar (multi-perfil
- * no es reactivo, por diseño): la elección viaja en `sessionStorage` y se aplica al volver.
- * Con una sola bóveda en total no se pregunta nada.
+ * La lista sale de `listProfiles` (identity ≥ 0.130.3). Con una sola bóveda no se pregunta nada.
  */
-const allVaults = computed(() => profiles.value.flatMap((p) => (p.vaults || []).map((v) => ({
+const allVaults = computed(() => profiles.value.filter((p) => p.current).flatMap((p) => (p.vaults || []).map((v) => ({
   ...v, profileId: p.id, profileName: p.name || '', current: !!p.current,
   here: !!p.current && !!vaults.value.find((x) => x.comm === v.comm)?.here
 }))))
