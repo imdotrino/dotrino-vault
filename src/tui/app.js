@@ -730,7 +730,7 @@ function capChecklist (i, t, { cn = null, has, real = has }) {
     // qué vas a firmar — que es justo lo que hace peligroso acumular cambios.
     const cambia = has.has(cap) !== real.has(cap)
     if (cambia) touched++
-    // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +administra`—
+    // El título ES el nombre del permiso —el mismo que se teclea en `caps <ID> +admin`—
     // así que no hay que repetirlo al lado. Lo que hace va debajo.
     const line = ` ${mark}${cambia ? t.bold('*') : ' '} ${cap === 'admin' ? t.bold(name) : name}`
     rows.push({ text: line, sel: true, meta: { cap } })

@@ -35,11 +35,11 @@ const AUD = 'https://accounts.dotrino.com'
 const FORMAT_V = 1
 /**
  * Lo que se vende, y con qué invitación entra cada uno: la réplica solo reparte (`replica`); la
- * segunda bóveda sella (`sella`) y firma, lee y guarda como una bóveda.
+ * segunda bóveda sella el acta (`sealer`) y firma, lee y guarda como una bóveda.
  */
 const PRODUCTS = {
   replica: { cmd: 'dotrino-vault pair --scope replica --quiet', scope: ['vault:replica'], caps: ['replica'] },
-  vault: { cmd: 'dotrino-vault pair --scope sella,firma,lee,guarda --quiet', scope: ['vault:sign'], caps: ['sign', 'read', 'store', 'sealer'] }
+  vault: { cmd: 'dotrino-vault pair --scope sealer,sign,read,store --quiet', scope: ['vault:sign'], caps: ['sign', 'read', 'store', 'sealer'] }
 }
 const PASSWORD_MIN = 12
 const WIKI = { es: 'https://wiki.dotrino.com/vault/nube/', en: 'https://wiki.dotrino.com/en/vault/nube/' }

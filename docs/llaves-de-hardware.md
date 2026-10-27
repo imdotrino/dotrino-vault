@@ -341,7 +341,7 @@ esconder:
 
 ### Nivel 5 — El teléfono, que ya existe · **la victoria más barata**
 
-`dotrino-app` ya sostiene `+aprueba`. Meter esa llave en **Android Keystore con
+`dotrino-app` ya sostiene `+approve`. Meter esa llave en **Android Keystore con
 StrongBox** (`setUserAuthenticationRequired`, huella) o en el **Secure Enclave** de
 iOS es hardware de verdad, y **no hay que comprar nada ni escribir criptografía
 nueva**: es una bandera al generar la llave.

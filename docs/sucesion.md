@@ -39,7 +39,7 @@ Es **cualquier miembro con la capacidad**. Así que una segunda bóveda (o un se
 teléfono, o los dos) aprueba sin tocar una línea de código:
 
 ```
-dotrino-vault caps <ID-de-la-segunda-bóveda> +aprueba
+dotrino-vault caps <ID-de-la-segunda-bóveda> +approve
 ```
 
 A partir de ahí, la salida de claves la puede autorizar quien esté despierto. **Si el
@@ -132,7 +132,7 @@ lo hereda en silencio.
 
 ## 7. Orden propuesto
 
-1. **`caps +aprueba` a una segunda bóveda.** Ya funciona; es una decisión, no una tarea.
+1. **`caps +approve` a una segunda bóveda.** Ya funciona; es una decisión, no una tarea.
 2. **Oráculo de frescura** (§2.4.2). Es el cuello de botella de todo lo demás.
 3. **Sucesor designado a mano** (§A): campo en el acta, comprobación, y el aviso en la
    consola de qué se pierde si la principal vuelve con una rama muerta.

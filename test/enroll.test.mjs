@@ -271,7 +271,7 @@ test('contraseñas: el scope del emparejamiento se convierte en la capacidad del
 
   assert.equal(admitidos.length, 1, 'el aparato no entró en el acta')
   assert.ok(admitidos[0].caps.includes('passwords'),
-    'emparejar con --scope contrasenas no concedió el permiso: ' + JSON.stringify(admitidos[0].caps))
+    'emparejar con --scope passwords no concedió el permiso: ' + JSON.stringify(admitidos[0].caps))
 })
 
 test('contraseñas: un emparejamiento normal NO concede el permiso', async () => {

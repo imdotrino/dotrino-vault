@@ -54,8 +54,8 @@
 #   una variable de entorno la ve cualquiera con `docker inspect`. Se usa UNA vez y queda
 #   anotada: reiniciar el contenedor no vuelve a pedir entrar.
 #
-#   Y te deja donde quieres estar: dos bóvedas en la misma cuenta. Dale `+sella` a la nueva
-#   (`dotrino-vault caps <ID> +sella` en tu PC) y podrá admitir aparatos ella sola el día
+#   Y te deja donde quieres estar: dos bóvedas en la misma cuenta. Dale `+sealer` a la nueva
+#   (`dotrino-vault caps <ID> +sealer` en tu PC) y podrá admitir aparatos ella sola el día
 #   que la primera se pierda. Ver `docs/replicas.md`.
 #
 # ⚠️ EN UN CONTENEDOR, EL KMS NO ES OPCIONAL. Y esto costó descubrirlo:

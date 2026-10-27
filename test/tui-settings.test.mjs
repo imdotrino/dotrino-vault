@@ -37,7 +37,7 @@ test('`s` entra a los ajustes, dice la regla como frase, y Esc vuelve', async ()
   const rows = texto(V.settingsRows(st, makeTheme()))
   assert.match(rows, /Esta bóveda se actualiza sola, sin pedir aprobación\./, 'por defecto se actualiza sola')
   assert.match(rows, /todos los perfiles/, 'dice que es global')
-  assert.match(rows, /ningún perfil tiene un aparato con «aprueba», la bóveda se actualiza sola/)
+  assert.match(rows, /ningún perfil tiene un aparato con «approve», la bóveda se actualiza sola/)
   V.render(term, st)
   assert.match(term.last[3], /Ajustes de esta bóveda/)
   for (const [cols, nrows] of [[100, 24], [30, 10]]) {

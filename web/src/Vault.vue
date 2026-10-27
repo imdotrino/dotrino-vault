@@ -262,8 +262,8 @@ function autor () {
 
 /**
  * Quién puede pedir credenciales lo dice el ACTA, como cualquier otro permiso: los
- * miembros con la capacidad `passwords` (`caps <ID> +contrasenas`, o al emparejar con
- * `--scope contrasenas`). Aquí no hay una segunda lista ni un código que pegar — un
+ * miembros con la capacidad `passwords` (`caps <ID> +passwords`, o al emparejar con
+ * `--scope passwords`). Aquí no hay una segunda lista ni un código que pegar — un
  * gestor entra como cualquier otro aparato del perfil.
  */
 async function listDevices () {

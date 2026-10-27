@@ -127,7 +127,7 @@ revoca borrando un sobre.
 ## Descartado, para que no vuelva
 
 - **Un permiso que abra sin contraseña.** Un admin robado abriría la bóveda él solo.
-- **Hacer sellador al admin (`+sella`).** Es *más* de lo que se pide: un sellador sella el
+- **Hacer sellador al admin (`+sealer`).** Es *más* de lo que se pide: un sellador sella el
   acta y —decidido el 2026-08-30— entra en TODOS los cajones. En una página web, eso mete
   en el navegador llaves que abren todos los secretos.
 - **Una cadena de sobres**: que la contraseña del admin abriera un sobre guardado en el

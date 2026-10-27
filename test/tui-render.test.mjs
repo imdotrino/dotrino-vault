@@ -506,23 +506,23 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   // EL TÍTULO ES EL NOMBRE DEL PERMISO, y es la palabra que se teclea en `caps <ID> +…`
   // (dueño, 2026-09-03: «deben decir siempre lo que SON»). Describirlo en su lugar dejaba
   // una lista donde no se sabía qué permiso era cuál ni cómo nombrarlo fuera de aquí.
-  assert.match(text, /\[x\] +firma$/m, 'lo que tiene va marcado')
-  assert.match(text, /\[ \] +administra$/m, 'lo que no tiene, sin marcar')
+  assert.match(text, /\[x\] +sign$/m, 'lo que tiene va marcado')
+  assert.match(text, /\[ \] +admin$/m, 'lo que no tiene, sin marcar')
   assert.match(text, /sin venir aquí/, 'y debajo, el detalle')
   // Nada de argot: la pantalla la lee alguien que no sabe qué es un scope (§9.1).
   assert.ok(!/vault:|scope|cert/i.test(text), 'sin jerga: ' + text)
   // Y la palabra tiene que servir en la CLI: si el título dejara de coincidir con lo que
   // acepta `caps`, la pantalla explicaría un permiso que después no se puede conceder.
   const ctl = fs.readFileSync(new URL('../src/ctl.js', import.meta.url), 'utf8')
-  for (const palabra of ['firma', 'guarda', 'lee', 'administra', 'aprueba', 'contrasenas',
-    'sella', 'desatendido', 'replica']) {
+  for (const palabra of ['sign', 'store', 'read', 'admin', 'approve', 'passwords',
+    'sealer', 'unattended', 'replica']) {
     assert.match(text, new RegExp('^ \\[[x ]\\] +' + palabra + '$', 'm'),
       'la pantalla nombra «' + palabra + '»')
     assert.match(ctl, new RegExp('[{,\\s]' + palabra + ':'),
       '`caps <ID> +' + palabra + '` tiene que existir')
   }
   // Se puede elegir cada permiso, y están LOS NUEVE que el acta reconoce (`passkeys` entró
-  // con identity 0.100.0 y se fusionó en `contrasenas` con la 0.118.0). Eran cinco:
+  // con identity 0.100.0 y se fusionó en `passwords` con la 0.118.0). Eran cinco:
   // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
   // pantalla que se llama «permisos»; `desatendido` era peor —una marca local de la
   // bóveda, invisible aquí y con el sentido invertido—; y `replica` entró el 2026-09-02.

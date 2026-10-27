@@ -311,7 +311,7 @@ Nunca un botón «Aprobar» a secas, y **jamás** un camino donde el código lle
   + dispositivo-nuevo, cada uno en su caja, con la bóveda corriendo **como binario** y
   manejada con su CLI real. El admin empareja y aprueba al nuevo **sin tocar el PC**, y el
   aviso firmado llega a los demás. Cubre también: sin `admin` no se administra, conceder
-  `+administra` llega al cert al renovar, `pair` con scope prohibido, quitar `-administra`
+  `+admin` llega al cert al renovar, `pair` con scope prohibido, quitar `-admin`
   corta en el acto, y F4 por el camino real.
 
   **Ya sirvió, y de sobra.** Destapó que esto no funcionaba en absoluto (§11).
@@ -341,7 +341,7 @@ tapaban entre sí.
 
 1. **El vault dependía de un `@dotrino/identity` anterior a la capacidad `admin`**
    (`0.37.1`, mientras el pilar ya iba por `0.38.0`). `cleanCaps` filtra contra `CAPS`, así
-   que el acta **descartaba `admin` en silencio**: `caps <ID> +administra` decía «Listo» y
+   que el acta **descartaba `admin` en silencio**: `caps <ID> +admin` decía «Listo» y
    no cambiaba nada. Un pilar publicado no sirve de nada si quien lo consume no lo sube.
 2. **El scope del cert se copiaba del cert viejo al renovar.** Como la autorización mira el
    **cert**, no el acta, un permiso concedido después del emparejamiento **no llegaba

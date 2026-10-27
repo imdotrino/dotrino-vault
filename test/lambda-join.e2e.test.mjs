@@ -99,7 +99,7 @@ test('con la invitación de otra cuenta no hay código, y no queda nada a medias
 
 // SIN `sella` NO ES UNA BÓVEDA (2026-10-27): la de Seyacat entró con una invitación sin ese
 // permiso y quedó como un aparato más. Se para antes del código, y no queda nada a medias.
-test('con una invitación que no da «sella» no hay código, y no queda nada a medias', async () => {
+test('con una invitación que no da «sealer» no hay código, y no queda nada a medias', async () => {
   const sinSella = encodeInvite((await vault.startPairing({ scope: ['vault:sign'], caps: ['sign', 'read', 'store'], label: 'sin sella' })).qr)
   const r = alta(sinSella, 'req-sin-sella')
   const door = await pairing('req-sin-sella', (g) => g.phase === 'door')

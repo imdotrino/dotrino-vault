@@ -73,7 +73,7 @@ solo de qué cert se emitió un día.
 
 ```sh
 dotrino-vault members            # el acta: qué llaves son tuyas y qué puede hacer cada una
-dotrino-vault caps <ID> +firma   # cambia permisos (+firma -guarda +lee +administra +aprueba …)
+dotrino-vault caps <ID> +sign   # cambia permisos (+sign -store +read +admin +approve …)
 ```
 
 **Los certificados caducan y se renuevan solos.** Un cert dura **30 días**. Mientras
@@ -293,7 +293,7 @@ dotrino-vault approve <código>     # aprueba tecleando los 6 dígitos que MUEST
 dotrino-vault reject  <deviceId>   # rechaza un dispositivo pendiente
 dotrino-vault devices              # lista dispositivos enrolados / revocados
 dotrino-vault members              # el acta del perfil: qué llaves son tuyas y qué puede cada una
-dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+firma -guarda +lee +administra +aprueba …)
+dotrino-vault caps <ID> ±permiso   # cambia lo que puede un dispositivo (+sign -store +read +admin +approve …)
 dotrino-vault revoke  <nonce>      # revoca un dispositivo (le ordena autoborrarse)
 dotrino-vault block   <ID>         # lo deja fuera sin quitarlo del acta; unblock <ID> lo deshace (solo aquí o por el admin)
 dotrino-vault activity [n]         # bitácora de seguridad: firmas, renovaciones, enrolados, rechazos
@@ -831,12 +831,12 @@ los secretos en el entorno de un proceso que no es Node). Primer consumidor:
 ### Aprobación desde el teléfono (un aparato que pide permiso para recibir claves)
 
 Liberar claves privadas a un aparato puede exigir el **visto bueno de otro aparato** (el
-teléfono, con `caps <ID> +aprueba`). Es una propiedad **del aparato**, no del cajón: el VPS
+teléfono, con `caps <ID> +approve`). Es una propiedad **del aparato**, no del cajón: el VPS
 desatendido no pide; la PC del dueño sí. Por defecto nadie pide; se fija al enrolar o se
 cambia después como un permiso más:
 
 ```sh
-dotrino-vault caps <ID-del-teléfono> +aprueba        # quién aprueba (no viaja en un QR)
+dotrino-vault caps <ID-del-teléfono> +approve        # quién aprueba (no viaja en un QR)
 dotrino-vault pair --service claude --approval       # el que entre pedirá permiso
 dotrino-vault caps <ID> +permiso | -permiso          # cambiarlo después
 dotrino-env run --ns claude -- node mi-script.js     # el proceso espera el sí…

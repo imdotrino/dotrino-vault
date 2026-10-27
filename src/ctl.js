@@ -280,7 +280,7 @@ async function cmdPair (args = []) {
   }
   // --admin: el aparato que entre por esta invitación podrá ADMINISTRAR (la consola).
   // El QR no lleva nada: es una nota local de la bóveda y el permiso se aplica al aprobar
-  // con el código que tecleas aquí. Ahorra el `caps <ID> +administra` de después, que en un
+  // con el código que tecleas aquí. Ahorra el `caps <ID> +admin` de después, que en un
   // contenedor es otro `docker exec` y una vuelta a buscar el ID.
   const admin = args.includes('--admin')
   // --quiet: escupe SOLO la invitación (una línea) y termina. Sin QR y sin esperar.
@@ -313,14 +313,14 @@ async function cmdPair (args = []) {
   let pairCaps = null
   if (scIdx >= 0) {
     const raw = args[scIdx + 1]
-    if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope firma,lee,guarda,administra,aprueba,contrasenas,secrets:<ns>'); process.exit(2) }
+    if (!raw || raw.startsWith('-')) { console.error('uso: dotrino-vault pair --scope %s,secrets:<ns>', CAP_WORDS.join(',')); process.exit(2) }
     scope = []
     pairCaps = []
     for (const tok of raw.split(',').map((t) => t.trim()).filter(Boolean)) {
       const m = /^secrets:([a-z0-9-]{1,32})$/.exec(tok)
       if (m) { scope.push('vault:secrets:' + m[1]); continue }
       const cap = CAP_BY_WORD[tok.toLowerCase()]
-      if (!cap) { console.error('permiso desconocido: %s  (%s | secrets:<ns>)', tok, Object.keys(CAP_BY_WORD).join(' | ')); process.exit(2) }
+      if (!cap) { console.error('permiso desconocido: %s  (%s | secrets:<ns>)', tok, CAP_WORDS.join(' | ')); process.exit(2) }
       pairCaps.push(cap)
     }
     if (service) scope.push('vault:secrets:' + service)
@@ -446,7 +446,7 @@ function cmdApprove (code) {
  *
  * Es el papel contrario a `pair`: aquí no se invita, se acepta. Y lo que entra en el acta
  * es la llave de ESTA bóveda, no una de aparato inventada — por eso después se le puede
- * dar `+sella` y que sea el respaldo de verdad de la otra.
+ * dar `+sealer` y que sea el respaldo de verdad de la otra.
  *
  * El código que sale por pantalla hay que TIPEARLO en la otra bóveda (`approve`): una
  * invitación interceptada no basta para entrar.
@@ -516,7 +516,7 @@ async function cmdJoin (rest) {
     if (d.state === 'done') {
       console.log('Listo: esta bóveda ya es miembro de esa cuenta (acta #%s).', d.seq ?? '?')
       if (d.profile) console.log('La cuenta vive aquí como el perfil %s  (dotrino-vault profile ls).', d.profile)
-      console.log('Para que además pueda SELLAR, en la otra:  dotrino-vault caps <ID> +sella')
+      console.log('Para que además pueda SELLAR, en la otra:  dotrino-vault caps <ID> +sealer')
       return
     }
     if (d.state === 'error') { console.error('No se pudo entrar: %s', d.error); process.exit(1) }
@@ -698,8 +698,8 @@ async function cmdMembers () {
     console.log('\n  %sEsta bóveda corre %s %s (protocolo %d)%s',
       D, record.vault.product, record.vault.version, record.vault.protocol, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +firma | -firma | +guarda | -guarda | +lee | -lee | +administra | +aprueba | +contrasenas | +sella | +desatendido | +replica')
-  console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «aprueba» (en cada arranque).')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +sign | -sign | +store | -store | +read | -read | +admin | +approve | +passwords | +sealer | +unattended | +replica')
+  console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «approve» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
   console.log('  Los servicios solo pueden abrir las claves de su propio nombre; eso no se cambia aquí.\n')
@@ -774,49 +774,42 @@ async function findMember (id) {
  * otro, y por lo tanto viaja, se ve en la pantalla de permisos y lo respeta cualquier
  * bóveda de la cuenta:
  *
- *   dotrino-vault caps <ID> +desatendido    ← se lleva las claves solo
- *   dotrino-vault caps <ID> -desatendido    ← vuelve a pedir permiso (el defecto)
+ *   dotrino-vault caps <ID> +unattended    ← se lleva las claves solo
+ *   dotrino-vault caps <ID> -unattended    ← vuelve a pedir permiso (el defecto)
  */
 
 /**
- * LAS PALABRAS DE LOS PERMISOS, en un solo sitio.
+ * LAS PALABRAS DE LOS PERMISOS, en un solo sitio, y son LOS NOMBRES DEL ACTA, en inglés (dueño,
+ * 2026-10-27: «solo en inglés»). Hubo alias en español (`firma`, `sella`, `desatendido`…) y la
+ * misma cosa tenía dos nombres: el que se tecleaba aquí y el que enseñaba cualquier otra pieza.
  *
- * Las usa `caps <ID> ±permiso` y también `logins add`, que da de alta un aparato que se abre
- * con usuario y contraseña: los dos hablan de lo mismo, así que tienen que llamarlo igual.
- * Tenerlo dos veces es cómo se acaba aceptando `+aprueba` en un comando y no en el otro.
+ * Las usa `caps <ID> ±permiso`, `pair --scope` y también `logins add`, que da de alta un aparato
+ * que se abre con usuario y contraseña: los tres hablan de lo mismo, así que lo llaman igual.
+ *
+ * - `sealer`: SELLAR EL ACTA. Convierte a otra bóveda en respaldo de esta: podrá admitir aparatos
+ *   y cambiar permisos si esta se pierde. No es un traspaso. Se concede con `caps` o al emparejar
+ *   (`pair --scope sealer,…`, que es como entra la bóveda alojada de `dotrino-accounts`).
+ * - `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No tiene maestra
+ *   y no puede abrir nada. A diferencia de `sealer`, SÍ se empareja.
+ * - `passwords`: el gestor (la extensión, la app del teléfono) puede PEDIR credenciales de a una.
+ *   Cubre también las passkeys: hubo un `passkeys` aparte y se fusionó (dueño, 2026-10-16), así que
+ *   quien escriba la palabra vieja recibe lo que hoy significa.
+ * - `unattended`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no entrega nada
+ *   hasta que un aparato con `approve` lo firme (una vez por arranque).
  */
 const CAP_BY_WORD = {
-  firma: 'sign', guarda: 'store', lee: 'read', administra: 'admin', aprueba: 'approve',
-  // `sella`: SELLAR EL ACTA. Es lo que convierte a otra bóveda en respaldo de esta —
-  // podrá admitir aparatos y cambiar permisos si esta se pierde. No es un traspaso:
-  // quien manda sigue mandando. Se concede con `caps` o al emparejar (`pair --scope sella,…`,
-  // que es como entra la bóveda alojada de `dotrino-accounts`).
-  sella: 'sealer', sealer: 'sealer',
-  // `replica`: reparte los sobres que esta bóveda ya firmó, cuando ella no está. No
-  // tiene maestra y no puede abrir nada. A diferencia de `sella`, SÍ se empareja.
-  replica: 'replica', replicador: 'replica',
-  // `contraseñas`: el gestor (la extensión, la app del teléfono) puede PEDIR
-  // credenciales de a una. Se acepta con y sin tilde: nadie escribe la ñ en una CLI.
-  contrasenas: 'passwords', 'contraseñas': 'passwords',
-  // `contraseñas` cubre también las PASSKEYS: hubo un `passkeys` aparte y se fusionó en este
-  // (dueño, 2026-10-16). Quien escriba la palabra vieja recibe lo que hoy significa.
-  passkeys: 'passwords',
-  // `desatendido`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no
-  // entrega nada hasta que un aparato con `aprueba` lo firme (una vez por arranque).
-  //
-  // No se llama `permiso` —como la marca local de antes— a propósito: aquella significaba
-  // «este aparato PIDE permiso» y esta significa lo contrario. Reusar la palabra con el
-  // sentido invertido es la clase de trampa que se paga una madrugada.
-  desatendido: 'unattended', unattended: 'unattended',
   sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
-  passwords: 'passwords'
+  sealer: 'sealer', replica: 'replica', passwords: 'passwords', passkeys: 'passwords',
+  unattended: 'unattended'
 }
+/** Para los mensajes de uso: los nombres que se aceptan, sin el alias viejo. */
+const CAP_WORDS = Object.keys(CAP_BY_WORD).filter((w) => w !== 'passkeys')
 
 /** `dotrino-vault caps <ID> ±permiso` — cambia lo que puede hacer un dispositivo. */
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +firma|-firma|+guarda|-guarda|+lee|-lee|+administra|-administra|+aprueba|-aprueba|+contrasenas|-contrasenas|+sella|-sella|+desatendido|-desatendido')
+    console.error('uso: dotrino-vault caps <ID> +sign|-sign|+store|-store|+read|-read|+admin|-admin|+approve|-approve|+passwords|-passwords|+sealer|-sealer|+unattended|-unattended')
     process.exit(2)
   }
   const s = requireDaemon()
@@ -832,7 +825,7 @@ async function cmdCaps (args = []) {
     const w = c.slice(1).toLowerCase()
     if (w === 'permiso' || w === 'approval') {
       console.error('`%s` ya no existe. Pedir aprobación es el DEFECTO; lo que se concede es lo contrario:', w)
-      console.error('  dotrino-vault caps %s +desatendido   ← se lleva las claves privadas sin aprobación', m.id)
+      console.error('  dotrino-vault caps %s +unattended   ← se lleva las claves privadas sin aprobación', m.id)
       process.exit(2)
     }
   }
@@ -841,7 +834,7 @@ async function cmdCaps (args = []) {
   for (const c of rest) {
     const sign = c[0]
     const cap = CAP_BY_WORD[c.slice(1).toLowerCase()]
-    if (!cap || (sign !== '+' && sign !== '-')) { console.error('permiso no reconocido: %s', c); process.exit(2) }
+    if (!cap || (sign !== '+' && sign !== '-')) { console.error('permiso no reconocido: %s  (±%s)', c, CAP_WORDS.join(' | ')); process.exit(2) }
     if (sign === '+') caps.add(cap); else caps.delete(cap)
   }
   writeReq('caps-request.json', { pub: m.pub, caps: [...caps] })
@@ -1688,7 +1681,7 @@ const LOGINS_USAGE = `uso: dotrino-vault logins <orden>
 
   logins [ls]                 los aparatos que se abren con usuario y contraseña
   logins add <usuario> [nombre del equipo] [±permiso …]
-                              permisos como en «caps» (+aprueba, -guarda, +desatendido…).
+                              permisos como en «caps» (+approve, -store, +unattended…).
                               Sin decir nada: firma, lee y guarda
   logins passwd <usuario>     cambia la contraseña (cierra lo que estuviera abierto)
   logins close <usuario> [sid]  cierra una sesión abierta (sin sid, todas)
@@ -1731,7 +1724,7 @@ async function cmdLogins (rest) {
       for (const a of args.slice(1)) {
         if (a[0] !== '+' && a[0] !== '-') { name.push(a); continue }
         const cap = CAP_BY_WORD[a.slice(1).toLowerCase()]
-        if (!cap) { console.error('permiso no reconocido: %s', a); process.exit(2) }
+        if (!cap) { console.error('permiso no reconocido: %s  (±%s)', a, CAP_WORDS.join(' | ')); process.exit(2) }
         if (a[0] === '+') caps.add(cap); else caps.delete(cap)
       }
       const label = name.join(' ').trim() || 'equipo prestado'
@@ -1867,7 +1860,7 @@ async function cmdUpdate (args = []) {
     if (v === 'on' || v === 'off') writeSettings(dir, { updateApproval: v === 'on' })
     else if (v !== undefined) { console.error('uso: dotrino-vault update --approval [on|off]'); process.exit(2) }
     console.log(readSettings(dir).updateApproval
-      ? 'Esta bóveda pide aprobación antes de actualizarse (a los aparatos con «aprueba» de cualquiera de sus perfiles).'
+      ? 'Esta bóveda pide aprobación antes de actualizarse (a los aparatos con «approve» de cualquiera de sus perfiles).'
       : 'Esta bóveda se actualiza sola, sin pedir aprobación.')
     return
   }
@@ -2548,7 +2541,7 @@ function help () {
                      servicio la arranque · --check solo mira · --no-wait no espera
   update --approval [on|off]
                      el servicio se actualiza solo; con «on» antes pide aprobación a los
-                     aparatos con «aprueba» de cualquier perfil (vale para todos) · sin
+                     aparatos con «approve» de cualquier perfil (vale para todos) · sin
                      valor, dice cómo está
   pair [--save <f>]   inicia un emparejamiento (QR + espera); --save escribe la invitación (.dpair)
   pair --kms <config.json>
@@ -2568,7 +2561,7 @@ function help () {
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
   pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (firma,lee,guarda,administra,
                       aprueba,contrasenas,sella,desatendido,replica) y secrets:<ns>. Sin esto: firma,lee,guarda.
-                      Entra al acta ya con ellos. Se combina con --service: --service eco --scope firma
+                      Entra al acta ya con ellos. Se combina con --service: --service eco --scope sign
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
   secret set <ns> CLAVE=valor CLAVE2=valor2 …
@@ -2612,7 +2605,7 @@ function help () {
                       otro nombre o a otro aparato. Bóveda abierta
   join <invitación> [--name <n>] [--kms <config.json>]
                       ESTA bóveda ENTRA en la cuenta de otra (el papel contrario a pair).
-                      Entra con su propia llave, así que después se le puede dar +sella
+                      Entra con su propia llave, así que después se le puede dar +sealer
                       y ser el respaldo de esa cuenta. La cuenta ajena queda aquí como un
                       PERFIL más (--name la nombra; --kms le pone la clave de disco en el
                       KMS, y solo vale ahora: el perfil se está creando)
@@ -2629,8 +2622,8 @@ function help () {
   me                  tu perfil (nombre, foto, datos) tal como lo tiene la bóveda
   members             el acta del perfil: quién es tuyo y qué puede hacer
   label <ID> <nombre> renombra un dispositivo (el nombre con el que lo reconoces)
-  caps <ID> ±permiso  cambia permisos (+firma -guarda +administra +contrasenas …)
-                      +sella = OTRA BÓVEDA que puede sellar el acta de esta cuenta, para
+  caps <ID> ±permiso  cambia permisos (+sign -store +admin +passwords …)
+                      +sealer = OTRA BÓVEDA que puede sellar el acta de esta cuenta, para
                       que perder una máquina no se la lleve. No es un traspaso
   revoke <ID|nonce>   quita un dispositivo (con el ID, todos sus certificados)
   block <ID>          bloquea un aparato sin quitarlo: la bóveda y tus agentes dejan de
@@ -2640,7 +2633,7 @@ function help () {
   logins              los aparatos que se abren con usuario y contraseña (para un equipo
                       prestado, donde no puedes emparejar nada)
   logins add <usuario> [nombre del equipo] [±permiso …]
-                              permisos como en «caps» (+aprueba, -guarda, +desatendido…).
+                              permisos como en «caps» (+approve, -store, +unattended…).
                               Sin decir nada: firma, lee y guarda
                       crea uno. La contraseña se teclea aquí y no sale de esta terminal:
                       la bóveda guarda un paquete de llaves que solo ella abre
@@ -2822,8 +2815,8 @@ export async function runCtl (argv) {
     // rechaza en voz alta, igual que `caps +approval`.
     case 'approval':
       console.error('`dotrino-vault approval` ya no existe. Pedir aprobación es el DEFECTO; lo que se concede es lo contrario:')
-      console.error('  dotrino-vault caps <ID> +desatendido   ← se lleva las claves privadas sin aprobación')
-      console.error('  dotrino-vault caps <ID> -desatendido   ← vuelve a pedir aprobación')
+      console.error('  dotrino-vault caps <ID> +unattended   ← se lleva las claves privadas sin aprobación')
+      console.error('  dotrino-vault caps <ID> -unattended   ← vuelve a pedir aprobación')
       process.exit(2)
     case 'atrest': return cmdAtrest(rest)
     case 'activity': return cmdActivity(Number(rest.find((a) => /^\d+$/.test(a))) || 30, {

@@ -724,7 +724,7 @@ export async function runDaemon () {
       /**
        * UNIRSE A LA CUENTA DE OTRA BÓVEDA (multivault). La llave que entra como miembro es
        * la de ESTA bóveda —no una de aparato inventada—, que es lo que después permite
-       * darle `+sella` y que sea el respaldo de verdad de la otra.
+       * darle `+sealer` y que sea el respaldo de verdad de la otra.
        *
        * El código de confirmación lo genera esta bóveda y hay que TIPEARLO en la otra: la
        * misma defensa de siempre, para que una invitación interceptada no baste.

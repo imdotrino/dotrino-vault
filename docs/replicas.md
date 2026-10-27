@@ -89,7 +89,7 @@ es pública y autoverificable por firma.
 | Servir certificados **ya emitidos** | **sí** | son papeles firmados, no secretos |
 | **Sellar un acta nueva** (admitir, revocar, cambiar permisos) | **NO** | D4: un solo sellador |
 | **Emitir un certificado nuevo** | ver §5 | necesita firma de la maestra |
-| **Aprobar** una entrega de clave privada | **NO** | eso es del teléfono (`+aprueba`), y así debe seguir |
+| **Aprobar** una entrega de clave privada | **NO** | eso es del teléfono (`+approve`), y así debe seguir |
 | Abrir un sobre | **no puede**, aunque quisiera | no tiene la llave del destinatario |
 
 ## 5. ~~El problema de verdad: renovar certificados~~ — DESAPARECIÓ
@@ -173,7 +173,7 @@ con capacidad `replica` que esté conectado— es más elegante y pide enrutado
 | | **Segunda bóveda** (§1.bis) | **Replicador** (esto) |
 |---|---|---|
 | Tiene maestra | **sí** | **no**, y se niega a crear una |
-| Puede sellar el acta | sí, con `+sella` | **nunca** |
+| Puede sellar el acta | sí, con `+sealer` | **nunca** |
 | Para qué está | que un desastre no se lleve la cuenta: sigue habiendo quien admita, revoque y cambie permisos | que la cuenta **responda** aunque tu máquina esté apagada |
 | Qué cuesta que la comprometan | todo: sella en tu nombre | disponibilidad, nada más |
 | Ejemplo | la bóveda en EC2 (`53F8-C1E8`, 2026-09-02) | cualquier sitio: un VPS alquilado, la máquina de un socio |
@@ -290,7 +290,7 @@ cambiar permisos), aunque lo ya emitido siga funcionando.
 
 **El multivault se probó de punta a punta el 2026-09-02 y se desmontó el mismo día.** Una
 bóveda en EC2 (`us-east-2`, contenedor con la clave del disco en AWS KMS) entró en la cuenta
-como `53F8-C1E8` con `+sella`, y funcionó: la invitación salió de la PC, el código se tecleó
+como `53F8-C1E8` con `+sealer`, y funcionó: la invitación salió de la PC, el código se tecleó
 en la PC y al contenedor no se entró nunca. Se quitó del acta (#21) y se destruyó todo
 porque **lo que hace falta es un replicador, no un segundo sellador** (§8.bis) — decisión
 del dueño ese día. La cadena de selladores **no llegó a publicarse**: no había ningún

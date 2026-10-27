@@ -111,7 +111,7 @@ distancia» de siempre (`../docs/abrir-a-distancia.md`): la consola deriva aquí
 manda solo la derivada, sellada a una llave efímera. Abierta lo está **mientras dura la sesión**.
 
 1. Crea la pila con `Mode: join`, sin `AdminPassword` y con **`Owner`**, como la réplica.
-2. En tu bóveda: `dotrino-vault pair --scope sella,firma,lee,guarda --quiet`.
+2. En tu bóveda: `dotrino-vault pair --scope sealer,sign,read,store --quiet`.
 3. Invoca la función con `{ "kind": "enroll", "invitation": "<invitación>" }`: contesta
    `{ req, door: { ek, salt, N, r, p, len } }`. La maestra todavía no existe.
 4. Deriva `scrypt(contraseña, salt, N, r, p, len)` y séllala a `ek` (`seal` de

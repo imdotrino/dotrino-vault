@@ -117,15 +117,16 @@ const es = {
   // decir siempre lo que SON»). Antes puse frases —«Conectar y quitar dispositivos»— y el
   // resultado fue una lista donde no se sabía qué permiso era cuál ni cómo nombrarlo para
   // el CLI. Lo que hace cada uno va DEBAJO, que es su sitio.
+  // Y ese nombre es el del acta, en inglés (dueño, 2026-10-27): el mismo en los dos idiomas.
   capName: {
-    sign: 'firma',
-    store: 'guarda',
-    read: 'lee',
-    admin: 'administra',
-    passwords: 'contrasenas',
-    approve: 'aprueba',
-    sealer: 'sella',
-    unattended: 'desatendido',
+    sign: 'sign',
+    store: 'store',
+    read: 'read',
+    admin: 'admin',
+    passwords: 'passwords',
+    approve: 'approve',
+    sealer: 'sealer',
+    unattended: 'unattended',
     replica: 'replica'
   },
   // CADA PISTA SE SOSTIENE SOLA. Antes colgaban del título —«hacerlo desde ese aparato»
@@ -145,7 +146,7 @@ const es = {
     // lo usa nadie. Se enseña igual, y se dice: verlo desactivado explica el modelo;
     // esconderlo hacía creer que no existe (dueño, 2026-08-31).
     sealer: 'admitir aparatos y cambiar permisos él solo cuando esta bóveda no está. Solo sirve en otra BÓVEDA',
-    unattended: 'llevarse claves privadas sin preguntarte. Apagado, hay que aprobarlo desde un aparato con «aprueba» cada vez que arranque',
+    unattended: 'llevarse claves privadas sin preguntarte. Apagado, hay que aprobarlo desde un aparato con «approve» cada vez que arranque',
     // El replicador reparte y no puede nada más: no abre lo que entrega ni cambia nada.
     replica: 'repartir los sobres que esta bóveda ya firmó, tal como salieron: no puede abrirlos ni cambiar nada. Solo sirve en otra máquina'
   },
@@ -185,8 +186,8 @@ const es = {
   settingUpdateAsks: 'Esta bóveda pide aprobación antes de actualizarse.',
   settingUpdateUnknown: 'No se sabe si esta bóveda pide aprobación para actualizarse.',
   settingChange: 'Enter cambiar',
-  settingUpdateHint1: 'Vale para todos los perfiles: se pide a los aparatos con «aprueba» de cualquiera de ellos, una vez por versión.',
-  settingUpdateHint2: 'Si ningún perfil tiene un aparato con «aprueba», la bóveda se actualiza sola.',
+  settingUpdateHint1: 'Vale para todos los perfiles: se pide a los aparatos con «approve» de cualquiera de ellos, una vez por versión.',
+  settingUpdateHint2: 'Si ningún perfil tiene un aparato con «approve», la bóveda se actualiza sola.',
   settingsUnreadable: 'El ajuste no se pudo leer: mientras siga así, la bóveda no se actualiza.',
   settingsUnreadableHint: 'Pulsa Enter para volver a guardarlo (queda pidiendo aprobación; Enter otra vez lo cambia).',
   settingUpdateNowAsks: 'Hecho: pide aprobación antes de actualizarse.',
@@ -494,7 +495,7 @@ const es = {
   joinCodeWhere: (code) => `allí: pulsa a en la pantalla del QR, o ejecuta  dotrino-vault approve ${code}`,
   joinLeft: (s) => `Esperando la aprobación · quedan ~${s} s`,
   joinDone: (seq) => `Listo: esta bóveda ya es miembro de esa cuenta (acta #${seq}). Ahora es la bóveda activa.`,
-  joinNextPassword: 'Si la otra bóveda le va a dar «sella», ponle antes contraseña a esta cuenta (c en Bóvedas): sin ella, cualquiera con acceso a esta máquina podría firmar el acta en tu nombre.',
+  joinNextPassword: 'Si la otra bóveda le va a dar «sealer», ponle antes contraseña a esta cuenta (c en Bóvedas): sin ella, cualquiera con acceso a esta máquina podría firmar el acta en tu nombre.',
   joinFailed: (err) => `No se pudo entrar: ${err}`,
   joinNoReply: 'La bóveda no contestó a tiempo. ¿Se aprobó el código en la otra?',
   joinInBackground: 'La espera sigue: si la otra bóveda aprueba, la cuenta aparecerá en esta lista.',
@@ -581,7 +582,7 @@ const es = {
   errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
   errWrongPassword: (n) => `Contraseña incorrecta${n ? ` — van ${n} intentos fallidos` : ''}`,
   errTooManyTries: (s) => `Demasiados intentos: espera ${s || '?'} s antes de volver a probar`,
-  errMasterWithMembers: 'Es la única bóveda de esta cuenta y hay otros dispositivos: dale antes el permiso de sellar a otra (`caps <ID> +sella`). Si la borras así, se quedan con su llave y sin nadie que pueda volver a darles permisos.'
+  errMasterWithMembers: 'Es la única bóveda de esta cuenta y hay otros dispositivos: dale antes el permiso de sellar a otra (`caps <ID> +sealer`). Si la borras así, se quedan con su llave y sin nadie que pueda volver a darles permisos.'
 }
 
 // ---------------------------------- inglés ----------------------------------
@@ -1090,7 +1091,7 @@ const en = {
   errProfileLocked: 'Vault locked: open it with its password',
   errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,
   errTooManyTries: (s) => `Too many attempts: wait ${s || '?'} s before trying again`,
-  errMasterWithMembers: 'This is the only vault of this account and it has other devices: give the sealing permission to another one first (`caps <ID> +sella`). If you delete it like this, they keep their key with nobody able to sign the record again.'
+  errMasterWithMembers: 'This is the only vault of this account and it has other devices: give the sealing permission to another one first (`caps <ID> +sealer`). If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 
 // --------------------------- selección y persistencia -----------------------

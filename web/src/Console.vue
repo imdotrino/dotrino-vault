@@ -690,7 +690,7 @@ async function computeProfileIdShort () {
  * EL ID DE **ESTE** APARATO, tal como lo escribe la bóveda (AB12-CD34).
  *
  * Hacía falta porque el cartel de «este aparato no aprueba» mandaba a ejecutar
- * `dotrino-vault caps <ID> +aprueba` con el `<ID>` LITERAL: quien lo lee tiene que ir a
+ * `dotrino-vault caps <ID> +approve` con el `<ID>` LITERAL: quien lo lee tiene que ir a
  * buscar cuál es el suyo en otra pantalla, y de los tres aparatos de la lista no es obvio.
  * Un comando que no se puede copiar tal cual no es una ayuda, es un acertijo.
  */
@@ -2370,7 +2370,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <!-- En la app, esta misma llave aprueba en Pedidos en cuanto tenga el permiso. -->
         <template v-if="inApp && pairedDevice">
           <p data-testid="native-step">{{ t.native_step }}</p>
-          <p class="cmd"><code>dotrino-vault caps {{ pairedDevice }} +aprueba</code></p>
+          <p class="cmd"><code>dotrino-vault caps {{ pairedDevice }} +approve</code></p>
         </template>
         <details v-if="flowMode !== 'adopt'">
           <summary>{{ t.two_del }}</summary>
@@ -2519,7 +2519,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       </template>
       <p v-else class="muted" data-testid="apv-nocap">
         {{ t.apv_nocap }}
-        <code class="mid">dotrino-vault caps {{ myDeviceIdShort || 'ID' }} +aprueba</code>
+        <code class="mid">dotrino-vault caps {{ myDeviceIdShort || 'ID' }} +approve</code>
       </p>
     </template>
 

@@ -1681,7 +1681,7 @@ test('una respuesta demasiado grande se cambia por un error, no revienta el sock
  * elegía por omisión, que es la peor forma de decidir algo así. Y al no estar en el acta
  * no se veía en la pantalla de permisos ni lo respetaba otra bóveda de la cuenta.
  *
- * Ahora se concede a propósito (`+desatendido`) y, si falta, se pide permiso.
+ * Ahora se concede a propósito (`+unattended`) y, si falta, se pide permiso.
  */
 test('un servicio SIN el permiso espera aprobación; con él, se sirve solo', async () => {
   await conAprobador()
@@ -1911,7 +1911,7 @@ test('var.set con el sobre HECHO: la bóveda no lo abre, y exige la firma de su 
  * hay aprobador no se necesita aprobación»).
  *
  * Antes la bóveda rechazaba con `no-approver`, y el servicio se quedaba sin sus claves hasta
- * que alguien le diera `+aprueba` a un aparato o `+desatendido` a él. La regla ahora es la
+ * que alguien le diera `+approve` a un aparato o `+unattended` a él. La regla ahora es la
  * misma que sigue la actualización automática: esperar un sí que nadie puede dar solo deja
  * al servicio colgado. Se entrega en el acto, y queda escrito en la bitácora por qué no sonó
  * nada (`secrets.no-approver`).

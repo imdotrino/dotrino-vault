@@ -171,7 +171,7 @@ test('vault-passwords: un aparato del acta pide de a una', async () => {
 
 test('vault-passwords: un aparato que el acta no reconoce no recibe nada', async () => {
   // Se monta con el permiso puesto —hay que poder guardar algo— y se le quita después,
-  // que es lo que pasa de verdad: `caps <ID> -contrasenas`, y a la siguiente pasada deja
+  // que es lo que pasa de verdad: `caps <ID> -passwords`, y a la siguiente pasada deja
   // de recibir. La bóveda mira el acta en cada petición, no al conectarse.
   let permitido = true
   const { remota } = await montar({ isAllowed: () => permitido })

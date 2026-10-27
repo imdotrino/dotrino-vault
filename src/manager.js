@@ -32,7 +32,7 @@ export function assertCanRemove ({ isMaster, memberCount, sealerCount = 1, name 
   const others = memberCount - 1
   const e = new Error(
     `this vault is the only one that can seal account "${name}", and it has ${others} more device(s): ` +
-    'give another one the sealing permission first (`caps <ID> +sella`). Deleting it like this ' +
+    'give another one the sealing permission first (`caps <ID> +sealer`). Deleting it like this ' +
     'leaves them with their key and nobody able to seal the record again.'
   )
   e.code = 'MASTER_WITH_MEMBERS'

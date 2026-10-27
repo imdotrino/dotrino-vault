@@ -19,7 +19,7 @@ es lo mismo **dentro del vault**, que ya tiene lo que allí había que improvisa
 | | En `passmanager serve` | En el vault |
 |---|---|---|
 | quién puede pedir | el **acta** (la misma pieza, `@dotrino/vault`) | el **acta** |
-| aprobación | una pregunta en la consola | el **teléfono** (`caps +aprueba`) |
+| aprobación | una pregunta en la consola | el **teléfono** (`caps +approve`) |
 | bitácora | un `console.log` | `activity.log`, la misma de firmas y enrolamientos |
 
 Las dos son bóvedas del ecosistema: los aparatos entran por el enrolamiento de siempre y
@@ -34,7 +34,7 @@ sola. `list` no existe en remoto.
 Dos condiciones, y **las dos** tienen que darse:
 
 1. que ese **aparato** no tenga el permiso `unattended` (desde el 2026-09-01 pedir aprobación
-   es el defecto; `caps <ID> +desatendido` se lo quita), que es la política
+   es el defecto; `caps <ID> +unattended` se lo quita), que es la política
    del vault: se pide una vez y vale mientras el vault siga encendido;
 2. y que lo que pide sea **privado** — una contraseña, un código de dos pasos, unas notas,
    una passkey, o un campo que el usuario marcó como privado.
@@ -69,9 +69,9 @@ las contesta esta bóveda igual que las otras dos:
 ## Cómo usarlo
 
 ```bash
-dotrino-vault pair --scope contrasenas   # conectar el gestor, ya con su permiso
-dotrino-vault caps <ID> +contrasenas     # o dárselo después a un aparato que ya está
-dotrino-vault caps <ID> +desatendido     # que NO pida el visto bueno (por defecto lo pide)
+dotrino-vault pair --scope passwords   # conectar el gestor, ya con su permiso
+dotrino-vault caps <ID> +passwords     # o dárselo después a un aparato que ya está
+dotrino-vault caps <ID> +unattended     # que NO pida el visto bueno (por defecto lo pide)
 ```
 
 **No hay códigos que pegar.** El gestor se empareja como cualquier otro aparato:
