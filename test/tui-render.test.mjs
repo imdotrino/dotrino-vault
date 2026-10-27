@@ -1196,3 +1196,25 @@ test('versión nueva: «no se pudo mirar» no es «estás al día»', async () =
     assert.equal(nueva.update.offer, true)
   }
 })
+
+test('Dispositivos: en grupos — bóvedas (con su llave de comunicación debajo), aparatos y servicios', () => {
+  const t = makeTheme()
+  const members = [
+    { pub: 'PUB-OTRA', id: '3B48-962A', label: '', isMaster: true },
+    { pub: 'PUB-COMM', id: '64AA-2758', label: 'esta bóveda', cn: 'vault', vault: 'PUB-AQUI', caps: ['sign'] },
+    { pub: 'PUB-SRV', id: '52B5-A72A', label: 'aws-glassnote', cn: 'aws-glassnote', caps: [] },
+    { pub: 'PUB-TEL', id: 'B274-8978', label: 'CelXApp', caps: ['approve', 'sign'] },
+    { pub: 'PUB-AQUI', id: '6B07-9A06', label: 'BovedaLocal', isMaster: true, isMe: true }
+  ]
+  const st = baseState({ screen: 'devices', members, devices: { issued: [], revoked: [] } })
+  const lineas = V.deviceRows(st, t).map((r) => r.text)
+  const at = (re) => lineas.findIndex((l) => re.test(l))
+  assert.ok(at(/BÓVEDAS/) < at(/6B07-9A06/), 'las bóvedas primero')
+  assert.ok(at(/6B07-9A06/) < at(/3B48-962A/), 'la de aquí delante de su hermana')
+  assert.match(lineas[at(/6B07-9A06/)], /esta · sella el acta/)
+  assert.doesNotMatch(lineas[at(/3B48-962A/)], /esta/, '«esta» solo en la de aquí')
+  assert.equal(at(/64AA-2758/), at(/6B07-9A06/) + 1, 'su llave de comunicación justo debajo')
+  assert.match(lineas[at(/64AA-2758/)], /└ .*llave de comunicación/)
+  assert.ok(at(/APARATOS/) < at(/B274-8978/) && at(/B274-8978/) < at(/SERVICIOS/))
+  assert.ok(at(/SERVICIOS/) < at(/52B5-A72A/))
+})

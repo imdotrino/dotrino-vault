@@ -633,6 +633,8 @@ async function cmdMembers () {
   // misma que se enseña al emparejar y en la lista de miembros.
   const profileId = await deviceIdOf(record.profileId).catch(() => '????-????')
   console.log('\n%sPerfil%s %s · acta #%d\n', B, Z, profileId, record.seq)
+  // Para decir de QUÉ bóveda es cada llave de comunicación.
+  const idOf = new Map(record.members.map((x) => [x.pub, x.id]))
   for (const m of record.members) {
     const who = m.label || m.id
     const lockout = (record.blocked || []).find((b) => b.pub === m.pub)
@@ -644,8 +646,10 @@ async function cmdMembers () {
       // permiso también sale abajo en la lista, pero aquí se ve de un vistazo — que es
       // justo lo que se busca al mirar quién es quién.
       m.isMaster ? `${B}Sella${Z}` : null,
-      m.isMe ? 'este dispositivo' : null,
-      m.cn ? `servicio «${m.cn}»` : null
+      m.isMe ? 'esta bóveda' : null,
+      // La llave de comunicación es parte de una bóveda, no un servicio (`cn: 'vault'`).
+      m.cn === 'vault' ? `llave de comunicación${m.vault ? ' de ' + (idOf.get(m.vault) || 'otra bóveda') : ''}` : null,
+      m.cn && m.cn !== 'vault' ? `servicio «${m.cn}»` : null
     ].filter(Boolean)
     // Un servicio sin permisos no está «sin nada»: su cajón lo abre el nombre, no un permiso.
     const caps = m.caps.length ? m.caps.map((c) => CAP[c] || c).join(', ') : (m.cn && m.cn !== COMM_CN ? '(solo su cajón)' : '(sin permisos)')

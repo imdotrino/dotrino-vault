@@ -152,7 +152,11 @@ function mergeMembersAndCerts (members, issued) {
       deviceId: m.id || cert?.deviceId || '????-????',
       label: m.label || cert?.label || '',
       isMaster: !!m.isMaster,
+      // La bóveda donde corre esta TUI (las demás que sellan son hermanas: Lambda, otra PC).
+      isMe: !!m.isMe,
       cn: m.cn || null,
+      // De una llave de comunicación: la maestra de SU bóveda, para pintarla debajo de ella.
+      vault: m.vault || null,
       // CUÁNDO ENTRÓ. Venía en el acta y se perdía aquí, así que la lista no podía
       // enseñarlo por mucho que se quisiera. El nombre lo pone el propio aparato y muchas
       // veces no distingue nada: la fecha es lo que deja reconocer cuál es cuál.
@@ -500,8 +504,47 @@ function deviceRows (st, t) {
   if (draft.length) {
     rows.unshift({ text: t.bold(' ' + i.devicesDraft(draft.length)), sel: false }, { text: '', sel: false })
   }
-  for (const d of devices) {
-    const label = d.label || t.muted(i.noLabel)
+  // EN TRES GRUPOS (dueño, 2026-10-26: «me confunde, no sé qué es dispositivo, qué es servicio,
+  // qué es bóveda, qué es llave de comunicación»). La lista plana mezclaba cuatro cosas que no
+  // se administran igual:
+  //   · BÓVEDAS: las que sellan el acta. Debajo de cada una, su llave de comunicación, que es
+  //     parte de ella (habla por la red con el candado echado) y no un aparato.
+  //   · APARATOS: teléfonos, navegadores, terminales, agentes.
+  //   · SERVICIOS: los que solo leen su cajón de secretos (`cn` = su espacio).
+  const isComm = (d) => d.cn === 'vault'
+  const vaults = devices.filter((d) => d.isMaster && !isComm(d))
+  const comms = devices.filter(isComm)
+  const services = devices.filter((d) => d.cn && !isComm(d) && !d.isMaster)
+  const others = devices.filter((d) => !d.isMaster && !d.cn)
+  // La de esta máquina primero: es la que se está administrando.
+  vaults.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0))
+  const ordered = []
+  const section = (title, list) => { if (list.length) ordered.push({ title }, ...list) }
+  const placed = new Set()
+  const vaultBlock = []
+  for (const v of vaults) {
+    vaultBlock.push(v)
+    for (const c of comms) if (c.vault === v.sub) { vaultBlock.push({ ...c, child: true }); placed.add(c.sub) }
+  }
+  // Una llave de comunicación de antes de que el acta dijera de qué bóveda es: va con la bóveda
+  // de aquí, que es quien la acuñaba entonces.
+  const orphanComms = comms.filter((c) => !placed.has(c.sub)).map((c) => ({ ...c, child: true }))
+  const meAt = vaultBlock.findIndex((d) => d.isMe)
+  if (meAt >= 0) {
+    let at = meAt + 1
+    while (vaultBlock[at]?.child) at++
+    vaultBlock.splice(at, 0, ...orphanComms)
+  } else vaultBlock.push(...orphanComms)
+  section(i.groupVaults, vaultBlock)
+  section(i.groupDevices, others)
+  section(i.groupServices, services)
+  for (const d of ordered) {
+    if (d.title) {
+      if (rows.length && rows[rows.length - 1].text !== '') rows.push({ text: '', sel: false })
+      rows.push({ text: t.bold(' ' + d.title), sel: false })
+      continue
+    }
+    const label = isComm(d) ? t.muted(i.commKey) : (d.label || t.muted(i.noLabel))
     // Dónde corre (`node · Linux 7.0 · mi-pc`), pegado al nombre: es con lo que se reconoce.
     const machine = machineLine(d.machine)
     const where = machine ? t.muted(`  ${machine}`) : ''
@@ -540,10 +583,13 @@ function deviceRows (st, t) {
     const status = (bloq ? t.warn(i.deviceBlocked) + '  ' : '') + (d.noAccess
       ? t.warn(i.deviceNoAccess)
       : d.isMaster
-        ? t.muted(i.thisVault)
-        : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp)))
+        ? t.muted(d.isMe ? i.thisVault : i.otherVault)
+        : isComm(d)
+          ? ''
+          : t.muted('scope:' + shortScope(d.scope)) + '  ' + t.muted('exp:' + fmtExp(d.exp)))
     const mark = withChanges.has(d.sub) ? t.bold('*') : ' '
-    rows.push({ text: `${mark}${t.bold(d.deviceId)}  ${label}${where}${since}  ${status}${extra}`, sel: true, meta: d })
+    const indent = d.child ? t.muted('  └ ') : ''
+    rows.push({ text: `${mark}${indent}${t.bold(d.deviceId)}  ${label}${where}${since}  ${status}${extra}`, sel: true, meta: d })
   }
   const revoked = st.devices?.revoked || []
   if (revoked.length) {
