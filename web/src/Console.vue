@@ -1348,7 +1348,9 @@ const VAULT_CHOSEN = 'dotrino.vault.chosen'
 const choseHere = ref((() => { try { return !!sessionStorage.getItem(VAULT_CHOSEN) } catch (_) { return false } })())
 const choosing = computed(() => allVaults.value.length > 1 && !choseHere.value)
 async function chooseVault (v) {
-  try { sessionStorage.setItem(VAULT_PICK, v.comm); sessionStorage.setItem(VAULT_CHOSEN, '1') } catch (_) {}
+  // Sin llave de comunicación conocida (la nombra solo su papel: el acta guardada de ese perfil es
+  // vieja) no hay a cuál apuntar: al cambiar de perfil se lee el acta al día y vale la de siempre.
+  try { sessionStorage.setItem(VAULT_PICK, v.comm || ''); sessionStorage.setItem(VAULT_CHOSEN, '1') } catch (_) {}
   if (!v.current) {
     await id.value.switchProfile(v.profileId)
     location.reload()
@@ -2513,7 +2515,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <span class="mlabel">{{ t.choose_title }}</span>
       <div v-for="g in vaultGroups" :key="g.id" class="vgroup" :data-profile="g.id">
         <p class="muted vgname">{{ g.name || t.choose_noname }}<template v-if="g.current"> · {{ t.choose_current }}</template></p>
-        <button v-for="v in g.vaults" :key="v.comm" type="button" class="vaultrow" :data-vault="v.id"
+        <button v-for="v in g.vaults" :key="v.comm || v.master" type="button" class="vaultrow" :data-vault="v.id"
                 data-testid="vault-choose-item" @click="chooseVault(v)">
           <span>{{ v.here ? t.pick_here : (v.label || v.id) }}</span> <code>{{ v.id }}</code>
         </button>
