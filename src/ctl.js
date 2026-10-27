@@ -613,21 +613,12 @@ async function cmdMembers () {
   assertOpen(record)
   if (!record.members?.length) { console.log('Este perfil todavía no tiene acta.'); return }
 
-  // `sealer` y `passwords` faltaban y salían crudos, en inglés, entre los demás en
-  // español. Se resaltan como `admin` y `approve`: los cuatro cambian lo que ese aparato
-  // puede hacerle a la cuenta, y eso se lee de un vistazo o no se lee.
-  const CAP = {
-    sign: 'firma', store: 'guarda', read: 'lee',
-    admin: `${B}administra el perfil${Z}`, approve: `${B}aprueba pedidos${Z}`,
-    sealer: `${B}sella el acta${Z}`, passwords: `${B}pide contraseñas${Z}`,
-    // Resaltado como los otros cuatro: dice si esa máquina se lleva tus claves privadas
-    // sola o si te lo pregunta. Sin traducción salía el identificador en crudo
-    // (`unattended`) en una lista que lee un humano.
-    unattended: `${B}recibe claves sin aprobación${Z}`,
-    // Y el que reparte cuando esta bóveda no está. Se resalta como los demás que cambian
-    // lo que ese aparato puede hacerle a la cuenta.
-    replica: `${B}entrega tus claves con la bóveda apagada${Z}`
-  }
+  // LOS PERMISOS POR SU NOMBRE, el mismo que se teclea en `caps` (dueño, 2026-10-27: «solo en
+  // inglés»). Antes salía una descripción en español («sella el acta», «aprueba pedidos») y había
+  // que traducirla para poder tocar el permiso. Se resaltan los que cambian lo que ese aparato
+  // puede hacerle a la cuenta: se leen de un vistazo o no se leen.
+  const STRONG = new Set(['admin', 'approve', 'sealer', 'passwords', 'unattended', 'replica'])
+  const CAP = Object.fromEntries(CAP_WORDS.map((w) => [w, STRONG.has(w) ? `${B}${w}${Z}` : w]))
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
   // misma que se enseña al emparejar y en la lista de miembros.
@@ -1682,7 +1673,7 @@ const LOGINS_USAGE = `uso: dotrino-vault logins <orden>
   logins [ls]                 los aparatos que se abren con usuario y contraseña
   logins add <usuario> [nombre del equipo] [±permiso …]
                               permisos como en «caps» (+approve, -store, +unattended…).
-                              Sin decir nada: firma, lee y guarda
+                              Sin decir nada: sign, read y store
   logins passwd <usuario>     cambia la contraseña (cierra lo que estuviera abierto)
   logins close <usuario> [sid]  cierra una sesión abierta (sin sid, todas)
   logins unblock <usuario>    quita la espera de los intentos fallidos
@@ -1717,7 +1708,7 @@ async function cmdLogins (rest) {
     case 'add': {
       needUser()
       // `±permiso` se lee con las MISMAS palabras que `caps <ID> ±permiso`, sobre los de
-      // siempre (firma, lee, guarda); lo demás es el nombre del equipo. Antes el texto de
+      // siempre (sign, read, store); lo demás es el nombre del equipo. Antes el texto de
       // ayuda lo anunciaba y aquí se juntaba todo como nombre.
       const caps = new Set(['sign', 'read', 'store'])
       const name = []
@@ -2559,8 +2550,8 @@ function help () {
                       El QR no lleva nada: el permiso se aplica al aprobar el código aquí
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
-  pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (firma,lee,guarda,administra,
-                      aprueba,contrasenas,sella,desatendido,replica) y secrets:<ns>. Sin esto: firma,lee,guarda.
+  pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (sign,read,store,admin,
+                      approve,passwords,sealer,unattended,replica) y secrets:<ns>. Sin esto: sign,read,store.
                       Entra al acta ya con ellos. Se combina con --service: --service eco --scope sign
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
@@ -2634,7 +2625,7 @@ function help () {
                       prestado, donde no puedes emparejar nada)
   logins add <usuario> [nombre del equipo] [±permiso …]
                               permisos como en «caps» (+approve, -store, +unattended…).
-                              Sin decir nada: firma, lee y guarda
+                              Sin decir nada: sign, read y store
                       crea uno. La contraseña se teclea aquí y no sale de esta terminal:
                       la bóveda guarda un paquete de llaves que solo ella abre
   logins passwd <usuario>       cambia la contraseña (cierra lo que estuviera abierto)

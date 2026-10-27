@@ -36,6 +36,7 @@ import { scanFrame, scanImageFile } from '@dotrino/qr'
 import Vars from './Vars.vue'
 import { identityOptions } from './identity.js'
 import { parseInvite, inviteUrl } from '../../lib/src/invite.js'
+import { groupMembers, isCommKey } from '../../lib/src/core/memberGroups.js'
 
 /**
  * La bóveda-en-pestaña (lo que atiende las peticiones de contraseñas) se carga aparte:
@@ -72,6 +73,7 @@ const T = {
     page_build: 'Esta página sale del commit',
     copy_id: 'Copiar el identificador completo',
     members: 'Dispositivos', me: 'este dispositivo', is_master: 'Bóveda',
+    grp: { vaults: 'Bóvedas', devices: 'Aparatos', services: 'Servicios' }, comm_key: 'llave de comunicación',
     caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas y passkeys', sealer: 'Sella el acta (otra bóveda)', unattended: 'Recibe claves sin aprobación', replica: 'Atiende cuando la bóveda no está' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
@@ -131,6 +133,7 @@ const T = {
     dev_needs_add: 'Añadir lo que falta',
     vault_runs: (p, v, n) => 'Esta bóveda corre ' + p + ' ' + v + ' (protocolo ' + n + ')',
     dev_nocert: 'sin acceso',
+    dev_cert_by: (v) => `con papel de ${v || 'otra bóveda'}`,
     dev_nocert_b: 'Está en tu lista pero ya no puede entrar. Si ya no lo usas, quítalo; si lo sigues usando, conéctalo otra vez.',
     // Este dispositivo salió del perfil (lo quitaron aquí o desde otro lado).
     gone_t: 'Este dispositivo ya no está en el perfil',
@@ -334,6 +337,7 @@ const T = {
     pend_b: 'Estos aparatos aún no tienen la llave de su grupo, así que no leen esas variables. Se arregla solo cuando otro aparato del grupo está encendido y se la reparte, o al abrir la bóveda en su computadora.',
     pend_rotate: 'salió un aparato del grupo',
     pend_rewrap: 'sin llave todavía',
+    pend_vault: (v) => `A otra bóveda de la cuenta se la pone ${v ? '«' + v + '»' : 'esta bóveda'} al abrirse: abrir esa otra no lo arregla.`,
     nopwd_t: 'Esta bóveda no tiene contraseña',
     nopwd_b: 'Sus variables privadas se abren con una llave de la computadora donde vive la bóveda, y esa llave está en ese mismo disco: quien copie el disco las abre. Ponle una contraseña en esa computadora.',
     var_dev_t: 'Sus variables',
@@ -382,6 +386,7 @@ const T = {
     page_build: 'This page was built from commit',
     copy_id: 'Copy the full identifier',
     members: 'Devices', me: 'this device', is_master: 'Vault',
+    grp: { vaults: 'Vaults', devices: 'Devices', services: 'Services' }, comm_key: 'communication key',
     caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords and passkeys', sealer: 'Seals the record (another vault)', unattended: 'Gets keys without approval', replica: 'Answers while the vault is away' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
@@ -427,6 +432,7 @@ const T = {
     dev_needs_add: 'Add what is missing',
     vault_runs: (p, v, n) => 'This vault runs ' + p + ' ' + v + ' (protocol ' + n + ')',
     dev_nocert: 'no access',
+    dev_cert_by: (v) => `with a paper from ${v || 'another vault'}`,
     dev_nocert_b: 'It is on your list but it can no longer get in. If you do not use it any more, remove it; if you do, connect it again.',
     gone_t: 'This device is no longer in the profile',
     gone_b: 'It was removed from the profile and the account was erased from this device, along with whatever it had saved.',
@@ -611,6 +617,7 @@ const T = {
     pend_b: 'These devices do not have their group key yet, so they are not reading those variables. It fixes itself when another device of the group is on and hands it out, or when the vault is opened on its computer.',
     pend_rotate: 'a device left the group',
     pend_rewrap: 'no key yet',
+    pend_vault: (v) => `Another vault of the account gets it from ${v ? '«' + v + '»' : 'this vault'} when it is opened: opening that other one does not fix it.`,
     nopwd_t: 'This vault has no password',
     nopwd_b: 'Its private variables open with a key from the computer where the vault lives, and that key sits on the same disk: whoever copies the disk opens them. Set a password on that computer.',
     var_dev_t: 'Its variables',
@@ -786,8 +793,13 @@ async function refresh () {
   // dispositivo renombrado seguía con el nombre viejo y los permisos nuevos no salían.
   checking.value = true
   try {
-    const r = await id.value.listVaultDevices()
+    // A LA BÓVEDA QUE SE ADMINISTRA, no a la que emitió mi papel: la lista, sus papeles y sus
+    // versiones son de esa bóveda (2026-10-27: «parece que mezcla cosas»).
+    const r = await id.value.listVaultDevices(adminTo.value ? { to: adminTo.value } : {})
     certBySub.value = groupCerts(r?.devices)
+    // Los papeles que emitieron las OTRAS bóvedas: un aparato que entra con el de la otra no está
+    // «sin acceso», y se dice de quién es su papel.
+    siblingCertBySub.value = new Map((r?.siblingCerts || []).filter((c) => c.sub).map((c) => [c.sub, c]))
     // QUÉ CORRE CADA UNO (CONVENCIONES §14). Viene con la lista, no del acta: el acta dice
     // quién puede qué, no qué build es. Y la de la bóveda, para el pie.
     runningBySub.value = new Map((r?.devices || []).filter((d) => d.sub && d.running).map((d) => [d.sub, d.running]))
@@ -882,14 +894,18 @@ const thisBuild = (() => {
   try { return document.querySelector('meta[name=commit]')?.content || '' } catch (_) { return '' }
 })()
 
+const siblingCertBySub = ref(new Map())
 const devices = computed(() => members.value.map((m) => {
   const cert = certBySub.value.get(m.pub) || null
+  const sib = cert ? null : siblingCertBySub.value.get(m.pub) || null
   return {
     ...m,
     exp: cert?.exp || null,
     // Un servicio y el master no tienen (ni necesitan) certificado emitido por la bóveda:
     // el master ES quien los firma. Marcar «sin acceso» ahí sería una alarma falsa.
-    noAccess: !cert && !m.isMaster && !m.cn && !!certBySub.value.size,
+    noAccess: !cert && !sib && !m.isMaster && !m.cn && !!certBySub.value.size,
+    // Su papel lo emitió otra bóveda de la cuenta: se dice cuál.
+    certBy: sib ? (members.value.find((x) => x.pub === sib.by)?.label || sib.byId || '') : null,
     running: runningBySub.value.get(m.pub) || null,
     missing: missingBySub.value.get(m.pub) || [],
     // Dónde corre (`@dotrino/identity/machine`): lo último que dijo, o lo que dijo al entrar.
@@ -898,6 +914,15 @@ const devices = computed(() => members.value.map((m) => {
     notified: (m.caps || []).includes('approve') && notifiedBySub.value.has(m.pub) ? notifiedBySub.value.get(m.pub) : undefined
   }
 }))
+
+/**
+ * EN GRUPOS, COMO LA TUI (dueño, 2026-10-27): bóvedas —cada una con su llave de comunicación
+ * debajo—, aparatos y servicios. La regla es la de la TUI (`lib/src/core/memberGroups.js`).
+ */
+const deviceGroups = computed(() => groupMembers(devices.value))
+
+/** ¿Alguna de las deudas de variables es de otra bóveda de la cuenta? */
+const pendingForVault = computed(() => pendingVars.value.some((p) => (p.members || []).some((x) => members.value.find((m) => m.id === x.id)?.isMaster)))
 
 /** ¿Puede esta pantalla quitar a ese miembro? El master siempre; un admin, a distancia. */
 const canRemove = (m) => !m.isMaster && (isMaster.value || canAdmin.value)
@@ -1429,6 +1454,7 @@ async function pickVault (v) {
   varsError.value = ''
   blockedList.value = []
   if (v.here && !self.value.running) openServeWindow()
+  await refresh()
   await refreshAdmin()
 }
 
@@ -2610,7 +2636,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <!-- LOS DISPOSITIVOS — una sola lista, la del acta, con el estado de cada uno.
            Lo que se pueda hacer con cada fila sale de lo que puede ESTE aparato: el
            master lo puede todo; uno con «administra» puede conectar y quitar. -->
-      <h2>{{ t.members }}</h2>
       <!-- PERMISOS SIN GUARDAR: arriba de la lista y a la vista, con cuántos aparatos
            cambian, porque «Guardar» los firma todos juntos en una sola acta. -->
       <div v-if="draftList.length" class="capsbar" data-testid="caps-draft">
@@ -2642,15 +2667,17 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <p v-if="unlockErr" class="muted svc-note" data-testid="unlock-err">{{ unlockErr }}</p>
         </li>
 
-        <li v-for="m in devices" :key="m.pub" class="member" :class="{ open: openMembers.has(m.pub) }" :data-member="m.id">
+        <template v-for="g in deviceGroups" :key="g.group">
+        <li class="mgroup" :data-testid="'group-' + g.group"><h2>{{ t.grp[g.group] }}</h2></li>
+        <li v-for="m in g.items" :key="m.pub" class="member" :class="{ open: openMembers.has(m.pub), child: m.child }" :data-member="m.id">
           <div class="who acc" role="button" tabindex="0" :aria-expanded="openMembers.has(m.pub)"
                :data-testid="'acc-member-' + m.id"
                @click="toggleMember(m.pub)" @keyup.enter="toggleMember(m.pub)">
             <span class="chev" aria-hidden="true">{{ openMembers.has(m.pub) ? '▾' : '▸' }}</span>
-            <strong>{{ m.label || m.id }}</strong>
+            <span v-if="m.child" class="muted" aria-hidden="true">└</span>
+            <strong>{{ isCommKey(m) ? t.comm_key : (m.label || m.id) }}</strong>
             <span class="tag" v-if="m.isMe">{{ t.me }}</span>
-            <span class="tag master" v-if="m.isMaster">{{ t.is_master }}</span>
-            <span class="tag svc" v-if="m.cn">{{ t.service }} «{{ m.cn }}»</span>
+            <span class="tag svc" v-if="m.cn && !isCommKey(m)">{{ t.service }} «{{ m.cn }}»</span>
             <!-- Está en el acta pero no puede entrar. Es un AVISO, no una explicación:
                  sin él, la fila parece un aparato normal y nadie la quita nunca. -->
             <span class="tag out" v-if="blockedOf(m.pub)" :data-testid="'blocked-' + m.id">{{ t.blocked_title }} · {{ t.blocked_since }} {{ shortDate(blockedOf(m.pub).since) }}<template v-if="blockedOf(m.pub).by"> · {{ t.blocked_by }} {{ blockedOf(m.pub).by }}</template></span>
@@ -2658,6 +2685,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
             <button v-else-if="canAdmin && !m.isMaster && !m.isMe" class="btn ghost sm" :data-testid="'block-' + m.id" :disabled="busy === 'block-' + m.pub" @click.stop="block(m)">{{ t.blocked_block }}</button>
             <span class="tag out" v-if="m.noAccess" :data-testid="'noaccess-' + m.id">{{ t.dev_nocert }}</span>
             <span class="tag" v-else-if="m.exp">{{ t.dev_until(shortDate(m.exp)) }}</span>
+            <span class="tag runs" v-else-if="m.certBy !== null" :data-testid="'cert-by-' + m.id">{{ t.dev_cert_by(m.certBy) }}</span>
             <!-- CUÁNDO ENTRÓ. El nombre lo pone el propio aparato y muchas veces no
                  distingue nada; la fecha es lo que deja saber cuál es cuál, y ver si hay
                  uno que no recuerdas haber conectado. -->
@@ -2733,6 +2761,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           </div>
           </template>
         </li>
+        </template>
       </ul>
 
       <!-- QUÉ CORRE LA PROPIA BÓVEDA. Va al pie de la lista y no arriba porque es el
@@ -3002,6 +3031,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
               </li>
             </ul>
             <small>{{ t.pend_b }}</small>
+            <!-- Si a quien le falta es OTRA BÓVEDA, abrir su computadora no lo arregla: la llave se
+                 la pone la que lo dice, al abrirse. -->
+            <small v-if="pendingForVault" data-testid="vars-pending-vault">{{ t.pend_vault(chosen?.label || '') }}</small>
           </div>
 
           <ul class="vars" data-testid="vars">
@@ -3135,6 +3167,10 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .muted.warn { color: var(--dt-busy); }
 .members { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .member { background: var(--dt-surface); border: 1px solid var(--dt-line-soft); border-radius: 12px; padding: 12px 14px; }
+/* Los grupos (bóvedas, aparatos, servicios) y la llave de comunicación colgada de su bóveda. */
+.mgroup { list-style: none; margin-top: 8px; }
+.mgroup h2 { margin: 0; }
+.member.child { margin-left: 24px; }
 .who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tag { font-size: 11px; background: var(--dt-surface-2); color: var(--dt-accent); border-radius: 999px; padding: 2px 8px; }
 .tag.master { background: var(--dt-accent-soft); color: var(--dt-accent); }

@@ -46,6 +46,7 @@ import * as service from '../service.js'
 import { startDaemonService, restartDaemonService } from '../service.js'
 import { DEVICE_CAPS } from '@dotrino/identity/acta'
 import { machineLine } from '@dotrino/identity/machine'
+import { groupMembers, isCommKey } from '../../lib/src/core/memberGroups.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -506,40 +507,11 @@ function deviceRows (st, t) {
   if (draft.length) {
     rows.unshift({ text: t.bold(' ' + i.devicesDraft(draft.length)), sel: false }, { text: '', sel: false })
   }
-  // EN TRES GRUPOS (dueño, 2026-10-26: «me confunde, no sé qué es dispositivo, qué es servicio,
-  // qué es bóveda, qué es llave de comunicación»). La lista plana mezclaba cuatro cosas que no
-  // se administran igual:
-  //   · BÓVEDAS: las que sellan el acta. Debajo de cada una, su llave de comunicación, que es
-  //     parte de ella (habla por la red con el candado echado) y no un aparato.
-  //   · APARATOS: teléfonos, navegadores, terminales, agentes.
-  //   · SERVICIOS: los que solo leen su cajón de secretos (`cn` = su espacio).
-  const isComm = (d) => d.cn === 'vault'
-  const vaults = devices.filter((d) => d.isMaster && !isComm(d))
-  const comms = devices.filter(isComm)
-  const services = devices.filter((d) => d.cn && !isComm(d) && !d.isMaster)
-  const others = devices.filter((d) => !d.isMaster && !d.cn)
-  // La de esta máquina primero: es la que se está administrando.
-  vaults.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0))
-  const ordered = []
-  const section = (title, list) => { if (list.length) ordered.push({ title }, ...list) }
-  const placed = new Set()
-  const vaultBlock = []
-  for (const v of vaults) {
-    vaultBlock.push(v)
-    for (const c of comms) if (c.vault === v.sub) { vaultBlock.push({ ...c, child: true }); placed.add(c.sub) }
-  }
-  // Una llave de comunicación de antes de que el acta dijera de qué bóveda es: va con la bóveda
-  // de aquí, que es quien la acuñaba entonces.
-  const orphanComms = comms.filter((c) => !placed.has(c.sub)).map((c) => ({ ...c, child: true }))
-  const meAt = vaultBlock.findIndex((d) => d.isMe)
-  if (meAt >= 0) {
-    let at = meAt + 1
-    while (vaultBlock[at]?.child) at++
-    vaultBlock.splice(at, 0, ...orphanComms)
-  } else vaultBlock.push(...orphanComms)
-  section(i.groupVaults, vaultBlock)
-  section(i.groupDevices, others)
-  section(i.groupServices, services)
+  // EN TRES GRUPOS: bóvedas (con su llave de comunicación debajo), aparatos y servicios. La regla
+  // vive en `lib/src/core/memberGroups.js`, la misma que usa la consola.
+  const isComm = isCommKey
+  const GROUP_TITLE = { vaults: i.groupVaults, devices: i.groupDevices, services: i.groupServices }
+  const ordered = groupMembers(devices, { keyOf: (d) => d.sub }).flatMap((g) => [{ title: GROUP_TITLE[g.group] }, ...g.items])
   for (const d of ordered) {
     if (d.title) {
       if (rows.length && rows[rows.length - 1].text !== '') rows.push({ text: '', sel: false })

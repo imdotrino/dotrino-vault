@@ -276,9 +276,14 @@ test('clones: el cajón escrito en la otra bóveda llega a la alojada, y el borr
   const espera = async (cond) => { for (let i = 0; i < 80 && !(await cond()); i++) await sleep(100); return cond() }
   const r1 = await runSession({
     store, dir: tmp('join-clon-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
-    start: vaultStarter({ startVault, locked: true, onReady: async (v) => espera(() => tiene(v, 'clon', 'TOKEN')) })
+    start: vaultStarter({ startVault, locked: true, onReady: async (v) => (await espera(() => tiene(v, 'clon', 'TOKEN'))) && v.secretDebts() })
   })
-  assert.equal(r1.ready, true, 'la alojada, cerrada, recibió el cajón')
+  assert.ok(r1.ready, 'la alojada, cerrada, recibió el cajón')
+  // Y SIN DEUDA CON LA OTRA BÓVEDA (2026-10-27): la Nube de Seyacat decía «sin llave todavía
+  // 3B48-962A» —el PC— en cajones que el PC escribió, porque el PC no se ponía sobre a sí mismo.
+  const pc = (await vault.profileMembers()).members.find((m) => m.isMe)?.pub
+  const conDeuda = Object.entries(r1.ready).filter(([, d]) => (d.members || []).some((m) => m.pub === pc)).map(([o]) => o)
+  assert.deepEqual(conDeuda, [], 'la alojada no ve a la otra bóveda sin sobre')
 
   await vault.deleteSecret('clon', 'TOKEN')
   await sleep(3500)
