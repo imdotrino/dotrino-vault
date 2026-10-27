@@ -847,3 +847,17 @@ test('clonar: lo que llega de una hermana no se vuelve a avisar (no hay ida y vu
   await b.set('demo', 'OTRA', 'w')
   assert.ok(avisos > 0, 'una escritura de aquí sí avisa')
 })
+
+test('clonar: aheadOf dice si tenemos algo que la hermana no (y deja de decirlo al devolvérselo)', async () => {
+  const dirA = tmp(); const dirB = tmp()
+  const a = abrir(dirA, fakeSealer(), { recipients: () => miembros('A') })
+  const b = abrir(dirB, fakeSealer(), { recipients: () => miembros('A') })
+  await a.set('demo', 'K', 'v')
+  assert.equal(a.aheadOf(b.exportState()), true, 'B no tiene K')
+  await b.mergeState(a.exportState())
+  assert.equal(a.aheadOf(b.exportState()), false, 'ya lo tiene')
+  await a.delete('demo', 'K')
+  assert.equal(a.aheadOf(b.exportState()), true, 'una lápida que B no ha visto')
+  await b.mergeState(a.exportState())
+  assert.equal(a.aheadOf(b.exportState()), false)
+})

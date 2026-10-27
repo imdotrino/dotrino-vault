@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "dotrino-vault-desktop"
-version = "0.180.2"
+version = "0.180.3"
 dependencies = [
  "iced",
  "open",
