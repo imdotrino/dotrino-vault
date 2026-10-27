@@ -112,6 +112,8 @@ const T = {
     // Abrir la bóveda desde aquí. Es una pantalla ADMINISTRATIVA: dice el estado y ofrece
     // la acción, sin explicar qué es una bóveda (§5.1).
     lock_t: 'La bóveda está cerrada',
+    lock_state_open: 'abierta',
+    lock_state_closed: 'cerrada',
     lock_b: 'Puedes abrirla desde aquí con su contraseña de administración. No es la tuya de siempre: es otra, aparte, que solo sirve por este camino.',
     lock_no: 'Si quieres abrirla desde aquí, ponle una contraseña de administración en su máquina:',
     lock_pwd: 'Contraseña de administración',
@@ -351,6 +353,7 @@ const T = {
     // entero. La fila nueva aparece sola al escribir, así que no hay botón que explicar.
     var_paste_hint: 'Para cargar varias de una vez, pega tu configuración (NOMBRE=valor, una por línea) en el campo del nombre.',
     var_value_ph: 'valor',
+    vars_none: 'La bóveda no mandó la lista de variables.',
     var_reveal: 'Ver',
     var_hide: 'Ocultar',
     var_revealing: 'Esperando aprobación…',
@@ -405,6 +408,8 @@ const T = {
     dev_until: (d) => 'connected until ' + d,
     dev_since: (d) => 'connected on ' + d,
     lock_t: 'The vault is closed',
+    lock_state_open: 'open',
+    lock_state_closed: 'closed',
     lock_b: 'You can open it from here with its admin password. It is not your usual one: it is a separate password that only works this way.',
     lock_no: 'If you want to open it from here, set an admin password on its machine:',
     lock_pwd: 'Admin password',
@@ -625,6 +630,7 @@ const T = {
     var_key_ph: 'VARIABLE_NAME',
     var_paste_hint: 'To load several at once, paste your configuration (NAME=value, one per line) into the name field.',
     var_value_ph: 'value',
+    vars_none: 'The vault did not send the variable list.',
     var_reveal: 'Show',
     var_hide: 'Hide',
     var_revealing: 'Waiting for approval…',
@@ -1408,6 +1414,7 @@ async function pickVault (v) {
   try { sessionStorage.setItem(VAULT_PICK, v.comm) } catch (_) {}
   // Lo que se enseñaba era de la otra: se le vuelve a preguntar a esta.
   vars.value = null
+  lockState.value = null
   varsError.value = ''
   blockedList.value = []
   if (v.here && !self.value.running) openServeWindow()
@@ -2069,6 +2076,10 @@ const targetOf = (t) => (t.startsWith('dev:') ? { pub: t.slice(4) } : { ns: t.sl
 async function loadVars () {
   varsError.value = ''
   const r = await vaultAdmin('vars')
+  lockState.value = r?.status || null
+  // Sin lista no hay nada que abrir aquí, pero la tarjeta del candado ya sabe lo que tiene que
+  // enseñar (arriba). El motivo se dice donde iba la lista.
+  if (!r?.enc) throw new Error(r?.error || t.value.vars_none)
   const data = JSON.parse(await id.value.openContent(r.enc))
   // ABRIR LAS PÚBLICAS QUE LA BÓVEDA NOS MANDÓ (dueño, 2026-09-02).
   //
@@ -2150,8 +2161,11 @@ const noPassword = computed(() => vars.value ? vars.value.hasPassword === false 
  * dos cosas que llevan a acciones distintas: que esté cerrada, y que se pueda abrir desde
  * aquí (hace falta haberle puesto una contraseña de admin en su máquina).
  */
-const locked = computed(() => !!vars.value?.locked)
-const canUnlock = computed(() => !!vars.value?.remoteUnlock)
+// EL CANDADO SE LEE APARTE DE LA LISTA (`status`): una bóveda cerrada puede no poder cerrar la
+// lista para nosotros, y sin esto la tarjeta de abrir desaparecía justo cuando hace falta.
+const lockState = ref(null)
+const locked = computed(() => !!(lockState.value?.locked ?? vars.value?.locked))
+const canUnlock = computed(() => !!(lockState.value?.remoteUnlock ?? vars.value?.remoteUnlock))
 const unlockPwd = ref('')
 const unlockErr = ref('')
 const unlockWait = ref(0)
@@ -2520,6 +2534,10 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <span class="dot" :class="{ on: listening }" aria-hidden="true"></span>
         <strong>{{ atTitle }}</strong>
         <span class="muted">— {{ atState }}</span>
+        <!-- ABIERTA O CERRADA, a la vista (dueño, 2026-10-26: «ya estaba abierta… debería
+             decirlo»). Sin esto, una bóveda abierta no enseñaba nada y parecía que faltaba el
+             botón de abrir. Solo cuando la bóveda lo ha dicho (`status`). -->
+        <span v-if="lockState" class="tag" :class="locked ? 'out' : 'ok'" data-testid="vault-lock-state">{{ locked ? t.lock_state_closed : t.lock_state_open }}</span>
       </div>
 
       <!-- Sin esto, un fallo de sincronía era INVISIBLE: la pantalla enseñaba tan
@@ -3100,6 +3118,7 @@ h2 { font-size: 18px; margin: 32px 0 8px; }
 .tag.svc { background: color-mix(in srgb, var(--dt-busy) 14%, transparent); color: var(--dt-busy); }
 /* «Sin acceso»: está en el acta pero no puede entrar. Es un aviso, y se ve como tal. */
 .tag.out { background: var(--dt-error-soft); color: var(--dt-error); }
+.tag.ok { background: var(--dt-ok-soft, var(--dt-surface-2)); color: var(--dt-ok); }
 /* La fecha acompaña; no compite con el nombre ni con las marcas que importan. */
 .tag.since { background: transparent; color: var(--dt-accent); padding-left: 0; }
 /* Qué corre: es un DATO, así que va en gris como la fecha. El que no cuadra usa `.out`,
