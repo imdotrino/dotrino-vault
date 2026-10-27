@@ -65,13 +65,13 @@ const approvalsOnly = computed(() => props.mode === 'approvals')
 const T = {
   es: {
     title: 'Dónde vive tu perfil',
-    lead: 'Estos son los dispositivos de tu perfil y lo que puede hacer cada uno. El acta la firma uno solo —el Master—, y ninguna llave sale nunca de su dispositivo.',
+    lead: 'Estos son los dispositivos de tu perfil y lo que puede hacer cada uno. El acta la firman tus bóvedas, todas con la misma autoridad, y ninguna llave sale nunca de su dispositivo.',
     loading: 'Cargando…',
     err_connect: 'No se pudo abrir tu identidad. Recarga la página e inténtalo otra vez.',
-    profile: 'Perfil', version: 'Versión del acta', master: 'Master',
+    profile: 'Perfil', version: 'Versión del acta', master: 'Bóvedas',
     page_build: 'Esta página sale del commit',
     copy_id: 'Copiar el identificador completo',
-    members: 'Dispositivos', me: 'este dispositivo', is_master: 'Master',
+    members: 'Dispositivos', me: 'este dispositivo', is_master: 'Bóveda',
     caps: { sign: 'Firma por ti', store: 'Guarda tu contenido', read: 'Lee tu contenido', admin: 'Administra el perfil', approve: 'Aprueba pedidos', passwords: 'Pide tus contraseñas y passkeys', sealer: 'Sella el acta (otra bóveda)', unattended: 'Recibe claves sin aprobación', replica: 'Atiende cuando la bóveda no está' },
     service: 'servicio',
     service_note: 'Un servicio solo puede abrir las claves de su propio nombre: no ve nada más de lo tuyo.',
@@ -94,10 +94,10 @@ const T = {
     sync_err_b: 'Lo de abajo es la última copia que tiene este dispositivo, puede estar desfasada. ¿Está encendida la bóveda?',
     solo_warn_t: 'Solo tienes este dispositivo',
     solo_warn_b: 'Si lo pierdes, pierdes el perfil: no hay forma de recuperarlo. Conecta al menos otro dispositivo o tu bóveda.',
-    not_master_t: 'Este dispositivo no es el Master',
-    not_master_b: 'Los cambios (conectar, quitar o cambiar permisos) se hacen desde el Master.',
-    not_master_admin_b: 'Pero puede administrar: conectar y quitar dispositivos desde aquí. Cambiar permisos y pasar el Master a otro siguen siendo cosa del Master.',
-    act_add: 'Conectar un dispositivo', act_remove: 'Quitar', act_handover: 'Que mande este',
+    not_master_t: 'Este dispositivo no es una bóveda',
+    not_master_b: 'Los cambios (conectar, quitar o cambiar permisos) se hacen desde una bóveda.',
+    not_master_admin_b: 'Pero puede administrar: conectar y quitar dispositivos desde aquí. Cambiar permisos sigue siendo cosa de una bóveda.',
+    act_add: 'Conectar un dispositivo', act_remove: 'Quitar',
     act_renounce: 'Que este dispositivo deje de firmar por su cuenta', act_renounced: 'Ya no firma',
     // Se dice lo que PASA, incluido el límite: a un aparato apagado no le llega nada. Lo
     // único que le borra la cuenta es el aviso firmado, y ese necesita que se conecte.
@@ -141,8 +141,7 @@ const T = {
     // La bóveda nos rechaza pero SIN aviso firmado: se cuenta, no se borra nada.
     rejected_t: 'Tu bóveda está rechazando a este dispositivo',
     rejected_b: 'Puede que lo hayan quitado del perfil. Aquí no se borra nada por un mensaje suelto: enciende tu bóveda y vuelve a abrir esta página para saberlo con certeza.',
-    confirm_handover: 'A partir de ahora mandará ese dispositivo y este dejará de poder cambiar el acta. ¿Seguir?',
-    confirm_renounce: 'Este dispositivo dejará de firmar con su propia llave: a partir de ahora le pedirá cada firma a tu bóveda. Podrás devolvérselo desde el Master. ¿Seguir?',
+    confirm_renounce: 'Este dispositivo dejará de firmar con su propia llave: a partir de ahora le pedirá cada firma a tu bóveda. Podrás devolvérselo desde una bóveda. ¿Seguir?',
     yes: 'Sí, hazlo', cancel: 'Cancelar',
     // --- Pantalla del PROCESO de conectar (se lleva la página entera) ---
     flow_connecting: 'Hablando con tu bóveda…',
@@ -164,13 +163,13 @@ const T = {
     // ALTA NATIVA (app de Dotrino): la llave vive en el chip del teléfono y solo aprueba.
     native_step: 'Para aprobar desde la pantalla Pedidos de este teléfono, asígnale el permiso en tu bóveda:',
     adopt_done: 'Listo, tu cuenta ya vive en tu bóveda.',
-    adopt_done_b: 'Sigue siendo la misma cuenta de siempre: los mismos contactos, lo mismo firmado, nada que volver a hacer. Lo que cambió es que ahora la guarda tu bóveda, que pasa a ser el Master, y este aparato es uno más de los que la usan.',
+    adopt_done_b: 'Sigue siendo la misma cuenta de siempre: los mismos contactos, lo mismo firmado, nada que volver a hacer. Lo que cambió es que ahora la guarda tu bóveda, que es quien firma sus cambios, y este aparato es uno más de los que la usan.',
     pair_new_account: 'Se creará aquí una cuenta nueva: la de tu bóveda. La que estás usando ahora no se toca.',
     ann_t: 'Esto es lo que quiere hacer tu bóveda',
     ann_join_h: (n) => n ? `Crear en este dispositivo una cuenta nueva: «${n}», la de tu bóveda.` : 'Crear en este dispositivo una cuenta nueva: la de tu bóveda.',
     ann_join_c: 'La cuenta que estás usando ahora no se toca. Al terminar tendrás dos y podrás cambiar entre ellas cuando quieras.',
     ann_adopt_h: (n) => n ? `Guardar y administrar tu cuenta «${n}»: pasaría a vivir en tu bóveda.` : 'Guardar y administrar la cuenta que usas en este dispositivo.',
-    ann_adopt_c: 'Tu cuenta seguiría siendo la misma para todo el mundo, pero a partir de ahí el Master sería tu bóveda: este dispositivo dejaría de ser quien firma los cambios.',
+    ann_adopt_c: 'Tu cuenta seguiría siendo la misma para todo el mundo, pero a partir de ahí los cambios los firmaría tu bóveda: este dispositivo dejaría de ser quien firma los cambios.',
     ann_adopt_no: 'Este dispositivo todavía no sabe entregar su cuenta. Actualiza la página, o elige la otra opción en tu bóveda.',
     ann_go: 'Continuar', ann_cancel: 'Cancelar',
     two_title: 'Ahora tienes dos cuentas en este aparato',
@@ -373,13 +372,13 @@ const T = {
   },
   en: {
     title: 'Where your profile lives',
-    lead: 'These are your profile’s devices and what each one can do. A single device signs the record —the Master— and no key ever leaves its device.',
+    lead: 'These are your profile’s devices and what each one can do. Your vaults sign the record, all with the same authority, and no key ever leaves its device.',
     loading: 'Loading…',
     err_connect: 'Could not open your identity. Reload the page and try again.',
-    profile: 'Profile', version: 'Record version', master: 'Master',
+    profile: 'Profile', version: 'Record version', master: 'Vaults',
     page_build: 'This page was built from commit',
     copy_id: 'Copy the full identifier',
-    members: 'Devices', me: 'this device', is_master: 'Master',
+    members: 'Devices', me: 'this device', is_master: 'Vault',
     caps: { sign: 'Signs for you', store: 'Stores your content', read: 'Reads your content', admin: 'Manages the profile', approve: 'Approves requests', passwords: 'Asks for your passwords and passkeys', sealer: 'Seals the record (another vault)', unattended: 'Gets keys without approval', replica: 'Answers while the vault is away' },
     service: 'service',
     service_note: 'A service can only open the keys under its own name: it sees nothing else of yours.',
@@ -398,10 +397,10 @@ const T = {
     sync_err_b: 'What you see below is the last copy this device has, and it may be out of date. Is the vault running?',
     solo_warn_t: 'You only have this device',
     solo_warn_b: 'If you lose it, you lose the profile: there is no way to recover it. Connect at least one more device or your vault.',
-    not_master_t: 'This device is not the Master',
-    not_master_b: 'Changes (connecting, removing or changing permissions) are made from the Master.',
-    not_master_admin_b: 'But it can manage: connect and remove devices from here. Changing permissions and passing the Master on are still the Master\u2019s job.',
-    act_add: 'Connect a device', act_remove: 'Remove', act_handover: 'Make this one the Master',
+    not_master_t: 'This device is not a vault',
+    not_master_b: 'Changes (connecting, removing or changing permissions) are made from a vault.',
+    not_master_admin_b: 'But it can manage: connect and remove devices from here. Changing permissions is still a vault\u2019s job.',
+    act_add: 'Connect a device', act_remove: 'Remove',
     act_renounce: 'Stop this device signing on its own', act_renounced: 'No longer signs',
     confirm_remove: 'Remove this device from the profile? It will no longer get in, and it will not be able to open anything you save from now on. If it is switched off, what it has stays there until it connects: that is when it is erased.',
     confirm_remove_me: 'You are removing THIS device. The account ends here: it will stop signing, reading and storing, and whatever it has saved is erased. To use it again you would have to connect it from your vault.',
@@ -431,8 +430,7 @@ const T = {
     gone_go: 'Connect this device',
     rejected_t: 'Your vault is turning this device away',
     rejected_b: 'It may have been removed from the profile. Nothing is erased here on the strength of a bare message: turn your vault on and open this page again to know for sure.',
-    confirm_handover: 'From now on that device becomes the Master and this one will no longer be able to change the record. Continue?',
-    confirm_renounce: 'This device will stop signing with its own key: from now on it will ask your vault for every signature. You can give it back from the Master. Continue?',
+    confirm_renounce: 'This device will stop signing with its own key: from now on it will ask your vault for every signature. You can give it back from a vault. Continue?',
     yes: 'Yes, do it', cancel: 'Cancel',
     // --- The pairing PROCESS screen (takes over the whole page) ---
     flow_connecting: 'Talking to your vault…',
@@ -453,13 +451,13 @@ const T = {
     pair_done: 'Done, this device is connected.',
     native_step: 'To approve from this phone\'s Requests screen, give it permission in your vault:',
     adopt_done: 'Done, your account now lives in your vault.',
-    adopt_done_b: 'It is the same account as always: same contacts, same signed history, nothing to redo. What changed is that your vault now keeps it and is the Master, and this device is one more that uses it.',
+    adopt_done_b: 'It is the same account as always: same contacts, same signed history, nothing to redo. What changed is that your vault now keeps it and signs its changes, and this device is one more that uses it.',
     pair_new_account: 'A new account will be created here: your vault\'s. The one you are using now is left untouched.',
     ann_t: 'This is what your vault wants to do',
     ann_join_h: (n) => n ? `Create a new account on this device: “${n}”, your vault's.` : 'Create a new account on this device: your vault\'s.',
     ann_join_c: 'The account you are using now is left untouched. When it is done you will have two, and you can switch between them any time.',
     ann_adopt_h: (n) => n ? `Keep and manage your account “${n}”: it would move into your vault.` : 'Keep and manage the account you use on this device.',
-    ann_adopt_c: 'Your account would stay the same for everyone else, but from then on your vault is the Master: this device would no longer sign its changes.',
+    ann_adopt_c: 'Your account would stay the same for everyone else, but from then on your vault signs its changes: this device would no longer sign its changes.',
     ann_adopt_no: 'This device cannot hand its account over yet. Reload the page, or choose the other option in your vault.',
     ann_go: 'Continue', ann_cancel: 'Cancel',
     two_title: 'You now have two accounts on this device',
@@ -1084,7 +1082,6 @@ const removeMember = (m) => run('rm-' + m.pub, async () => {
   expelled.value = true
   try { await id.value.listVaultDevices() } catch (_) {}
 })
-const handover = (m) => run('ho-' + m.pub, () => id.value.handoverMaster(m.pub))
 const renounceSign = () => run('renounce', () => id.value.renounceCaps(['sign']))
 
 // ---------- conectar este dispositivo a una bóveda ----------
@@ -2574,7 +2571,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <strong>{{ t.solo_warn_t }}</strong> — {{ t.solo_warn_b }}
       </div>
 
-      <!-- Ficha del acta: qué cuenta es, por qué versión va y quién es el Master. Es
+      <!-- Ficha del acta: qué cuenta es, por qué versión va y qué bóvedas la firman. Es
            DATO, no explicación, y por eso se queda a la vista. -->
       <ul class="facts" v-if="record">
         <!-- El identificador se enseña ABREVIADO y no se puede seleccionar con el ratón,
@@ -2588,7 +2585,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           </button>
         </li>
         <li>{{ t.version }} <code>#{{ record.seq }}</code></li>
-        <li>{{ t.master }} <code>{{ members.find(m => m.isMaster)?.label || members.find(m => m.isMaster)?.id }}</code></li>
+        <li>{{ t.master }} <code>{{ members.filter(m => m.isMaster).map(m => m.label || m.id).join(', ') }}</code></li>
         <!-- CUÁNDO se confirmó esto con la bóveda. Solo cuando la bóveda es OTRA máquina:
              si es esta, no hay nada que confirmar con nadie y la línea sobraba. -->
         <li v-if="vaultAt !== 'self'" data-testid="sync-state" class="muted">
@@ -2701,8 +2698,6 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <div class="acts">
             <button v-if="m.isMe && m.caps.includes('sign')" class="btn ghost sm"
                     data-testid="renounce" @click="confirming = { kind: 'renounce', pub: m.pub }">{{ t.act_renounce }}</button>
-            <button v-if="isMaster && !m.isMaster" class="btn ghost sm" :data-testid="'handover-' + m.id"
-                    @click="confirming = { kind: 'handover', pub: m.pub }">{{ t.act_handover }}</button>
             <!-- Quitar vive AQUÍ, en la fila del aparato, y en ningún otro sitio: es donde
                  se ve a quién se está quitando. El botón suelto de la sección de abajo
                  quitaba «C8AA-7DCF» sin decir que ese eras tú, y sin preguntar. -->
@@ -2710,9 +2705,9 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
                     @click="confirming = { kind: 'remove', pub: m.pub }">{{ t.act_remove }}</button>
           </div>
           <div v-if="confirming && confirming.pub === m.pub" class="confirm">
-            <span>{{ confirming.kind === 'remove' ? (m.isMe ? t.confirm_remove_me : t.confirm_remove) : confirming.kind === 'handover' ? t.confirm_handover : t.confirm_renounce }}</span>
+            <span>{{ confirming.kind === 'remove' ? (m.isMe ? t.confirm_remove_me : t.confirm_remove) : t.confirm_renounce }}</span>
             <button class="btn danger sm" data-testid="confirm-yes" :disabled="!!busy"
-                    @click="confirming.kind === 'remove' ? removeMember(m) : confirming.kind === 'handover' ? handover(m) : renounceSign()">{{ t.yes }}</button>
+                    @click="confirming.kind === 'remove' ? removeMember(m) : renounceSign()">{{ t.yes }}</button>
             <button class="btn ghost sm" @click="confirming = null">{{ t.cancel }}</button>
           </div>
           </template>

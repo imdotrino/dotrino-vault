@@ -304,7 +304,7 @@ const es = {
   groupVaults: 'BÓVEDAS',
   groupDevices: 'APARATOS',
   groupServices: 'SERVICIOS',
-  cantRemoveMaster: 'Esta bóveda es la que manda: no se quita a sí misma.',
+  cantRemoveMaster: 'Esta bóveda no se quita a sí misma.',
   revokedCount: (n) => `  Revocados: ${n}`,
   startingPairing: 'Iniciando emparejamiento…',
   deviceSince: 'desde',
@@ -580,7 +580,7 @@ const es = {
   errProfileLocked: 'Bóveda bloqueada: ábrela con su contraseña',
   errWrongPassword: (n) => `Contraseña incorrecta${n ? ` — van ${n} intentos fallidos` : ''}`,
   errTooManyTries: (s) => `Demasiados intentos: espera ${s || '?'} s antes de volver a probar`,
-  errMasterWithMembers: 'Esta bóveda es la que manda en esta cuenta y hay otros dispositivos: pásale primero el mando a uno que esté conectado. Si la borras así, se quedan con su llave y sin nadie que pueda volver a darles permisos.'
+  errMasterWithMembers: 'Es la única bóveda de esta cuenta y hay otros dispositivos: dale antes el permiso de sellar a otra (`caps <ID> +sella`). Si la borras así, se quedan con su llave y sin nadie que pueda volver a darles permisos.'
 }
 
 // ---------------------------------- inglés ----------------------------------
@@ -842,7 +842,7 @@ const en = {
   groupVaults: 'VAULTS',
   groupDevices: 'DEVICES',
   groupServices: 'SERVICES',
-  cantRemoveMaster: 'This vault is the Master: it does not remove itself.',
+  cantRemoveMaster: 'This vault does not remove itself.',
   revokedCount: (n) => `  Revoked: ${n}`,
   startingPairing: 'Starting pairing…',
   deviceSince: 'since',
@@ -1088,7 +1088,7 @@ const en = {
   errProfileLocked: 'Vault locked: open it with its password',
   errWrongPassword: (n) => `Wrong password${n ? ` — ${n} failed attempts so far` : ''}`,
   errTooManyTries: (s) => `Too many attempts: wait ${s || '?'} s before trying again`,
-  errMasterWithMembers: 'This vault is the Master of this account and it has other devices: hand the Master over to one that is online first. If you delete it like this, they keep their key with nobody able to sign the record again.'
+  errMasterWithMembers: 'This is the only vault of this account and it has other devices: give the sealing permission to another one first (`caps <ID> +sella`). If you delete it like this, they keep their key with nobody able to sign the record again.'
 }
 
 // --------------------------- selección y persistencia -----------------------
