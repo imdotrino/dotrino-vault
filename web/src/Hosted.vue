@@ -240,6 +240,8 @@ async function finishPurchase () {
 
 // ----- las mías -----
 const mine = ref([])
+/** Las borradas no se enseñan: al cliente no le dicen nada (dueño, 2026-10-27). La auditoría está en /admin. */
+const shown = computed(() => mine.value.filter((s) => s.stack !== 'deleted'))
 const cancelling = ref(null)
 const invitation = ref({}) // id -> lo pegado
 const codes = ref({})      // id -> el código que salió al enrolar
@@ -342,8 +344,8 @@ onMounted(async () => {
 
       <div v-if="identity" class="card" data-testid="hosted-mine">
         <h2>{{ t.mine }}</h2>
-        <p v-if="!mine.length" class="muted">{{ t.none }}</p>
-        <article v-for="s in mine" :key="s.id" class="sub" :data-sub-id="s.id" data-testid="hosted-sub">
+        <p v-if="!shown.length" class="muted">{{ t.none }}</p>
+        <article v-for="s in shown" :key="s.id" class="sub" :data-sub-id="s.id" data-testid="hosted-sub">
           <p>
             <strong>{{ t.item(s.product, s.device) }}</strong> ·
             {{ t.status[s.status] || s.status }}

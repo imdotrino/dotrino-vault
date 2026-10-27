@@ -46,6 +46,8 @@ const T = {
     refund: { pending: 'pendiente', done: 'hecha', none: 'nada cobrado' },
     turn_on: 'Encender', turn_off: 'Apagar', release: 'Que mande el pago',
     refund_btn: 'Devolver el último cobro', refund_sure: '¿Devolver el último cobro? La suscripción se cancela.',
+    show_deleted: 'Mostrar las borradas',
+    hidden_deleted: (n) => `(${n} borrada${n === 1 ? '' : 's'}, ocultas)`,
     remove_btn: 'Borrar la réplica', remove_sure: '¿Borrar esta réplica? Si la suscripción sigue activa, se cancela.',
     yes: 'Sí', no: 'No',
     refunded: (r) => `Devuelto ${r.amount} (${r.capture}).`,
@@ -83,6 +85,8 @@ const T = {
     refund: { pending: 'pending', done: 'done', none: 'nothing charged' },
     turn_on: 'Turn on', turn_off: 'Turn off', release: 'Follow the payment',
     refund_btn: 'Refund the last payment', refund_sure: 'Refund the last payment? The subscription is cancelled.',
+    show_deleted: 'Show deleted ones',
+    hidden_deleted: (n) => `(${n} deleted, hidden)`,
     remove_btn: 'Delete the replica', remove_sure: 'Delete this replica? If the subscription is still active, it is cancelled.',
     yes: 'Yes', no: 'No',
     refunded: (r) => `Refunded ${r.amount} (${r.capture}).`,
@@ -114,6 +118,10 @@ const link = ref(null)
 const notice = ref(null) // { kind: 'ok' | 'error', text }
 /** Un servicio por miembro: { sub, label, deviceId, online, open, client, rows, busy, notice, confirm, account } */
 const agents = ref([])
+/** Las borradas quedan para auditoría, ocultas por defecto (dueño, 2026-10-27). */
+const showDeleted = ref(false)
+const rowsOf = (a) => (a.rows || []).filter((r) => showDeleted.value || r.stack !== 'deleted')
+const deletedOf = (a) => (a.rows || []).filter((r) => r.stack === 'deleted').length
 let probe = null
 
 class AdminError extends Error { constructor (code, message) { super(message); this.code = code } }
@@ -220,6 +228,7 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 <template>
   <section class="admin" data-testid="admin">
     <h1>{{ t.title }}</h1>
+    <label class="filter" data-testid="admin-show-deleted"><input v-model="showDeleted" type="checkbox"> {{ t.show_deleted }}</label>
     <p v-if="notice" :class="['notice', notice.kind]" role="status" data-testid="admin-notice">{{ notice.text }}</p>
 
     <article v-for="a in agents" :key="a.sub" class="card" :data-agent="a.deviceId" data-testid="admin-agent">
@@ -235,9 +244,9 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
         <p v-if="a.busy === 'list' && !a.rows" class="muted">{{ t.connecting }}</p>
 
         <template v-if="a.rows">
-          <p v-if="!a.rows.length" class="muted" data-testid="admin-none">{{ t.none }}</p>
+          <p v-if="!rowsOf(a).length" class="muted" data-testid="admin-none">{{ t.none }}<template v-if="!showDeleted && deletedOf(a)"> {{ t.hidden_deleted(deletedOf(a)) }}</template></p>
           <ul v-else class="subs" data-testid="admin-table">
-            <li v-for="r in a.rows" :key="r.id" class="sub" :data-sub-id="r.id" data-testid="admin-row">
+            <li v-for="r in rowsOf(a)" :key="r.id" class="sub" :data-sub-id="r.id" data-testid="admin-row">
               <dl class="fields">
                 <div><dt>{{ t.col.account }}</dt><dd><code :title="r.account">{{ short(r.account, 12) }}</code></dd></div>
                 <div><dt>{{ t.col.id }}</dt><dd><code :title="r.id">{{ short(r.id) }}</code></dd></div>
@@ -264,7 +273,7 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
                   </template>
                   <!-- Sin cargo no hay ni habrá cobro que devolver: no se ofrece (dueño, 2026-10-27). -->
                   <button v-if="r.status !== 'COMP'" class="btn btn-ghost small" :disabled="!!a.busy || !r.paypalId" @click="a.confirm = { id: r.id, op: 'refund' }" data-testid="admin-refund">{{ t.refund_btn }}</button>
-                  <button class="btn btn-ghost small" :disabled="!!a.busy || r.stack === 'deleted' || r.stack === 'none'" @click="a.confirm = { id: r.id, op: 'remove' }" data-testid="admin-remove">{{ t.remove_btn }}</button>
+                  <button v-if="r.stack !== 'deleted'" class="btn btn-ghost small" :disabled="!!a.busy || r.stack === 'none'" @click="a.confirm = { id: r.id, op: 'remove' }" data-testid="admin-remove">{{ t.remove_btn }}</button>
                 </template>
               </div>
             </li>
@@ -285,6 +294,7 @@ const short = (s, n = 8) => (s && s.length > n ? s.slice(0, n) + '…' : s)
 </template>
 
 <style scoped>
+.filter { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: .9rem; color: var(--muted); cursor: pointer; }
 .admin { max-width: 1200px; margin: 24px auto 64px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
 .head h2 { margin: 0; font-size: 1.1rem; flex: 1; min-width: 0; }
