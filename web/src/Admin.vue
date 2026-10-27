@@ -59,7 +59,9 @@ const T = {
       forbidden: 'Este aparato no tiene el permiso «admin» en la cuenta.',
       'no-record': 'El servicio no tiene el acta de la cuenta para comprobar permisos. Inténtalo en unos minutos.',
       'not-paired': 'Este navegador no está enlazado a tu bóveda. Enlázalo en «Mi bóveda».',
-      'unauthorized': 'El servicio no reconoce a este aparato como parte de la cuenta.',
+      // Lo dice cualquiera de los dos lados: el servicio no acepta a este aparato, o este
+      // navegador no acepta el papel del servicio. Se enseña el motivo, que es lo que distingue.
+      'unauthorized': (e) => `No se pudo verificar la sesión con el servicio (${e?.reason || 'sin motivo'}): ${e?.message || ''}`,
       timeout: 'El servicio no contestó.',
       'bad-account': 'Ese ID de cuenta no es válido: son 64 caracteres hexadecimales en minúscula.',
       'nothing-to-refund': 'No hay ningún cobro que devolver.',
@@ -94,7 +96,7 @@ const T = {
       forbidden: 'This device does not have the «admin» permission in the account.',
       'no-record': 'The service does not have the account record to check permissions. Try again in a few minutes.',
       'not-paired': 'This browser is not linked to your vault. Link it in «My vault».',
-      'unauthorized': 'The service does not recognize this device as part of the account.',
+      'unauthorized': (e) => `The session with the service could not be verified (${e?.reason || 'no reason'}): ${e?.message || ''}`,
       timeout: 'The service did not answer.',
       'bad-account': 'That account ID is not valid: it is 64 lowercase hexadecimal characters.',
       'nothing-to-refund': 'There is no payment to refund.',
@@ -103,7 +105,10 @@ const T = {
   }
 }
 const t = computed(() => T[props.lang] || T.es)
-const errorText = (e) => t.value.errors[e?.code] || t.value.error(e?.code || 'error', e?.message)
+const errorText = (e) => {
+  const m = t.value.errors[e?.code]
+  return typeof m === 'function' ? m(e) : (m || t.value.error(e?.code || 'error', e?.message))
+}
 
 const link = ref(null)
 const notice = ref(null) // { kind: 'ok' | 'error', text }
