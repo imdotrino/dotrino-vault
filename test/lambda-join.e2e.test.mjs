@@ -295,6 +295,27 @@ test('clones: el cajón escrito en la otra bóveda llega a la alojada, y el borr
   assert.ok(lines.some((l) => /merged the drawers of a sibling vault/.test(l)), 'se mezclaron los cajones de la hermana')
 })
 
+// EL RESPALDO DE LAS APPS TAMBIÉN SE COPIA (dueño, 2026-10-28): lo que una bóveda guarda del
+// messenger le llega a la alojada al despertar, sin que nadie lo pida.
+test('clones: el respaldo de las apps de la otra bóveda llega a la alojada al despertar', async () => {
+  vault.threads.methods.importThreads({
+    threads: { chat: [{ id: 'm1', ts: Date.now(), text: 'hola' }] },
+    owners: { chat: 'messenger.dotrino.com' },
+    mode: 'upsert'
+  })
+  const r = await runSession({
+    store, dir: tmp('join-respaldo-'), proxyUrl, deadline: Date.now() + 60_000, idleMs: 0, log,
+    start: vaultStarter({
+      startVault,
+      locked: true,
+      onReady: async (v) => (await espera(() => (v.threads.raw().threads.chat || []).some((e) => e.id === 'm1'), 150)) &&
+        v.threads.raw().owners.chat
+    })
+  })
+  assert.equal(r.ready, 'messenger.dotrino.com', 'llegó el hilo, con su app')
+  assert.ok(lines.some((l) => /merged the app backup of a sibling vault/.test(l)))
+})
+
 // LAS DOS SON MAESTRA (`docs/replicas.md` §11.5). Lo que pasó con la de Lambda de Seyacat: la
 // última acta la selló la otra bóveda, el acta solo nombraba UNA llave de sellado (la de esa), y
 // la alojada no podía firmar nada de lo que sirve («no sealing key named by the record»). Ahora
