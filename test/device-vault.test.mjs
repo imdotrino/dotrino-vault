@@ -262,6 +262,10 @@ test('paridad: el dispositivo-bóveda atiende lo mismo que el daemon', () => {
     // Los CAJONES de una bóveda hermana (`docs/replicas.md` §11.4): son los de `SECRETS`, y
     // un dispositivo-bóveda no los guarda. Van con `SECRETS`, no aparte.
     'SIBLING_DRAWERS',
+    // El RESPALDO DE LAS APPS entre bóvedas hermanas (`lib/src/core/siblingBackup.js`). Un
+    // dispositivo-bóveda vive en el mismo navegador cuyo almacén ya tiene esos datos, y se
+    // apaga al cerrar la pestaña: copiarlo a las hermanas es trabajo de las que quedan encendidas.
+    'SIBLING_BACKUP',
   ])
 
   const faltan = [...daemon].filter(m => !dispositivo.has(m) && !soloDaemon.has(m))
