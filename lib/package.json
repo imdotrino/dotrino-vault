@@ -66,7 +66,7 @@
   ],
   "peerDependencies": {
     "@dotrino/identity": ">=0.134.0",
-    "@dotrino/proxy-client": ">=0.45.2",
+    "@dotrino/proxy-client": ">=0.45.3",
     "@dotrino/store": ">=0.13.0"
   },
   "license": "MIT",
