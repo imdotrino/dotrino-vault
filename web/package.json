@@ -22,7 +22,7 @@
     "@dotrino/support": "0.10.0",
     "@dotrino/theme": "0.1.0",
     "@dotrino/topbar": "0.17.0",
-    "@dotrino/vault": "0.113.0",
+    "@dotrino/vault": "0.114.0",
     "scrypt-js": "3.0.1",
     "vue": "3.5.13"
   },

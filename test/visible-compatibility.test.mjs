@@ -30,7 +30,7 @@ test('la bóveda y su cliente declaran lo mismo del cable', () => {
 
 test('el cliente mete su versión DENTRO de lo que firma, no en el envoltorio', () => {
   const src = leer('lib/src/service.js')
-  const m = /const data = \{ op: 'secrets',[^\n]*\}/.exec(src)
+  const m = /\bdata = \{ op: 'secrets',[^\n]*\}/.exec(src)
   assert.ok(m, 'el cuerpo firmado de secrets tiene que existir')
   assert.match(m[0], /\bv: (MY_VERSION|declarationOf\()/,
     'una versión que cualquiera puede escribir por fuera no es un inventario')
