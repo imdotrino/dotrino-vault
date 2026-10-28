@@ -725,15 +725,32 @@ function setCapsDraft (st, member, caps) {
   else drafts[member.pub] = [...caps]
   st.capsDrafts = drafts
 }
+/**
+ * DISPOSITIVO O SERVICIO (dueño, 2026-10-28): el cajón (`cn`) va en el mismo borrador y se
+ * guarda en la misma acta que los permisos. `st.cnDrafts[pub]` es el cajón que QUEDARÍA
+ * (`null` = dispositivo); si vuelve a coincidir con el acta, sale del borrador.
+ */
+const draftCnOf = (st, member) => (member.pub in (st.cnDrafts || {}) ? st.cnDrafts[member.pub] : (member.cn || null))
+function setCnDraft (st, member, cn) {
+  const drafts = { ...(st.cnDrafts || {}) }
+  if ((cn || null) === (member.cn || null)) delete drafts[member.pub]
+  else drafts[member.pub] = cn || null
+  st.cnDrafts = drafts
+}
 /** Lo que se firmaría ahora: un cambio por aparato que sigue en el acta y difiere de ella. */
 function draftChanges (st) {
   const out = []
-  for (const [pub, caps] of Object.entries(st.capsDrafts || {})) {
+  const pubs = new Set([...Object.keys(st.capsDrafts || {}), ...Object.keys(st.cnDrafts || {})])
+  for (const pub of pubs) {
     const member = (st.members || []).find((m) => m.pub === pub)
-    if (!member || sameCaps(caps, member.caps)) continue
+    if (!member) continue
+    const caps = draftCapsOf(st, member)
+    const cn = draftCnOf(st, member)
+    const cnChanged = cn !== (member.cn || null)
+    if (sameCaps(caps, member.caps) && !cnChanged) continue
     const real = new Set(member.caps || []); const has = new Set(caps)
-    const n = [...new Set([...has, ...real])].filter((c) => has.has(c) !== real.has(c)).length
-    out.push({ pub, caps: [...caps], member, n })
+    const n = [...new Set([...has, ...real])].filter((c) => has.has(c) !== real.has(c)).length + (cnChanged ? 1 : 0)
+    out.push({ pub, caps: [...caps], ...(cnChanged ? { cn } : {}), member, n })
   }
   return out
 }
@@ -746,7 +763,7 @@ function draftChanges (st) {
 function unlessDrafts (st, fn) {
   const n = draftChanges(st).length
   if (!n) return fn()
-  setConfirm(st, { text: L(st).capsDiscardAll(n), onYes: async () => { st.capsDrafts = {}; await fn() } })
+  setConfirm(st, { text: L(st).capsDiscardAll(n), onYes: async () => { st.capsDrafts = {}; st.cnDrafts = {}; await fn() } })
 }
 
 /**
@@ -758,10 +775,10 @@ async function saveCapsDrafts (term, st) {
   const changes = draftChanges(st)
   if (!changes.length) { flash(st, i.capsNothing); return }
   const save = async () => {
-    const r = await guard(term, st, i.applyingCaps, () => vc.setDevicesCaps(changes.map(({ pub, caps }) => ({ pub, caps })), activeId(st)))
+    const r = await guard(term, st, i.applyingCaps, () => vc.setDevicesCaps(changes.map(({ pub, caps, cn }) => ({ pub, caps, ...(cn !== undefined ? { cn } : {}) })), activeId(st)))
     if (!r.ok) return
     applyDump(st, r.v)
-    st.capsDrafts = {}
+    st.capsDrafts = {}; st.cnDrafts = {}
     await refreshMembers(term, st)
     flash(st, i.capsSavedMany(changes.reduce((a, c) => a + c.n, 0), changes.length))
   }
@@ -783,11 +800,24 @@ function capsRows (st, t) {
   // EL BORRADOR manda sobre lo que hay en el acta: es lo que estás a punto de dejar.
   const real = new Set(member.caps || [])
   const has = new Set(draftCapsOf(st, member))
-  const { rows: list, tocados: touched } = capChecklist(i, t, { cn: member.cn, has, real })
+  const comm = isCommKey(member)
+  const { rows: list, tocados: capsTouched } = capChecklist(i, t, { cn: comm ? member.cn : null, has, real })
+  // EL CAJÓN, última fila: decide si es un dispositivo o un servicio, y se cambia sin
+  // re-enrolar. La llave de comunicación de la bóveda no tiene esta fila.
+  const cn = draftCnOf(st, member)
+  const cnChanged = cn !== (member.cn || null)
+  const drawer = comm
+    ? []
+    : [
+        { text: ` ${cnChanged ? t.bold('*') : ' '} ${cn ? i.capsDrawerRow(cn) : i.capsDeviceRow}`, sel: true, meta: { drawer: true } },
+        { text: t.muted('      ' + (cn ? i.capsDrawer(cn) + ' ' + i.capsServiceHint : i.capsDeviceHint)), sel: false }
+      ]
+  const touched = capsTouched + (cnChanged ? 1 : 0)
   const rows = [
     { text: ' ' + t.bold(i.capsFor(target.deviceId, member.label || '')), sel: false },
     { text: '', sel: false },
     ...list,
+    ...drawer,
     { text: '', sel: false }
   ]
   // Lo que hay pendiente en OTROS aparatos también se dice aquí: G los guarda juntos.
@@ -1072,7 +1102,7 @@ async function refreshAll (term, st, api = vc) {
   // Cerrada: no se pide su contenido, y tampoco se enseña un error por mirarla desde
   // fuera. Lo que hubiera cargado se suelta, para no dejar en pantalla lo de antes.
   if (activeLocked(st)) {
-    st.devices = null; st.secrets = null; st.members = []; st.blocked = []; st.me = undefined; st.capsDrafts = {}
+    st.devices = null; st.secrets = null; st.members = []; st.blocked = []; st.me = undefined; st.capsDrafts = {}; st.cnDrafts = {}
     return
   }
   const r = await guard(term, st, L(st).loading, () => api.snapshot(activeId(st)))
@@ -1679,12 +1709,29 @@ async function onKeyCaps (term, st, key) {
   if (key.name === 'f5') {
     // F5 trae el acta de nuevo y el borrador deja de tener con qué compararse: se pregunta
     // antes de tirarlo, igual que al salir de la bóveda.
-    unlessDrafts(st, async () => { st.capsDrafts = {}; await refreshMembers(term, st) })
+    unlessDrafts(st, async () => { st.capsDrafts = {}; st.cnDrafts = {}; await refreshMembers(term, st) })
     return true
   }
   if (ch === 'g') { await saveCapsDrafts(term, st); return true }
 
   if ((key.name !== 'enter' && ch !== ' ') || !cur) return true
+  if (cur.drawer) {
+    // El cajón se ESCRIBE: vacío lo deja como dispositivo. Solo mueve el borrador.
+    const i = L(st)
+    setInput(st, {
+      label: i.cnLabel,
+      hint: i.cnHint,
+      value: draftCnOf(st, member) || '',
+      onSubmit: async (v) => {
+        const cn = v.trim().toLowerCase() || null
+        if (cn && (!/^[a-z0-9-]{1,32}$/.test(cn) || cn === 'vault')) { flash(st, i.cnInvalid, 'danger'); return }
+        st.input = null
+        setCnDraft(st, member, cn)
+      },
+      onCancel: () => { st.input = null }
+    })
+    return true
+  }
   // Enter solo mueve el BORRADOR: no firma, no avisa, no se puede equivocar caro.
   const draft = new Set(draftCapsOf(st, member))
   if (draft.has(cur.cap)) draft.delete(cur.cap); else draft.add(cur.cap)
@@ -3153,6 +3200,7 @@ export function newSession () {
     sel: { profiles: 0, devices: 0, secrets: 0, pairmode: 0, paircaps: 0, devvars: 0, logins: 0, doors: 0, settings: 0 },
     // Permisos tocados y sin guardar, por llave del aparato (ver `setCapsDraft`).
     capsDrafts: {},
+    cnDrafts: {},
     // Las bóvedas que ha abierto ESTA sesión, para volver a cerrarlas al salir.
     unlockedHere: new Set(),
     // Su contraseña, SOLO en memoria y SOLO mientras la pantalla esté abierta: sirve para
@@ -3251,7 +3299,7 @@ export async function handleKey (term, st, key) {
   // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
   if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
     // El borrador es de ESTA bóveda: al salir de ella se guarda o se tira.
-    unlessDrafts(st, () => { st.capsDrafts = {}; st.screen = 'profiles' })
+    unlessDrafts(st, () => { st.capsDrafts = {}; st.cnDrafts = {}; st.screen = 'profiles' })
     return true
   }
 

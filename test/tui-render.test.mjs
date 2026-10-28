@@ -527,7 +527,7 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   // pantalla que se llama «permisos»; `desatendido` era peor —una marca local de la
   // bóveda, invisible aquí y con el sentido invertido—; y `replica` entró el 2026-09-02.
   // Si el acta gana o pierde uno, esto se pone rojo a propósito.
-  assert.equal(V.capsRows(st, t).filter((r) => r.sel).length, 9)
+  assert.equal(V.capsRows(st, t).filter((r) => r.meta?.cap).length, 9)
   assert.match(text, /Solo sirve en otra BÓVEDA/, 'de `sella` se dice dónde significa algo')
   // El que decide si un servidor se lleva tus claves solo. Verlo APAGADO es media
   // explicación: dice que hoy te lo pregunta.
@@ -854,18 +854,20 @@ test('Permisos: el cajón de un servicio se DICE, no es una casilla', () => {
   const texto = filas.map((r) => r.text).join('\n')
   assert.match(texto, /abre el cajón «proxy» y ningún otro/, 'dice QUÉ cajón abre, y que no abre otro')
   assert.doesNotMatch(texto, /\[.\].*proxy/, 'pero no es algo que se marque')
-  assert.equal(filas.filter((r) => r.sel).length, 9, 'los mismos nueve que cualquier aparato')
+  assert.equal(filas.filter((r) => r.meta?.cap).length, 9, 'los mismos nueve que cualquier aparato')
   assert.equal(filas.find((r) => r.meta?.cap === 'secrets'), undefined)
+  // Y el cajón es una fila propia que se edita (dueño, 2026-10-28): servicio ↔ dispositivo.
+  assert.equal(filas.filter((r) => r.meta?.drawer).length, 1)
 
-  // Un aparato TUYO no tiene cajón: no se dice nada.
+  // Un aparato TUYO no tiene cajón, y la fila lo dice: es un dispositivo.
   const aparato = baseState({
     screen: 'caps',
     capsFor: { pub: 'PUB2', deviceId: 'EF56-7890' },
     members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'teléfono', caps: ['sign'] }]
   })
   const suyas = V.capsRows(aparato, t)
-  assert.equal(suyas.filter((r) => r.sel).length, 9)
-  assert.doesNotMatch(suyas.map((r) => r.text).join('\n'), /cajón/, 'no hay cajón que abrir')
+  assert.equal(suyas.filter((r) => r.meta?.cap).length, 9)
+  assert.match(suyas.map((r) => r.text).join('\n'), /sin cajón · es un dispositivo/)
 })
 
 /**
@@ -1217,4 +1219,47 @@ test('Dispositivos: en grupos — bóvedas (con su llave de comunicación debajo
   assert.match(lineas[at(/64AA-2758/)], /└ .*llave de comunicación/)
   assert.ok(at(/APARATOS/) < at(/B274-8978/) && at(/B274-8978/) < at(/SERVICIOS/))
   assert.ok(at(/SERVICIOS/) < at(/52B5-A72A/))
+})
+
+/**
+ * DISPOSITIVO O SERVICIO, DESDE LA TUI (dueño, 2026-10-28). El cajón es la última fila de los
+ * permisos: se escribe (vacío = dispositivo), va al mismo borrador y G lo guarda en la misma
+ * acta. Sin re-enrolar.
+ */
+test('Permisos: el cajón se escribe en el borrador y G lo manda junto con los permisos', async () => {
+  const t = makeTheme()
+  const members = [{ pub: 'PUB1', id: 'AB12-CD34', label: 'fexa', caps: ['sign', 'read', 'store'], cn: 'fexa' }]
+  const st = baseState({ screen: 'caps', capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' }, members })
+  let text = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(text, /cajón «fexa» · es un servicio/)
+  st.sel.caps = V.capsRows(st, t).filter((r) => r.sel).findIndex((r) => r.meta?.drawer)
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  assert.equal(st.input.value, 'fexa', 'se abre con el cajón actual')
+  await st.input.onSubmit('')
+  assert.equal(st.input, null)
+  assert.deepEqual(st.members[0].cn, 'fexa', 'el acta no se toca hasta G')
+  text = V.capsRows(st, t).map((r) => r.text).join('\n')
+  assert.match(text, /sin cajón · es un dispositivo/)
+  assert.match(text, /1 cambio\(s\) sin guardar/)
+  const [c] = V.draftChanges(st)
+  assert.equal(c.cn, null, 'va como dispositivo')
+  assert.deepEqual(c.caps.sort(), ['read', 'sign', 'store'], 'con los permisos de siempre')
+})
+
+test('Permisos: un cajón que no vale no entra al borrador, y la llave de la bóveda no tiene fila de cajón', async () => {
+  const t = makeTheme()
+  const members = [
+    { pub: 'PUB1', id: 'AB12-CD34', label: 'túnel', caps: ['sign'] },
+    { pub: 'COMM', id: 'CC00-0000', label: 'esta bóveda', caps: ['sign'], cn: 'vault' }
+  ]
+  const st = baseState({ screen: 'caps', capsFor: { pub: 'PUB1', deviceId: 'AB12-CD34' }, members })
+  st.sel.caps = V.capsRows(st, t).filter((r) => r.sel).findIndex((r) => r.meta?.drawer)
+  await V.onKeyCaps({ t }, st, { name: 'enter' })
+  await st.input.onSubmit('vault')
+  assert.ok(st.input, 'sigue pidiendo')
+  assert.equal(V.draftChanges(st).length, 0)
+  await st.input.onSubmit('tunnel')
+  assert.equal(V.draftChanges(st)[0].cn, 'tunnel')
+  st.capsFor = { pub: 'COMM', deviceId: 'CC00-0000' }
+  assert.ok(!V.capsRows(st, t).some((r) => r.meta?.drawer), 'la llave de comunicación no se convierte')
 })

@@ -78,7 +78,7 @@ permisos (`sign`, `read`, `store`…) se le dan igual a uno que a otro.
 | Tus datos | recibe la clave de contenido (lee lo tuyo) | no la recibe |
 
 Se pasa de uno a otro **sin re-enrolar**: es la misma llave, cambia lo que el acta dice de
-ella (vaultd ≥ 0.187.0, identity ≥ 0.135.0).
+ella (vaultd ≥ 0.187.1, identity ≥ 0.135.0; en la TUI, la última fila de los permisos del aparato desde la 0.188.0).
 
 ```sh
 dotrino-vault caps <ID> +secrets:tunnel   # pasa a ser el servicio «tunnel» (si ya era otro, lo reemplaza)
