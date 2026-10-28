@@ -43,7 +43,7 @@ perfiles porque cada uno tiene su llave, su directorio y sus dispositivos; la
          · sellador (master): UNA sola llave firma el acta. La intención es que sea la bóveda.
          · miembros: una LLAVE cada uno, con capacidades
              sign · store · read   → un dispositivo tuyo
-             secrets + cn          → un servicio: abre SOLO su propio cajón
+             + cn (su cajón)       → un servicio: abre SOLO ese cajón (ver abajo)
          · llavero: la clave de contenido del perfil, envuelta para cada miembro
 
  PC (bóveda)  ── su llave NUNCA sale ──────────────────────────────────────┐
@@ -64,6 +64,31 @@ cuenta firmó. **No tiene por qué ser la llave de la bóveda**: si la cuenta na
 tu teléfono y la bóveda la adoptó, la bóveda es la que manda pero el nombre sigue
 siendo el de la llave génesis. Lo que la bóveda pone en cada cert es su propia llave
 (quien lo emitió), no el nombre de la cuenta.
+
+### Dispositivo o servicio
+
+La única diferencia entre los dos es el **`cn`** del miembro (el nombre de su cajón). Los
+permisos (`sign`, `read`, `store`…) se le dan igual a uno que a otro.
+
+| | **Dispositivo** (sin `cn`) | **Servicio** (`cn: <cajón>`) |
+|---|---|---|
+| Qué es | un aparato tuyo: el teléfono, el portátil | un programa que corre por ti: un bot, un proxio, un túnel |
+| Secretos | ningún cajón | abre **solo** el cajón de su nombre |
+| Con `sign` | firma **como tú** | firma **solo dentro de su cajón**; nunca habla por ti |
+| Tus datos | recibe la clave de contenido (lee lo tuyo) | no la recibe |
+
+Se pasa de uno a otro **sin re-enrolar**: es la misma llave, cambia lo que el acta dice de
+ella (vaultd ≥ 0.187.0, identity ≥ 0.135.0).
+
+```sh
+dotrino-vault caps <ID> +secrets:tunnel   # pasa a ser el servicio «tunnel» (si ya era otro, lo reemplaza)
+dotrino-vault caps <ID> -secrets:tunnel   # vuelve a ser un dispositivo
+```
+
+Al hacerlo servicio se le quitan las envolturas de la clave de contenido; lo que ya leyó no
+vuelve, y lo futuro se corta rotando, igual que al quitar un aparato. Al hacerlo dispositivo
+se le envuelve la clave vigente en la misma acta. La llave de comunicación de la bóveda
+(`cn: vault`) no es ni lo uno ni lo otro y no se convierte.
 
 **Qué autoriza qué, hoy.** Para firmar, leer y guardar, la autorización sale del
 **cert** (se verifica la cadena hasta la llave de la bóveda). El **acta** se comprueba

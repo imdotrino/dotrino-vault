@@ -690,6 +690,7 @@ async function cmdMembers () {
       D, record.vault.product, record.vault.version, record.vault.protocol, Z)
   }
   console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +sign | -sign | +store | -store | +read | -read | +admin | +approve | +passwords | +sealer | +unattended | +replica')
+  console.log('  Dispositivo o servicio: dotrino-vault caps <ID> +secrets:<cajón>  (servicio)  ·  -secrets:<cajón>  (dispositivo)')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «approve» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
   console.log('  No deja cambiar permisos ni traspasar el mando: eso solo se hace en esta máquina.')
@@ -800,7 +801,7 @@ const CAP_WORDS = Object.keys(CAP_BY_WORD).filter((w) => w !== 'passkeys')
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +sign|-sign|+store|-store|+read|-read|+admin|-admin|+approve|-approve|+passwords|-passwords|+sealer|-sealer|+unattended|-unattended')
+    console.error('uso: dotrino-vault caps <ID> +sign|-sign|+store|-store|+read|-read|+admin|-admin|+approve|-approve|+passwords|-passwords|+sealer|-sealer|+unattended|-unattended|+secrets:<ns>|-secrets:<ns>')
     process.exit(2)
   }
   const s = requireDaemon()
@@ -820,16 +821,39 @@ async function cmdCaps (args = []) {
       process.exit(2)
     }
   }
-  const rest = changes
   const caps = new Set(m.caps)
-  for (const c of rest) {
+  // DISPOSITIVO O SERVICIO (dueño, 2026-10-28). La única diferencia es el cajón (`cn`), y se
+  // escribe con la misma palabra que en `pair --scope`: `+secrets:<ns>` lo hace servicio de
+  // ese cajón (uno solo: el de antes se reemplaza), `-secrets:<ns>` lo devuelve a dispositivo.
+  // Sin re-enrolar: es la misma llave, cambia lo que el acta dice de ella.
+  let cn
+  for (const c of changes) {
     const sign = c[0]
-    const cap = CAP_BY_WORD[c.slice(1).toLowerCase()]
-    if (!cap || (sign !== '+' && sign !== '-')) { console.error('permiso no reconocido: %s  (±%s)', c, CAP_WORDS.join(' | ')); process.exit(2) }
+    const word = c.slice(1).toLowerCase()
+    if (sign !== '+' && sign !== '-') { console.error('permiso no reconocido: %s  (±%s | ±secrets:<ns>)', c, CAP_WORDS.join(' | ')); process.exit(2) }
+    const drawer = /^secrets:([a-z0-9-]{1,32})$/.exec(word)
+    if (drawer) {
+      if (sign === '+') { cn = drawer[1]; continue }
+      if ((m.cn || null) !== drawer[1]) { console.error('%s no es el servicio «%s»%s', m.id, drawer[1], m.cn ? ` (es «${m.cn}»)` : ' (ya es un dispositivo)'); process.exit(2) }
+      cn = null
+      continue
+    }
+    const cap = CAP_BY_WORD[word]
+    if (!cap) { console.error('permiso no reconocido: %s  (±%s | ±secrets:<ns>)', c, CAP_WORDS.join(' | ')); process.exit(2) }
     if (sign === '+') caps.add(cap); else caps.delete(cap)
   }
-  writeReq('caps-request.json', { pub: m.pub, caps: [...caps] })
+  const reqId = crypto.randomUUID()
+  const resFile = path.join(dir, 'caps.json')
+  const since = Date.now()
+  writeReq('caps-request.json', { id: reqId, changes: [{ pub: m.pub, caps: [...caps], ...(cn !== undefined ? { cn } : {}) }] })
   sendSignal(s.pid, 'SIGUSR2')
+  // SE ESPERA LA RESPUESTA: un «Listo» que no lo era deja creer que se firmó lo que no.
+  let r = null
+  for (let i = 0; i < 100; i++) { await sleep(100); const a = ipcRead(resFile, null); if (a?.req === reqId && a.at >= since) { r = a; break } }
+  if (!r) { console.error('El daemon no respondió.'); process.exit(1) }
+  assertOpen(r)
+  if (r.ok === false) { console.error('No se pudo: %s', r.error); process.exit(1) }
+  if (cn !== undefined) console.log(cn ? 'Ahora es el servicio «%s».' : 'Ahora es un dispositivo%s.', cn || '')
   console.log('Listo. Compruébalo con: dotrino-vault members')
 }
 
