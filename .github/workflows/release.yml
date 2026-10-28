@@ -61,7 +61,11 @@ jobs:
 
       # LAS PRUEBAS VAN ANTES DE PUBLICAR, no después. Una versión que no pasa su suite no
       # llega a npm: es lo único que impide publicar algo roto a mano un viernes.
+      # Con tope: un archivo que no sale (algo abierto) dejaba el paso esperando horas. El vigía
+      # de `npm test` (test/fixtures/hang-watchdog.cjs) ya lo corta a los 4 min diciendo qué
+      # quedó vivo; esto es por si lo que se cuelga es otra cosa.
       - run: npm test
+        timeout-minutes: 20
       # El registro de compatibilidad (dotrino-roadmap, CONVENCIONES §14): nada instalado en
       # una versión marcada rota ni por debajo de lo que exige la ficha. Con @latest, que trae
       # la lista de rotas más nueva. Va antes de publicar: aquí sí frena.

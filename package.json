@@ -13,7 +13,7 @@
     "start": "node bin/dotrino-vaultd.js",
     "pair": "node bin/dotrino-vaultd.js --pair",
     "tui": "node bin/dotrino-vault-tui.js",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --require ./test/fixtures/hang-watchdog.cjs test/*.test.mjs",
     "type-check": "tsc --noEmit",
     "release:env": "node packaging/release-env.mjs"
   },

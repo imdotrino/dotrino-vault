@@ -1,0 +1,32 @@
+# Las pruebas solas, igual que en la release pero sin publicar nada. Sirve para ver en el
+# runner de GitHub lo que en local no sale (los cuelgues de la 0.186.0 y la 0.186.1), sin
+# gastar una versión en cada intento.
+name: Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Los E2E levantan un proxio de verdad desde el repo hermano (ver release.yml).
+      - name: Clonar el proxio (lo necesitan los E2E)
+        run: git clone --depth 1 https://github.com/imdotrino/dotrino-proxy.git ../dotrino-proxy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm i -g npm@latest
+      - run: npm ci
+      - name: Dependencias del proxio
+        working-directory: ../dotrino-proxy
+        run: npm install --omit=dev
+      - run: npm test
+        timeout-minutes: 20
