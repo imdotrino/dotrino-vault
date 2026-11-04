@@ -73,3 +73,13 @@ test('pairing-contested: el incidente lleva los dos aparatos y no pide versión'
   assert.equal(n.list().length, 1)
   assert.throws(() => n.add('pairing-contested', { devices: [{ deviceId: 'x' }] }), { code: 'bad-notice' })
 })
+
+test('delivered: un aparato desatendido se llevó claves o una contraseña; pide cajón, aparato y un kind conocido', () => {
+  const n = openNotices({ disk: nodeDisk(tmp(), { atRest }), now: () => 9 })
+  const a = n.add('delivered', { kind: 'passwords', ns: 'passwords', deviceId: 'AB12-CD34', label: 'servidor' })
+  assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'delivered', kind: 'passwords', ns: 'passwords', deviceId: 'AB12-CD34', label: 'servidor', ts: 9 })
+  assert.equal(n.add('delivered', { kind: 'secrets', ns: 'proxy', deviceId: 'EF56-7890' }).label, '')
+  assert.throws(() => n.add('delivered', { kind: 'other', ns: 'proxy', deviceId: 'EF56-7890' }), (e) => e.code === 'bad-notice')
+  assert.throws(() => n.add('delivered', { kind: 'secrets', deviceId: 'EF56-7890' }), (e) => e.code === 'bad-notice')
+  assert.throws(() => n.add('delivered', { kind: 'secrets', ns: 'proxy' }), (e) => e.code === 'bad-notice')
+})

@@ -1424,7 +1424,10 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   // …Y «HAY VERSIÓN NUEVA Y NECESITO PERMISOS DE ADMINISTRADOR» (`update-needs-root`): el
   // aparato no instala ni pregunta, solo lo dice; la bóveda lo reparte con otro `ev`.
   assert.deepEqual(await reportUpdateNeedsRoot({ ...pregunta, version: '9.9.10', from: '9.9.9' }), { ok: true })
-  const lista = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
+  const lista0 = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
+  const lista = { ...lista0, notices: lista0.notices.filter((n) => n.ev !== 'delivered') }
+  // El agente se llevó su cajón por `unattended` antes de quitárselo: eso es un `delivered`.
+  assert.deepEqual(lista0.notices.filter((n) => n.ev === 'delivered').map((n) => [n.kind, n.ns, n.label]), [['secrets', 'claude', 'claude']])
   assert.deepEqual(lista.notices.map((n) => [n.ev, n.product, n.version, n.from, n.label || null]), [
     ['updated', '@dotrino/vaultd', '9.9.9', '9.9.8', null],
     ['updated', '@dotrino/terminal-agent', '9.9.9', '9.9.8', 'claude'],
@@ -1971,4 +1974,50 @@ test('un pedido que nadie contesta se vuelve a pedir cada vez más espaciado (no
   assert.equal(unansweredDelay(0), 0)
   assert.deepEqual([1, 2, 3, 4].map(unansweredDelay), [5 * min, 10 * min, 20 * min, 40 * min])
   assert.equal(unansweredDelay(30), 6 * 60 * min, 'con tope de 6 h')
+})
+
+test('desatendido: se lleva las claves sin pedir, el aprobador recibe «delivered» con asunto sellado, una vez por hora', async () => {
+  const { enrollWithVault, fetchSecrets } = await import('../lib/src/service.js')
+  const { makeDeviceKey } = await import('@dotrino/identity/capabilities')
+  const { makeEncKeypair } = await import('@dotrino/proxy-client')
+  const { openWrap, decryptWithCek } = await import('@dotrino/identity/content')
+  const { MSG } = await import('../src/protocol.js')
+  const ttl = 30 * 24 * 60 * 60 * 1000
+
+  // Un aprobador CON llave de cifrado: es a ella a la que va sellado el asunto del timbre.
+  const tel = await makeDeviceKey()
+  const telEnc = await makeEncKeypair()
+  await vault.identity.admitMember({ pub: tel.publickey, encPub: telEnc.encPub, label: 'teléfono', caps: ['sign', 'approve'] })
+
+  const inv = await vault.startPairing({ scope: ['vault:sign', 'vault:secrets:desatendido'], label: 'cron', ttlMs: ttl })
+  let perm = null
+  const svc = await enrollWithVault({ qr: inv.qr, label: 'cron', onCode: ({ code }) => { perm = aprobarYPermitir(code) } })
+  await perm
+  await vault.setSecret('desatendido', 'TOKEN', 't-1')
+  assert.equal(await vault.needsApproval(svc.device.publickey), false, 'tiene unattended: no pide')
+
+  const sent = []
+  const orig = vault.client.sendByPubkey.bind(vault.client)
+  vault.client.sendByPubkey = (pub, msg, opts) => { if (pub === tel.publickey) sent.push({ msg, opts }); return orig(pub, msg, opts) }
+  try {
+    const args = { ns: 'desatendido', proxyUrl, masterPubkey: vault.master, device: svc.device, cert: svc.cert, enc: svc.enc, timeoutMs: 5000 }
+    assert.deepEqual(await fetchSecrets(args), { TOKEN: 't-1' })
+    const until = Date.now() + 5000
+    while (!sent.some((s) => s.msg?.body?.ev === 'delivered') && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
+    const ev = sent.filter((s) => s.msg?.type === MSG.ADMIN_EVENT && s.msg.body?.ev === 'delivered')
+    assert.equal(ev.length, 1, 'el aprobador se entera')
+    assert.equal(ev[0].msg.body.kind, 'secrets'); assert.equal(ev[0].msg.body.ns, 'desatendido'); assert.equal(ev[0].msg.body.label, 'cron')
+    assert.notEqual(ev[0].opts?.quiet, true, 'suena')
+    // EL ASUNTO: sellado al teléfono, y solo él lo abre.
+    const { wrap, envelope } = ev[0].msg.ring
+    const cek = await openWrap({ wrap, myEncPrivateKey: telEnc.privateKey })
+    const asunto = JSON.parse(await decryptWithCek({ cek, envelope }))
+    assert.equal(asunto.ev, 'delivered'); assert.equal(asunto.ns, 'desatendido'); assert.equal(asunto.label, 'cron')
+    assert.ok(!JSON.stringify(ev[0].msg.ring).includes('desatendido'), 'el asunto no va en claro')
+
+    // Otra vez dentro de la hora: se entrega, y NO se vuelve a timbrar.
+    assert.deepEqual(await fetchSecrets(args), { TOKEN: 't-1' })
+    await new Promise((r) => setTimeout(r, 500))
+    assert.equal(sent.filter((s) => s.msg?.body?.ev === 'delivered').length, 1, 'una vez por aparato, cajón y hora')
+  } finally { vault.client.sendByPubkey = orig }
 })
