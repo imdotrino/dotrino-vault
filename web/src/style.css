@@ -29,6 +29,10 @@ h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; }
    La barra es <dotrino-topbar> a todo el ancho; la navegación va debajo, en una fila de
    pestañas también a todo el ancho, con su contenido alineado a la columna de `.page`. En
    pantallas estrechas la fila se desplaza de lado en vez de partirse. */
+/* La barra por ENCIMA de las pestañas. Su `.bar` lleva `backdrop-filter`, que la vuelve un
+   contexto de apilado propio, y las pestañas (sticky, z-index 30) se pintaban sobre todo lo que
+   cuelga de ella: la burbuja del support y el menú de perfil salían tapados por la fila. */
+dotrino-topbar { display: block; position: relative; z-index: 31; }
 .tabs {
   border-bottom: 1px solid var(--line);
   background: var(--bg);

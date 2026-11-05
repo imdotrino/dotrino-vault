@@ -1220,6 +1220,24 @@ const inApp = typeof window !== 'undefined' && !!window.DotrinoNative
 /** El identificador del aparato recién emparejado: lo que hay que teclear en `caps`. */
 const pairedDevice = ref('')
 
+/**
+ * EMPAREJAR PUEDE CAMBIAR LA CUENTA ACTIVA, y el multi-perfil no es reactivo. El camino B crea
+ * una cuenta nueva y la deja activa en la identidad, pero esta página —y el avatar del topbar—
+ * seguían con la de antes hasta cambiar de página. Se recarga, como al elegir otra bóveda
+ * (`chooseVault`), y la pantalla de «listo» se guarda aquí para enseñarla al volver.
+ */
+const JUST_PAIRED = 'dotrino.vault.justPaired'
+try {
+  const saved = JSON.parse(sessionStorage.getItem(JUST_PAIRED) || 'null')
+  sessionStorage.removeItem(JUST_PAIRED)
+  if (saved) {
+    flowMode.value = saved.mode === 'adopt' ? 'adopt' : 'join'
+    flowAccount.value = typeof saved.account === 'string' ? saved.account : ''
+    pairedDevice.value = typeof saved.device === 'string' ? saved.device : ''
+    justPaired.value = true
+  }
+} catch (_) { /* sin sessionStorage (modo privado): la pantalla de «listo» no se repite, nada más */ }
+
 async function connect (qr, mode = 'join') {
   if (!validInvite(qr)) { msg.value = { kind: 'bad', text: t.value.pair_bad }; return }
   pairing.value = true; pairCode.value = ''; pairError.value = ''; msg.value = null
@@ -1231,8 +1249,14 @@ async function connect (qr, mode = 'join') {
     //   · `join`  (camino B) → la cuenta de la bóveda se materializa aquí como una cuenta
     //     MÁS, con llave nueva. La que estabas usando NO se toca — antes se sobrescribía
     //     sin preguntar, que era la fusión de cuentas que el modelo prohíbe.
+    const before = (await id.value.currentProfile())?.id || null
     const r = await id.value.enrollDevice(qr, { join: mode === 'adopt' ? 'adopt' : 'new' })
     pairedDevice.value = r?.deviceId || ''
+    if ((await id.value.currentProfile())?.id !== before) {
+      try { sessionStorage.setItem(JUST_PAIRED, JSON.stringify({ mode, account: flowAccount.value, device: pairedDevice.value })) } catch (_) {}
+      location.reload()
+      return
+    }
     // Emparejar deja DOS cuentas en el aparato, y eso hay que decirlo: si no, el
     // conmutador aparece con una entrada de más y nadie sabe de dónde salió.
     justPaired.value = true
