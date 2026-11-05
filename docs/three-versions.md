@@ -1,7 +1,7 @@
 # Las tres versiones del vault: un solo núcleo
 
 > **Estado: 2026-11-04.** vaultd 0.191.0 · `@dotrino/vault` 0.119.0 · `@dotrino/identity` 0.135.1
-> (iframe de `id.dotrino.com` con el núcleo 0.119.0) · extensión 0.59.0 (núcleo 0.119.0; antes
+> (iframe de `id.dotrino.com` con el núcleo 0.119.0) · extensión 0.58.4 (núcleo 0.119.0; antes
 > 0.58.3 con el 0.106.0). Revisión anterior: 2026-10-16. Regla del dueño (2026-09-17): el vault existe **siempre** en tres
 > versiones —la **pestaña**, la **extensión** y el **binario**—, **compatibles y con las mismas
 > funciones**, salvo lo que limita su contexto; **el binario es la fuente de verdad**.
