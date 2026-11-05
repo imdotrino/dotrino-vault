@@ -86,8 +86,8 @@ test('delivered: un aparato desatendido se llevó claves o una contraseña; pide
 
 test('un pedido cerrado deja su rastro: qué, de quién, cómo acabó y quién lo contestó', () => {
   const n = openNotices({ disk: nodeDisk(tmp(), { atRest }), now: () => 5 })
-  const a = n.add('answered', { outcome: 'approved', kind: 'read', ns: 'claude', deviceId: 'AB12-CD34', label: 'portátil', by: 'EF56-GH78', request: 'r1' })
-  assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'answered', outcome: 'approved', kind: 'read', ns: 'claude', deviceId: 'AB12-CD34', label: 'portátil', by: 'EF56-GH78', request: 'r1', ts: 5 })
+  const a = n.add('answered', { outcome: 'approved', kind: 'read', ns: 'claude', deviceId: 'AB12-CD34', label: 'portátil', by: 'EF56-GH78', byLabel: 'teléfono', request: 'r1' })
+  assert.deepEqual({ ...a, id: 'x' }, { id: 'x', ev: 'answered', outcome: 'approved', kind: 'read', ns: 'claude', deviceId: 'AB12-CD34', label: 'portátil', by: 'EF56-GH78', byLabel: 'teléfono', request: 'r1', ts: 5 })
   const c = n.add('answered', { outcome: 'expired', kind: 'update', ns: 'vault', deviceId: null })
   assert.equal(c.by, null, 'lo que caducó no lo contestó nadie')
   assert.throws(() => n.add('answered', { outcome: 'maybe', kind: 'read' }), { code: 'bad-notice' })

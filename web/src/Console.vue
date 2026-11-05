@@ -1901,7 +1901,8 @@ function mvText (n) {
   if (n.ev === 'answered') {
     const what = (T_.mv_what[n.kind] || T_.mv_what.read)(n.ns || '?')
     const how = T_.mv_outcome[n.outcome] || n.outcome
-    return `${mvWho(n)} ${what}: ${how}${n.by ? ' ' + T_.mv_by(n.by) : ''}`
+    const by = n.by ? (n.byLabel ? `${n.byLabel} (${n.by})` : n.by) : ''
+    return `${mvWho(n)} ${what}: ${how}${by ? ' ' + T_.mv_by(by) : ''}`
   }
   if (n.ev === 'delivered') return `${mvWho(n)} ${(T_.mv_delivered[n.kind] || T_.mv_delivered.secrets)(n.ns || '?')}`
   if (n.ev === 'updated') return `${n.deviceId ? mvWho(n) : T_.mv_vault} ${T_.mv_updated(n.version || '?')}`

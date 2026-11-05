@@ -1345,6 +1345,7 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.equal(rastro.outcome, 'approved')
   assert.equal(rastro.ns, 'claude')
   assert.match(rastro.by || '', /^[0-9A-Z]{4}-[0-9A-Z]{4}/, 'y dice quién lo contestó')
+  assert.equal(rastro.byLabel, 'phone', 'con su alias, no solo el ID')
 
   // 3) LA HORA: decir que sí a ESTE comando vale para las siguientes veces que lo pida ese
   // mismo comando desde esa misma carpeta (dueño, 2026-09-11). Así que ya no timbra.
