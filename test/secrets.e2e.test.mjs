@@ -1337,6 +1337,14 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.equal((await rpc({ op: 'approve', id: list[0].id }, phoneCert, phone.device)).body.ok, true)
   assert.deepEqual(await waiting, { DEEPSEEK_API_KEY: 'sk-1' })
   assert.equal(vault.listApprovals().length, 0)
+  // EL PEDIDO SE FUE DE LA LISTA, PERO QUEDA SU RASTRO (24 h): el aviso del teléfono ya sonó, y
+  // al abrir Pedidos tiene que verse qué pasó con él y quién lo contestó.
+  const rastro = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body.notices
+    .find((n) => n.ev === 'answered' && n.request === list[0].id)
+  assert.ok(rastro, 'lo contestado deja un aviso')
+  assert.equal(rastro.outcome, 'approved')
+  assert.equal(rastro.ns, 'claude')
+  assert.match(rastro.by || '', /^[0-9A-Z]{4}-[0-9A-Z]{4}/, 'y dice quién lo contestó')
 
   // 3) LA HORA: decir que sí a ESTE comando vale para las siguientes veces que lo pida ese
   // mismo comando desde esa misma carpeta (dueño, 2026-09-11). Así que ya no timbra.
@@ -1377,6 +1385,14 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   const r = a.request({ ns: 'x', device: 'd', deviceId: 'D', ek: 'e' })
   t = 11
   assert.deepEqual(a.sweep().map((x) => x.id), [r.id])
+  // Y lo que caduca se cuenta aunque lo barra `list()` (lo hace por dentro): si no, el rastro
+  // de «caducó sin respuesta» dependería de quién mirara primero.
+  const caducados = []
+  const b = createApprovals({ now: () => t, pendingTtlMs: 10, onExpire: (p) => caducados.push(p.id) })
+  const r2 = b.request({ ns: 'x', device: 'd', deviceId: 'D', ek: 'e' })
+  t = 22
+  assert.deepEqual(b.list(), [])
+  assert.deepEqual(caducados, [r2.id])
 
   // Antes esto era `setApproval(..., false)` sobre una lista local. Ahora es conceder el
   // permiso en el acta, y por eso se ve aquí lo que importa: surte efecto en la siguiente
@@ -1435,7 +1451,9 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   // aparato no instala ni pregunta, solo lo dice; la bóveda lo reparte con otro `ev`.
   assert.deepEqual(await reportUpdateNeedsRoot({ ...pregunta, version: '9.9.10', from: '9.9.9' }), { ok: true })
   const lista0 = (await rpc({ op: 'approvals' }, phoneCert, phone.device)).body
-  const lista = { ...lista0, notices: lista0.notices.filter((n) => n.ev !== 'delivered') }
+  // Los pedidos contestados más arriba dejan su rastro (`answered`); aquí se miran los otros.
+  const lista = { ...lista0, notices: lista0.notices.filter((n) => n.ev !== 'delivered' && n.ev !== 'answered') }
+  assert.ok(lista0.notices.some((n) => n.ev === 'answered' && n.outcome === 'denied'), 'denegar también deja rastro')
   // El agente se llevó su cajón por `unattended` antes de quitárselo: eso es un `delivered`.
   assert.deepEqual(lista0.notices.filter((n) => n.ev === 'delivered').map((n) => [n.kind, n.ns, n.label]), [['secrets', 'claude', 'claude']])
   assert.deepEqual(lista.notices.map((n) => [n.ev, n.product, n.version, n.from, n.label || null]), [

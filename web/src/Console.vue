@@ -287,6 +287,17 @@ const T = {
     // PEDIDOS DE APROBACIÓN: un cajón con aprobación por uso espera la firma de este aparato.
     apv_t: 'Pedidos',
     apv_none: 'Nadie está pidiendo nada.',
+    // LAS ÚLTIMAS 24 HORAS: lo que ya pasó, para que un aviso que sonó tenga algo detrás.
+    mv_t: 'Últimas 24 horas',
+    mv_none: 'Nada en las últimas 24 horas.',
+    mv_vault: 'La bóveda',
+    mv_what: { read: (ns) => `pidió las claves de «${ns}»`, write: (ns) => `quiso guardar variables en «${ns}»`, reveal: (ns) => `pidió ver una variable de «${ns}»`, passwords: () => 'pidió una contraseña', update: () => 'pidió actualizarse', incident: () => 'incidente de seguridad' },
+    mv_outcome: { approved: 'aprobado', denied: 'denegado', blocked: 'bloqueado', ignored: 'ignorado', withdrawn: 'retirado', expired: 'caducó sin respuesta' },
+    mv_by: (who) => `por ${who}`,
+    mv_delivered: { secrets: (ns) => `se llevó las claves de «${ns}» sin pedir aprobación`, passwords: () => 'se llevó una contraseña sin pedir aprobación' },
+    mv_updated: (v) => `se actualizó a ${v}`,
+    mv_needs_root: (v) => `tiene la versión ${v} esperando: instálala a mano (necesita permisos de administrador)`,
+    mv_contested: 'Dos aparatos respondieron a la misma invitación de emparejar y se canceló.',
     apv_error: 'No se pudieron consultar los pedidos:',
     apv_asks: 'pide tus claves de',
     apv_writes: 'quiere guardar variables en',
@@ -569,6 +580,16 @@ const T = {
     invite_copy: 'Copy link', invite_copied: 'Copied',
     apv_t: 'Requests',
     apv_none: 'Nobody is asking for anything.',
+    mv_t: 'Last 24 hours',
+    mv_none: 'Nothing in the last 24 hours.',
+    mv_vault: 'The vault',
+    mv_what: { read: (ns) => `asked for the keys of “${ns}”`, write: (ns) => `wanted to save variables in “${ns}”`, reveal: (ns) => `asked to see a variable of “${ns}”`, passwords: () => 'asked for a password', update: () => 'asked to update', incident: () => 'security incident' },
+    mv_outcome: { approved: 'approved', denied: 'denied', blocked: 'blocked', ignored: 'ignored', withdrawn: 'withdrawn', expired: 'expired with no answer' },
+    mv_by: (who) => `by ${who}`,
+    mv_delivered: { secrets: (ns) => `took the keys of “${ns}” without asking for approval`, passwords: () => 'took a password without asking for approval' },
+    mv_updated: (v) => `updated to ${v}`,
+    mv_needs_root: (v) => `has version ${v} waiting: install it by hand (it needs administrator rights)`,
+    mv_contested: 'Two devices answered the same pairing invitation, and it was cancelled.',
     apv_error: 'Could not check for requests:',
     apv_asks: 'asks for your keys of',
     apv_writes: 'wants to save variables in',
@@ -1864,6 +1885,30 @@ const apvPorCuenta = ref([])
 /** Los pedidos de todas las cuentas, planos y cada uno sabiendo de quién es. */
 const approvals = computed(() => apvPorCuenta.value.flatMap((g) =>
   (g.items || []).map((it) => ({ ...it, profile: g.profile, profileName: g.name }))))
+/**
+ * LO QUE PASÓ EN LAS ÚLTIMAS 24 HORAS, de todas las cuentas y del más nuevo al más viejo: los
+ * pedidos que se cerraron (y cómo), lo entregado sin aprobación y las actualizaciones. Es lo que
+ * explica un aviso que sonó cuando al abrir ya no hay nada pendiente. El ancla de la bitácora no
+ * va: no le cuenta nada a una persona.
+ */
+const movimientos = computed(() => apvPorCuenta.value
+  .flatMap((g) => (g.notices || []).filter((n) => n && n.ev !== 'log-anchor')
+    .map((n) => ({ ...n, profile: g.profile, profileName: g.name })))
+  .sort((a, b) => b.ts - a.ts))
+const mvWho = (n) => n.label ? `${n.label} (${n.deviceId || '?'})` : (n.deviceId || t.value.mv_vault)
+function mvText (n) {
+  const T_ = t.value
+  if (n.ev === 'answered') {
+    const what = (T_.mv_what[n.kind] || T_.mv_what.read)(n.ns || '?')
+    const how = T_.mv_outcome[n.outcome] || n.outcome
+    return `${mvWho(n)} ${what}: ${how}${n.by ? ' ' + T_.mv_by(n.by) : ''}`
+  }
+  if (n.ev === 'delivered') return `${mvWho(n)} ${(T_.mv_delivered[n.kind] || T_.mv_delivered.secrets)(n.ns || '?')}`
+  if (n.ev === 'updated') return `${n.deviceId ? mvWho(n) : T_.mv_vault} ${T_.mv_updated(n.version || '?')}`
+  if (n.ev === 'update-needs-root') return `${n.deviceId ? mvWho(n) : T_.mv_vault} ${T_.mv_needs_root(n.version || '?')}`
+  if (n.ev === 'pairing-contested') return T_.mv_contested
+  return n.ev
+}
 /** Las cuentas a las que no se pudo preguntar. Se enseñan: callarlas es el fallo mudo. */
 const apvFallos = computed(() => apvPorCuenta.value.filter((g) => g.error))
 /** ¿Aprueba alguna cuenta de este aparato? Con ninguna, la pantalla no tiene nada que hacer. */
@@ -1978,7 +2023,8 @@ async function refreshApprovals () {
     const r = await id.value.vaultApprovals('approvals', { notify: avisosAqui() })
     apvPorCuenta.value = [{
       profile: apvCurrent.value?.id || '', name: apvCurrent.value?.name || '', current: true,
-      items: Array.isArray(r?.items) ? r.items : []
+      items: Array.isArray(r?.items) ? r.items : [],
+      notices: Array.isArray(r?.notices) ? r.notices : []
     }]
     apvError.value = ''
   } catch (e) {
@@ -2567,6 +2613,18 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <p v-else-if="apvPush === 'default'"><button class="btn sm" data-testid="apv-push" @click="activarAvisos">{{ t.apv_push_ask }}</button></p>
           <p v-if="apvPushError" class="muted small warn" data-testid="apv-push-err">{{ t.apv_push_err }} <code class="mid">{{ apvPushError }}</code></p>
         </template>
+
+        <!-- LAS ÚLTIMAS 24 HORAS: lo que ya pasó. Un aviso que sonó y ya no está pendiente
+             tiene aquí su explicación (aprobado, denegado, caducado, entregado…). -->
+        <h2 class="apvh">{{ t.mv_t }}</h2>
+        <p v-if="!movimientos.length" class="muted" data-testid="mv-none">{{ t.mv_none }}</p>
+        <ul v-else class="mv" data-testid="mv-list">
+          <li v-for="n in movimientos" :key="n.profile + ':' + n.id" :data-mv-ev="n.ev" :data-mv-outcome="n.outcome || null" data-testid="mv-item">
+            <span class="muted">{{ shortTime(n.ts) }}</span>
+            <b v-if="apvVariasCuentas" class="apvtag">{{ n.profileName || n.profile }}</b>
+            {{ mvText(n) }}
+          </li>
+        </ul>
 
         <!-- LO QUE YA DIJISTE QUE SÍ. Se renueva con cada uso, así que puede durar mientras
              el servicio viva: se ve y se corta desde el mismo sitio donde se aprobó. -->
@@ -3320,5 +3378,8 @@ details summary { cursor: pointer; color: var(--dt-accent); margin: 10px 0 6px; 
 }
 .apvbtns { display: flex; gap: 8px; margin-top: 10px; }
 .apvh { margin-top: 26px; }
+.mv { list-style: none; margin: 0; padding: 0; }
+.mv li { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .92rem; overflow-wrap: anywhere; }
+.mv li .muted { margin-right: 6px; font-variant-numeric: tabular-nums; }
 .small { font-size: 12px; }
 </style>
