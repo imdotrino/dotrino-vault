@@ -1,6 +1,8 @@
 # Las tres versiones del vault: un solo núcleo
 
-> **Estado: 2026-10-16.** Regla del dueño (2026-09-17): el vault existe **siempre** en tres
+> **Estado: 2026-11-04.** vaultd 0.191.0 · `@dotrino/vault` 0.119.0 · `@dotrino/identity` 0.135.1
+> (iframe de `id.dotrino.com` con el núcleo 0.119.0) · extensión 0.59.0 (núcleo 0.119.0; antes
+> 0.58.3 con el 0.106.0). Revisión anterior: 2026-10-16. Regla del dueño (2026-09-17): el vault existe **siempre** en tres
 > versiones —la **pestaña**, la **extensión** y el **binario**—, **compatibles y con las mismas
 > funciones**, salvo lo que limita su contexto; **el binario es la fuente de verdad**.
 >
@@ -58,6 +60,15 @@ aparece en la ventana sin tocarla, y no hay manera de que una tenga algo que la 
 | Cajones de servicios (`vault.secrets`: claves, `enckey`, `digest`, guardar variables, `rewrap`) | sí | sí | sí |
 | Consola remota (`vault.admin`), renuncia, avisos entre bóvedas | sí | sí | sí |
 | Aprobaciones, concesiones, incidentes y aparatos bloqueados | sí | sí | sí |
+| Ver y cortar concesiones **desde la administración** (`vault.admin` `grants` / `grant-revoke`, vault ≥ 0.119.0) | sí (TUI) | sí (`/vault` de la consola, con `admin`; antes solo en `/approvals` con `approve`, que la bóveda del navegador no se da) | el núcleo lo atiende; falta la pantalla (ver abajo) |
+| Ver el valor de una privada desde la consola (`var.reveal`, con aprobación y sellado) | sí | sí | el núcleo lo atiende; falta la pantalla |
+| Las bóvedas de la cuenta son clones: se pasan el acta, los cajones, la clave de contenido y el respaldo de las apps (`replicas.md` §11) | sí | sí | sí |
+| La puerta: solo se atiende al acta (`core/gate.js`); los que salieron se borran solos | sí | sí | sí |
+| Emparejar: reto y errores firmados; dos respuestas a una invitación = incidente | sí | sí | sí |
+| Anunciar la invitación cerca (Bluetooth y red local) | sí (Linux: los dos; macOS/Windows: red local) | no: el navegador no puede anunciar | no |
+| Timbre con asunto sellado; aviso `delivered` cuando un desatendido se lleva claves | sí | sí | sí |
+| Cada servicio dice qué permisos del acta necesita | sí | sí | sí |
+| Dispositivo o servicio se cambia sin re-enrolar (`cn`) | sí (`caps <ID> ±secrets:<ns>`, TUI) | el núcleo y `setCapsMany` lo aceptan; falta el control en la consola | igual |
 | Pedir y avisar actualizaciones de los aparatos (`update-ask`, `update-done`) | sí | sí | sí |
 | Dónde corre cada aparato (`machines`) | sí | sí | sí |
 | Llave de comunicación (atender con el perfil cerrado) | sí | sí | sí |
@@ -93,22 +104,66 @@ Limitaciones de contexto, no olvidos:
   que su consola la administra (`selfCertIssuer`) se firma solo cuando cambian el acta o sus
   permisos, no cada minuto. En el binario la maestra y el aparato son llaves distintas.
 
+## Inventario de lo nuevo del binario (lib 0.87.0 → 0.119.0, 2026-10-16 → 2026-11-04)
+
+Casi todo entró por el **núcleo** (`lib/src/core/`), así que llegó a las tres en cuanto cada una
+tomó la versión: la pestaña al re-vendorizar el iframe (`node dotrino-identity/vendor.mjs`) y la
+extensión al construir (`extension/build.mjs` copia el núcleo del checkout de al lado; el
+`package.json` de `dotrino-passmanager` solo lo usa `serve`).
+
+| Versión del núcleo | Qué | Dónde vive | Llega a pestaña y extensión |
+|---|---|---|---|
+| 0.88 | un solo permiso para contraseñas y passkeys; borrar o pisar una passkey pregunta; el sí dura una hora deslizante | núcleo | sí |
+| 0.89–0.90 | respaldo cifrado con contraseña | núcleo + pantallas (TUI, ventana, consola, pestaña de bóveda de la extensión) | sí (la extensión, sin contraseñas del gestor) |
+| 0.91–0.96, 0.103 | la bóveda en una Lambda (alojada, réplica, segunda bóveda) | `lambda/` | no aplica: es otra forma del binario |
+| 0.92–0.93 | reto, errores y secretos firmados; códigos en inglés | núcleo | sí |
+| 0.97 | la consola elige qué bóveda administra (`to`) | núcleo + identity | sí |
+| 0.98–0.99 | la puerta solo atiende al acta; los que salieron se borran solos | núcleo | sí |
+| 0.100–0.102 | emparejar cerca (Bluetooth, red local) | plataforma (`bluetooth`, `lan`) | no: contexto |
+| 0.101, 0.103.2 | aparato de usuario y contraseña: sin sesión no se atiende; nace con llave de cifrado | núcleo | sí |
+| 0.103.1 | la bóveda del navegador no firma sola cada minuto | `browser.js` | sí (es del navegador) |
+| 0.104–0.111 | renuncia única, ancla de la bitácora, las dos bóvedas son maestra, se pasan acta, cajones, clave de contenido, cadena de selladoras | núcleo | sí |
+| 0.106 | ver una privada desde la consola (`var.reveal`) | núcleo + consola | pestaña sí; extensión sin pantalla |
+| 0.109 | cada servicio dice qué permisos necesita | núcleo | sí |
+| 0.112 | cada bóveda enseña lo suyo, en grupos | núcleo + TUI/consola | sí |
+| 0.113 | el respaldo de las apps se copia entre las bóvedas | núcleo | sí |
+| 0.114 | dispositivo o servicio sin re-enrolar | núcleo + identity + CLI/TUI | protocolo sí; control en la consola, no |
+| 0.115 | `@dotrino/vault/atrest` exportado | librería | no aplica |
+| 0.116 | el acta nueva se deja en la caché del proxio | núcleo | sí |
+| 0.117 | un servicio aprende la selladora de la cadena | cliente de servicio | no aplica |
+| 0.118 | timbre con asunto sellado; aviso `delivered` | núcleo | sí |
+| 0.119 | concesiones desde la administración | núcleo + consola | pestaña sí; extensión sin pantalla |
+
+**Lo que vive en `src/` (fuera del núcleo) y es de contexto, no un olvido:** `profiles.js` y
+`adminDoor.js` (la contraseña del perfil que sella la maestra, la contraseña vacía con la llave de
+la máquina, la puerta del admin para abrir a distancia, las llaves de hardware), `replica.js` (el
+replicador), `selfupdate.js`/`update*.js` (actualizarse), `platform.js` (socket local, `/proc`,
+Bluetooth y red local), la TUI y la ventana. Revisado `daemon.js`: lo que hace el respaldo, los
+cajones y las concesiones es cablear funciones del núcleo, no lógica propia.
+
 ## Lo que falta (pantallas, no protocolo)
 
 El núcleo ya atiende todo lo de arriba. Lo que el binario hace desde su TUI y el navegador
 todavía no enseña:
 
-- **Ver el valor de una variable privada, su historial y volver a una versión** (`secret
-  show/history/revert`): la consola remota no lo tiene a propósito, y la pestaña administra por
-  ese protocolo. En la TUI es local.
-- **Listar y cortar concesiones** (`grants`) desde la pantalla.
+- **El historial de una variable privada y volver a una versión** (`secret history/revert`): la
+  consola remota no lo tiene a propósito (solo `var.reveal`, desde 0.106.0), y la pestaña
+  administra por ese protocolo. En la TUI es local.
+- **Cambiar un aparato a servicio y al revés** (`cn`) desde la consola: `setCapsMany` ya lo
+  acepta (identity ≥ 0.135.0); falta el control en la fila del aparato.
 - **Las contraseñas de la extensión en el respaldo.** La extensión respalda sus cajones, pero no
-  sus contraseñas: las guarda el worker, con su propia copia de recuperación, y la bóveda de la
-  pestaña no las ve. Hace falta que el worker exporte e importe las suyas con la misma pieza
-  (`exportPasswordEntries` / `importPasswordEntries`).
-- **La pantalla de administración de la extensión** (aparatos, cajones, bloqueados): la
-  extensión tiene su propia identidad, distinta de la de `id.dotrino.com`, así que
-  `vault.dotrino.com` no la administra. El núcleo ya responde a la consola remota; falta la
-  pantalla dentro de la extensión.
+  sus contraseñas: las guarda el worker (único escritor de su almacén), con su propia copia de
+  recuperación que se abre con la contraseña de recuperación del usuario, y la bóveda de la
+  pestaña no las ve. Hace falta: (1) que el núcleo acepte de su plataforma quién le da y le
+  guarda las contraseñas (`exportBackup`/`planBackupImport`/`importBackup` hoy leen su propio
+  almacén sellado); (2) que el worker las abra con su llave de aparato y las vuelva a sellar a sus
+  destinatarios al importar, firmando como autor; (3) el canal entre la pestaña y el worker. No
+  entró en la revisión del 2026-11-04: toca el núcleo, el worker y el canal, y saca contraseñas
+  en claro de un contexto a otro de la extensión, así que necesita su propio diseño y su prueba.
+- **La pantalla de administración de la extensión** (aparatos, cajones, bloqueados,
+  concesiones, ver una privada): la extensión tiene su propia identidad, distinta de la de
+  `id.dotrino.com`, así que `vault.dotrino.com` no la administra. El núcleo ya responde a la
+  consola remota; falta la pantalla dentro de la extensión, que hoy enseña los inicios de sesión
+  y el respaldo. Es una pantalla entera (la de `/vault` de la consola), y no entró el 2026-11-04.
 - **`dotrino-passmanager serve`** (la cuarta, en Node) sigue con el mostrador viejo
   (`startDeviceVault`, que se conserva solo para ella).

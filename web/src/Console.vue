@@ -1784,6 +1784,7 @@ async function refreshAdmin () {
     if (!canAdmin.value) return
     if (!vars.value) await loadVars().catch((e) => { vars.value = null; varsError.value = e?.message || String(e) })
     await loadBlocked()
+    await loadAdminGrants()
   } catch (_) { canAdmin.value = false }
 }
 
@@ -1795,6 +1796,24 @@ const blockedOf = (pub) => blockedList.value.find((b) => b.pub === pub) || null
 async function loadBlocked () {
   try { blockedList.value = (await vaultAdmin('blocked'))?.items || [] } catch (_) { blockedList.value = [] }
 }
+/**
+ * LAS CONCESIONES desde la administración (`vault:admin`), como en la TUI del binario: lo
+ * aprobado que sigue valiendo, y cortarlo. Las mismas que ve el aprobador en /approvals; aquí
+ * las ve quien administra la bóveda, aunque no apruebe (la bóveda del navegador se da
+ * `admin` a sí misma, no `approve`). Si la bóveda no conoce la operación, se dice.
+ */
+const adminGrants = ref([])
+const adminGrantsError = ref('')
+async function loadAdminGrants () {
+  try {
+    adminGrants.value = (await vaultAdmin('grants'))?.items || []
+    adminGrantsError.value = ''
+  } catch (e) {
+    adminGrants.value = []
+    adminGrantsError.value = e?.message || String(e)
+  }
+}
+const adminGrantRevoke = (g) => run('agrant-' + g.id, async () => { await vaultAdmin('grant-revoke', { id: g.id }); await loadAdminGrants() })
 const unblock = (m) => run('unblock-' + m.pub, async () => { await vaultAdmin('unblock', { sub: m.pub }); await loadBlocked() })
 // BLOQUEAR A MANO (dueño, 2026-10-07): no toca el acta, la bóveda simplemente deja de
 // atender a ese aparato y sus agentes le cierran la puerta. Se deshace con Desbloquear.
@@ -2996,6 +3015,27 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       <!-- LO QUE PIDE «administra» EN EL CERT: las variables de las aplicaciones y,
            al final, conectar otro aparato a la bóveda. -->
       <template v-if="canAdmin">
+        <!-- LO APROBADO QUE SIGUE VALIENDO: se renueva con cada uso, así que se ve y se corta
+             desde la administración, igual que en la TUI. -->
+        <h2>{{ t.apv_grants_t }}</h2>
+        <p v-if="adminGrantsError" class="muted warn" data-testid="admin-grants-error">{{ adminGrantsError }}</p>
+        <p v-else-if="!adminGrants.length" class="muted" data-testid="admin-grants-none">{{ t.apv_grants_none }}</p>
+        <div v-for="g in adminGrants" :key="'ag:' + g.id" class="pending apv" :data-grant-id="g.id" data-testid="admin-grant-item">
+          <span class="apvwho">
+            <code>{{ g.ns }}</code>
+            <span class="muted"> · {{ g.deviceId }} · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
+          </span>
+          <div v-if="g.ctx" class="apvcmd"><code class="cmd">{{ apvCmd(g) || '—' }}</code>
+            <div class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ g.ctx.cwd || '?' }}</code></div>
+          </div>
+          <div v-else-if="g.ctxError || g.ctxWrap || g.ctxSealed === false" class="apvcmd muted warn" data-testid="admin-grant-cmd-error">
+            {{ t.apv_cmderr }} <code class="mid">{{ g.ctxError || g.ctxReason || 'cannot-open' }}</code>
+          </div>
+          <div class="apvbtns">
+            <button class="btn ghost sm" data-testid="admin-grant-revoke" :disabled="busy === 'agrant-' + g.id" @click="adminGrantRevoke(g)">{{ t.apv_grants_revoke }}</button>
+          </div>
+        </div>
+
         <!-- VARIABLES DE ENTORNO. Pantalla administrativa: lo que se ve son las variables
              y los botones. El qué-es-esto (qué significa pública) vive detrás de la (i);
              lo que NO se esconde es la marca de cada una, que es un dato operativo. -->

@@ -456,3 +456,32 @@ test('una escritura EN ESPERA de aprobación no avisa a nadie: todavía no cambi
   assert.ok(!audits.some(([op]) => op === 'admin.var.set'), 'ni se anota como guardada')
   assert.equal(audits.filter(([op]) => op === 'admin.var.pending').length, 2)
 })
+
+/**
+ * LAS CONCESIONES desde la consola de administración: verlas y cortarlas, como la TUI del
+ * binario. La lista se pide para quien pregunta (el comando va sellado a su llave).
+ */
+test('las concesiones se ven y se cortan con `vault:admin`', async () => {
+  const calls = []
+  const grants = {
+    list: async (device) => { calls.push(['list', device]); return { items: [{ id: 'g1', ns: 'ns:aws', ctx: null }], ttlMs: 3600000 } },
+    revoke: async (id, o) => { calls.push(['revoke', id, o]); return id === 'g1' }
+  }
+  const { admin } = mount({ grants })
+  const l = await admin.handle({ op: 'grants', nonce: nonce('g') })
+  assert.equal(l.ok, true)
+  assert.equal(l.result.items[0].id, 'g1')
+  assert.deepEqual(calls[0], ['list', 'DPUB'], 'la lista se sella para quien pregunta')
+  const sinId = await admin.handle({ op: 'grant-revoke', nonce: nonce('h') })
+  assert.equal(sinId.ok, false)
+  const r = await admin.handle({ op: 'grant-revoke', id: 'g1', nonce: nonce('i') })
+  assert.deepEqual(r.result, { id: 'g1', ok: true })
+  assert.deepEqual(calls[1], ['revoke', 'g1', { by: 'AD01-AD01' }])
+})
+
+test('sin concesiones inyectadas, la operación contesta que no', async () => {
+  const { admin } = mount()
+  const r = await admin.handle({ op: 'grants', nonce: nonce('j') })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /no grants/)
+})
