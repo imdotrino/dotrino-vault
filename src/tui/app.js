@@ -1153,7 +1153,7 @@ async function refreshMembers (term, st) {
  * que nadie está mirando.
  */
 async function refreshLogins (term, st, api = vc) {
-  const r = await guard(term, st, L(st).refreshing, () => api.listLogins(activeId(st)))
+  const r = await guard(term, st, L(st).loadingLogins, () => api.listLogins(activeId(st)))
   if (r.ok) st.logins = r.v
   else st.logins = []
 }
@@ -2217,7 +2217,7 @@ async function onKeySecrets (term, st, key) {
 function promptRenameVariable (term, st, cur) {
   const i = L(st)
   setInput(st, {
-    label: i.renameLabel(cur.key),
+    label: i.renameVarLabel(cur.key),
     hint: i.renameHint,
     value: cur.key,
     onSubmit: async (newer) => {

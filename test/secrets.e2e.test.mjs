@@ -713,9 +713,19 @@ test('la consola remota CREA variables (scope nuevo o aparato) y rota las privad
   assert.equal(vault.listSecrets().web.find((x) => x.key === 'API_KEY').public, false,
     'y rotarla no la vuelve visible por accidente')
 
-  // Y también en el cajón de un aparato.
-  await poner({ pub: me }, 'PUBLIC_URL', 'https://uno.example', true)
-  assert.equal((await fetchSecretsFrom(svcDir)).PUBLIC_URL, 'https://uno.example')
+  // Y también en el cajón de un aparato. Y AL APARATO se le avisa: antes el aviso iba a un
+  // namespace null y el aparato no se enteraba de que su configuración había cambiado.
+  const { MSG } = await import('../lib/src/protocol.js')
+  const avisos = []
+  const orig = vault.client.sendByPubkey.bind(vault.client)
+  vault.client.sendByPubkey = (pub, msg, opts) => { if (msg?.type === MSG.SECRETS_CHANGED) avisos.push(pub); return orig(pub, msg, opts) }
+  try {
+    await poner({ pub: me }, 'PUBLIC_URL', 'https://uno.example', true)
+    assert.equal((await fetchSecretsFrom(svcDir)).PUBLIC_URL, 'https://uno.example')
+    const until = Date.now() + 8000
+    while (!avisos.includes(me) && Date.now() < until) await new Promise((r) => setTimeout(r, 100))
+    assert.ok(avisos.includes(me), 'el aparato recibe el aviso de su cajón')
+  } finally { vault.client.sendByPubkey = orig }
 
   // SIN SOBRE NO HAY ESCRITURA, y ya no hay camino viejo al que caer.
   await assert.rejects(vault.vars.set({ ns: 'web', key: 'API_KEY' }), /already sealed|sealed/)

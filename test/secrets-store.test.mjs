@@ -321,6 +321,20 @@ test('conversion v3 -> v5: sin frase, con respaldo, y sin cambiar ningun valor',
   assert.ok(fs.existsSync(path.join(dir, 'secrets.json.v3.bak')), 'deshacer tiene que ser un mv')
 })
 
+test('tras convertir se puede borrar sin reiniciar (el v5 nuevo trae sus lapidas)', async () => {
+  const dir = tmp()
+  writeJson(path.join(dir, 'secrets.json'), {
+    schemaVersion: 3,
+    ns: { proxy: { A: { v: 'a', pub: false }, B: { v: 'b', pub: false } } },
+    dev: {}
+  }, atRestFor(dir))
+  const s = abrir(dir, fakeSealer())
+  await s.migrate(() => miembros('A'))
+  assert.equal(await s.delete('proxy', 'A'), true)
+  assert.ok(enDisco(dir).deleted['ns:proxy'].A, 'la lapida queda en el disco')
+  assert.equal(await s.reveal('ns:proxy', 'B', MAQUINA), 'b')
+})
+
 test('conversion v4 -> v5: la frase hace falta UNA vez, y despues nunca mas', async () => {
   const dir = tmp()
   const sealer = fakeSealer()

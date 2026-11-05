@@ -214,3 +214,26 @@ test('`r` significa RENOMBRAR en toda la TUI (una tecla, un significado)', () =>
     }
   }
 })
+
+/**
+ * Lo que la TUI LEE existe, y ninguna clave se escribe dos veces. Una clave que no existe
+ * sale `undefined` en pantalla (pasó con `L(st).refreshing`), y una duplicada se pisa en
+ * silencio: `renameLabel` estaba dos veces y la de variables pisaba la de bóvedas.
+ */
+test('las claves que usa la TUI existen, y ningún diccionario repite una', () => {
+  const here = path.dirname(new URL(import.meta.url).pathname)
+  const app = fs.readFileSync(path.join(here, '..', 'src', 'tui', 'app.js'), 'utf8')
+  const used = new Set([...app.matchAll(/\bL\(st\)\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))
+  for (const lang of LANGS) {
+    const d = dict(lang)
+    assert.deepEqual([...used].filter((k) => !(k in d)), [], `${lang}: claves usadas que no existen`)
+  }
+  const src = fs.readFileSync(path.join(here, '..', 'src', 'tui', 'i18n.js'), 'utf8')
+  for (const name of ['es', 'en']) {
+    const start = src.indexOf(`\nconst ${name} = {`)
+    const end = src.indexOf('\n}\n', start)
+    const keys = [...src.slice(start, end).matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*:/gm)].map((m) => m[1])
+    const dup = keys.filter((k, i) => keys.indexOf(k) !== i)
+    assert.deepEqual(dup, [], `${name}: claves repetidas`)
+  }
+})

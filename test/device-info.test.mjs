@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeDeviceKey, pubkeyId } from '@dotrino/identity/capabilities'
-import { deviceInfo, formatDeviceInfo, shortId } from '../lib/src/deviceInfo.js'
+import { deviceInfo, formatDeviceInfo, shortId, describePaper } from '../lib/src/deviceInfo.js'
 
 test('el id corto es el mismo que enseña la bóveda', async () => {
   const k = await makeDeviceKey()
@@ -36,3 +36,13 @@ test('un papel del modelo viejo se dice con su fecha, que es lo que caduca', asy
 test('sin llave de aparato no se inventa un id: se para con un código', async () => {
   await assert.rejects(deviceInfo({ cert: {} }), (e) => e.code === 'not-enrolled')
 })
+
+test('el papel se describe sin reventar: acta, modelo viejo con fecha, o `?`', () => {
+  assert.equal(describePaper({ seq: 24 }), 'acta #24')
+  assert.equal(describePaper({ exp: Date.UTC(2026, 0, 2) }), 'modelo viejo · vence 2026-01-02')
+  // El caso que tumbaba `dotrino-env enroll`: papel viejo sin `exp` (RangeError en `toISOString`).
+  assert.equal(describePaper({}), '?')
+  assert.equal(describePaper(null), '?')
+  assert.equal(describePaper({ exp: NaN }), '?')
+})
+

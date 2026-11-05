@@ -485,3 +485,13 @@ test('sin concesiones inyectadas, la operación contesta que no', async () => {
   assert.equal(r.ok, false)
   assert.match(r.error, /no grants/)
 })
+
+test('var.reveal.begin sin `revealBegin` en la boveda se dice, no revienta', async () => {
+  const { admin } = mount({ vars: { ...fakeVars(), reveal: async () => ({}) } })
+  const r = await admin.handle({ op: 'var.reveal.begin', nonce: nonce('r'), ts: Date.now() })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /cannot show a private variable/)
+  const { admin: conTodo } = mount({ vars: { ...fakeVars(), revealBegin: async () => ({ door: 'D', ek: 'EK' }) } })
+  const r2 = await conTodo.handle({ op: 'var.reveal.begin', nonce: nonce('s'), ts: Date.now() })
+  assert.deepEqual(r2, { ok: true, result: { door: 'D', ek: 'EK' } }, 'sin `reveal` no hace falta para pedir la puerta')
+})

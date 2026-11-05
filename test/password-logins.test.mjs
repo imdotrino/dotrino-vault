@@ -228,3 +228,23 @@ test('el aparato nace CON su llave de cifrado, en el acta y en el paquete de lla
   // Y sin encPub el alta se niega en vez de admitir un aparato al que no se le puede sellar.
   await assert.rejects(registerLogin({ identity: { admitMember () {} }, logins: d, user: 'beto', upload: 'x', pub: sent.pub, blob: 'b' }), { code: 'no-encpub' })
 })
+
+test('createPasswordLogin espera al cliente OPAQUE inyectado (puede ser asincrono)', async () => {
+  const { createPasswordLogin } = await import('../lib/src/passwordLogins.js')
+  const { client } = await import('@dotrino/opaque')
+  const asincrono = {
+    registrationStart: async (a) => client.registrationStart(a),
+    registrationFinish: async (a) => client.registrationFinish(a)
+  }
+  const { desk: d } = desk()
+  const password = 'otra contraseña larga de prueba'
+  let sent = null
+  await createPasswordLogin({
+    user: 'eva', password, label: 'prueba', opaque: asincrono,
+    begin: (req) => d.registerBegin(req),
+    finish: async (req) => { sent = req; return { ok: true } }
+  })
+  assert.ok(sent.upload, 'el registro se termina con la mitad del cliente')
+  await d.registerFinish({ user: 'eva', upload: sent.upload, pub: sent.pub, label: 'prueba', blob: sent.blob })
+  assert.ok((await login(d, { user: 'eva', password })).exportKey)
+})

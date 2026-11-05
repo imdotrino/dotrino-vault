@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { serviceDir, serviceRoot, listEnrolled, isValidVaultLabel, resolveVaultLabel } from '../lib/src/env.js'
+import { serviceDir, serviceRoot, listEnrolled, isValidVaultLabel, resolveVaultLabel, resolveNs } from '../lib/src/env.js'
 
 const conRaiz = (fn) => {
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'env-perfil-'))
@@ -128,4 +128,25 @@ test('la etiqueta se puede dar por entorno, para no repetirla en cada comando', 
   } finally { if (antes === undefined) delete process.env.DOTRINO_ENV_VAULT; else process.env.DOTRINO_ENV_VAULT = antes }
   assert.equal(isValidVaultLabel('aws-cepi'), true)
   assert.equal(isValidVaultLabel('Aws'), false)
+})
+
+/**
+ * SIN `ns` Y CON UN SOLO SERVICIO ENROLADO, `resolveNs` DA SU NOMBRE. Devolvía el `{ vault, ns }`
+ * de `listEnrolled`, y `serviceDir` lo rechazaba como «invalid ns»: `loadEnv()` sin `ns` fallaba
+ * justo en el caso para el que existe. Con varios, el error los nombra (antes, `[object Object]`).
+ */
+test('resolveNs sin ns: el único enrolado da su nombre; con varios, se nombran', () => {
+  const antes = process.env.DOTRINO_NS
+  delete process.env.DOTRINO_NS
+  try {
+    conRaiz((raiz) => {
+      enrolar(raiz, 'cepi', 'aws', 'X')
+      assert.equal(resolveNs(undefined), 'aws')
+      assert.equal(serviceDir(null, resolveNs(undefined)), path.join(raiz, 'cepi', 'aws'))
+      enrolar(raiz, 'casa', 'mail', 'Y')
+      assert.throws(() => resolveNs(undefined), /several services are enrolled \((casa\/mail, cepi\/aws|cepi\/aws, casa\/mail)\)/)
+    })
+  } finally {
+    if (antes !== undefined) process.env.DOTRINO_NS = antes
+  }
 })
