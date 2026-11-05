@@ -2635,7 +2635,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
           <span class="apvwho">
             <b v-if="apvVariasCuentas" class="apvtag">{{ g.profileName || g.profile }}</b>
             <code>{{ g.ns }}</code>
-            <span class="muted"> · {{ g.deviceId }} · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
+            <span class="muted"> · <template v-if="g.label">{{ g.label }} (</template>{{ g.deviceId }}<template v-if="g.label">)</template> · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
           </span>
           <div class="apvcmd"><code class="cmd">{{ apvCmd(g) || '—' }}</code>
             <div v-if="g.ctx" class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ g.ctx.cwd || '?' }}</code></div>
@@ -2940,7 +2940,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
       </template>
 
       <div v-for="p in selfPending" :key="p.deviceId" class="pending" data-testid="self-pending">
-        <span>{{ t.self_pending }}: <code>{{ p.deviceId }}</code></span>
+        <span>{{ t.self_pending }}: <b v-if="p.label">{{ p.label }}</b> <code>{{ p.deviceId }}</code></span>
         <input v-model="selfCode" :placeholder="t.self_code_ph" inputmode="numeric" data-testid="self-code" />
         <button class="btn sm" data-testid="self-approve" @click="selfApprove(p.deviceId)">{{ t.self_approve }}</button>
         <button class="btn ghost sm" @click="selfReject(p.deviceId)">{{ t.self_reject }}</button>
@@ -3106,7 +3106,7 @@ onBeforeUnmount(() => { clearInterval(selfTimer) })
         <div v-for="g in adminGrants" :key="'ag:' + g.id" class="pending apv" :data-grant-id="g.id" data-testid="admin-grant-item">
           <span class="apvwho">
             <code>{{ g.ns }}</code>
-            <span class="muted"> · {{ g.deviceId }} · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
+            <span class="muted"> · <template v-if="g.label">{{ g.label }} (</template>{{ g.deviceId }}<template v-if="g.label">)</template> · {{ t.apv_grants_left }} {{ grantLeft(g) }} {{ t.apv_grants_min }} · {{ g.uses }} {{ t.apv_grants_uses }}</span>
           </span>
           <div v-if="g.ctx" class="apvcmd"><code class="cmd">{{ apvCmd(g) || '—' }}</code>
             <div class="apvline muted">{{ t.apv_cwd }} <code class="mid">{{ g.ctx.cwd || '?' }}</code></div>

@@ -1353,6 +1353,8 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   assert.equal(vault.listApprovals().length, 0, 'el mismo comando no vuelve a pedir')
   const [g] = vault.listGrants()
   assert.equal(g?.ns, 'claude')
+  assert.equal(g.label, 'claude', 'la concesión dice el alias del aparato, no solo su ID')
+  assert.match(g.deviceId || '', /^[0-9A-Z]{4}-[0-9A-Z]{4}/)
   assert.ok(g.uses >= 1, 'y se ve cuántas veces se usó')
 
   // QUITARLA VUELVE A LA CASILLA DE SALIDA. Una concesión que se renueva con cada uso puede
