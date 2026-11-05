@@ -17,6 +17,8 @@ import { myContentKey, encryptWithCek, decryptWithKeyring } from '@dotrino/ident
 import { checkVaultReply } from '@dotrino/identity/acta'
 import { installNodeGlobals } from './node-globals.js'
 import { MSG } from './protocol.js'
+// SELLADO (`docs/sealed-requests.md`): la petición entera a las bóvedas del acta, la respuesta a `rek`.
+import { sendToVault, acceptReply } from '@dotrino/identity/vault-seal'
 
 async function freshClient ({ proxyUrl, dir = '.dotrino-vault-device' }) {
   installNodeGlobals(dir)
@@ -24,10 +26,18 @@ async function freshClient ({ proxyUrl, dir = '.dotrino-vault-device' }) {
   // WEBRTC SOLO DONDE EXISTE (ver `lib/src/service.js`): en Node no hay
   // `RTCPeerConnection` y encenderlo reventaría al negociar; en un navegador es nativo y es
   // el camino directo que hay que preferir. Se mira, en vez de apagarlo para siempre.
-  const client = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: typeof globalThis.RTCPeerConnection === 'function', autoReconnect: false })
+  // La llave de un solo uso de la respuesta (`rek`): abre lo que la bóveda le sella, y no se anuncia.
+  const { makeEncKeypair } = await import('@dotrino/proxy-client')
+  const replyKey = await makeEncKeypair()
+  const client = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: typeof globalThis.RTCPeerConnection === 'function', autoReconnect: false, myEncPrivateKey: replyKey.privateKey })
+  client.replyKey = replyKey.encPub
   await client.connect()
   return client
 }
+
+const warn = (line) => console.error(line)
+/** Manda a la bóveda SELLADO a las bóvedas que nombra `acta`. */
+const toVault = (client, masterPubkey, acta, payload) => sendToVault(client, { dest: masterPubkey, acta, payload, warn })
 
 /** Identifica la conexión bajo la pubkey de dispositivo D (para ser direccionable). */
 async function identifyAsDevice (client, device) {
@@ -38,8 +48,10 @@ async function identifyAsDevice (client, device) {
 
 function waitFor (client, predicate, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
-    const off = client.on('message', (_from, payload) => {
-      if (payload && typeof payload === 'object' && predicate(payload)) { cleanup(); resolve(payload) }
+    const off = client.on('message', (_from, payload, meta) => {
+      if (!payload || typeof payload !== 'object' || !predicate(payload)) return
+      if (payload.type !== MSG.ERROR && !acceptReply({ meta, type: payload.type, warn })) return
+      cleanup(); resolve(payload)
     })
     const t = setTimeout(() => { cleanup(); reject(new Error('timeout waiting for the vault response')) }, timeoutMs)
     const cleanup = () => { off(); clearTimeout(t) }
@@ -115,13 +127,13 @@ export async function verifyRevoke ({ body, signature, master, devicePubkey }) {
 }
 
 /** Pide a la maestra que firme `payload` (scope vault:sign). */
-export async function requestSign ({ masterPubkey, proxyUrl, device, cert, payload, dir } = {}) {
+export async function requestSign ({ masterPubkey, proxyUrl, device, cert, acta = null, payload, dir } = {}) {
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const data = { op: 'sign', payload, publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'sign', payload, rek: client.replyKey, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.SIGNED || p.type === MSG.ERROR)
-    client.sendByPubkey(masterPubkey, { type: MSG.SIGN, data, signature, cert })
+    await toVault(client, masterPubkey, acta, { type: MSG.SIGN, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) throw new Error(res.error)
     return { signature: res.signature, publickey: res.publickey }
@@ -129,13 +141,13 @@ export async function requestSign ({ masterPubkey, proxyUrl, device, cert, paylo
 }
 
 /** Lee un nodo del árbol del vault (scope vault:read). */
-export async function requestGet ({ masterPubkey, proxyUrl, device, cert, id = 'root', dir } = {}) {
+export async function requestGet ({ masterPubkey, proxyUrl, device, cert, acta = null, id = 'root', dir } = {}) {
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const data = { op: 'get', id, publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'get', id, rek: client.replyKey, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.DATA || p.type === MSG.ERROR)
-    client.sendByPubkey(masterPubkey, { type: MSG.GET, data, signature, cert })
+    await toVault(client, masterPubkey, acta, { type: MSG.GET, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) throw new Error(res.error)
     return { id: res.id, node: res.node }
@@ -150,13 +162,13 @@ export async function requestGet ({ masterPubkey, proxyUrl, device, cert, id = '
  * después de emparejarlo —y como se le cae uno que le quitaron—. Un cert vencido o
  * revocado no se renueva: ahí toca volver a emparejar.
  */
-export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, dir } = {}) {
+export async function requestRenew ({ masterPubkey, proxyUrl, device, cert, acta = null, dir } = {}) {
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const data = { op: 'renew', publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'renew', rek: client.replyKey, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.RENEWED || p.type === MSG.ERROR)
-    client.sendByPubkey(masterPubkey, { type: MSG.RENEW, data, signature, cert })
+    await toVault(client, masterPubkey, acta, { type: MSG.RENEW, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) throw new Error(res.error)
     // Se valida antes de devolverlo, igual que en el enrolamiento: un cert que no firmó la
@@ -181,10 +193,10 @@ export async function requestStore ({ masterPubkey, proxyUrl, device, cert, acta
   const enc = await encryptWithCek({ cek: mine.cek, gen: mine.gen, plaintext: JSON.stringify(args ?? {}) })
   const client = await freshClient({ proxyUrl, dir })
   try {
-    const data = { op: 'store', method, enc, publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'store', method, enc, rek: client.replyKey, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.STORE_RESULT || p.type === MSG.ERROR)
-    client.sendByPubkey(masterPubkey, { type: MSG.STORE, data, signature, cert })
+    await toVault(client, masterPubkey, acta, { type: MSG.STORE, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) throw Object.assign(new Error(res.error), res.code ? { code: res.code } : {})
     if (!res.result?.__enc) throw Object.assign(new Error('the vault replied to the store without encrypting it'), { code: 'vault-reply-unsealed' })
@@ -200,7 +212,7 @@ export async function requestStore ({ masterPubkey, proxyUrl, device, cert, acta
  * El `nonce` de un solo uso NO es decorativo: `approve` y `revoke` cambian estado, así
  * que la ventana de frescura de ±5 min no basta para descartar un replay.
  */
-export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, op, dir, nonce: dado, ...rest } = {}) {
+export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, acta = null, op, dir, nonce: dado, ...rest } = {}) {
   const client = await freshClient({ proxyUrl, dir })
   try {
     // EL NONCE SE PUEDE DAR. Abrir la bóveda a distancia lo mete TAMBIÉN dentro del sobre
@@ -209,10 +221,10 @@ export async function requestAdmin ({ masterPubkey, proxyUrl, device, cert, op, 
     const nonce = typeof dado === 'string' && dado.length >= 16
       ? dado
       : [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('')
-    const data = { op, ...rest, publickey: device.publickey, ts: Date.now(), nonce }
+    const data = { op, ...rest, rek: client.replyKey, publickey: device.publickey, ts: Date.now(), nonce }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     const pending = waitFor(client, (p) => p.type === MSG.ADMIN_RESULT || p.type === MSG.ERROR)
-    client.sendByPubkey(masterPubkey, { type: MSG.ADMIN, data, signature, cert })
+    await toVault(client, masterPubkey, acta, { type: MSG.ADMIN, data, signature, cert })
     const res = await pending
     if (res.type === MSG.ERROR) {
       // CON LO QUE TRAE: el `code` y —al abrir— el freno. Emparejar por el TEXTO es lo que

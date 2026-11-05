@@ -117,7 +117,7 @@ test('con quien apruebe: añadir es directo; editar pide aprobación (también c
   const phone = await enrollWithVault({ qr: inv.qr, label: 'phone', onCode: ({ code }) => { ok = vault.approveDevice(code) } })
   await ok
   await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
-  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert, acta: phone.acta })).cert
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
   const aprobar = async (id) => {
     const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })

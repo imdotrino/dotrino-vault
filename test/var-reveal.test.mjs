@@ -105,7 +105,7 @@ test('con quien apruebe: queda pendiente, una aprobación vale para ESE valor y 
   const { requestRenew } = await import('@dotrino/identity/vault/remote.js')
   const { MSG } = await import('../src/protocol.js')
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
-  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert, acta: phone.acta })).cert
   const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })
   await c.connect()
   try {

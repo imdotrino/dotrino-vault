@@ -102,7 +102,7 @@ test('el almacén en claro no entra: la bóveda lo rechaza sin tocarlo', async (
   const dev = await pair(vault)
   // El cliente de identity sin `enc` es exactamente lo que mandaba un aparato sin la clave.
   await assert.rejects(
-    () => requestStore({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, method: 'appendMessage', args: { threadKey: 'claro', entry: { id: 'z', text: 'a la vista del proxio' } } }),
+    () => requestStore({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, acta: dev.acta, method: 'appendMessage', args: { threadKey: 'claro', entry: { id: 'z', text: 'a la vista del proxio' } } }),
     /must be sealed/
   )
   assert.equal(vault.threads.methods.listThread({ threadKey: 'claro' }).length, 0, 'y no se guardó nada')
@@ -357,7 +357,7 @@ test('pedidos con la bóveda cerrada: sin `approve` en el acta se dice ESO; con 
   await mgr.lock(p.id)
   assert.equal(vault.identity.masterLocked, true)
 
-  const ask = (dev) => requestApproval({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, op: 'approvals' })
+  const ask = (dev) => requestApproval({ master: dev.master, proxy: dev.proxy, device: dev.device, cert: dev.cert, acta: dev.acta, op: 'approvals' })
   await assert.rejects(() => ask(sin), (e) => {
     assert.match(e.message, /unauthorized: record/)
     assert.doesNotMatch(e.message, /locked|scope/)

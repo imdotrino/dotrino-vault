@@ -1255,7 +1255,7 @@ test('aparato con approval: pide en cada petición, el aparato con `approve` fir
   const phone = await enrollWithVault({ qr: inv2.qr, label: 'phone', onCode: ({ code }) => { permPhone = aprobarYPermitir(code) } })
   await permPhone
   await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
-  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert, acta: phone.acta })).cert
   assert.ok(phoneCert.scope.includes('vault:approve'))
 
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
@@ -1470,7 +1470,7 @@ test('una consola sin `unattended` deja la escritura en espera: denegar la tira,
   const phone = await enrollWithVault({ qr: inv.qr, label: 'phone-espera', onCode: ({ code }) => { perm = aprobarYPermitir(code) } })
   await perm
   await vault.setCaps(phone.device.publickey, ['sign', 'approve'])
-  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert })).cert
+  const phoneCert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: phone.device, cert: phone.cert, acta: phone.acta })).cert
   const { WebSocketProxyClient } = await import('@dotrino/proxy-client')
   const rpc = async (data) => {
     const c = new WebSocketProxyClient({ url: proxyUrl, enableWebRTC: false, autoReconnect: false })

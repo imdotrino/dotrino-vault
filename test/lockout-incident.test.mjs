@@ -28,7 +28,7 @@ async function aparato (label, caps) {
   const d = await enrollWithVault({ qr: inv.qr, label, onCode: ({ code }) => { ok = vault.approveDevice(code) } })
   await ok
   await vault.setCaps(d.device.publickey, caps)
-  const cert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: d.device, cert: d.cert })).cert
+  const cert = (await requestRenew({ master: vault.master, proxy: proxyUrl, device: d.device, cert: d.cert, acta: d.acta })).cert
   return { device: d.device, cert, pub: d.device.publickey }
 }
 

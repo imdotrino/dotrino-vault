@@ -41,13 +41,13 @@ test('un aparato que salió pregunta, recibe su aviso firmado y se borra', async
   const dev = await enrollWithVault({ qr, label: 'teléfono', withEncKey: false, onCode: ({ code }) => { vault.approveDevice(code).catch(() => {}) } })
   const master = dev.cert.iss
 
-  const dentro = await checkMembership({ master, proxy: proxyUrl, device: dev.device, timeoutMs: 5000 })
+  const dentro = await checkMembership({ master, proxy: proxyUrl, device: dev.device, acta: dev.acta, timeoutMs: 5000 })
   assert.equal(dentro.in, true, 'mientras está, está')
 
   await vault.revokeDevice({ sub: dev.device.publickey })
 
   let borrado = false
-  const r = await checkMembership({ master, proxy: proxyUrl, device: dev.device, timeoutMs: 5000, onRevoked: () => { borrado = true } })
+  const r = await checkMembership({ master, proxy: proxyUrl, device: dev.device, acta: dev.acta, timeoutMs: 5000, onRevoked: () => { borrado = true } })
   assert.equal(r.in ?? false, false)
   // El aviso se verifica aparte del «no»: se le da un momento.
   for (let i = 0; i < 30 && !borrado; i++) await new Promise((resolve) => setTimeout(resolve, 100))
@@ -57,7 +57,7 @@ test('un aparato que salió pregunta, recibe su aviso firmado y se borra', async
 test('a quien nunca estuvo en el acta no se le contesta nada', async () => {
   const k = await makeDeviceKey({ label: 'extraño' })
   const master = (await vault.profileActa?.())?.acta?.profileId || vault.master
-  const r = await checkMembership({ master, proxy: proxyUrl, device: { publickey: k.publickey, privateJwk: k.privateJwk }, timeoutMs: 2000 })
+  const r = await checkMembership({ master, proxy: proxyUrl, device: { publickey: k.publickey, privateJwk: k.privateJwk }, acta: (await vault.identity.profileActa()).acta, timeoutMs: 2000 })
   assert.equal(r.in, undefined, 'ni un «no»')
   assert.match(String(r.error || ''), /did not reply/)
 })

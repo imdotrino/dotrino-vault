@@ -23,10 +23,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { WebSocketProxyClient } from '@dotrino/proxy-client'
+import { WebSocketProxyClient, makeEncKeypair, exportEncPrivate, importEncPrivate, isEncPub } from '@dotrino/proxy-client'
 import { signWithDevice, verifyDeviceSig, verifyChain, pubkeyId, keyLabel } from '@dotrino/identity/capabilities'
 import { verifyActa, memberCan, memberCanReadSecrets, sealKeyAt, sealersOf } from '@dotrino/identity/acta'
-import { MSG, secretsScope, isValidSecretsNs } from '../lib/src/protocol.js'
+import { MSG, secretsScope, isValidSecretsNs, unsealedRequestsAllowed, UNSEALED_REQUESTS_UNTIL_TEXT } from '../lib/src/protocol.js'
 import { FRESH_WINDOW_MS } from '../lib/src/enroll.js'
 import { seal } from '../lib/src/sealed.js'
 import { atRestFor } from './atrest.js'
@@ -165,7 +165,19 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null
   // Por llave solo se habla con la BÓVEDA (`link.iss`), que es a quien queremos alcanzar
   // aunque no esté conectada ahora mismo.
 
-  const client = new WebSocketProxyClient({ url })
+  /**
+   * LA LLAVE DE TRANSPORTE (`docs/sealed-requests.md`): con ella abre lo que los servicios le
+   * sellan —qué cajón piden, desde qué máquina— y nada más. No es una llave del acta: el acta
+   * sigue sin nombrarle llave de cifrado, así que ningún sobre de secretos puede ir a ella.
+   * Se estrena una vez y se guarda con el enlace (cifrado en reposo); su pública la anuncia el
+   * pilar, firmada por la llave del aparato, al identificarse.
+   */
+  if (!link.transport?.priv || !isEncPub(link.transport?.encPub)) {
+    const kp = await makeEncKeypair()
+    store.setLink({ ...link, transport: { encPub: kp.encPub, priv: await exportEncPrivate(kp.privateKey) } })
+  }
+  const transport = store.link.transport
+  const client = new WebSocketProxyClient({ url, myEncPub: transport.encPub, myEncPrivateKey: await importEncPrivate(transport.priv) })
   await client.connect()
   // El sobre lo arma el pilar (`identifyAs`), que le pone el destinatario.
   await client.identifyAs({ publickey: link.device.publickey, sign: (d) => sign(d) })
@@ -246,12 +258,31 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null
    * y no hace falta: quitar un aparato es sacarlo del acta (`docs/acta-de-perfil.md`), y de
    * eso se ocupa `memberCanReadSecrets` con el acta de abajo.
    */
-  async function onSecrets (from, p) {
+  async function onSecrets (from, p, meta) {
     const ns = p?.data?.ns
     const ek = p?.data?.ek
     if (!isValidSecretsNs(ns) || typeof ek !== 'string') return
-    if (!store.acta) return client.send(from, { type: MSG.ERROR, error: 'replica: no record yet' })
-    const no = (error) => client.send(from, { type: MSG.ERROR, error })
+    // LO QUE SE CONTESTA VUELVE SELLADO a la llave de un solo uso de la petición (`data.rek`)
+    // cuando la petición vino sellada. En claro solo durante la migración (caduca 2026-12-15).
+    const rek = p?.data?.rek
+    const send = (obj) => {
+      if (meta?.sealed && isEncPub(rek)) {
+        return client.sendSealedTo(from, obj, { peerEncPub: rek, pilar: true })
+          .catch((e) => log(`[replica] could not send a sealed reply (${e.code || 'error'}): ${e.message}`))
+      }
+      client.send(from, obj)
+    }
+    if (!meta?.sealed) {
+      if (!unsealedRequestsAllowed()) {
+        log('[replica] a secrets request arrived UNSEALED: refused (the migration window is over)')
+        return client.send(from, { type: MSG.ERROR, error: 'replica: requests must be sealed — update the client', code: 'request-unsealed' })
+      }
+      if (!unsealedTold) { unsealedTold = true; log(`[replica] a secrets request arrived UNSEALED from an old client: served until ${UNSEALED_REQUESTS_UNTIL_TEXT} (migration), then refused`) }
+    } else if (!isEncPub(rek)) {
+      return client.send(from, { type: MSG.ERROR, error: 'replica: a sealed request needs data.rek to seal the reply to', code: 'no-reply-key' })
+    }
+    if (!store.acta) return send({ type: MSG.ERROR, error: 'replica: no record yet' })
+    const no = (error) => send({ type: MSG.ERROR, error })
     const acta = store.acta
 
     if (typeof p?.data?.ts !== 'number' || Math.abs(Date.now() - p.data.ts) > FRESH_WINDOW_MS) {
@@ -280,7 +311,7 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null
     const b = store.bundleFor(ns, who)
     if (!b) {
       log(`[replica] asked for "${ns}" and has nothing stored for that device`)
-      return client.send(from, {
+      return send({
         type: MSG.ERROR,
         error: `replica: nothing stored for "${ns}" and this device — ask the vault once while it is up`
       })
@@ -290,18 +321,19 @@ export async function runReplica ({ dir = replicaDir(), proxyUrl, wakeUrl = null
     // `by` y no `seq`: no tenemos la llave de sellado y no debemos tenerla. Quien recibe
     // mira el acta, ve que a esta llave le reconoce `replica`, y acepta.
     const { signature } = await sign(body)
-    client.send(from, { type: MSG.SECRETS_RESULT, body, seal: { by: link.device.publickey, sig: signature } })
+    send({ type: MSG.SECRETS_RESULT, body, seal: { by: link.device.publickey, sig: signature } })
     log(`[replica] served "${ns}" from record #${store.seq}`)
   }
 
   /** Todo lo que DECIDE algo se contesta que no, y se dice por qué. */
   const NO_DECIDE = new Set([MSG.ENROLL, MSG.ADMIN, MSG.RENEW, MSG.RENOUNCE, MSG.SIGN, MSG.ACTA_SEALED])
 
-  client.on('message', (from, p) => {
+  let unsealedTold = false
+  client.on('message', (from, p, meta) => {
     onActivity?.()
     const t = p?.type
     if (t === MSG.REPLICA_PUSH) return onPush(from, p).catch((e) => log('[replica] push: ' + e.message))
-    if (t === MSG.SECRETS) return onSecrets(from, p).catch((e) => log('[replica] secrets: ' + e.message))
+    if (t === MSG.SECRETS) return onSecrets(from, p, meta).catch((e) => log('[replica] secrets: ' + e.message))
     if (NO_DECIDE.has(t)) {
       log(`[replica] refused "${t}": a replica hands things out, it does not decide`)
       return client.send(from, {

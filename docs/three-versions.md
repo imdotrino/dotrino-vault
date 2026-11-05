@@ -75,6 +75,7 @@ aparece en la ventana sin tocarla, y no hay manera de que una tenga algo que la 
 | Llave de sellado de los sobres | sí | sí | sí (la guarda la pestaña; el worker se la pide al sellar el acta) |
 | Entrar con usuario y contraseña | sí | sí | sí |
 | Política de contraseñas (sin aprobador no se pide; con aprobadores, pedido al teléfono salvo `unattended`) | sí | sí | sí (antes preguntaba siempre en pantalla) |
+| Peticiones de los aparatos **selladas** y respuestas selladas a `rek` ([`sealed-requests.md`](./sealed-requests.md), vault ≥ 0.120.0); en claro solo hasta el 2026-12-15 | sí | sí | sí (el cliente lleva el sellado de la app **y** la llave de transporte: proxy-client ≥ 0.47.0) |
 | Anunciar la versión (`@dotrino/compat`) | `vaultd` | `vault` (versión de la librería) | `vault` |
 | Bitácora encadenada | sí | sí (en IndexedDB) | sí |
 | Réplicas (empujar a otra bóveda) | sí | sí (el núcleo lo hace; nadie configura una réplica desde el navegador todavía) | igual |
@@ -104,7 +105,7 @@ Limitaciones de contexto, no olvidos:
   que su consola la administra (`selfCertIssuer`) se firma solo cuando cambian el acta o sus
   permisos, no cada minuto. En el binario la maestra y el aparato son llaves distintas.
 
-## Inventario de lo nuevo del binario (lib 0.87.0 → 0.119.0, 2026-10-16 → 2026-11-04)
+## Inventario de lo nuevo del binario (lib 0.87.0 → 0.120.0, 2026-10-16 → 2026-11-05)
 
 Casi todo entró por el **núcleo** (`lib/src/core/`), así que llegó a las tres en cuanto cada una
 tomó la versión: la pestaña al re-vendorizar el iframe (`node dotrino-identity/vendor.mjs`) y la
@@ -133,6 +134,7 @@ extensión al construir (`extension/build.mjs` copia el núcleo del checkout de 
 | 0.117 | un servicio aprende la selladora de la cadena | cliente de servicio | no aplica |
 | 0.118 | timbre con asunto sellado; aviso `delivered` | núcleo | sí |
 | 0.119 | concesiones desde la administración | núcleo + consola | pestaña sí; extensión sin pantalla |
+| 0.120 | peticiones y respuestas selladas (`sealed-requests.md`); la bóveda de navegador anuncia su llave de transporte | núcleo + `transport.js` + `logins.js` de la extensión | sí |
 
 **Lo que vive en `src/` (fuera del núcleo) y es de contexto, no un olvido:** `profiles.js` y
 `adminDoor.js` (la contraseña del perfil que sella la maestra, la contraseña vacía con la llave de
