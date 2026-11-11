@@ -1046,6 +1046,12 @@ function autoLockWakeIn (st, now = Date.now()) {
  * reabriría sola en cuanto alguien pulsara Enter (ver `reunlockSilently`), así que el
  * candado del daemon no habría cerrado nada.
  */
+/**
+ * ¿Esta «tecla» la pulsó alguien? `tick` es el despertar del sondeo y `resize` lo manda el
+ * terminal: ninguno de los dos es una persona delante, así que no estiran el candado.
+ */
+const isUse = (key) => key?.name !== 'tick' && key?.name !== 'resize'
+
 /** Cada cuánto se le dice al daemon «sigo aquí». Muy por debajo del plazo del candado. */
 const TOUCH_MS = 60_000
 let lastTouch = 0
@@ -3279,7 +3285,12 @@ export async function handleKey (term, st, key) {
   // navegando esta pantalla y se cerraba igual, que es lo contrario de lo que se
   // quería. Se avisa como mucho una vez por minuto —el plazo son cinco, así que
   // sobra— para no escribir un archivo por tecla.
-  stayHere(st)
+  //
+  // SOLO UNA TECLA DE VERDAD. Aparatos, emparejamiento y unirse se despiertan solos cada
+  // 800 ms con un `tick` para sondear; contarlo como uso dejaba la bóveda abierta para
+  // siempre con la pantalla quieta (dueño, 2026-11-11: «lo mantiene abierto solo mientras
+  // haya acciones»).
+  if (isUse(key)) stayHere(st)
 
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
   // 'q' global sale — preguntando antes si hay permisos sin guardar.
@@ -3378,4 +3389,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui: stayHere, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { lastTouch = 0 } }
+export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui: stayHere, isUse, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { lastTouch = 0 } }

@@ -740,6 +740,18 @@ test('teclear estira el candado, y no una vez por tecla', () => {
   assert.deepEqual(tocados, ['P1'], 'tres teclas seguidas avisan UNA vez: no un archivo por tecla')
 })
 
+/**
+ * QUIETO NO ES USO. La pantalla de aparatos se despierta sola cada 800 ms (`tick`) y eso
+ * contaba como tecla: la bóveda no se cerraba nunca con la TUI abierta y nadie delante
+ * (dueño, 2026-11-11).
+ */
+test('el sondeo y el cambio de tamaño no estiran el candado', () => {
+  assert.equal(V.isUse({ name: 'tick' }), false, 'el despertar del sondeo no es una persona')
+  assert.equal(V.isUse({ name: 'resize' }), false, 'redimensionar tampoco')
+  assert.equal(V.isUse({ name: 'char', ch: 'x' }), true)
+  assert.equal(V.isUse({ name: 'down' }), true)
+})
+
 test('sin candado que estirar, no se molesta al daemon', () => {
   const tocados = []
   const api = { touchProfile: async (id) => { tocados.push(id); return {} } }
