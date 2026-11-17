@@ -134,7 +134,9 @@ const es = {
     approve: 'approve',
     sealer: 'sealer',
     unattended: 'unattended',
-    replica: 'replica'
+    replica: 'replica',
+    terminal: 'terminal',
+    desktop: 'desktop'
   },
   // CADA PISTA SE SOSTIENE SOLA. Antes colgaban del título —«hacerlo desde ese aparato»
   // continuaba a «Conectar y quitar dispositivos»—; ahora el título es la palabra que se
@@ -155,7 +157,9 @@ const es = {
     sealer: 'admitir aparatos y cambiar permisos él solo cuando esta bóveda no está. Solo sirve en otra BÓVEDA',
     unattended: 'llevarse claves privadas sin preguntarte. Apagado, hay que aprobarlo desde un aparato con «approve» cada vez que arranque',
     // El replicador reparte y no puede nada más: no abre lo que entrega ni cambia nada.
-    replica: 'repartir los sobres que esta bóveda ya firmó, tal como salieron: no puede abrirlos ni cambiar nada. Solo sirve en otra máquina'
+    replica: 'repartir los sobres que esta bóveda ya firmó, tal como salieron: no puede abrirlos ni cambiar nada. Solo sirve en otra máquina',
+    terminal: 'abrir consolas en tus máquinas con Dotrino Terminal',
+    desktop: 'usar el escritorio de tus máquinas con Dotrino Remote Desktop'
   },
   confirmAdmin: (id) => `¿Dejar que ${id} conecte y quite dispositivos sin venir aquí?`,
   capGiven: (n) => `Concedido: ${n}`,
@@ -696,7 +700,9 @@ const en = {
     approve: 'approve',
     sealer: 'sealer',
     unattended: 'unattended',
-    replica: 'replica'
+    replica: 'replica',
+    terminal: 'terminal',
+    desktop: 'desktop'
   },
   // Cada pista se sostiene sola: el título es la palabra, no una frase que continuar.
   capHint: {
@@ -708,7 +714,9 @@ const en = {
     approve: 'give the go-ahead when another device asks for private keys',
     sealer: 'admit devices and change permissions on its own when this vault is away. Only useful on another VAULT',
     unattended: 'take private keys without asking you. Off, it must be approved from a device with «approve» every time it starts',
-    replica: 'hand out the envelopes this vault already signed, exactly as they left: it cannot open them or change anything. Only useful on another machine'
+    replica: 'hand out the envelopes this vault already signed, exactly as they left: it cannot open them or change anything. Only useful on another machine',
+    terminal: 'open consoles on your machines with Dotrino Terminal',
+    desktop: 'use the desktop of your machines with Dotrino Remote Desktop'
   },
   confirmAdmin: (id) => `Let ${id} connect and remove devices without coming here?`,
   capGiven: (n) => `Granted: ${n}`,

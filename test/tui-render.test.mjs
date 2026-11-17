@@ -515,7 +515,7 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   // acepta `caps`, la pantalla explicaría un permiso que después no se puede conceder.
   const ctl = fs.readFileSync(new URL('../src/ctl.js', import.meta.url), 'utf8')
   for (const palabra of ['sign', 'store', 'read', 'admin', 'approve', 'passwords',
-    'sealer', 'unattended', 'replica']) {
+    'terminal', 'desktop', 'sealer', 'unattended', 'replica']) {
     assert.match(text, new RegExp('^ \\[[x ]\\] +' + palabra + '$', 'm'),
       'la pantalla nombra «' + palabra + '»')
     assert.match(ctl, new RegExp('[{,\\s]' + palabra + ':'),
@@ -525,9 +525,10 @@ test('Permisos: TODOS los del acta, en cristiano, con su marca — y admin desta
   // con identity 0.100.0 y se fusionó en `passwords` con la 0.118.0). Eran cinco:
   // `aprueba` y `sella` solo se podían dar por la CLI y no se veían aquí, que es la
   // pantalla que se llama «permisos»; `desatendido` era peor —una marca local de la
-  // bóveda, invisible aquí y con el sentido invertido—; y `replica` entró el 2026-09-02.
+  // bóveda, invisible aquí y con el sentido invertido—; `replica` entró el 2026-09-02, y
+  // `terminal` y `desktop` el 2026-11-16 (identity 0.139.0).
   // Si el acta gana o pierde uno, esto se pone rojo a propósito.
-  assert.equal(V.capsRows(st, t).filter((r) => r.meta?.cap).length, 9)
+  assert.equal(V.capsRows(st, t).filter((r) => r.meta?.cap).length, 11)
   assert.match(text, /Solo sirve en otra BÓVEDA/, 'de `sella` se dice dónde significa algo')
   // El que decide si un servidor se lleva tus claves solo. Verlo APAGADO es media
   // explicación: dice que hoy te lo pregunta.
@@ -866,7 +867,7 @@ test('Permisos: el cajón de un servicio se DICE, no es una casilla', () => {
   const texto = filas.map((r) => r.text).join('\n')
   assert.match(texto, /abre el cajón «proxy» y ningún otro/, 'dice QUÉ cajón abre, y que no abre otro')
   assert.doesNotMatch(texto, /\[.\].*proxy/, 'pero no es algo que se marque')
-  assert.equal(filas.filter((r) => r.meta?.cap).length, 9, 'los mismos nueve que cualquier aparato')
+  assert.equal(filas.filter((r) => r.meta?.cap).length, 11, 'los mismos once que cualquier aparato')
   assert.equal(filas.find((r) => r.meta?.cap === 'secrets'), undefined)
   // Y el cajón es una fila propia que se edita (dueño, 2026-10-28): servicio ↔ dispositivo.
   assert.equal(filas.filter((r) => r.meta?.drawer).length, 1)
@@ -878,7 +879,7 @@ test('Permisos: el cajón de un servicio se DICE, no es una casilla', () => {
     members: [{ pub: 'PUB2', id: 'EF56-7890', label: 'teléfono', caps: ['sign'] }]
   })
   const suyas = V.capsRows(aparato, t)
-  assert.equal(suyas.filter((r) => r.meta?.cap).length, 9)
+  assert.equal(suyas.filter((r) => r.meta?.cap).length, 11)
   assert.match(suyas.map((r) => r.text).join('\n'), /sin cajón · es un dispositivo/)
 })
 

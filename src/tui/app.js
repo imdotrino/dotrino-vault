@@ -670,7 +670,7 @@ function pairModeRows (st, t) {
  * esté nombrado se añade al final: un permiso puede salir en mal sitio, nunca desaparecer.
  * `test/tui-permissions.test.mjs` exige además que todos tengan nombre en los dos idiomas.
  */
-const ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'sealer', 'unattended', 'replica']
+const ORDER = ['sign', 'store', 'read', 'admin', 'approve', 'passwords', 'terminal', 'desktop', 'sealer', 'unattended', 'replica']
 const CAPS_ORDER = [...ORDER.filter((c) => DEVICE_CAPS.includes(c)),
   ...DEVICE_CAPS.filter((c) => !ORDER.includes(c))]
 

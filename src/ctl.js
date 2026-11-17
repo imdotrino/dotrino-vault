@@ -617,7 +617,7 @@ async function cmdMembers () {
   // inglés»). Antes salía una descripción en español («sella el acta», «aprueba pedidos») y había
   // que traducirla para poder tocar el permiso. Se resaltan los que cambian lo que ese aparato
   // puede hacerle a la cuenta: se leen de un vistazo o no se leen.
-  const STRONG = new Set(['admin', 'approve', 'sealer', 'passwords', 'unattended', 'replica'])
+  const STRONG = new Set(['admin', 'approve', 'sealer', 'passwords', 'unattended', 'replica', 'terminal', 'desktop'])
   const CAP = Object.fromEntries(CAP_WORDS.map((w) => [w, STRONG.has(w) ? `${B}${w}${Z}` : w]))
   // El nombre del perfil es una pubkey JWK. Recortarla no la hace legible: la deja
   // pareciendo un error (`{"key_ops":["verify"],"e…`). Se muestra su huella corta, la
@@ -689,7 +689,7 @@ async function cmdMembers () {
     console.log('\n  %sEsta bóveda corre %s %s (protocolo %d)%s',
       D, record.vault.product, record.vault.version, record.vault.protocol, Z)
   }
-  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +sign | -sign | +store | -store | +read | -read | +admin | +approve | +passwords | +sealer | +unattended | +replica')
+  console.log('\n  Cambiar permisos:  dotrino-vault caps <ID> +sign | -sign | +store | -store | +read | -read | +admin | +approve | +passwords | +sealer | +unattended | +replica | +terminal | +desktop')
   console.log('  Dispositivo o servicio: dotrino-vault caps <ID> +secrets:<cajón>  (servicio)  ·  -secrets:<cajón>  (dispositivo)')
   console.log('  «Permiso»: ese aparato solo recibe claves privadas cuando lo apruebas desde un aparato con «approve» (en cada arranque).')
   console.log('  «Administra» deja conectar y quitar dispositivos desde ese aparato, sin venir aquí.')
@@ -788,11 +788,14 @@ async function findMember (id) {
  *   quien escriba la palabra vieja recibe lo que hoy significa.
  * - `unattended`: RECIBE CLAVES PRIVADAS SIN QUE NADIE APRUEBE. Sin él, la bóveda no entrega nada
  *   hasta que un aparato con `approve` lo firme (una vez por arranque).
+ * - `terminal`: abre consolas en tus máquinas con el agente de Dotrino Terminal. `desktop`: usa el
+ *   escritorio de las que corren el de Dotrino Remote Desktop. Los dos van ADEMÁS de `sign` (dueño,
+ *   2026-11-16): antes bastaba firmar para tener una shell en todas las máquinas de la cuenta.
  */
 const CAP_BY_WORD = {
   sign: 'sign', store: 'store', read: 'read', admin: 'admin', approve: 'approve',
   sealer: 'sealer', replica: 'replica', passwords: 'passwords', passkeys: 'passwords',
-  unattended: 'unattended'
+  unattended: 'unattended', terminal: 'terminal', desktop: 'desktop'
 }
 /** Para los mensajes de uso: los nombres que se aceptan, sin el alias viejo. */
 const CAP_WORDS = Object.keys(CAP_BY_WORD).filter((w) => w !== 'passkeys')
@@ -801,7 +804,7 @@ const CAP_WORDS = Object.keys(CAP_BY_WORD).filter((w) => w !== 'passkeys')
 async function cmdCaps (args = []) {
   const [id, ...changes] = args
   if (!id || !changes.length) {
-    console.error('uso: dotrino-vault caps <ID> +sign|-sign|+store|-store|+read|-read|+admin|-admin|+approve|-approve|+passwords|-passwords|+sealer|-sealer|+unattended|-unattended|+secrets:<ns>|-secrets:<ns>')
+    console.error('uso: dotrino-vault caps <ID> +sign|-sign|+store|-store|+read|-read|+admin|-admin|+approve|-approve|+passwords|-passwords|+sealer|-sealer|+unattended|-unattended|+replica|-replica|+terminal|-terminal|+desktop|-desktop|+secrets:<ns>|-secrets:<ns>')
     process.exit(2)
   }
   const s = requireDaemon()
@@ -2575,7 +2578,8 @@ function help () {
   pair --quiet          escupe SOLO la invitación (una línea) y termina: sin QR y sin
                       esperar. Para desplegar (un contenedor no mira un QR en pantalla)
   pair --scope <lista>  los PERMISOS con los que entra, cualquiera de los de caps (sign,read,store,admin,
-                      approve,passwords,sealer,unattended,replica) y secrets:<ns>. Sin esto: sign,read,store.
+                      approve,passwords,sealer,unattended,replica,terminal,desktop) y secrets:<ns>.
+                      Sin esto: sign,read,store.
                       Entra al acta ya con ellos. Se combina con --service: --service eco --scope sign
   secret set <ns> <CLAVE> <valor>   variable del scope <ns>: la comparten TODOS los
                                     aparatos del perfil que sirven ese namespace
