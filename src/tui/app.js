@@ -2614,7 +2614,7 @@ function askPwFind (term, st) {
         st.scroll.passwords = { value: 0 }
       } catch (e) {
         st.busy = null
-        const msg = e?.code === 'BAD_SITE' ? i.pwFindBadSite : e?.code === 'NO_RECOVERY' ? i.pwFindNoRecovery : backupErr(e, st)
+        const msg = e?.code === 'EMPTY_QUERY' ? i.pwFindEmptyQuery : e?.code === 'NO_RECOVERY' ? i.pwFindNoRecovery : backupErr(e, st)
         flash(st, msg, 'danger')
       }
     },

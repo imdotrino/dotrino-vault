@@ -85,17 +85,20 @@ crear un secreto que nadie pidió.
 ### Comprobar que una contraseña está y se repartió (2026-11-23)
 
 ```bash
-dotrino-vault passwords find ejemplo.com     # o una URL; en la TUI, pestaña Contraseñas
+dotrino-vault passwords find npm             # en la TUI, pestaña Contraseñas
 ```
 
-Dice si hay una contraseña o una passkey para ese sitio (también la del dominio padre:
-`login.ejemplo.com` encuentra lo guardado para `ejemplo.com`), con su título, usuario y
-sitios, cuándo y desde qué aparato se guardó, **qué aparatos pueden abrirla** y a cuáles
-con `passwords` **les falta todavía** (se les reparte al abrir la bóveda). No enseña la
-contraseña. **Solo lee**: no reenvuelve ni escribe nada en el almacén.
+Busca por **parte** del sitio, del título o del usuario: `npm` encuentra lo guardado para
+`www.npmjs.com`, y una URL sigue encontrando lo del dominio padre (`login.ejemplo.com/x`
+encuentra lo de `ejemplo.com`). De cada coincidencia dice título, usuario y sitios, cuándo y
+desde qué aparato se guardó, **qué aparatos pueden abrirla** y a cuáles con `passwords`
+**les falta todavía** (se les reparte al abrir la bóveda). No enseña la contraseña. **Solo
+lee**: no reenvuelve ni escribe nada en el almacén.
 
-Pide la bóveda abierta: la bóveda busca por huellas, no por dominios, y la huella sale de la
-llave del perfil, que solo abre la frase. Sin un sitio no lista nada.
+Pide la bóveda abierta. La bóveda guarda huellas, no dominios, y una huella solo casa con el
+texto exacto: la extensión guarda el host tal cual (`www.npmjs.com`), así que buscar
+`npmjs.com` por huella no lo encontraba (0.195.1). Para buscar un trozo, la bóveda abre con
+la frase la **vista** de cada entrada (título, usuario, sitios; nunca un valor) y compara.
 
 ## Las cuatro piezas, y cómo quedaron
 

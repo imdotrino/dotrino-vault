@@ -449,10 +449,10 @@ dispositivos/variables que estás viendo:
      valores), **agregar** una variable (con su scope) y **quitar** una variable o un
      scope entero. Son las **compartidas**: las de UN aparato se ponen en la otra
      pestaña, y esta lo dice en vez de repetirlas.
-   - **Contraseñas:** buscar por sitio (`Enter` o `f`, y un dominio o una URL) si hay
-     una contraseña o passkey guardada, con su usuario, y qué aparatos la abren o todavía
+   - **Contraseñas:** buscar (`Enter` o `f`, y parte del sitio, del título o del usuario:
+     `npm` encuentra `www.npmjs.com`) si hay una contraseña o passkey guardada, con su usuario, y qué aparatos la abren o todavía
      no. Solo mira: no enseña la contraseña ni cambia nada. Pide la bóveda abierta. Lo
-     mismo en la CLI: `dotrino-vault passwords find <dominio>`.
+     mismo en la CLI: `dotrino-vault passwords find <texto>`.
 
    Y dentro de **Dispositivos**, con `e` sobre un servicio, sus **variables propias**:
    las que lee solo él y le ganan a las del scope que se llamen igual. Cada cajón se

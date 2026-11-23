@@ -2611,9 +2611,9 @@ function help () {
                                     privada, y una privada NO se vuelve pública.
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
-  passwords find <dominio>
-                      si hay contraseña o passkey para ese sitio (y sus subdominios),
-                      con su usuario, y qué aparatos la abren o todavía no. No enseña
+  passwords find <texto>
+                      busca por parte del sitio, del título o del usuario (npm
+                      encuentra www.npmjs.com) y dice qué hay, con su usuario, y qué aparatos la abren o todavía no. No enseña
                       la contraseña ni cambia nada. Bóveda abierta
   backup list         qué cajones hay para respaldar (nombres y cuántos valores)
   backup export [cajón…] [-o archivo]
@@ -2790,18 +2790,20 @@ async function cmdReplica (args) {
 }
 
 /**
- * `dotrino-vault passwords find <dominio>`: ¿hay contraseña o passkey para ese sitio, y la
- * pueden abrir todos los aparatos con `passwords`? Solo lee: no cambia nada del almacén.
+ * `dotrino-vault passwords find <texto>`: ¿hay contraseña o passkey que coincida (parte del
+ * sitio, del título o del usuario), y la pueden abrir todos los aparatos con `passwords`? Solo lee: no cambia nada del almacén.
  * Enseña título, usuario y sitios; nunca un valor.
  */
 async function cmdPasswords (rest) {
-  const [sub, query] = rest
+  const [sub, ...words] = rest
+  const query = words.join(' ').trim()
   if (sub !== 'find' || !query) {
-    console.error('uso: dotrino-vault passwords find <dominio o URL>')
+    console.error('uso: dotrino-vault passwords find <parte del sitio, del título o del usuario>')
     process.exit(2)
   }
-  const r = await backupRequest({ op: 'passwords-find', query }).catch((e) => {
-    if (e.code === 'BAD_SITE') { console.error('«%s» no es un sitio: escribe un dominio (ejemplo.com) o una URL.', query); process.exit(2) }
+  requireDaemon()
+  const r = await vc.passwordsFind(query, PROFILE || undefined).catch((e) => {
+    if (e.code === 'EMPTY_QUERY') { console.error('Escribe algo que buscar: parte del sitio, del título o del usuario.'); process.exit(2) }
     if (e.code === 'NO_RECOVERY') { console.error('La llave de las contraseñas todavía no tiene la copia de la frase. Abre la bóveda (dotrino-vault unlock) para que la reciba.'); process.exit(1) }
     return backupFail(e)
   })
@@ -2810,8 +2812,8 @@ async function cmdPasswords (rest) {
     return
   }
   if (!r.found.length) {
-    console.log('\nNo hay nada guardado para %s%s%s (%d entrada(s) en total).\n', B, query, Z, r.entries)
-    console.log('Se busca por el dominio y sus padres: login.ejemplo.com encuentra lo guardado para ejemplo.com.\n')
+    console.log('\nNada coincide con %s%s%s (%d entrada(s) en total).\n', B, query, Z, r.entries)
+    console.log('Se busca un trozo del sitio, el título o el usuario: npm encuentra www.npmjs.com.\n')
     return
   }
   const name = (d) => d ? `${d.id}${d.label ? ' ' + d.label : ''}` : '?'

@@ -29,7 +29,9 @@ async function boveda () {
     ...ctx,
     writes: [
       { entry: { id: 'e1', title: 'Salesforce', sites: ['salesforce.com'], username: 'yo@dotrino.com', secret: 'hunter2' }, replaces: null },
-      { entry: { id: 'e2', title: 'Banco', sites: [], username: 'ana', webauthn: { rpId: 'banco.com', credentialId: 'c1', userHandle: 'u', privateKey: 'PRIV' } }, replaces: null }
+      { entry: { id: 'e2', title: 'Banco', sites: [], username: 'ana', webauthn: { rpId: 'banco.com', credentialId: 'c1', userHandle: 'u', privateKey: 'PRIV' } }, replaces: null },
+      // Como la guarda la extensión: el host exacto, con su `www.`.
+      { entry: { id: 'e3', title: 'www.npmjs.com', sites: ['www.npmjs.com'], username: 'dev', secret: 'npm-secreto' }, replaces: null }
     ]
   })
   return { ...ctx, m, members, writes: () => writes }
@@ -46,6 +48,7 @@ test('passwords find: por dominio y por subdominio, con usuario y sin valores', 
     assert.equal(f.view.user, 'yo@dotrino.com')
     assert.deepEqual(f.view.sites, ['salesforce.com'])
     assert.equal(f.passkey, false)
+    assert.equal(f.view.hasSecret, true)
     assert.equal(f.recovery, true)
     assert.ok(!JSON.stringify(r).includes('hunter2'), 'salió la contraseña')
     assert.ok(!('recoveryWrap' in f) && !('fields' in f), 'salieron sobres')
@@ -63,8 +66,22 @@ test('passwords find: nada para otro sitio, y lo que no es un sitio se dice', as
   const b = await boveda()
   const r = await findPasswordEntries({ ...b, query: 'otro.com' })
   assert.deepEqual(r.found, [])
-  assert.equal(r.entries, 2)
-  await assert.rejects(() => findPasswordEntries({ ...b, query: '' }), (e) => e.code === 'BAD_SITE')
+  assert.equal(r.entries, 3)
+  await assert.rejects(() => findPasswordEntries({ ...b, query: '  ' }), (e) => e.code === 'EMPTY_QUERY')
+})
+
+test('passwords find: la búsqueda es parcial (sitio, título, usuario)', async () => {
+  const b = await boveda()
+  const ids = async (q) => (await findPasswordEntries({ ...b, query: q })).found.map((f) => f.id).sort()
+  assert.deepEqual(await ids('npm'), ['e3'])
+  assert.deepEqual(await ids('npmjs.com'), ['e3'], 'el dominio tiene que encontrar lo guardado para www.')
+  assert.deepEqual(await ids('https://www.npmjs.com/login'), ['e3'])
+  assert.deepEqual(await ids('sales'), ['e1'])
+  assert.deepEqual(await ids('ANA'), ['e2'])
+  assert.deepEqual(await ids('.com'), ['e1', 'e2', 'e3'])
+  const [f] = (await findPasswordEntries({ ...b, query: 'npm' })).found
+  assert.equal(f.match, 'text')
+  assert.ok(!JSON.stringify(f).includes('npm-secreto'))
 })
 
 test('passwords find: dice a qué aparato le falta, y NO ESCRIBE', async () => {
