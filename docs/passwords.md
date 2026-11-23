@@ -82,6 +82,21 @@ El mostrador se levanta **en cuanto** alguien tiene el permiso, sin reiniciar el
 Si no lo tiene nadie no se levanta, porque sin a quién responder crear la llave sería
 crear un secreto que nadie pidió.
 
+### Comprobar que una contraseña está y se repartió (2026-11-23)
+
+```bash
+dotrino-vault passwords find ejemplo.com     # o una URL; en la TUI, tecla f en Bóvedas
+```
+
+Dice si hay una contraseña o una passkey para ese sitio (también la del dominio padre:
+`login.ejemplo.com` encuentra lo guardado para `ejemplo.com`), con su título, usuario y
+sitios, cuándo y desde qué aparato se guardó, **qué aparatos pueden abrirla** y a cuáles
+con `passwords` **les falta todavía** (se les reparte al abrir la bóveda). No enseña la
+contraseña. **Solo lee**: no reenvuelve ni escribe nada en el almacén.
+
+Pide la bóveda abierta: la bóveda busca por huellas, no por dominios, y la huella sale de la
+llave del perfil, que solo abre la frase. Sin un sitio no lista nada.
+
 ## Las cuatro piezas, y cómo quedaron
 
 1. **Dónde viven las entradas.** `passwords.json` en el directorio del perfil, cifrado

@@ -2611,6 +2611,10 @@ function help () {
                                     privada, y una privada NO se vuelve pública.
   secret visibility <ns> <CLAVE> private               tapa una pública sin tocar el valor
   secret device visibility <ID> <CLAVE> private
+  passwords find <dominio>
+                      si hay contraseña o passkey para ese sitio (y sus subdominios),
+                      con su usuario, y qué aparatos la abren o todavía no. No enseña
+                      la contraseña ni cambia nada. Bóveda abierta
   backup list         qué cajones hay para respaldar (nombres y cuántos valores)
   backup export [cajón…] [-o archivo]
                       un archivo cifrado con una contraseña propia, con los valores de
@@ -2785,6 +2789,51 @@ async function cmdReplica (args) {
   process.exit(2)
 }
 
+/**
+ * `dotrino-vault passwords find <dominio>`: ¿hay contraseña o passkey para ese sitio, y la
+ * pueden abrir todos los aparatos con `passwords`? Solo lee: no cambia nada del almacén.
+ * Enseña título, usuario y sitios; nunca un valor.
+ */
+async function cmdPasswords (rest) {
+  const [sub, query] = rest
+  if (sub !== 'find' || !query) {
+    console.error('uso: dotrino-vault passwords find <dominio o URL>')
+    process.exit(2)
+  }
+  const r = await backupRequest({ op: 'passwords-find', query }).catch((e) => {
+    if (e.code === 'BAD_SITE') { console.error('«%s» no es un sitio: escribe un dominio (ejemplo.com) o una URL.', query); process.exit(2) }
+    if (e.code === 'NO_RECOVERY') { console.error('La llave de las contraseñas todavía no tiene la copia de la frase. Abre la bóveda (dotrino-vault unlock) para que la reciba.'); process.exit(1) }
+    return backupFail(e)
+  })
+  if (!r.sealed) {
+    console.log(r.entries ? 'Las contraseñas están en el formato viejo: abre la bóveda para convertirlas.' : 'Esta bóveda todavía no tiene contraseñas guardadas.')
+    return
+  }
+  if (!r.found.length) {
+    console.log('\nNo hay nada guardado para %s%s%s (%d entrada(s) en total).\n', B, query, Z, r.entries)
+    console.log('Se busca por el dominio y sus padres: login.ejemplo.com encuentra lo guardado para ejemplo.com.\n')
+    return
+  }
+  const name = (d) => d ? `${d.id}${d.label ? ' ' + d.label : ''}` : '?'
+  const when = (ms) => ms ? new Date(ms).toLocaleString() : '?'
+  console.log('\n%d resultado(s) para %s%s%s\n', r.found.length, B, query, Z)
+  for (const f of r.found) {
+    const kind = f.passkey ? (f.view?.hasSecret ? 'contraseña + passkey' : 'passkey') : 'contraseña'
+    const title = f.view ? (f.view.title || '(sin título)') : '(no se puede abrir con la frase)'
+    console.log('  %s%s%s  ·  %s', B, title, Z, kind)
+    if (f.view?.user) console.log('    usuario:      %s', f.view.user)
+    if (f.view?.sites?.length) console.log('    sitios:       %s', f.view.sites.join(', '))
+    if (f.view?.rpId) console.log('    passkey de:   %s', f.view.rpId)
+    console.log('    guardada:     %s, por %s', when(f.updatedAt), name(f.by))
+    console.log('    la abren:     %s', f.holders.length ? f.holders.map(name).join(', ') : 'ningún aparato')
+    if (f.missing.length) console.log('    %sFALTA en:%s     %s  ← se le reparte al abrir la bóveda: dotrino-vault lock && dotrino-vault unlock', R, Z, f.missing.map(name).join(', '))
+    else console.log('    sincronizada: sí, la abren todos los aparatos con permiso de contraseñas')
+    if (!f.recovery) console.log('    %s¡OJO!%s la frase del perfil no la abre: no entra en el respaldo', R, Z)
+    if (f.broken) console.log('    %s¡OJO!%s le falta una llave en el llavero: está dañada', R, Z)
+    console.log('')
+  }
+}
+
 /** «hace 3 días», «hace 5 horas»: para decir desde cuándo espera algo. */
 function ago (ms) {
   const h = Math.max(0, Math.floor((Date.now() - ms) / 3600000))
@@ -2829,6 +2878,7 @@ export async function runCtl (argv) {
     case 'update': return cmdUpdate(rest)
     case 'secret': return cmdSecret(rest)
     case 'backup': return cmdBackup(rest)
+    case 'passwords': return cmdPasswords(rest)
     // `approval` se quitó el 2026-09-01 (ahora es el permiso `unattended`), pero la ruta se
     // quedó apuntando a una función que ya no existía: reventaba con un ReferenceError. Se
     // rechaza en voz alta, igual que `caps +approval`.

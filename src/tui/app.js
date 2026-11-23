@@ -1406,6 +1406,15 @@ async function onKeyProfiles (term, st, key) {
       }
       await openBackup(term, st)
     })
+  } else if (ch === 'f' && cur) { // buscar una contraseña por sitio, con la bóveda abierta
+    await ensureUnlocked(term, st, cur, async (p = cur) => {
+      if (!p.current) {
+        const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
+        if (!r.ok) return
+        await refreshAll(term, st)
+      }
+      askPwFind(term, st)
+    })
   } else if (ch === 'y' && cur) { // las llaves: con qué se abre la bóveda
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       st.doorsFor = p.id
@@ -2588,6 +2597,81 @@ function backupPlanRows (st, t) {
   return rows
 }
 
+/**
+ * BUSCAR UNA CONTRASEÑA O PASSKEY POR SITIO (`dotrino-vault passwords find`). Solo lee: dice
+ * si está, con qué usuario y qué aparatos la abren; ni enseña el valor ni cambia nada.
+ */
+function askPwFind (term, st) {
+  const i = L(st)
+  setInput(st, {
+    label: i.pwFindLabel,
+    hint: i.pwFindHint,
+    onSubmit: async (q) => {
+      st.input = null
+      const query = (q || '').trim()
+      if (!query) return
+      st.busy = i.pwFinding
+      render(term, st)
+      try {
+        const result = await vc.passwordsFind(query, activeId(st))
+        st.busy = null
+        st.pwFind = { query, result }
+        st.sel.pwfind = 0
+        st.scroll.pwfind = { value: 0 }
+        st.screen = 'pwfind'
+      } catch (e) {
+        st.busy = null
+        const msg = e?.code === 'BAD_SITE' ? i.pwFindBadSite : e?.code === 'NO_RECOVERY' ? i.pwFindNoRecovery : backupErr(e, st)
+        flash(st, msg, 'danger')
+      }
+    },
+    onCancel: () => { st.input = null }
+  })
+}
+
+function pwFindRows (st, t) {
+  const i = L(st)
+  const f = st.pwFind
+  if (!f) return []
+  const r = f.result
+  const rows = [{ text: ' ' + t.bold(i.pwFindFor(f.query)), sel: false }, { text: '', sel: false }]
+  if (!r.sealed) { rows.push({ text: '   ' + t.muted(r.entries ? i.pwFindOld : i.pwFindEmpty), sel: false }); return rows }
+  if (!r.found.length) {
+    rows.push({ text: '   ' + i.pwFindNone(f.query, r.entries), sel: false })
+    rows.push({ text: '   ' + t.muted(i.pwFindParents), sel: false })
+    return rows
+  }
+  const name = (d) => d ? `${d.id}${d.label ? ' ' + d.label : ''}` : '?'
+  const when = (ms) => ms ? new Date(ms).toLocaleString(i.code) : '?'
+  for (const e of r.found) {
+    const kind = e.passkey ? (e.view?.hasSecret ? i.pwKindBoth : i.pwKindPasskey) : i.pwKindPassword
+    const title = e.view ? (e.view.title || i.pwNoTitle) : i.pwNotOpenable
+    rows.push({ text: ` ${t.bold(title)}  ${t.muted('· ' + kind)}`, sel: true })
+    if (e.view?.user) rows.push({ text: `     ${t.muted(i.pwUser + ':')} ${e.view.user}`, sel: false })
+    if (e.view?.sites?.length) rows.push({ text: `     ${t.muted(i.pwSites + ':')} ${e.view.sites.join(', ')}`, sel: false })
+    if (e.view?.rpId) rows.push({ text: `     ${t.muted(i.pwPasskeyOf + ':')} ${e.view.rpId}`, sel: false })
+    rows.push({ text: '     ' + t.muted(i.pwSaved(when(e.updatedAt), name(e.by))), sel: false })
+    rows.push({ text: `     ${t.muted(i.pwHolders + ':')} ${e.holders.length ? e.holders.map(name).join(', ') : i.pwNobody}`, sel: false })
+    if (e.missing.length) rows.push({ text: `     ${t.danger(i.pwMissing + ':')} ${e.missing.map(name).join(', ')}  ${t.muted('← ' + i.pwMissingFix)}`, sel: false })
+    else rows.push({ text: '     ' + t.accent('✓ ' + i.pwSynced), sel: false })
+    if (!e.recovery) rows.push({ text: '     ' + t.warn('! ' + i.pwNoRecovery), sel: false })
+    if (e.broken) rows.push({ text: '     ' + t.danger('! ' + i.pwBroken), sel: false })
+    rows.push({ text: '', sel: false })
+  }
+  return rows
+}
+
+async function onKeyPwFind (term, st, key) {
+  const ch = key.name === 'char' ? key.ch.toLowerCase() : null
+  if (key.name === 'escape' || ch === 'b' || !st.pwFind) { st.screen = 'profiles'; st.pwFind = null; return true }
+  if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) {
+    moveSel(st, key, 'pwfind', pwFindRows(st, makeTheme()).filter((r) => r.sel).length)
+    return true
+  }
+  if (ch === 'f') { askPwFind(term, st); return true }
+  return true
+}
+
 /** Abre la pantalla de respaldo de la bóveda activa: carga qué cajones hay. */
 async function openBackup (term, st) {
   const i = L(st)
@@ -2814,7 +2898,8 @@ const helpSegs = (i, screen, st = {}) => {
     caps: i.helpCaps,
     devvars: i.helpDevVars,
     backup: i.helpBackup,
-    backupplan: i.helpBackupPlan
+    backupplan: i.helpBackupPlan,
+    pwfind: i.helpPwFind
   }[screen] || []
   if (typeof segs !== 'function') return segs
   // El aparato señalado ahora mismo: `e variables` solo tiene sentido en un servicio (es
@@ -2851,7 +2936,8 @@ const title = (i, screen) => ({
   caps: i.titleCaps,
   devvars: i.titleDevVars,
   backup: i.titleBackup,
-  backupplan: i.titleBackupPlan
+  backupplan: i.titleBackupPlan,
+  pwfind: i.titlePwFind
 })[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
@@ -2993,6 +3079,7 @@ function render (term, st) {
   else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'backup') body = renderList(backupRows(st, t), st.sel.backup || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'backupplan') body = renderList(backupPlanRows(st, t), st.sel.backupplan || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'pwfind') body = renderList(pwFindRows(st, t), st.sel.pwfind || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = scrollBody(pb, contentH, scrollRef)
@@ -3037,7 +3124,8 @@ const LIST_SCREENS = {
   settings: [settingsRows, 'settings'],
   paircaps: [pairCapsRows, 'paircaps'],
   backup: [backupRows, 'backup'],
-  backupplan: [backupPlanRows, 'backupplan']
+  backupplan: [backupPlanRows, 'backupplan'],
+  pwfind: [pwFindRows, 'pwfind']
 }
 
 /**
@@ -3327,6 +3415,7 @@ export async function handleKey (term, st, key) {
   if (st.screen === 'paircaps') return onKeyPairCaps(term, st, key)
   if (st.screen === 'backup') return onKeyBackup(term, st, key)
   if (st.screen === 'backupplan') return onKeyBackupPlan(term, st, key)
+  if (st.screen === 'pwfind') return onKeyPwFind(term, st, key)
   if (st.screen === 'pairing') return onKeyPairing(term, st, key)
   if (st.screen === 'join') return onKeyJoin(term, st, key)
   return true
@@ -3389,4 +3478,4 @@ export async function runTui () {
 }
 
 // Solo para pruebas headless (render sin terminal real). No usar en runtime.
-export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui: stayHere, isUse, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, resetToque: () => { lastTouch = 0 } }
+export const __test = { checkForUpdate, offerUpdate, installUpdate, render, settingsRows, onKeySettings, doorRows, onKeyDoors, pairCapsRows, onKeyPairCaps, onKeyDevices, draftChanges, saveCapsDrafts, onKeySecrets, loginRows, onKeyLogins, refreshLogins, activeLocked, autoLockedIds, autoLockWakeIn, forgetAutoLocked, autoLockMin, refreshAll, ensureUnlocked, profileRows, deviceRows, secretRows, devVarRows, meRows, capsRows, onKeyCaps, pairModeRows, pairingBody, scrollBody, fitHelp, wrapHelp, wrapWords, joinBody, onKeyJoin, promptJoin, onKeyProfiles, onInputKey, toggleLang, mergeMembersAndCerts, seguirAqui: stayHere, isUse, backupRows, backupPlanRows, onKeyBackup, onKeyBackupPlan, pwFindRows, onKeyPwFind, resetToque: () => { lastTouch = 0 } }

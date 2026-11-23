@@ -812,7 +812,11 @@ export async function runDaemon () {
           // EL RESPALDO. Bóveda abierta (lo comprueba la bóveda) y la contraseña del RESPALDO,
           // que no es la del perfil: con ella se cierra el archivo aquí mismo, para que lo que
           // salga de este proceso ya vaya cifrado.
-          else if (sec.op === 'backup-drawers') {
+          // BUSCAR UNA CONTRASEÑA POR SITIO. Solo lee: dice si está y quién la abre. Va por el
+          // canal del respaldo porque pide lo mismo (bóveda abierta) y contesta igual.
+          else if (sec.op === 'passwords-find') {
+            lastBackup = { op: sec.op, id: sec.id || null, result: await vault.findPasswords(sec.query, { adminKey: ak }) }
+          } else if (sec.op === 'backup-drawers') {
             lastBackup = { op: sec.op, id: sec.id || null, drawers: await vault.backupDrawers() }
           } else if (sec.op === 'backup-export') {
             const { payload, summary } = await vault.exportBackup({ drawers: sec.drawers || null, adminKey: ak })
@@ -849,7 +853,7 @@ export async function runDaemon () {
             // Los choques de una importación viajan con el error: son lo que hay que decidir.
             ...(e.conflicts ? { conflicts: e.conflicts } : {}),
             ...(e.missing ? { missing: e.missing } : {}),
-            ...(sec.op?.startsWith('backup-') ? { op: sec.op, id: sec.id || null } : {})
+            ...((sec.op?.startsWith('backup-') || sec.op === 'passwords-find') ? { op: sec.op, id: sec.id || null } : {})
           }
           console.error('[vault] secret failed:', e.message)
         } finally { wipe(ak) }

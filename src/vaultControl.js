@@ -677,6 +677,14 @@ export async function backupImport (file, backupPassword, { drawers = null, map 
   return (await backupOp({ op: 'backup-import', file, backupPassword, drawers, map, onConflict, decisions }, profile)).result
 }
 
+/**
+ * ¿Hay contraseña o passkey para ese sitio y la abren todos los aparatos que deberían?
+ * Solo lee. `{ sealed, entries, found: [{ title, user, passkey, holders, missing, … }] }`.
+ */
+export async function passwordsFind (query, profile) {
+  return (await backupOp({ op: 'passwords-find', query }, profile)).result
+}
+
 /** SALDA lo que quedó a deber (heredar lo viejo, rotar de verdad). Pide la contraseña. */
 export function settleSecrets (profile, password) {
   return secretOp({ op: 'settle', ...(password ? { password } : {}) }, profile, () => {})

@@ -402,6 +402,35 @@ const es = {
   // variables de UN aparato (Dispositivos → tecla e). Las del scope las comparten todos
   // los aparatos que sirven ese namespace; estas las lee solo él, y le ganan.
   titleDevVars: 'Variables del dispositivo',
+  // BUSCAR UNA CONTRASEÑA POR SITIO (Bóvedas → tecla f). Solo lee.
+  titlePwFind: 'Buscar contraseña',
+  helpPwFind: ['↑↓', 'f otra búsqueda', 'Esc atrás', 'l English', 'q salir'],
+  pwFindLabel: 'Sitio a buscar',
+  pwFindHint: 'un dominio (ejemplo.com) o una URL',
+  pwFinding: 'buscando…',
+  pwFindFor: (q) => `Lo guardado para ${q}`,
+  pwFindNone: (q, n) => `No hay nada guardado para ${q} (${n} entrada(s) en total).`,
+  pwFindParents: 'Se busca por el dominio y sus padres: login.ejemplo.com encuentra lo de ejemplo.com.',
+  pwFindEmpty: 'Esta bóveda todavía no tiene contraseñas guardadas.',
+  pwFindOld: 'Las contraseñas están en el formato viejo: abre la bóveda para convertirlas.',
+  pwFindBadSite: 'Eso no es un sitio: escribe un dominio (ejemplo.com) o una URL.',
+  pwFindNoRecovery: 'La llave de las contraseñas aún no tiene la copia de la frase: abre la bóveda para que la reciba.',
+  pwKindPassword: 'contraseña',
+  pwKindPasskey: 'passkey',
+  pwKindBoth: 'contraseña + passkey',
+  pwNoTitle: '(sin título)',
+  pwNotOpenable: '(la frase no la abre)',
+  pwUser: 'usuario',
+  pwSites: 'sitios',
+  pwPasskeyOf: 'passkey de',
+  pwSaved: (when, by) => `guardada ${when}, por ${by}`,
+  pwHolders: 'la abren',
+  pwNobody: 'ningún aparato',
+  pwMissing: 'FALTA en',
+  pwMissingFix: 'se le reparte al abrir la bóveda: ciérrala (k) y vuelve a abrirla (u)',
+  pwSynced: 'sincronizada: la abren todos los aparatos con permiso de contraseñas',
+  pwNoRecovery: 'la frase del perfil no la abre: no entra en el respaldo',
+  pwBroken: 'le falta una llave en el llavero: está dañada',
   // EL RESPALDO (`docs/respaldo.md`).
   titleBackup: 'Respaldo',
   titleBackupPlan: 'Importar un respaldo',
@@ -520,7 +549,7 @@ const es = {
   // INGLÉS: new/rename/delete/password/unlock/locK/pair/approve/revoke/refresh/
   // language/quit); lo único que se traduce es la palabra que las explica.
   // Segmentos, no una línea: si no caben en una, el render los reparte en varias.
-  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'o respaldo', 'u desbloq', 'k bloquear', 's ajustes', 'l English', 'q salir'],
+  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'o respaldo', 'f buscar clave', 'u desbloq', 'k bloquear', 's ajustes', 'l English', 'q salir'],
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
@@ -943,6 +972,35 @@ const en = {
 
   // variables de UN aparato (Dispositivos → tecla e)
   titleDevVars: 'Device variables',
+  // FIND A PASSWORD BY SITE (Vaults → key f). Read-only.
+  titlePwFind: 'Find a password',
+  helpPwFind: ['↑↓', 'f search again', 'Esc back', 'l Español', 'q quit'],
+  pwFindLabel: 'Site to look for',
+  pwFindHint: 'a domain (example.com) or a URL',
+  pwFinding: 'searching…',
+  pwFindFor: (q) => `Saved for ${q}`,
+  pwFindNone: (q, n) => `Nothing saved for ${q} (${n} entr${n === 1 ? 'y' : 'ies'} in total).`,
+  pwFindParents: 'The domain and its parents are searched: login.example.com finds what is saved for example.com.',
+  pwFindEmpty: 'This vault has no saved passwords yet.',
+  pwFindOld: 'The passwords are in the old format: open the vault to convert them.',
+  pwFindBadSite: 'That is not a site: type a domain (example.com) or a URL.',
+  pwFindNoRecovery: 'The password key has no copy for the phrase yet: open the vault so it gets one.',
+  pwKindPassword: 'password',
+  pwKindPasskey: 'passkey',
+  pwKindBoth: 'password + passkey',
+  pwNoTitle: '(no title)',
+  pwNotOpenable: '(the phrase does not open it)',
+  pwUser: 'user',
+  pwSites: 'sites',
+  pwPasskeyOf: 'passkey for',
+  pwSaved: (when, by) => `saved ${when}, by ${by}`,
+  pwHolders: 'opened by',
+  pwNobody: 'no device',
+  pwMissing: 'MISSING on',
+  pwMissingFix: 'it is handed over when the vault opens: lock it (k) and open it again (u)',
+  pwSynced: 'synced: every device allowed to use passwords can open it',
+  pwNoRecovery: 'the profile phrase does not open it: it is left out of backups',
+  pwBroken: 'a key is missing from the keyring: it is damaged',
   titleBackup: 'Backup',
   titleBackupPlan: 'Import a backup',
   helpBackup: ['↑↓', 'Enter mark', 'g export', 'i import', 'Esc back', 'l Español', 'q quit'],
@@ -1051,7 +1109,7 @@ const en = {
   helpInput: 'Enter confirm · Esc cancel · Ctrl-U clear',
   helpConfirm: 'y confirm · n/Esc cancel',
 
-  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'o backup', 'u unlock', 'k lock', 's settings', 'l Español', 'q quit'],
+  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'o backup', 'f find password', 'u unlock', 'k lock', 's settings', 'l Español', 'q quit'],
   helpDevices: ({ pending, hasDevices, isService, drafts, curBlocked } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(drafts ? ['g save permissions'] : []),
