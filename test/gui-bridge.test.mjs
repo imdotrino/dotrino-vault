@@ -65,7 +65,7 @@ test('el modelo de Bóvedas trae las MISMAS filas que la TUI, la seleccionada y 
 test('dentro de una bóveda, las pestañas; con una pregunta abierta, la pregunta y no la ayuda', () => {
   const t = makeTheme({ color: true })
   const vm = viewModel(estado({ screen: 'devices' }), t)
-  assert.deepEqual(vm.tabs.map((x) => x.key), ['devices', 'secrets', 'logins', 'me'])
+  assert.deepEqual(vm.tabs.map((x) => x.key), ['devices', 'secrets', 'passwords', 'logins', 'me'])
   assert.equal(vm.tabs.find((x) => x.active).key, 'devices')
   const q = viewModel(estado({ input: { label: 'Nombre', hint: 'h', mask: true, value: '', file: true } }), t)
   assert.deepEqual(q.input, { label: 'Nombre', hint: 'h', mask: true, value: '', file: true, save: false })

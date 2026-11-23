@@ -85,7 +85,7 @@ crear un secreto que nadie pidió.
 ### Comprobar que una contraseña está y se repartió (2026-11-23)
 
 ```bash
-dotrino-vault passwords find ejemplo.com     # o una URL; en la TUI, tecla f en Bóvedas
+dotrino-vault passwords find ejemplo.com     # o una URL; en la TUI, pestaña Contraseñas
 ```
 
 Dice si hay una contraseña o una passkey para ese sitio (también la del dominio padre:

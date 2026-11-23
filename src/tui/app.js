@@ -1406,15 +1406,6 @@ async function onKeyProfiles (term, st, key) {
       }
       await openBackup(term, st)
     })
-  } else if (ch === 'f' && cur) { // buscar una contraseña por sitio, con la bóveda abierta
-    await ensureUnlocked(term, st, cur, async (p = cur) => {
-      if (!p.current) {
-        const r = await guard(term, st, i.switchingVault, () => vc.useProfile(p.id))
-        if (!r.ok) return
-        await refreshAll(term, st)
-      }
-      askPwFind(term, st)
-    })
   } else if (ch === 'y' && cur) { // las llaves: con qué se abre la bóveda
     await ensureUnlocked(term, st, cur, async (p = cur) => {
       st.doorsFor = p.id
@@ -2603,7 +2594,10 @@ function backupPlanRows (st, t) {
  */
 function askPwFind (term, st) {
   const i = L(st)
-  setInput(st, {
+  const p = activeProfile(st)
+  if (!p) return
+  // La huella del sitio sale de la llave del perfil, que solo abre la frase: bóveda abierta.
+  return ensureUnlocked(term, st, p, () => setInput(st, {
     label: i.pwFindLabel,
     hint: i.pwFindHint,
     onSubmit: async (q) => {
@@ -2616,9 +2610,8 @@ function askPwFind (term, st) {
         const result = await vc.passwordsFind(query, activeId(st))
         st.busy = null
         st.pwFind = { query, result }
-        st.sel.pwfind = 0
-        st.scroll.pwfind = { value: 0 }
-        st.screen = 'pwfind'
+        st.sel.passwords = 0
+        st.scroll.passwords = { value: 0 }
       } catch (e) {
         st.busy = null
         const msg = e?.code === 'BAD_SITE' ? i.pwFindBadSite : e?.code === 'NO_RECOVERY' ? i.pwFindNoRecovery : backupErr(e, st)
@@ -2626,13 +2619,20 @@ function askPwFind (term, st) {
       }
     },
     onCancel: () => { st.input = null }
-  })
+  }))
 }
 
 function pwFindRows (st, t) {
   const i = L(st)
   const f = st.pwFind
-  if (!f) return []
+  if (!f) {
+    return [
+      { text: ' ' + t.bold(i.pwFindIntro), sel: false },
+      { text: '', sel: false },
+      { text: '   ' + t.muted(i.pwFindIntroHow), sel: false },
+      { text: '   ' + t.muted(i.pwFindIntroSafe), sel: false }
+    ]
+  }
   const r = f.result
   const rows = [{ text: ' ' + t.bold(i.pwFindFor(f.query)), sel: false }, { text: '', sel: false }]
   if (!r.sealed) { rows.push({ text: '   ' + t.muted(r.entries ? i.pwFindOld : i.pwFindEmpty), sel: false }); return rows }
@@ -2663,12 +2663,11 @@ function pwFindRows (st, t) {
 
 async function onKeyPwFind (term, st, key) {
   const ch = key.name === 'char' ? key.ch.toLowerCase() : null
-  if (key.name === 'escape' || ch === 'b' || !st.pwFind) { st.screen = 'profiles'; st.pwFind = null; return true }
   if (['up', 'down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) {
-    moveSel(st, key, 'pwfind', pwFindRows(st, makeTheme()).filter((r) => r.sel).length)
+    moveSel(st, key, 'passwords', pwFindRows(st, makeTheme()).filter((r) => r.sel).length)
     return true
   }
-  if (ch === 'f') { askPwFind(term, st); return true }
+  if (ch === 'f' || key.name === 'enter') { await askPwFind(term, st); return true }
   return true
 }
 
@@ -2874,8 +2873,8 @@ async function onKeyBackupPlan (term, st, key) {
 
 // Pestañas INTERNAS de una bóveda ya elegida: se cambian con ←→. La lista de
 // bóvedas (profiles) es el nivel de arriba (se entra con Enter, no es una pestaña).
-const INNER_TABS = ['devices', 'secrets', 'logins', 'me']
-const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, logins: i.tabLogins, me: i.tabMe })[k]
+const INNER_TABS = ['devices', 'secrets', 'passwords', 'logins', 'me']
+const tabLabel = (i, k) => ({ devices: i.tabDevices, secrets: i.tabSecrets, passwords: i.tabPasswords, logins: i.tabLogins, me: i.tabMe })[k]
 
 /**
  * Las teclas que se pueden usar AHORA, no el catálogo entero. Aprobar/rechazar sin nadie
@@ -2899,7 +2898,7 @@ const helpSegs = (i, screen, st = {}) => {
     devvars: i.helpDevVars,
     backup: i.helpBackup,
     backupplan: i.helpBackupPlan,
-    pwfind: i.helpPwFind
+    passwords: i.helpPwFind
   }[screen] || []
   if (typeof segs !== 'function') return segs
   // El aparato señalado ahora mismo: `e variables` solo tiene sentido en un servicio (es
@@ -2937,18 +2936,25 @@ const title = (i, screen) => ({
   devvars: i.titleDevVars,
   backup: i.titleBackup,
   backupplan: i.titleBackupPlan,
-  pwfind: i.titlePwFind
+  passwords: i.titlePwFind
 })[screen] || ''
 
 /** Barra de pestañas horizontal (Dispositivos | Scopes y variables) de la bóveda entrada. */
-function renderTabs (st, t) {
+function renderTabs (st, t, cols = Infinity) {
   const i = L(st)
-  return INNER_TABS.map((k) => {
+  // UN espacio entre pestañas, no tres. Y si aun así no cabe (con cinco pestañas, en 80
+  // columnas), se aprieta: primero el relleno de las inactivas y al final un `│` entre ellas
+  // en vez de espacios. Lo que no se puede perder es la pista de que se puede cambiar.
+  const bar = (pad, sep, hint) => INNER_TABS.map((k) => {
     const active = st.screen === k
-    return active ? t.bold(t.accent('▐ ' + tabLabel(i, k) + ' ▌')) : t.muted('  ' + tabLabel(i, k) + '  ')
-    // UN espacio entre pestañas, no tres: con cuatro ya no cabía el «(←→ cambiar)» en 80
-    // columnas, y lo que se perdía era justamente la pista de que se puede cambiar.
-  }).join(' ') + t.muted(i.tabsHint)
+    return active ? t.bold(t.accent('▐ ' + tabLabel(i, k) + ' ▌')) : t.muted(pad + tabLabel(i, k) + pad)
+  }).join(sep) + t.muted(hint)
+  const tries = [['  ', ' ', i.tabsHint], [' ', ' ', i.tabsHint], ['', t.muted('│'), i.tabsHint]]
+  for (const [pad, sep, hint] of tries) {
+    const out = bar(pad, sep, hint)
+    if (widthOf(out) + 2 <= cols) return out
+  }
+  return bar('', t.muted('│'), i.tabsHint)
 }
 
 function pairingBody (st, t, cols, height, { qr: withQr = true } = {}) {
@@ -3057,7 +3063,7 @@ function render (term, st) {
   if (!lines[2] && st.update?.release) lines[2] = ' ' + t.warn(i.updateAvailable(st.update.release.version))
   // Dispositivos/Scopes son pestañas de la bóveda activa (se entra desde Bóvedas);
   // el resto muestra su título simple.
-  lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t) : ' ' + t.title('» ' + title(i, st.screen))
+  lines[3] = INNER_TABS.includes(st.screen) ? ' ' + renderTabs(st, t, cols) : ' ' + t.title('» ' + title(i, st.screen))
   lines[4] = ''
 
   const help = helpLines(st, i, cols, rows)
@@ -3079,7 +3085,7 @@ function render (term, st) {
   else if (st.screen === 'paircaps') body = renderList(pairCapsRows(st, t), st.sel.paircaps || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'backup') body = renderList(backupRows(st, t), st.sel.backup || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'backupplan') body = renderList(backupPlanRows(st, t), st.sel.backupplan || 0, contentH, cols, t, scrollRef)
-  else if (st.screen === 'pwfind') body = renderList(pwFindRows(st, t), st.sel.pwfind || 0, contentH, cols, t, scrollRef)
+  else if (st.screen === 'passwords') body = renderList(pwFindRows(st, t), st.sel.passwords || 0, contentH, cols, t, scrollRef)
   else if (st.screen === 'pairing') {
     const pb = pairingBody(st, t, cols, contentH)
     body = scrollBody(pb, contentH, scrollRef)
@@ -3125,7 +3131,7 @@ const LIST_SCREENS = {
   paircaps: [pairCapsRows, 'paircaps'],
   backup: [backupRows, 'backup'],
   backupplan: [backupPlanRows, 'backupplan'],
-  pwfind: [pwFindRows, 'pwfind']
+  passwords: [pwFindRows, 'passwords']
 }
 
 /**
@@ -3398,7 +3404,7 @@ export async function handleKey (term, st, key) {
   // entrada). La pantalla de emparejamiento maneja su propio Esc (va a Dispositivos).
   if ((key.name === 'escape' || ch === 'b') && INNER_TABS.includes(st.screen)) {
     // El borrador es de ESTA bóveda: al salir de ella se guarda o se tira.
-    unlessDrafts(st, () => { st.capsDrafts = {}; st.cnDrafts = {}; st.screen = 'profiles' })
+    unlessDrafts(st, () => { st.capsDrafts = {}; st.cnDrafts = {}; st.pwFind = null; st.screen = 'profiles' })
     return true
   }
 
@@ -3415,7 +3421,7 @@ export async function handleKey (term, st, key) {
   if (st.screen === 'paircaps') return onKeyPairCaps(term, st, key)
   if (st.screen === 'backup') return onKeyBackup(term, st, key)
   if (st.screen === 'backupplan') return onKeyBackupPlan(term, st, key)
-  if (st.screen === 'pwfind') return onKeyPwFind(term, st, key)
+  if (st.screen === 'passwords') return onKeyPwFind(term, st, key)
   if (st.screen === 'pairing') return onKeyPairing(term, st, key)
   if (st.screen === 'join') return onKeyJoin(term, st, key)
   return true

@@ -402,9 +402,13 @@ const es = {
   // variables de UN aparato (Dispositivos → tecla e). Las del scope las comparten todos
   // los aparatos que sirven ese namespace; estas las lee solo él, y le ganan.
   titleDevVars: 'Variables del dispositivo',
-  // BUSCAR UNA CONTRASEÑA POR SITIO (Bóvedas → tecla f). Solo lee.
+  // BUSCAR UNA CONTRASEÑA POR SITIO (pestaña Contraseñas de la bóveda). Solo lee.
   titlePwFind: 'Buscar contraseña',
-  helpPwFind: ['↑↓', 'f otra búsqueda', 'Esc atrás', 'l English', 'q salir'],
+  tabPasswords: 'Contraseñas',
+  helpPwFind: ['←→ pestaña', 'f buscar', '↑↓', 'Esc bóvedas', 'l English', 'q salir'],
+  pwFindIntro: 'Buscar una contraseña o passkey por sitio',
+  pwFindIntroHow: 'Pulsa Enter o f y escribe un dominio (ejemplo.com) o una URL: verás si hay algo guardado y qué aparatos lo tienen.',
+  pwFindIntroSafe: 'Solo mira: no enseña la contraseña ni cambia nada.',
   pwFindLabel: 'Sitio a buscar',
   pwFindHint: 'un dominio (ejemplo.com) o una URL',
   pwFinding: 'buscando…',
@@ -549,7 +553,7 @@ const es = {
   // INGLÉS: new/rename/delete/password/unlock/locK/pair/approve/revoke/refresh/
   // language/quit); lo único que se traduce es la palabra que las explica.
   // Segmentos, no una línea: si no caben en una, el render los reparte en varias.
-  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'o respaldo', 'f buscar clave', 'u desbloq', 'k bloquear', 's ajustes', 'l English', 'q salir'],
+  helpProfiles: ['↑↓', 'Enter entrar', 'p emparejar', 'j unirse', 'n nueva', 'r renombrar', 'd borrar', 'c clave', 'x quitar-clave', 'y llaves', 'o respaldo', 'u desbloq', 'k bloquear', 's ajustes', 'l English', 'q salir'],
   // La barra dice lo que se PUEDE hacer AHORA, no todo lo que existe: aprobar/rechazar solo
   // valen si hay alguien esperando, y renombrar/revocar solo si hay un aparato seleccionado.
   // Anunciar teclas muertas confunde y además las quema para otros usos.
@@ -972,9 +976,13 @@ const en = {
 
   // variables de UN aparato (Dispositivos → tecla e)
   titleDevVars: 'Device variables',
-  // FIND A PASSWORD BY SITE (Vaults → key f). Read-only.
+  // FIND A PASSWORD BY SITE (Passwords tab of the vault). Read-only.
   titlePwFind: 'Find a password',
-  helpPwFind: ['↑↓', 'f search again', 'Esc back', 'l Español', 'q quit'],
+  tabPasswords: 'Passwords',
+  helpPwFind: ['←→ tab', 'f search', '↑↓', 'Esc vaults', 'l Español', 'q quit'],
+  pwFindIntro: 'Find a password or passkey by site',
+  pwFindIntroHow: 'Press Enter or f and type a domain (example.com) or a URL: you will see whether something is saved and which devices have it.',
+  pwFindIntroSafe: 'It only looks: it does not show the password or change anything.',
   pwFindLabel: 'Site to look for',
   pwFindHint: 'a domain (example.com) or a URL',
   pwFinding: 'searching…',
@@ -1109,7 +1117,7 @@ const en = {
   helpInput: 'Enter confirm · Esc cancel · Ctrl-U clear',
   helpConfirm: 'y confirm · n/Esc cancel',
 
-  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'o backup', 'f find password', 'u unlock', 'k lock', 's settings', 'l Español', 'q quit'],
+  helpProfiles: ['↑↓', 'Enter open', 'p pair', 'j join', 'n new', 'r rename', 'd delete', 'c password', 'x drop-password', 'y keys', 'o backup', 'u unlock', 'k lock', 's settings', 'l Español', 'q quit'],
   helpDevices: ({ pending, hasDevices, isService, drafts, curBlocked } = {}) => [
     '←→ tab', '↑↓', 'p pair',
     ...(drafts ? ['g save permissions'] : []),
